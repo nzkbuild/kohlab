@@ -67,20 +67,20 @@ ssh -L 7676:localhost:7676 user@your-server
 
 Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
-## What's next
+## What's new in v1.1.0
 
-**v1.1.0** is planned and committed to the repo — not vaporware:
+- **Completion notifications** — the moment an agent finishes, the dashboard shows it and a webhook can fire. Walk away and trust it.
+- **Workspace sharing** — share a read-only link to a live workspace; a teammate can watch the terminal and review the diff.
+- **Scoped access key** — set `KOHLAB_KEY` and deploy safely behind a reverse proxy.
 
-- **Completion notifications** — the moment an agent finishes, you know.
-- **Workspace sharing** — hand a live workspace to a teammate.
-- **Scoped access key** — deploy the dashboard safely behind a reverse proxy.
-
-Full plan: RELEASE-PLAN.md. We ship disciplined releases; see CHANGELOG.md.
+Next up (see RELEASE-PLAN.md): UI polish, automations. We ship disciplined releases; see CHANGELOG.md.
 
 ## Project status
 
 
-**v1.0.0** — a solid baseline. We ship disciplined, semantic releases; see CHANGELOG.md. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.
+**v1.1.0** — parallel agents, persistent sessions, and now: know when they finish, share them, secure them. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.
+
+
 
 ## License
 

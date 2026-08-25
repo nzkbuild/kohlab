@@ -199,6 +199,7 @@
     <span class="spacer"></span>
     <button id="btn-start" class="btn green">start</button>
     <button id="btn-restart" class="btn">restart</button>
+    <button id="btn-share" class="btn" title="copy read-only share link">share</button>
     <button id="btn-stop" class="btn red">stop</button>
     <button id="btn-delete" class="btn red">delete</button>
   </div>
@@ -310,6 +311,17 @@ async function act(action, extra) {
 $("#btn-start").onclick = () => act("start");
 $("#btn-stop").onclick = () => act("stop");
 $("#btn-restart").onclick = () => act("restart");
+$("#btn-share").onclick = async () => {
+  if (!state.selected) return;
+  try {
+    const res = await api(`/api/workspaces/${state.selected}/share`, { method: "POST" });
+    const link = `${location.origin}/?share=${res.share}`;
+    await navigator.clipboard.writeText(link).catch(() => {});
+    toast("share link copied (read-only)");
+  } catch (e) {
+    toast("share: " + e.message);
+  }
+};
 $("#btn-delete").onclick = async () => {
   if (!confirm("delete workspace " + state.selected + "? worktree will be removed")) return;
   await act("delete");
@@ -412,10 +424,32 @@ $("#new-form").onsubmit = async (e) => {
   }
 };
 
+// --- completion notifications -------------------------------------------
+
+// listen for workspace.done pushes over the same websocket the terminal uses
+function listenForDone() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const sock = new WebSocket(`${proto}//${location.host}`);
+  sock.onmessage = (ev) => {
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    if (msg.type === "workspace.done") {
+      toast(`✓ ${msg.agent} finished: ${msg.task}`);
+      refresh();
+    }
+  };
+  sock.onclose = () => setTimeout(listenForDone, 3000);
+}
+
 // --- boot ---------------------------------------------------------------
 
 refresh();
 setInterval(refresh, 5000);
+listenForDone();
 </script>
 </body>
 </html>

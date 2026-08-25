@@ -10,6 +10,47 @@ import { cwd } from "process";
 
 const WORKS_DIR = process.env.WORKS_DIR ?? join(cwd(), ".works");
 const STATE_FILE = join(WORKS_DIR, "state.json");
+/** Webhook URL to hit when an agent finishes (optional). */
+const NOTIFY_WEBHOOK = process.env.NOTIFY_WEBHOOK;
+/** Interval (ms) for the completion watcher. */
+const WATCH_INTERVAL = Number(process.env.WATCH_INTERVAL ?? 2000);
+/** If set, the dashboard/API require this key (?key= or Bearer). */
+const ACCESS_KEY = process.env.KOHLAB_KEY;
+
+/** True when no access key is configured, or the request carries the right one. */
+export function authorized(req: { headers: Headers; url: string }): boolean {
+  if (!ACCESS_KEY) return true;
+  const url = new URL(req.url);
+  const q = url.searchParams.get("key");
+  if (q && q.length === ACCESS_KEY.length) {
+    const a = new TextEncoder().encode(q);
+    const b = new TextEncoder().encode(ACCESS_KEY);
+    return a.length === b.length && crypto.subtle
+      ? timingSafe(a, b)
+      : a.every((v, i) => v === b[i]);
+  }
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth.startsWith("Bearer ")) {
+    const t = auth.slice(7);
+    const a = new TextEncoder().encode(t);
+    const b = new TextEncoder().encode(ACCESS_KEY);
+    return a.length === b.length && (crypto.subtle ? timingSafe(a, b) : a.every((v, i) => v === b[i]));
+  }
+  return false;
+}
+
+function timingSafe(a: Uint8Array, b: Uint8Array): boolean {
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+/** Completion callbacks (webhook + browser push). Set by the server. */
+type NotifyFn = (ws: Workspace) => void;
+let notifyDone: NotifyFn[] = [];
+export function onWorkspaceDone(fn: NotifyFn) {
+  notifyDone.push(fn);
+}
 
 interface State {
   workspaces: Workspace[];
@@ -39,6 +80,62 @@ async function loadState(): Promise<State> {
 async function saveState(s: State) {
   await writeFile(STATE_FILE, JSON.stringify(s, null, 2));
 }
+
+// --- completion watcher --------------------------------------------------
+
+/** Workspaces that were running on the previous watcher tick. */
+let previouslyRunning = new Set<string>();
+
+/**
+ * Poll every workspace: when a started workspace stops running, mark it done
+ * and fire notifications. Uses a previous-tick snapshot AND the started flag
+ * so even short-lived sessions that finish between ticks are caught.
+ */
+export function startWatcher() {
+  setInterval(async () => {
+    try {
+      const s = await loadState();
+      const running = new Set<string>();
+      for (const w of s.workspaces) {
+        const alive = await isRunning(w);
+        if (alive) {
+          running.add(w.id);
+          continue;
+        }
+        // finished: was running last tick, or was started but never seen running
+        if (previouslyRunning.has(w.id) || (w.started && !w.stopped)) {
+          w.stopped = Date.now();
+          await saveState(s);
+          notifyDone.forEach((fn) => fn(w));
+        }
+      }
+      previouslyRunning = running;
+    } catch (e) {
+      console.error("[watcher]", (e as Error).message);
+    }
+  }, WATCH_INTERVAL);
+}
+
+/** Fire the configured webhook for a completed workspace (best-effort). */
+export async function notifyWebhook(ws: Workspace) {
+  if (!NOTIFY_WEBHOOK) return;
+  try {
+    await fetch(NOTIFY_WEBHOOK, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        event: "workspace.done",
+        id: ws.id,
+        task: ws.task,
+        agent: ws.agent,
+        done: new Date(ws.stopped ?? Date.now()).toISOString(),
+      }),
+    });
+  } catch (e) {
+    console.error("[webhook]", (e as Error).message);
+  }
+}
+
 
 // --- tmux ----------------------------------------------------------------
 
@@ -163,10 +260,11 @@ export async function createWorkspace(opts: {
   const tree = worktreePath(ws);
   await mkdir(dir, { recursive: true });
 
-  // Clone the repo as a new worktree. `git worktree add` on a branch is
-  // preferred; a plain add creates a detached HEAD.
-  const addArgs = ["worktree", "add", "--quiet", tree];
-  if (opts.branch) addArgs.push("-b", opts.branch);
+  // Clone the repo as a new worktree on a branch named after the workspace.
+  // A plain `git worktree add` would try to check out a branch matching the
+  // path's basename ("tree"), colliding with other workspaces — a named
+  // branch keeps every workspace isolated.
+  const addArgs = ["worktree", "add", "--quiet", "-b", `kohlab/${ws.id}`, tree];
   await run(repo, "git", addArgs);
 
   // Map the worktree's git dir into our workspace so `works diff` and other
@@ -182,9 +280,32 @@ export async function createWorkspace(opts: {
   return { ...ws, running: false, path: tree };
 }
 
-export async function startWorkspace(id: string) {
-  const ws = await getWorkspace(id);
+// --- sharing -------------------------------------------------------------
+
+/** Generate a read-only share token for a workspace (idempotent). */
+export async function shareWorkspace(id: string) {
   const s = await loadState();
+  const ws = s.workspaces.find((w) => w.id === id);
+  if (!ws) throw new Error(`no workspace '${id}'`);
+  if (!ws.share) {
+    ws.share = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    await saveState(s);
+  }
+  return { id: ws.id, share: ws.share };
+}
+
+/** Resolve a share token to its workspace (read-only view). */
+export async function workspaceByShare(token: string) {
+  const s = await loadState();
+  const ws = s.workspaces.find((w) => w.share === token);
+  if (!ws) throw new Error("invalid share link");
+  return ws;
+}
+
+export async function startWorkspace(id: string) {
+  const s = await loadState();
+  const ws = s.workspaces.find((w) => w.id === id);
+  if (!ws) throw new Error(`no workspace '${id}'`);
 
   if (await isRunning(ws)) return { ...ws, running: true, path: worktreePath(ws) };
 

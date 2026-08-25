@@ -17,15 +17,53 @@ import {
   stopWorkspace,
   commitWorkspace,
   worktreePath,
-  loadState,
-  saveState,
-  WORKS_DIR,
+  startWatcher,
+  onWorkspaceDone,
+  notifyWebhook,
+  shareWorkspace,
+  workspaceByShare,
+  authorized,
 } from "./lib";
 
 const PORT = Number(process.env.PORT ?? 7676);
 
+/** Browser push subscribers (dashboard pages). */
+const pushClients = new Set<ServerWebSocket>();
 
-// --- HTTP handlers -------------------------------------------------------
+// completion → push to every open dashboard + fire webhook
+onWorkspaceDone((ws) => {
+  const msg = JSON.stringify({ type: "workspace.done", id: ws.id, task: ws.task, agent: ws.agent });
+  for (const c of pushClients) {
+    if (c.readyState === c.OPEN) c.send(msg);
+  }
+  void notifyWebhook(ws);
+});
+
+// poll for finished agents
+startWatcher();
+
+
+async function handleShare(id: string): Promise<Response> {
+  try {
+    const res = await shareWorkspace(id);
+    return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** Resolve ?share=<token> to a workspace id, or null. */
+async function shareId(req: Request): Promise<string | null> {
+  const url = new URL(req.url);
+  const token = url.searchParams.get("share");
+  if (!token) return null;
+  try {
+    const ws = await workspaceByShare(token);
+    return ws.id;
+  } catch {
+    return null;
+  }
+}
 
 async function handleCreate(req: Request): Promise<Response> {
   const body = (await req.json()) as {
@@ -184,7 +222,7 @@ function openTmuxSocket(ws: ServerWebSocket, session: string) {
 
 const server = serve({
   port: PORT,
-  fetch(req, server) {
+  fetch: async (req, server) => {
     const url = new URL(req.url);
     const path = url.pathname;
 
@@ -193,20 +231,21 @@ const server = serve({
       if (server.upgrade(req)) return undefined;
     }
 
-
-    if (req.method === "OPTIONS") {
-      return new Response(null, { headers: cors() });
+    // access key gate: share links stay public-read; everything else needs the key
+    const shareIdRes = await shareId(req);
+    const isShareLink = !!shareIdRes;
+    if (!isShareLink && !authorized(req)) {
+      return json({ error: "unauthorized — set ?key= or Authorization: Bearer" }, 401);
     }
-
-    if (path === "/api/workspaces" && req.method === "GET") {
-      return listWorkspaces().then(json).catch((e) => json({ error: (e as Error).message }, 500));
-    }
-    if (path === "/api/workspaces" && req.method === "POST") return handleCreate(req);
-    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
-
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|log|files)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|log|files|share)$/);
     if (m) {
       const [, id, action] = m;
+      // share-mode access is read-only: only diff/log/files allowed
+      if (action !== "diff" && action !== "log" && action !== "files" && action !== "share") {
+        if (shareIdRes === id) {
+          return json({ error: "read-only share link" }, 403);
+        }
+      }
       switch (action) {
         case "start": return handleStart(id);
         case "stop": return handleStop(id);
@@ -216,8 +255,24 @@ const server = serve({
         case "commit": return handleCommit(id, req);
         case "log": return handleLog(id, req);
         case "files": return handleFiles(id);
+        case "share": return handleShare(id);
       }
     }
+
+    if (path === "/api/workspaces" && req.method === "GET") {
+      const url = new URL(req.url);
+      const wantsShare = url.searchParams.has("share");
+      // ?share= present but invalid → nothing to show
+      if (wantsShare && !shareIdRes) return json([]);
+      if (shareIdRes) {
+        const list = await listWorkspaces();
+        const w = list.find((x) => x.id === shareIdRes);
+        return json(w ? [w] : []);
+      }
+      return listWorkspaces().then(json).catch((e) => json({ error: (e as Error).message }, 500));
+    }
+    if (path === "/api/workspaces" && req.method === "POST") return handleCreate(req);
+    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
 
     // Static files
     if (path === "/" || path === "/index.html") {
@@ -231,7 +286,8 @@ const server = serve({
   },
   websocket: {
     open(ws) {
-      // nothing to do until the client asks to attach
+      // every dashboard page is a push subscriber
+      pushClients.add(ws);
     },
     message(ws, raw) {
       const str = String(raw);
@@ -259,6 +315,7 @@ const server = serve({
       }
     },
     close(ws) {
+      pushClients.delete(ws);
       const pty = ws.data as (ChildProcess & { stdin: NodeJS.WritableStream }) | undefined;
       pty?.kill();
     },
