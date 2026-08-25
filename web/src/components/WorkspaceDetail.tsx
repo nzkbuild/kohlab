@@ -1,0 +1,96 @@
+import { useState } from "react";
+import { Play, Stop, ArrowsClockwise, ShareNetwork, Trash, Terminal, Files, GitDiff } from "@phosphor-icons/react";
+import { api } from "../api";
+import { useApp } from "../store";
+import TerminalView from "./TerminalView";
+import FileTree from "./FileTree";
+import CodeView from "./CodeView";
+import DiffView from "./DiffView";
+
+type Tab = "terminal" | "files" | "diff";
+
+export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }) {
+  const { workspaces, refresh, select } = useApp();
+  const [tab, setTab] = useState<Tab>("terminal");
+  const [openFile, setOpenFile] = useState<string | null>(null);
+  const w = workspaces.find((x) => x.id === workspaceId);
+
+  const act = async (action: string) => {
+    try {
+      await api.action(workspaceId, action);
+      await refresh();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  if (!w) return <div className="flex-1 flex items-center justify-center text-zinc-500">loading...</div>;
+
+  return (
+    <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-[#232d42] bg-[#0f141d]">
+        <span className="font-semibold text-sm truncate">{w.id}</span>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${w.running ? "text-emerald-400 border-emerald-400/40 bg-emerald-400/10" : "text-zinc-500 border-zinc-700"}`}>
+          {w.running ? "running" : w.stopped ? "done" : "stopped"}
+        </span>
+        <span className="text-zinc-600 text-xs truncate hidden md:block">{w.path}</span>
+        <div className="flex-1" />
+        <button onClick={() => void act("start")} disabled={w.running} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-400/40 text-emerald-400 text-xs disabled:opacity-35 hover:bg-emerald-400/10 transition" title="start">
+          <Play size={12} weight="fill" /> start
+        </button>
+        <button onClick={() => void act("restart")} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#232d42] text-xs hover:border-emerald-400 transition" title="restart">
+          <ArrowsClockwise size={12} /> restart
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              const s = await api.share(workspaceId);
+              const link = `${location.origin}/?share=${s.share}`;
+              await navigator.clipboard.writeText(link).catch(() => {});
+            } catch (e) {
+              console.error(e);
+            }
+          }}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#232d42] text-xs hover:border-emerald-400 transition" title="copy share link"
+        >
+          <ShareNetwork size={12} /> share
+        </button>
+        <button onClick={() => void act("stop")} disabled={!w.running} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-400/40 text-red-400 text-xs disabled:opacity-35 hover:bg-red-400/10 transition" title="stop">
+          <Stop size={12} weight="fill" /> stop
+        </button>
+        <button
+          onClick={async () => {
+            if (!confirm("delete this workspace? worktree will be removed")) return;
+            await act("delete");
+            select(null);
+          }}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-400/40 text-red-400 text-xs hover:bg-red-400/10 transition" title="delete"
+        >
+          <Trash size={12} /> delete
+        </button>
+      </div>
+
+      <div className="flex gap-1 px-2 border-b border-[#232d42] bg-[#0f141d]">
+        {([["terminal", Terminal], ["files", Files], ["diff", GitDiff]] as [Tab, typeof Terminal][]).map(([t, Icon]) => (
+          <button
+            key={t}
+            onClick={() => { setTab(t); setOpenFile(null); }}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition ${tab === t ? "text-zinc-100 border-emerald-400" : "text-zinc-500 border-transparent hover:text-zinc-300"}`}
+          >
+            <Icon size={13} /> {t}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 min-h-0">
+        {tab === "terminal" && <TerminalView workspaceId={workspaceId} />}
+        {tab === "files" && (openFile ? (
+          <CodeView workspaceId={workspaceId} filePath={openFile} onBack={() => setOpenFile(null)} />
+        ) : (
+          <FileTree workspaceId={workspaceId} onOpenFile={setOpenFile} />
+        ))}
+        {tab === "diff" && <DiffView workspaceId={workspaceId} />}
+      </div>
+    </div>
+  );
+}

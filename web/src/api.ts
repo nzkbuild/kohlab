@@ -1,0 +1,61 @@
+import type { AgentStatus, DiffFile, TreeNode, Workspace } from "./types";
+
+let key = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "";
+
+export function setKey(k: string) {
+  key = k;
+  localStorage.setItem("kohlab_key", k);
+}
+export function clearKey() {
+  key = "";
+  localStorage.removeItem("kohlab_key");
+}
+export function hasKey() {
+  return !!key;
+}
+
+async function req(path: string, opts: RequestInit = {}): Promise<Response> {
+  const sep = path.includes("?") ? "&" : "?";
+  const url = key ? `${path}${sep}key=${encodeURIComponent(key)}` : path;
+  const res = await fetch(url, {
+    ...opts,
+    headers: { ...(opts.headers || {}) },
+  });
+  return res;
+}
+
+async function json<T>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await req(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
+  return body as T;
+}
+
+export const api = {
+  async testKey(k: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/workspaces?key=${encodeURIComponent(k)}`);
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  },
+  workspaces: () => json<Workspace[]>("/api/workspaces"),
+  agentsStatus: () => json<AgentStatus>("/api/agents-status"),
+  create: (body: { task: string; repo?: string; agent: string; branch?: string }) =>
+    json<Workspace>("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  clone: (body: { url: string; task: string; agent: string }) =>
+    json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  action: (id: string, action: string) =>
+    json<Workspace>(`/api/workspaces/${id}/${action}`, { method: "POST" }),
+  share: (id: string) =>
+    json<{ id: string; share: string }>(`/api/workspaces/${id}/share`, { method: "POST" }),
+  diff: (id: string) => json<DiffFile[]>(`/api/workspaces/${id}/diff`),
+  commit: (id: string, message: string) =>
+    json<{ ok: boolean }>(`/api/workspaces/${id}/commit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) }),
+  files: (id: string) => json<TreeNode[]>(`/api/workspaces/${id}/files`),
+  file: (id: string, path: string) =>
+    json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
+};
+
+export type { Workspace };

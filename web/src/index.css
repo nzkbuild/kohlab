@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: #0a0e14;
+  color: #d7e0ee;
+  overflow: hidden;
+}
+
+/* xterm container fills its parent */
+.terminal-wrap .xterm {
+  height: 100%;
+}

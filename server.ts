@@ -461,13 +461,22 @@ const server = serve({
     if (path === "/api/workspaces" && req.method === "POST") return handleCreate(req);
     if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
 
-    // Static files
+    // Static files - serve the React app from web/dist, fall back to legacy public/
+    const webDist = join(process.cwd(), "web", "dist");
+    const legacy = join(import.meta.dir, "public");
+    const roots = [webDist, legacy];
     if (path === "/" || path === "/index.html") {
-      return new Response(Bun.file(join(import.meta.dir, "public", "index.html")));
+      for (const root of roots) {
+        const f = Bun.file(join(root, "index.html"));
+        if (f.size > 0) return new Response(f);
+      }
     }
-    const staticPath = join(import.meta.dir, "public", path.slice(1));
-    const f = Bun.file(staticPath);
-    if (f.size > 0) return new Response(f);
+    for (const root of roots) {
+      const staticPath = join(root, path.slice(1));
+      const f = Bun.file(staticPath);
+      if (f.size > 0) return new Response(f);
+    }
+    return new Response("not found", { status: 404 });
 
     return new Response("not found", { status: 404 });
   },
