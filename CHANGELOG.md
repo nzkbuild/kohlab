@@ -5,6 +5,12 @@ All notable changes to **Kohlab** are documented here.
 The format follows Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+Kohlab's versioning philosophy:
+
+- **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
+- **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
+- **Every change is a disciplined bump**: patch (1.0.1) for fixes, minor (1.1.0) for new features, major (2.0.0) only for a breakthrough.
+
 ## [1.0.0] - 2026-08-25
 
 ### Added

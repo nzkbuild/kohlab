@@ -69,7 +69,7 @@ Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
 ## Project status
 
-**v1.0.0** — a solid baseline. We ship disciplined, semantic releases; see CHANGELOG.md.
+**v1.0.0** — a solid baseline. We ship disciplined, semantic releases; see CHANGELOG.md. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.
 
 ## License
 
