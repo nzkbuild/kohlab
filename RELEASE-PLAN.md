@@ -1,75 +1,92 @@
-# Release Plan — v1.1.0
+# Release Plan — v1.3.0
 
 **Status:** Planned
-**Type:** Minor release (new features, fully backward compatible)
-**Theme:** From "agents run" to "agents run, and you can trust the result."
+**Type:** Major feature release
+**Theme:** "From zero to running agent, in the browser."
 
 ---
 
 ## Goal
 
-v1.0.0 proved Kohlab's core promise: **parallel, persistent, browser-accessible agents.**
-v1.1.0 makes that promise trustworthy and shareable:
+Kohlab's engine is proven (parallel persistent PTY sessions, worktrees, diff, sharing, notifications). But a vibe coder hitting a fresh VPS cannot go from zero to running agent today: agents are missing, auth is unwalked, and the UI is hand-rolled.
 
-> **"Start an agent, walk away, come back to a result you can review and trust."**
+**v1.3.0 delivers functional parity with Superset's core loop** — install, login, pick a repo, launch, review — in a real frontend built on proper primitives.
 
-Three capabilities, all user-facing, all completing a story v1.0.0 only told halfway:
-
-| # | Feature | What the user gets |
-|---|---------|--------------------|
-| 1 | **Completion notifications** | Know the moment an agent finishes — no babysitting the dashboard |
-| 2 | **Workspace sharing** | Send a workspace to a teammate (or your other device) and see it live |
-| 3 | **Safer by default** | A scoped access key so the dashboard can live behind a proxy, not just an SSH tunnel |
+> **A true vibe coder should be able to run kohlab on a fresh VPS and be talking to their agent within 10 minutes, entirely from the browser.**
 
 ---
 
-## Why these three (not a grab bag)
+## Phase A — Frontend rewrite (real primitives, not hand-rolled)
 
-- **Meaningful** — each maps directly to a v1.0.0 pain point: no visibility while away, no way to hand off work, SSH-tunnel-only access.
-- **Completes the story** — the dashboard becomes something you leave open and trust, not something you watch.
-- **No tech debt** — each feature ships complete with its own docs and testing; nothing half-wired.
+The 27KB inline-HTML dashboard has hit its ceiling. Replace it with a proper app.
+
+| Layer | Old (hand-rolled) | New (real primitive) |
+|---|---|---|
+| Framework | One giant HTML+JS file | React 18 + Vite + TypeScript |
+| Styling | Hand CSS | Tailwind CSS v4 |
+| Terminal | Raw xterm + manual wiring | `@xterm/xterm` + `@xterm/addon-fit` + `@xterm/addon-image` (official, proper UMD handling) |
+| Icons | Emoji/unicode | Phosphor Icons |
+| Components | `document.createElement` | Radix UI (tabs, dialog, dropdown, toast) |
+| Code view | `<pre>` | Monaco Editor (real VS Code editor) |
+| Diff | Hand-rolled line colors | Monaco diff editor |
+| Fonts | Browser default mono | JetBrains Mono + Geist (self-hosted) |
+| State | Global `state` object | Zustand |
+
+## Phase B — Functional parity (the "vibe coder" necessities)
+
+### 1. Agent installer & launcher config
+- **Detect** installed agents (omp, claude, codex, opencode, pi, gemini)
+- **Offer to install** missing ones (npm/bun/curl commands per agent) from the UI
+- **Agent registry** in the dashboard: see what's available, what's missing, one-click install
+
+### 2. Agent setup/login walkthrough
+- First-run wizard: "Choose your agent" → install → **login/setup step**
+- Per-agent auth guidance: `claude setup`, codex API key, etc. with copyable commands
+- Verify login works before launching (detect agent is ready)
+
+### 3. GitHub integration
+- **`gh` auth check** + guided login (`gh auth login`)
+- **Repo browser** — list GitHub repos (and local dirs) to create workspaces from, not just type a path
+- Clone-from-GitHub already works; make it discoverable
+
+### 4. Workspace creation flow
+- Repo picker (GitHub repos + local paths)
+- Branch selection
+- Task prompt + agent choice in one guided flow (replaces the bare form)
+
+### 5. Multi-terminal
+- Tabbed terminals per workspace (PTY daemon supports it natively)
+- Split view terminal + diff side by side
+
+### 6. Diff & code review
+- Monaco diff editor (real add/remove/context, not colored text)
+- Per-file diff view + commit from the review screen
+
+### 7. Onboarding polish
+- First-run: access key → agent install → login → pick repo → launch
+- Empty states that guide ("install codex to get started")
+
+## Phase C — Docs & release
+
+- Setup docs: fresh-VPS-to-running-agent in 10 minutes
+- CHANGELOG + bump. **Versioning decision: 1.3.0** (feature release, not a product-architecture breakthrough — the engine is unchanged, the frontend is a rewrite but the product concept is the same). The 2.x jump stays reserved for a true breakthrough.
+- Tag + push
 
 ---
 
-## Deliverables (each is a complete, tested feature)
+## What this explicitly does NOT include
 
-### 1. Completion notifications
-- Server detects when a workspace's session ends; marks the workspace **done**.
-- Dashboard shows done state; optional **desktop/webhook notification** (web push or webhook URL) when an agent finishes.
-- Docs: setup + notification configuration.
-
-### 2. Workspace sharing
-- Shareable link per workspace, with read-only or full access.
-- Live sync — a teammate sees the same terminal stream and diff you see.
-- Docs: sharing guide + permission model.
-
-### 3. Scoped access key
-- Single access token set via env; dashboard and API require it.
-- Enables safe reverse-proxy deployment (Caddy/nginx) without exposing the server naked.
-- Docs: deployment + proxy guide.
-
----
-
-## What this release explicitly does NOT include
-
-- No automations/scheduling (v1.2.0 candidate)
-- No IDE handoff, no mobile app (later)
-- No internal refactors, no speculative features — anything not user-visible ships later or not at all
-
----
-
-## Versioning discipline (per project policy)
-
-- **1.1.0** — new features, backward compatible. Correct.
-- No 2.x jump — that is reserved for a genuine breakthrough, and none of this is one.
-- This plan, once executed, lands in CHANGELOG as **1.1.0** and the README status moves to **v1.1.0**.
+- Automations/scheduling (v1.4.0)
+- Mobile app / IDE handoff (later)
+- Team collaboration beyond share links (later)
 
 ---
 
 ## Definition of done
 
-- [ ] All three features implemented, tested end-to-end on a live server
-- [ ] Docs updated (setup, sharing, proxy deployment)
-- [ ] CHANGELOG 1.1.0 section written
-- [ ] package.json bumped to 1.1.0, tagged `v1.1.0`, pushed
-- [ ] README status → v1.1.0
+- [ ] Fresh VPS → running agent in the browser, under 10 minutes, all from the UI
+- [ ] Agent installer works for at least omp, claude, codex
+- [ ] Agent login walkthrough works for installed agents
+- [ ] GitHub repo browser + clone-to-workspace flow
+- [ ] React frontend with Monaco editor + diff, multi-terminal tabs
+- [ ] CHANGELOG 1.3.0, package.json bumped, tagged, pushed

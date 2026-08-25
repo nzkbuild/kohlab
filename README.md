@@ -78,6 +78,18 @@ Full setup, systemd (auto-start on reboot), and every command are in docs/.
 Previous: v1.1.0 added completion notifications, workspace sharing, and a scoped access key.
 
 ## Project status
+## Coming next - v1.3.0
+
+The "from zero to running agent" release:
+
+- **Install agents from the UI** - detect missing ones (codex, opencode, pi) and install in one click.
+- **Agent login walkthrough** - guided setup so your agent is authenticated and ready.
+- **GitHub repo browser** - pick a repo, clone it, launch an agent, all from the dashboard.
+- **Real editor + diff** - Monaco-based code view and review, not plain text.
+- **Multi-terminal tabs** - one terminal per workspace, tabbed.
+
+Full plan: RELEASE-PLAN.md
+
 
 
 **v1.2.0** — browse code, clone projects, launch agents, all from the dashboard. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.

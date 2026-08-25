@@ -9,6 +9,19 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
+## [Unreleased] — v1.3.0 (planned)
+
+The "from zero to running agent" release. Functional parity with the core Superset loop, on a real frontend.
+
+- **React + Vite + TypeScript frontend** — replaces the hand-rolled HTML/JS dashboard.
+- **Agent installer** — detect missing agents (codex, opencode, pi) and install from the UI.
+- **Agent login walkthrough** — guided setup per agent (claude setup, codex API key).
+- **GitHub integration** — repo browser + clone-to-workspace flow.
+- **Monaco editor + diff** — real code editing and review, not plain text.
+- **Multi-terminal tabs** — one terminal per workspace, tabbed.
+- **Guided workspace creation** — pick repo, branch, agent, task in one flow.
+
+Full plan: RELEASE-PLAN.md
 
 ## [1.2.0] - 2026-08-25
 
