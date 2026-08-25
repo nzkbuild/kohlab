@@ -434,6 +434,7 @@ const server = serve({
         case "delete": return handleDelete(id);
         case "diff": return handleDiff(id);
         case "commit": return handleCommit(id, req);
+        case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
         case "share": return handleShare(id);
       }

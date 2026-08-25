@@ -558,9 +558,12 @@ function attachTerminal(id) {
     setTimeout(doFit, 100);
     setTimeout(doFit, 500);
     // image support: renders SIXEL / iTerm inline images (codex, claude code output)
-    if (typeof ImageAddon !== "undefined") {
+    const ImageCtor = typeof ImageAddon !== "undefined"
+      ? (ImageAddon.ImageAddon || ImageAddon)   // UMD may expose {ImageAddon} or the class
+      : null;
+    if (ImageCtor) {
       try {
-        t.loadAddon(new ImageAddon({
+        t.loadAddon(new ImageCtor({
           sixelSupport: true,
           iipSupport: true,
           kittySupport: true,
