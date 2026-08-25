@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>works — agent workspaces</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<style>
+  :root {
+    --bg: #0b0e14;
+    --bg2: #11151f;
+    --panel: #151a26;
+    --panel2: #1a2130;
+    --border: #232b3b;
+    --text: #c8d0e0;
+    --muted: #6b7688;
+    --accent: #4f8cff;
+    --green: #3ecf8e;
+    --red: #ff5c5c;
+    --yellow: #f5b83d;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* sidebar */
+  #sidebar {
+    width: 300px;
+    min-width: 300px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+  #brand {
+    padding: 14px 16px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+  #new-form {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    gap: 8px;
+  }
+  #new-form input, #new-form select {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 7px 9px;
+    font: inherit;
+    outline: none;
+  }
+  #new-form input:focus, #new-form select:focus { border-color: var(--accent); }
+  #new-form button {
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 6px;
+    padding: 8px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter .15s;
+  }
+  #new-form button:hover { filter: brightness(1.1); }
+  #new-form .row { display: grid; grid-template-columns: 1fr 110px; gap: 8px; }
+  #ws-list { flex: 1; overflow-y: auto; padding: 6px; }
+  .ws {
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background .12s;
+  }
+  .ws:hover { background: var(--panel); }
+  .ws.active { background: var(--panel2); border-color: var(--border); }
+  .ws .top { display: flex; align-items: center; gap: 8px; }
+  .ws .status { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .ws .status.run { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .ws .status.stopped { background: var(--muted); }
+  .ws .id { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ws .meta { margin-top: 3px; color: var(--muted); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .ws .task { color: var(--text); }
+  .empty { color: var(--muted); text-align: center; padding: 30px 10px; }
+
+  /* main */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  #toolbar .ws-id { font-weight: 700; }
+  #toolbar .muted { color: var(--muted); }
+  #toolbar .spacer { flex: 1; }
+  .btn {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font: inherit;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .btn:hover { border-color: var(--accent); color: #fff; }
+  .btn.green { border-color: var(--green); color: var(--green); }
+  .btn.green:hover { background: var(--green); color: #04120b; }
+  .btn.red { border-color: var(--red); color: var(--red); }
+  .btn.red:hover { background: var(--red); color: #fff; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: .4; cursor: default; }
+
+  #tabs { display: flex; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--bg2); }
+  .tab {
+    padding: 9px 14px;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-weight: 500;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  #views { flex: 1; min-height: 0; position: relative; }
+  .view { position: absolute; inset: 0; display: none; }
+  .view.active { display: block; }
+  #terminal-view { padding: 0; background: #000; }
+  #terminal { height: 100%; padding: 8px; }
+  #terminal .xterm { height: 100%; }
+  #diff-view { overflow: auto; padding: 0; }
+  #diff-header {
+    display: flex; gap: 10px; align-items: center;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--muted);
+  }
+  #diff-header .stat { color: var(--text); flex: 1; }
+  #diff-content { padding: 14px; white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; }
+  .diff-line { display: flex; gap: 8px; padding: 0 8px; border-radius: 3px; }
+  .diff-line .ln { color: var(--muted); user-select: none; min-width: 3em; text-align: right; }
+  .diff-line.add { background: rgba(62, 207, 142, .12); color: #9be8c4; }
+  .diff-line.del { background: rgba(255, 92, 92, .12); color: #f0a8a8; }
+  .diff-line.hunk { color: var(--accent); margin-top: 8px; }
+  .diff-line.meta { color: var(--yellow); font-weight: 600; }
+  .diff-line.clean { color: var(--muted); padding: 20px; }
+  #toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 18px; border-radius: 8px; transition: transform .2s; z-index: 10;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #commit-bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg2); }
+  #commit-bar input { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 6px 9px; font: inherit; outline: none; }
+  #commit-bar input:focus { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<aside id="sidebar">
+  <div id="brand"><span class="dot"></span>works</div>
+  <form id="new-form">
+    <input id="f-task" placeholder="task description" required />
+    <div class="row">
+      <input id="f-repo" placeholder="repo path (default: server cwd)" />
+      <select id="f-agent">
+        <option value="sh">sh</option>
+        <option value="omp">omp</option>
+        <option value="claude">claude</option>
+        <option value="codex">codex</option>
+      </select>
+    </div>
+    <button type="submit">new workspace</button>
+  </form>
+  <div id="ws-list"><div class="empty">no workspaces yet</div></div>
+</aside>
+
+<main id="main">
+  <div id="toolbar">
+    <span id="t-id" class="ws-id">—</span>
+    <span id="t-status" class="muted"></span>
+    <span id="t-path" class="muted"></span>
+    <span class="spacer"></span>
+    <button id="btn-start" class="btn green">start</button>
+    <button id="btn-restart" class="btn">restart</button>
+    <button id="btn-stop" class="btn red">stop</button>
+    <button id="btn-delete" class="btn red">delete</button>
+  </div>
+  <div id="tabs">
+    <div class="tab active" data-view="terminal">terminal</div>
+    <div class="tab" data-view="diff">diff</div>
+  </div>
+  <div id="views">
+    <div id="terminal-view" class="view active"><div id="terminal"></div></div>
+    <div id="diff-view" class="view">
+      <div id="diff-header"><span class="stat"></span><button id="btn-refresh-diff" class="btn">refresh</button></div>
+      <div id="diff-content"></div>
+      <div id="commit-bar">
+        <input id="commit-msg" placeholder="commit message (defaults to task)" />
+        <button id="btn-commit" class="btn primary">commit</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const state = { list: [], selected: null, term: null, ws: null };
+
+const api = async (path, opts) => {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+};
+
+function toast(msg, ms = 2500) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), ms);
+}
+
+// --- sidebar list -------------------------------------------------------
+
+async function refresh() {
+  try {
+    state.list = await api("/api/workspaces");
+  } catch (e) {
+    toast("failed to load: " + e.message);
+    return;
+  }
+  const list = $("#ws-list");
+  if (state.list.length === 0) {
+    list.innerHTML = '<div class="empty">no workspaces yet</div>';
+    return;
+  }
+  list.innerHTML = "";
+  for (const w of state.list) {
+    const el = document.createElement("div");
+    el.className = "ws" + (state.selected === w.id ? " active" : "");
+    el.innerHTML = `
+      <div class="top"><span class="status ${w.running ? "run" : "stopped"}"></span><span class="id">${w.id}</span></div>
+      <div class="meta"><span class="task">${esc(w.task)}</span><span>${w.agent}</span><span>${w.running ? "running" : "stopped"}</span></div>`;
+    el.onclick = () => select(w.id);
+    list.appendChild(el);
+  }
+  if (!state.list.find((w) => w.id === state.selected)) select(state.list[0].id);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function select(id) {
+  state.selected = id;
+  const w = state.list.find((x) => x.id === id);
+  if (!w) return;
+  $("#t-id").textContent = w.id;
+  $("#t-status").textContent = w.running ? "● running" : "○ stopped";
+  $("#t-path").textContent = w.path;
+  $("#btn-start").disabled = w.running;
+  $("#btn-stop").disabled = !w.running;
+  renderListActive();
+  attachTerminal(id);
+  refreshDiff(id);
+}
+
+function renderListActive() {
+  for (const el of $("#ws-list").children) {
+    el.classList.toggle("active", el.querySelector(".id").textContent === state.selected);
+  }
+}
+
+// --- actions ------------------------------------------------------------
+
+async function act(action, extra) {
+  if (!state.selected) return;
+  try {
+    await api(`/api/workspaces/${state.selected}/${action}`, {
+      method: "POST",
+      body: extra ? JSON.stringify(extra) : undefined,
+    });
+    toast(`${action} ${state.selected}`);
+    await refresh();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+$("#btn-start").onclick = () => act("start");
+$("#btn-stop").onclick = () => act("stop");
+$("#btn-restart").onclick = () => act("restart");
+$("#btn-delete").onclick = async () => {
+  if (!confirm("delete workspace " + state.selected + "? worktree will be removed")) return;
+  await act("delete");
+  state.selected = null;
+};
+$("#btn-refresh-diff").onclick = () => refreshDiff(state.selected);
+$("#btn-commit").onclick = async () => {
+  const msg = $("#commit-msg").value.trim();
+  await act("commit", { message: msg });
+  $("#commit-msg").value = "";
+  toast("committed " + state.selected);
+  refreshDiff(state.selected);
+};
+
+// --- terminal (xterm + ws) ----------------------------------------------
+
+function attachTerminal(id) {
+  if (!state.term) {
+    const t = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: 'ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace',
+      theme: { background: "#000", foreground: "#d0d7e5", cursor: "#4f8cff" },
+      scrollback: 5000,
+    });
+    t.open(document.getElementById("terminal"));
+    state.term = t;
+  }
+  if (state.ws) state.ws.close();
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}`);
+  ws.onopen = () => ws.send(JSON.stringify({ type: "attach", id }));
+  ws.onmessage = (ev) => state.term.write(ev.data);
+  ws.onclose = () => state.term.write("\r\n\x1b[31m[disconnected — server or session ended]\x1b[0m\r\n");
+  state.ws = ws;
+  state.term.focus();
+  state.term.onData((d) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(d);
+  });
+}
+
+// --- diff ---------------------------------------------------------------
+
+async function refreshDiff(id) {
+  if (!id) return;
+  try {
+    const files = await api(`/api/workspaces/${id}/diff`);
+    const content = $("#diff-content");
+    const stat = $("#diff-header .stat");
+    if (!files.length) { stat.textContent = "(clean)"; content.innerHTML = '<div class="diff-line clean">no changes</div>'; return; }
+    stat.textContent = files[0].name.split("\n")[0];
+    const diff = files[0].diff;
+    if (!diff.trim()) { content.innerHTML = '<div class="diff-line clean">no changes</div>'; return; }
+    let html = "";
+    for (const line of diff.split("\n")) {
+      let cls = "";
+      if (line.startsWith("+++") || line.startsWith("---")) cls = "meta";
+      else if (line.startsWith("@@")) cls = "hunk";
+      else if (line.startsWith("+")) cls = "add";
+      else if (line.startsWith("-")) cls = "del";
+      html += `<div class="diff-line ${cls}"><span class="ln"></span><span>${esc(line) || "&nbsp;"}</span></div>`;
+    }
+    content.innerHTML = html;
+  } catch (e) {
+    toast("diff: " + e.message);
+  }
+}
+
+// --- tabs ---------------------------------------------------------------
+
+for (const tab of document.querySelectorAll(".tab")) {
+  tab.onclick = () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+    document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === tab.dataset.view + "-view"));
+  };
+}
+
+// --- new workspace ------------------------------------------------------
+
+$("#new-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const task = $("#f-task").value.trim();
+  if (!task) return;
+  try {
+    const w = await api("/api/workspaces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task,
+        repo: $("#f-repo").value.trim() || undefined,
+        agent: $("#f-agent").value,
+      }),
+    });
+    $("#f-task").value = "";
+    toast("created " + w.id);
+    await refresh();
+    select(w.id);
+  } catch (err) {
+    toast("create: " + err.message);
+  }
+};
+
+// --- boot ---------------------------------------------------------------
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

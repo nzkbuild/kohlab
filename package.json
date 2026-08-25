@@ -1,0 +1,15 @@
+{
+  "name": "kohlab",
+  "version": "1.0.0",
+  "description": "Run your AI coding agents in parallel, persistently, from any device.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "kohlab": "cli.ts"
+  },
+  "scripts": {
+    "start": "bun run server.ts",
+    "cli": "bun run cli.ts",
+    "dev": "bun run --watch server.ts"
+  }
+}

@@ -1,0 +1,9 @@
+# runtime / state
+.works/
+node_modules/
+
+# logs
+*.log
+
+# OS / editor
+.DS_Store
