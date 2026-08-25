@@ -67,7 +67,18 @@ ssh -L 7676:localhost:7676 user@your-server
 
 Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
+## What's next
+
+**v1.1.0** is planned and committed to the repo — not vaporware:
+
+- **Completion notifications** — the moment an agent finishes, you know.
+- **Workspace sharing** — hand a live workspace to a teammate.
+- **Scoped access key** — deploy the dashboard safely behind a reverse proxy.
+
+Full plan: RELEASE-PLAN.md. We ship disciplined releases; see CHANGELOG.md.
+
 ## Project status
+
 
 **v1.0.0** — a solid baseline. We ship disciplined, semantic releases; see CHANGELOG.md. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.
 

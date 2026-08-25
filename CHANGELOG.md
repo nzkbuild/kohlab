@@ -11,6 +11,14 @@ Kohlab's versioning philosophy:
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
 - **Every change is a disciplined bump**: patch (1.0.1) for fixes, minor (1.1.0) for new features, major (2.0.0) only for a breakthrough.
 
+## [Unreleased]
+
+### Planned — v1.1.0 (see RELEASE-PLAN.md)
+
+- **Completion notifications** — get notified the moment an agent finishes.
+- **Workspace sharing** — share a workspace with a teammate and see it live.
+- **Scoped access key** — deploy the dashboard behind a reverse proxy safely.
+
 ## [1.0.0] - 2026-08-25
 
 ### Added
