@@ -3,13 +3,14 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import "@xterm/xterm/css/xterm.css";
-import { hasKey } from "../api";
+
 
 interface Props {
   workspaceId: string;
+  terminalId: string;
 }
 
-export default function TerminalView({ workspaceId }: Props) {
+export default function TerminalView({ workspaceId, terminalId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -42,7 +43,7 @@ export default function TerminalView({ workspaceId }: Props) {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new ImageAddon({ sixelSupport: true, iipSupport: true, kittySupport: true, storageLimit: 64, pixelLimit: 8388608 }));
+    term.loadAddon(new ImageAddon({ sixelSupport: true, iipSupport: true, storageLimit: 64, pixelLimit: 8388608 }));
     term.open(containerRef.current);
     try {
       fit.fit();
@@ -80,15 +81,15 @@ export default function TerminalView({ workspaceId }: Props) {
 
     // websocket to server
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const keyq = hasKey() ? "" : "";
+
     const urlKey = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "";
     const ws = new WebSocket(`${proto}//${location.host}${urlKey ? `?key=${encodeURIComponent(urlKey)}` : ""}`);
     wsRef.current = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "attach", id: workspaceId }));
+      ws.send(JSON.stringify({ type: "attach", id: workspaceId, terminalId }));
       try {
         const dims = fit.proposeDimensions();
-        if (dims) ws.send(JSON.stringify({ type: "resize", id: workspaceId, cols: dims.cols, rows: dims.rows }));
+        if (dims) ws.send(JSON.stringify({ type: "resize", id: workspaceId, terminalId, cols: dims.cols, rows: dims.rows }));
       } catch {
         /* ignore */
       }
@@ -103,7 +104,7 @@ export default function TerminalView({ workspaceId }: Props) {
       try {
         fit.fit();
         const dims = fit.proposeDimensions();
-        if (dims && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", id: workspaceId, cols: dims.cols, rows: dims.rows }));
+        if (dims && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", id: workspaceId, terminalId, cols: dims.cols, rows: dims.rows }));
       } catch {
         /* ignore */
       }
@@ -120,7 +121,7 @@ export default function TerminalView({ workspaceId }: Props) {
       termRef.current = null;
       wsRef.current = null;
     };
-  }, [workspaceId]);
+  }, [workspaceId, terminalId]);
 
   return <div ref={containerRef} className="terminal-wrap h-full w-full bg-[#05070b] p-2.5" />;
 }

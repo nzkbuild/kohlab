@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Stop, ArrowsClockwise, ShareNetwork, Trash, Terminal, Files, GitDiff } from "@phosphor-icons/react";
+import { Play, Stop, ArrowsClockwise, ShareNetwork, Trash, Terminal, Files, GitDiff, Plus, X } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp } from "../store";
 import TerminalView from "./TerminalView";
@@ -13,6 +13,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const { workspaces, refresh, select } = useApp();
   const [tab, setTab] = useState<Tab>("terminal");
   const [openFile, setOpenFile] = useState<string | null>(null);
+  const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
+  const [activeTerminal, setActiveTerminal] = useState("main");
   const w = workspaces.find((x) => x.id === workspaceId);
 
   const act = async (action: string) => {
@@ -81,9 +83,44 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </button>
         ))}
       </div>
+      {tab === "terminal" && (
+        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[#232d42] bg-[#0a0e14] overflow-x-auto">
+          {terminals.map((term) => (
+            <button
+              key={term.id}
+              onClick={() => setActiveTerminal(term.id)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] border transition ${activeTerminal === term.id ? "bg-[#182032] border-[#2c3a55] text-zinc-200" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+            >
+              <Terminal size={12} />
+              {term.label}
+              {term.id !== "main" && (
+                <X
+                  size={11}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTerminals((items) => items.filter((item) => item.id !== term.id));
+                    if (activeTerminal === term.id) setActiveTerminal("main");
+                  }}
+                />
+              )}
+            </button>
+          ))}
+          <button
+            onClick={() => {
+              const id = `terminal-${Date.now()}`;
+              setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
+              setActiveTerminal(id);
+            }}
+            className="p-1 rounded text-zinc-500 hover:text-emerald-400 hover:bg-[#131926] transition"
+            title="new terminal"
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0">
-        {tab === "terminal" && <TerminalView workspaceId={workspaceId} />}
+        {tab === "terminal" && <TerminalView key={`${workspaceId}:${activeTerminal}`} workspaceId={workspaceId} terminalId={activeTerminal} />}
         {tab === "files" && (openFile ? (
           <CodeView workspaceId={workspaceId} filePath={openFile} onBack={() => setOpenFile(null)} />
         ) : (

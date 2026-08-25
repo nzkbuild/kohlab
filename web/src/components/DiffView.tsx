@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import DiffEditor from "@monaco-editor/react";
+import { DiffEditor } from "@monaco-editor/react";
 import { api } from "../api";
 
 interface Props {
@@ -53,7 +53,7 @@ export default function DiffView({ workspaceId }: Props) {
           original=""
           modified={diff}
           theme="vs-dark"
-          options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false } }}
+          options={{ readOnly: true, minimap: { enabled: false } }}
         />
       </div>
       <div className="flex gap-2 items-center px-3 py-2 border-t border-[#232d42]">

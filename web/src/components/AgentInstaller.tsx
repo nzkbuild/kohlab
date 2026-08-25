@@ -31,16 +31,13 @@ export default function AgentInstaller({ compact }: Props) {
     setRunning(a.name);
     setLog(null);
     try {
-      // run the install command via the workspace terminal? simpler: open a guide.
-      // For v1, run via API is not available - we show the command.
-      setLog(`run on the server:\n  ${a.installCmd}\n  ${a.setupCmd ?? ""}`);
-      setTimeout(() => {
-        void load();
-        setRunning(null);
-      }, 2000);
-    } catch {
-      setRunning(null);
+      const res = await api.installAgent(a.name, a.installCmd);
+      setLog(`installed ${a.name}${res.output ? `\n${res.output.slice(0, 300)}` : ""}`);
+      await load();
+    } catch (e) {
+      setLog(`install failed: ${(e as Error).message}`);
     }
+    setRunning(null);
   };
 
   const installed = agents.filter((a) => a.installed);

@@ -255,6 +255,26 @@ async function handleAgentsStatus(): Promise<Response> {
   return json(status);
 }
 
+/** Install an agent CLI on the host (runs the npm global install). */
+async function handleAgentInstall(req: Request): Promise<Response> {
+  const body = (await req.json()) as { name?: string; cmd?: string };
+  const name = (body.name ?? "").trim();
+  const cmd = (body.cmd ?? "").trim();
+  if (!name || !cmd) return json({ error: "name and cmd are required" }, 400);
+  // whitelist: only known package installs, never arbitrary shell
+  const allowed = ["npm i -g", "npm install -g", "bun add -g", "curl -fsSL"];
+  if (!allowed.some((p) => cmd.startsWith(p))) {
+    return json({ error: "command not allowed" }, 400);
+  }
+  const { exec } = await import("child_process");
+  const { promise, resolve, reject } = Promise.withResolvers<{ ok: boolean; output: string }>();
+  exec(cmd, { timeout: 300000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    if (err) reject(new Error(stderr.trim() || err.message));
+    else resolve({ ok: true, output: stdout.slice(0, 2000) });
+  });
+  return promise.then(json).catch((e) => json({ error: (e as Error).message }, 400));
+}
+
 
 /** Read a file's contents for the code view. */
 async function handleFile(id: string, req: Request): Promise<Response> {
@@ -270,6 +290,31 @@ async function handleFile(id: string, req: Request): Promise<Response> {
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
+}
+
+/** List GitHub repos via `gh` (if authenticated) for the repo browser. */
+async function handleGhRepos(): Promise<Response> {
+  const { execFile } = await import("child_process");
+  const { promise, resolve } = Promise.withResolvers<{ ok: boolean; repos: string[]; authed: boolean }>();
+  execFile("gh", ["auth", "status"], { timeout: 8000 }, (authErr) => {
+    if (authErr) {
+      resolve({ ok: true, repos: [], authed: false });
+      return;
+    }
+    execFile(
+      "gh",
+      ["repo", "list", "--limit", "30", "--json", "nameWithOwner,description", "--jq", '.[] | .nameWithOwner + "\\t" + (.description // "")'],
+      { timeout: 10000 },
+      (err, stdout) => {
+        if (err) {
+          resolve({ ok: true, repos: [], authed: true });
+          return;
+        }
+        resolve({ ok: true, repos: stdout.trim().split("\n").filter(Boolean), authed: true });
+      },
+    );
+  });
+  return promise.then((result) => json(result));
 }
 
 function json(body: unknown, status = 200): Response {
@@ -371,30 +416,31 @@ function onDaemonData(chunk: Buffer | string) {
   }
 }
 
-/** Attach a ws client to a workspace's PTY session. */
-function attachPty(ws: ServerWebSocket, id: string) {
-  const sessId = `works-${id}`;
+/** Attach a ws client to a workspace's named PTY session. */
+function attachPty(ws: ServerWebSocket, id: string, terminalId = "main") {
+  const sessId = `works-${id}-${terminalId}`;
   termClients.set(ws, sessId);
   void daemonSend({ type: "subscribe", id: sessId, replay: true });
   ws.send("\x1b[2J\x1b[H");
 }
 
 
-/** Ensure a workspace's PTY session exists (spawn the agent if not). */
-async function ensurePtySession(id: string) {
+/** Ensure a workspace's named PTY session exists (spawn the agent if not). */
+async function ensurePtySession(id: string, terminalId = "main") {
   const ws = await getWorkspace(id);
   const s = await loadState();
   const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
+  const sessionId = `works-${id}-${terminalId}`;
   await daemonSend({
     type: "open",
-    id: `works-${id}`,
+    id: sessionId,
     cwd: worktreePath(ws),
     cmd,
     cols: 120,
     rows: 36,
   });
-  if (ws.payload) {
-    await daemonSend({ type: "input", id: `works-${id}`, data: Buffer.from(ws.payload + "\r").toString("base64") });
+  if (ws.payload && terminalId === "main") {
+    await daemonSend({ type: "input", id: sessionId, data: Buffer.from(ws.payload + "\r").toString("base64") });
   }
 }
 
@@ -440,7 +486,10 @@ const server = serve({
       }
     }
 
+    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
+    if (path === "/api/agents/install" && req.method === "POST") return handleAgentInstall(req);
     if (path === "/api/agents-status") return handleAgentsStatus();
+    if (path === "/api/gh/repos") return handleGhRepos();
     if (path === "/api/clone" && req.method === "POST") return handleClone(req);
     if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
 
@@ -491,12 +540,17 @@ const server = serve({
       // JSON control frames (attach/resize) vs raw terminal input
       if (str.startsWith("{")) {
         try {
-          const msg = JSON.parse(str) as { type?: string; id?: string; cols?: number; rows?: number };
+          const msg = JSON.parse(str) as { type?: string; id?: string; terminalId?: string; cols?: number; rows?: number };
           if (msg.type === "attach" && msg.id) {
-            attachPty(ws, msg.id);
-            void ensurePtySession(msg.id);
+            attachPty(ws, msg.id, msg.terminalId);
+            void ensurePtySession(msg.id, msg.terminalId);
           } else if (msg.type === "resize" && msg.id && msg.cols && msg.rows) {
-            void daemonSend({ type: "resize", id: `works-${msg.id}`, cols: msg.cols, rows: msg.rows });
+            void daemonSend({
+              type: "resize",
+              id: `works-${msg.id}-${msg.terminalId ?? "main"}`,
+              cols: msg.cols,
+              rows: msg.rows,
+            });
           }
           return;
         } catch {

@@ -17,9 +17,15 @@ export default function Sidebar() {
   const [agent, setAgent] = useState("omp");
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [ghRepos, setGhRepos] = useState<string[]>([]);
+  const [ghAuthed, setGhAuthed] = useState(false);
 
   useEffect(() => {
     void refresh();
+    void api.ghRepos().then((result) => {
+      setGhAuthed(result.authed);
+      setGhRepos(result.repos);
+    });
     const t = setInterval(refresh, 5000);
     return () => clearInterval(t);
   }, [refresh]);
@@ -67,6 +73,25 @@ export default function Sidebar() {
             required
             className="bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
           />
+          {ghAuthed && ghRepos.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const ownerRepo = e.target.value.split("\t")[0];
+                if (ownerRepo) setRepo(`https://github.com/${ownerRepo}.git`);
+              }}
+              className="bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+            >
+              <option value="">choose a GitHub repo</option>
+              {ghRepos.map((entry) => {
+                const [name, description] = entry.split("\t");
+                return <option key={name} value={entry}>{name}{description ? ` - ${description}` : ""}</option>;
+              })}
+            </select>
+          )}
+          {!ghAuthed && (
+            <div className="text-[11px] text-amber-400">GitHub not connected. Run `gh auth login` on the server.</div>
+          )}
           <div className="flex gap-2">
             <div className="relative flex-1">
               <input
@@ -75,7 +100,7 @@ export default function Sidebar() {
                 placeholder="repo path or GitHub URL"
                 className="w-full bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
               />
-              <GitHubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600" />
+              <GithubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600" />
             </div>
             <select
               value={agent}

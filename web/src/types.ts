@@ -25,6 +25,7 @@ export interface DiffFile {
 export type AgentStatus = Record<string, boolean>;
 
 export interface AgentInfo {
+  name: string;
   installed?: boolean;
   installCmd?: string;
   setupCmd?: string;

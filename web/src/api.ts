@@ -52,10 +52,17 @@ export const api = {
     json<{ id: string; share: string }>(`/api/workspaces/${id}/share`, { method: "POST" }),
   diff: (id: string) => json<DiffFile[]>(`/api/workspaces/${id}/diff`),
   commit: (id: string, message: string) =>
-    json<{ ok: boolean }>(`/api/workspaces/${id}/commit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) }),
+    json<{ ok: boolean }>(`/api/workspaces/${id}/commit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    }),
   files: (id: string) => json<TreeNode[]>(`/api/workspaces/${id}/files`),
   file: (id: string, path: string) =>
     json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
+  installAgent: (name: string, cmd: string) =>
+    json<{ ok: boolean; output?: string }>("/api/agents/install", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, cmd }) }),
+  ghRepos: () => json<{ ok: boolean; repos: string[]; authed: boolean }>("/api/gh/repos"),
 };
 
 export type { Workspace };
