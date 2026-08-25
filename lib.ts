@@ -307,20 +307,12 @@ export async function startWorkspace(id: string) {
   const ws = s.workspaces.find((w) => w.id === id);
   if (!ws) throw new Error(`no workspace '${id}'`);
 
-  if (await isRunning(ws)) return { ...ws, running: true, path: worktreePath(ws) };
-
-  const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
-  const tree = worktreePath(ws);
-
-  await tmux(["new-session", "-d", "-s", tid(ws), "-c", tree, cmd[0], ...cmd.slice(1)]);
-  if (ws.payload) {
-    await tmux(["send-keys", "-t", tid(ws), ws.payload.replace(/\n/g, "\r"), "Enter"]);
-  }
-
+  // PTY sessions are owned by the pty-daemon and spawned on attach;
+  // start just marks the workspace as started.
   ws.started = Date.now();
   ws.stopped = null;
   await saveState(s);
-  return { ...ws, running: true, path: tree };
+  return { ...ws, running: true, path: worktreePath(ws) };
 }
 
 export async function stopWorkspace(id: string) {

@@ -21,9 +21,9 @@ import {
   startWatcher,
   onWorkspaceDone,
   notifyWebhook,
-  shareWorkspace,
   workspaceByShare,
   authorized,
+  loadState,
 } from "./lib";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -279,26 +279,123 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-// --- WebSocket terminal proxy -------------------------------------------
+// --- PTY daemon client ---------------------------------------------------
+// The Bun server speaks to a Node node-pty daemon over a Unix socket.
+// This replaces the old `script`+`tmux attach` hack: real PTYs, proper
+// resize, replay on reconnect, multiple sessions.
 
-function openTmuxSocket(ws: ServerWebSocket, session: string) {
-  // restarts — this pty is just a viewer.
-  console.error("[ws] attaching pty to session", session);
-  const pty = spawn("script", ["-qefc", `tmux attach -t ${session}`, "/dev/null"], {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, TERM: "xterm-256color", COLUMNS: "120", LINES: "36" },
-  }) as ChildProcess & { stdin: NodeJS.WritableStream };
-  pty.stdout?.on("data", (d) => ws.send(d.toString()));
-  pty.stderr?.on("data", (d) => ws.send(d.toString()));
-  pty.on("spawn", () => console.error("[ws] pty spawned pid", pty.pid));
-  pty.on("error", (e) => console.error("[ws] pty error:", e.message));
-  pty.on("exit", (code, sig) => console.error("[ws] pty exited", code, sig));
-  pty.on("close", () => {
-    if (ws.readyState === ws.OPEN) ws.send("\x1b[31m[session ended]\x1b[0m\r\n");
+const PTY_SOCKET = process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock";
+const PTY_DAEMON = process.env.PTY_DAEMON || join(process.cwd(), "pty-daemon.cjs");
+
+let daemonSock: import("net").Socket | null = null;
+let daemonBuf = "";
+let daemonStarted = false;
+let daemonConnecting: Promise<import("net").Socket> | null = null;
+function ensureDaemon() {
+  if (daemonStarted) return;
+  daemonStarted = true;
+  const fs = require("fs");
+  try { fs.unlinkSync(PTY_SOCKET); } catch {}
+  const child = spawn("node", [PTY_DAEMON], { stdio: "ignore", detached: true });
+  child.unref();
+}
+
+function daemonConnect() {
+  if (daemonSock) return Promise.resolve(daemonSock);
+  if (daemonConnecting) return daemonConnecting;
+  daemonConnecting = new Promise<import("net").Socket>((resolve, reject) => {
+    ensureDaemon();
+    const tryConnect = (attempt: number) => {
+      const sock = (require("net") as typeof import("net")).createConnection(PTY_SOCKET);
+      sock.once("connect", () => {
+        daemonSock = sock;
+        daemonBuf = "";
+        sock.on("data", onDaemonData);
+        sock.on("close", () => {
+          daemonSock = null;
+          daemonConnecting = null;
+        });
+        sock.on("error", () => {
+          daemonSock = null;
+          daemonConnecting = null;
+        });
+        resolve(sock);
+      });
+      sock.once("error", (e: Error) => {
+        if (attempt < 10) setTimeout(() => tryConnect(attempt + 1), 300);
+        else {
+          daemonConnecting = null;
+          reject(e);
+        }
+      });
+    };
+    tryConnect(0);
   });
-  ws.data = pty;
+  return daemonConnecting;
+}
+
+/** WS client state per terminal: which session + ack subscription */
+const termClients = new Map<ServerWebSocket, string>();
+
+async function daemonSend(msg: unknown) {
+  const sock = await daemonConnect();
+  sock.write(JSON.stringify(msg) + "\n");
+}
+
+function onDaemonData(chunk: Buffer | string) {
+  daemonBuf += chunk.toString("utf8");
+  let idx;
+  while ((idx = daemonBuf.indexOf("\n")) >= 0) {
+    const line = daemonBuf.slice(0, idx);
+    daemonBuf = daemonBuf.slice(idx + 1);
+    if (!line.trim()) continue;
+    try {
+      const msg = JSON.parse(line);
+      if (msg.type === "output") {
+        const txt = Buffer.from(msg.data, "base64").toString("utf8");
+        // fan out to all ws clients subscribed to this session
+        for (const [ws, sessId] of termClients) {
+          // WebSocket.OPEN === 1; `ws.OPEN` is undefined on Bun's ServerWebSocket
+          if (sessId === msg.id && ws.readyState === 1) {
+            ws.send(txt);
+          }
+        }
+      } else if (msg.type === "exit") {
+        for (const [ws, sessId] of termClients) {
+          if (sessId === msg.id && ws.readyState === 1) {
+            ws.send("\x1b[90m[process exited]\x1b[0m\r\n");
+          }
+        }
+      }
+    } catch {}
+  }
+}
+
+/** Attach a ws client to a workspace's PTY session. */
+function attachPty(ws: ServerWebSocket, id: string) {
+  const sessId = `works-${id}`;
+  termClients.set(ws, sessId);
+  void daemonSend({ type: "subscribe", id: sessId, replay: true });
   ws.send("\x1b[2J\x1b[H");
-  return pty;
+}
+
+
+/** Ensure a workspace's PTY session exists (spawn the agent if not). */
+async function ensurePtySession(id: string) {
+  const ws = await getWorkspace(id);
+  const s = await loadState();
+  const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
+  await daemonSend({
+    type: "open",
+    id: `works-${id}`,
+    cwd: worktreePath(ws),
+    cmd,
+    cols: 120,
+    rows: 36,
+  });
+  if (ws.payload) {
+    await daemonSend({ type: "input", id: `works-${id}`, data: Buffer.from(ws.payload + "\r").toString("base64") });
+  }
 }
 
 // --- server --------------------------------------------------------------
@@ -380,37 +477,33 @@ const server = serve({
     },
     message(ws, raw) {
       const str = String(raw);
-      // JSON control frames (attach) vs raw terminal input
+
+      // JSON control frames (attach/resize) vs raw terminal input
       if (str.startsWith("{")) {
         try {
-          const msg = JSON.parse(str) as { type?: string; id?: string };
+          const msg = JSON.parse(str) as { type?: string; id?: string; cols?: number; rows?: number };
           if (msg.type === "attach" && msg.id) {
-            openTmuxSocket(ws, `works-${msg.id}`);
+            attachPty(ws, msg.id);
+            void ensurePtySession(msg.id);
+          } else if (msg.type === "resize" && msg.id && msg.cols && msg.rows) {
+            void daemonSend({ type: "resize", id: `works-${msg.id}`, cols: msg.cols, rows: msg.rows });
           }
           return;
         } catch {
-          // not JSON — fall through to terminal input
+          // not JSON - fall through to terminal input
         }
       }
-      const pty = ws.data as (ChildProcess & { stdin: NodeJS.WritableStream }) | undefined;
-      if (!pty) {
-        console.error("[ws] input without pty attached:", JSON.stringify(str.slice(0, 40)));
-        return;
-      }
-      try {
-        pty.stdin.write(str);
-      } catch (e) {
-        console.error("[ws] pty stdin write failed:", (e as Error).message);
+      const sessId = termClients.get(ws);
+      if (sessId) {
+        void daemonSend({ type: "input", id: sessId, data: Buffer.from(str, "utf8").toString("base64") });
       }
     },
     close(ws) {
       pushClients.delete(ws);
-      const pty = ws.data as (ChildProcess & { stdin: NodeJS.WritableStream }) | undefined;
-      pty?.kill();
+      termClients.delete(ws);
     },
     drain(ws) {
-      const pty = ws.data as (ChildProcess & { stdin: NodeJS.WritableStream }) | undefined;
-      pty?.stdin?.write("");
+      // no-op
     },
   },
 });

@@ -7,9 +7,13 @@
   "bin": {
     "kohlab": "cli.ts"
   },
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  },
   "scripts": {
     "start": "bun run server.ts",
     "cli": "bun run cli.ts",
-    "dev": "bun run --watch server.ts"
+    "dev": "bun run --watch server.ts",
+    "pty:daemon": "node pty-daemon.cjs"
   }
 }

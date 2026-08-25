@@ -154,11 +154,22 @@
   .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
   #views { flex: 1; min-height: 0; position: relative; }
-  .view { position: absolute; inset: 0; display: none; }
+  .view { position: absolute; inset: 0; display: none; overflow: hidden; }
   .view.active { display: block; }
   #terminal-view { background: #05070b; }
-  #terminal { height: 100%; padding: 10px; }
-  #terminal .xterm { height: 100%; }
+  #terminal {
+    height: 100%;
+    width: 100%;
+    padding: 10px;
+    box-sizing: border-box;
+  }
+  #terminal .xterm {
+    height: 100%;
+    width: 100%;
+  }
+  #terminal .xterm .xterm-screen {
+    height: 100%;
+  }
   #terminal .xterm .xterm-rows { line-height: 1.45; }
 
   /* file tree + code view */
@@ -610,7 +621,16 @@ function attachTerminal(id) {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const keyq = state.key ? `?key=${encodeURIComponent(state.key)}` : "";
   const ws = new WebSocket(`${proto}//${location.host}${keyq}`);
-  ws.onopen = () => ws.send(JSON.stringify({ type: "attach", id }));
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: "attach", id }));
+    // tell the server the terminal size so the PTY resizes to match
+    if (state.term && state.fit) {
+      try {
+        const dims = state.fit.proposeDimensions();
+        if (dims) ws.send(JSON.stringify({ type: "resize", id, cols: dims.cols, rows: dims.rows }));
+      } catch {}
+    }
+  };
   ws.onmessage = (ev) => state.term.write(ev.data);
   ws.onclose = () => state.term.write("\r\n\x1b[90m[disconnected]\x1b[0m\r\n");
   state.ws = ws;
@@ -618,6 +638,15 @@ function attachTerminal(id) {
   state.term.onData((d) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(d);
   });
+  // keep the PTY size in sync when the terminal resizes
+  const onResize = () => {
+    if (!state.fit || !ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const dims = state.fit.proposeDimensions();
+      if (dims) ws.send(JSON.stringify({ type: "resize", id, cols: dims.cols, rows: dims.rows }));
+    } catch {}
+  };
+  window.addEventListener("resize", onResize);
 }
 
 /* ---------------- diff ---------------- */
