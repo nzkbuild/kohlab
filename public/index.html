@@ -3,109 +3,111 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>works — agent workspaces</title>
+<title>kohlab</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
 <style>
   :root {
-    --bg: #0b0e14;
-    --bg2: #11151f;
-    --panel: #151a26;
-    --panel2: #1a2130;
-    --border: #232b3b;
-    --text: #c8d0e0;
-    --muted: #6b7688;
-    --accent: #4f8cff;
-    --accent2: #7aa7ff;
-    --green: #3ecf8e;
-    --red: #ff5c5c;
-    --yellow: #f5b83d;
-    --radius: 8px;
+    --bg: #0a0e14;
+    --bg2: #0f141d;
+    --panel: #131926;
+    --panel2: #182032;
+    --border: #232d42;
+    --border2: #2c3a55;
+    --text: #d7e0ee;
+    --muted: #7a869c;
+    --accent: #34d399;      /* emerald - single accent, locked */
+    --accent-dim: #10b981;
+    --green: #34d399;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --radius: 10px;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
   body {
     background: var(--bg);
     color: var(--text);
-    font: 13px/1.45 ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font: 13px/1.5 var(--font-mono);
     display: flex;
     overflow: hidden;
   }
+  ::selection { background: rgba(52, 211, 153, .25); }
 
-  /* sidebar */
+  /* --- sidebar --- */
   #sidebar {
     width: 300px;
     min-width: 300px;
     background: var(--bg2);
     border-right: 1px solid var(--border);
     display: flex;
+    flex-direction: column;
+  }
   #brand {
     padding: 14px 16px;
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: .5px;
-    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 8px;
-    background: linear-gradient(135deg, var(--bg2), var(--panel));
+    gap: 9px;
+    border-bottom: 1px solid var(--border);
   }
   #brand .dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    box-shadow: 0 0 8px var(--accent);
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
   }
-  #brand .name { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-  #brand .sub { color: var(--muted); font-size: 10px; font-weight: 400; margin-left: auto; }
+  #brand .name { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+  #brand .sub { color: var(--muted); font-size: 10px; margin-left: auto; }
 
-  #new-form {
-    padding: 12px;
-    border-bottom: 1px solid var(--border);
-    display: grid;
-    gap: 8px;
-  }
+  #new-form { padding: 12px; border-bottom: 1px solid var(--border); display: grid; gap: 8px; }
   #new-form input, #new-form select {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--text);
-    padding: 7px 9px;
+    padding: 8px 10px;
     font: inherit;
     outline: none;
+    transition: border-color .15s;
   }
   #new-form input:focus, #new-form select:focus { border-color: var(--accent); }
+  #new-form input::placeholder { color: var(--muted); }
+  #new-form .row { display: grid; grid-template-columns: 1fr 100px; gap: 8px; }
   #new-form button {
     background: var(--accent);
-    color: #fff;
+    color: #04120b;
     border: 0;
-    border-radius: 6px;
-    padding: 8px;
+    border-radius: 8px;
+    padding: 9px;
     font: inherit;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: filter .15s;
+    transition: filter .15s, transform .05s;
   }
-  #new-form button:hover { filter: brightness(1.1); }
-  #new-form .row { display: grid; grid-template-columns: 1fr 110px; gap: 8px; }
+  #new-form button:hover { filter: brightness(1.08); }
+  #new-form button:active { transform: scale(.98); }
+  #agent-status { color: var(--muted); font-size: 11px; min-height: 14px; }
+
   #ws-list { flex: 1; overflow-y: auto; padding: 6px; }
   .ws {
     padding: 9px 10px;
     border-radius: 8px;
     cursor: pointer;
     border: 1px solid transparent;
-    transition: background .12s;
+    transition: background .12s, border-color .12s;
   }
   .ws:hover { background: var(--panel); }
-  .ws.active { background: var(--panel2); border-color: var(--border); }
+  .ws.active { background: var(--panel2); border-color: var(--border2); }
   .ws .top { display: flex; align-items: center; gap: 8px; }
   .ws .status { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .ws .status.run { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .ws .status.run { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s ease-in-out infinite; }
   .ws .status.stopped { background: var(--muted); }
   .ws .id { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ws .meta { margin-top: 3px; color: var(--muted); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
   .ws .task { color: var(--text); }
-  .empty { color: var(--muted); text-align: center; padding: 30px 10px; }
+  .empty { color: var(--muted); text-align: center; padding: 30px 10px; line-height: 1.6; }
+  @keyframes pulse { 50% { opacity: .45; } }
 
-  /* main */
+  /* --- main --- */
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #toolbar {
     display: flex;
@@ -116,34 +118,37 @@
     background: var(--bg2);
   }
   #toolbar .ws-id { font-weight: 700; }
-  #toolbar .muted { color: var(--muted); }
+  #toolbar .muted { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #toolbar .spacer { flex: 1; }
   .btn {
     background: var(--panel2);
     border: 1px solid var(--border);
     color: var(--text);
-    border-radius: 6px;
+    border-radius: 7px;
     padding: 5px 12px;
     font: inherit;
+    font-size: 12px;
     cursor: pointer;
-    transition: all .12s;
+    transition: border-color .12s, color .12s, background .12s, transform .05s;
   }
-  .btn:hover { border-color: var(--accent); color: #fff; }
-  .btn.green { border-color: var(--green); color: var(--green); }
-  .btn.green:hover { background: var(--green); color: #04120b; }
-  .btn.red { border-color: var(--red); color: var(--red); }
-  .btn.red:hover { background: var(--red); color: #fff; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  .btn.primary:hover { filter: brightness(1.1); }
-  .btn:disabled { opacity: .4; cursor: default; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: scale(.97); }
+  .btn.green { border-color: rgba(52, 211, 153, .4); color: var(--green); }
+  .btn.green:hover { background: rgba(52, 211, 153, .12); }
+  .btn.red { border-color: rgba(248, 113, 113, .4); color: var(--red); }
+  .btn.red:hover { background: rgba(248, 113, 113, .12); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #04120b; font-weight: 700; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: .35; cursor: default; }
 
-  #tabs { display: flex; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--bg2); }
+  #tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--bg2); }
   .tab {
     padding: 9px 14px;
     color: var(--muted);
     cursor: pointer;
     border-bottom: 2px solid transparent;
     font-weight: 500;
+    transition: color .12s;
   }
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--text); border-bottom-color: var(--accent); }
@@ -151,73 +156,89 @@
   #views { flex: 1; min-height: 0; position: relative; }
   .view { position: absolute; inset: 0; display: none; }
   .view.active { display: block; }
-  #terminal-view { padding: 0; background: #000; }
-  #terminal { height: 100%; padding: 8px; }
+  #terminal-view { background: #05070b; }
+  #terminal { height: 100%; padding: 10px; }
   #terminal .xterm { height: 100%; }
-  #diff-view { overflow: auto; padding: 0; }
-  #diff-header {
-    display: flex; gap: 10px; align-items: center;
-    padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--muted);
-  }
-  #diff-header .stat { color: var(--text); flex: 1; }
-  #diff-content { padding: 14px; white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; }
-  .diff-line { display: flex; gap: 8px; padding: 0 8px; border-radius: 3px; }
-  .diff-line .ln { color: var(--muted); user-select: none; min-width: 3em; text-align: right; }
-  .diff-line.add { background: rgba(62, 207, 142, .12); color: #9be8c4; }
-  .diff-line.del { background: rgba(255, 92, 92, .12); color: #f0a8a8; }
-  .diff-line.hunk { color: var(--accent); margin-top: 8px; }
-  .diff-line.meta { color: var(--yellow); font-weight: 600; }
-  .diff-line.clean { color: var(--muted); padding: 20px; }
-  #toast {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px);
-    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
-    padding: 10px 18px; border-radius: 8px; transition: transform .2s; z-index: 10;
-  }
-  #toast.show { transform: translateX(-50%) translateY(0); }
-  #commit-bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg2); }
-  #commit-bar input { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 6px 9px; font: inherit; outline: none; }
-  #commit-bar input:focus { border-color: var(--accent); }
+  #terminal .xterm .xterm-rows { line-height: 1.45; }
 
   /* file tree + code view */
   #tree-view { display: none; }
   #tree-view.active { display: flex; flex-direction: column; }
   #tree-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); }
   #tree-content { flex: 1; overflow: auto; padding: 8px; }
-  .tree-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .tree-item { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 5px; cursor: pointer; white-space: nowrap; color: var(--text); }
   .tree-item:hover { background: var(--panel); }
-  #code-content { flex: 1; overflow: auto; margin: 0; padding: 14px; font-size: 12.5px; line-height: 1.5; color: var(--text); white-space: pre; }
+  .tree-item .arrow { width: 12px; color: var(--muted); }
+  .tree-children { margin-left: 14px; }
+  #code-view { display: none; }
+  #code-view.active { display: flex; flex-direction: column; }
+  #code-header { padding: 8px 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
+  #code-content { flex: 1; overflow: auto; margin: 0; padding: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre; }
+
+  /* diff */
+  #diff-view { overflow: auto; }
+  #diff-header { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
+  #diff-header .stat { color: var(--text); flex: 1; }
+  #diff-content { padding: 14px; white-space: pre-wrap; font-size: 12.5px; line-height: 1.6; }
+  .diff-line { display: flex; gap: 8px; padding: 0 8px; border-radius: 3px; }
+  .diff-line .ln { color: var(--muted); user-select: none; min-width: 3em; text-align: right; }
+  .diff-line.add { background: rgba(52, 211, 153, .1); color: #9ae8c4; }
+  .diff-line.del { background: rgba(248, 113, 113, .1); color: #f0b4b4; }
+  .diff-line.hunk { color: var(--accent); margin-top: 8px; }
+  .diff-line.meta { color: var(--yellow); font-weight: 600; }
+  .diff-line.clean { color: var(--muted); padding: 20px; }
+
+  #commit-bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg2); }
+  #commit-bar input { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 7px 10px; font: inherit; outline: none; }
+  #commit-bar input:focus { border-color: var(--accent); }
+
+  /* toast */
+  #toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(90px);
+    background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
+    padding: 10px 18px; border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    transition: transform .2s cubic-bezier(.16,1,.3,1); z-index: 10;
+    max-width: 80vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
 
   /* access gate */
   #gate {
     position: fixed; inset: 0; z-index: 100;
     display: flex; align-items: center; justify-content: center;
-    background: var(--bg);
+    background: radial-gradient(1200px 600px at 50% 20%, #101827 0%, var(--bg) 60%);
   }
   .gate-card {
-    width: 320px; padding: 32px; border-radius: var(--radius);
-    background: var(--panel); border: 1px solid var(--border);
+    width: 340px; padding: 36px; border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--border2);
     display: flex; flex-direction: column; gap: 8px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
   }
-  .gate-logo { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; }
-  .gate-logo .name { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-  .gate-sub { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+  .gate-logo { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; }
+  .gate-logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  .gate-sub { color: var(--muted); font-size: 11px; margin-bottom: 14px; }
   #gate-form { display: flex; flex-direction: column; gap: 10px; }
   #gate-form input {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text); padding: 9px 11px; font: inherit; outline: none;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 10px 12px; font: inherit; outline: none;
   }
   #gate-form input:focus { border-color: var(--accent); }
   #gate-form button {
-    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
-    padding: 9px; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: #04120b; border: 0; border-radius: 8px;
+    padding: 10px; font: inherit; font-weight: 700; cursor: pointer;
   }
-  #gate-form button:hover { filter: brightness(1.1); }
+  #gate-form button:hover { filter: brightness(1.08); }
   .gate-error { color: var(--red); font-size: 12px; display: none; }
-  .tree-item .arrow { width: 12px; color: var(--muted); }
-  .tree-item .icon { width: 14px; color: var(--muted); }
 
-  #code-header { padding: 8px 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
-  #code-content { flex: 1; overflow: auto; margin: 0; padding: 14px; font-size: 12.5px; line-height: 1.5; color: var(--text); white-space: pre; }
+  @media (max-width: 768px) {
+    #sidebar { width: 240px; min-width: 240px; }
+    #toolbar .muted { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ws .status.run { animation: none; }
+    #toast { transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -227,7 +248,7 @@
   <form id="new-form">
     <input id="f-task" placeholder="task description" required />
     <div class="row">
-      <input id="f-repo" placeholder="repo path, or GitHub URL to clone" />
+      <input id="f-repo" placeholder="repo path, or GitHub URL" />
       <select id="f-agent">
         <option value="sh">sh</option>
         <option value="omp">omp</option>
@@ -235,7 +256,7 @@
         <option value="codex">codex</option>
       </select>
     </div>
-    <div id="agent-status" class="muted" style="font-size:11px"></div>
+    <div id="agent-status" class="muted"></div>
     <button type="submit">new workspace</button>
   </form>
   <div id="ws-list"><div class="empty">no workspaces yet</div></div>
@@ -243,7 +264,7 @@
 
 <main id="main">
   <div id="toolbar">
-    <span id="t-id" class="ws-id">—</span>
+    <span id="t-id" class="ws-id">-</span>
     <span id="t-status" class="muted"></span>
     <span id="t-path" class="muted"></span>
     <span class="spacer"></span>
@@ -282,20 +303,25 @@
 <div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-image@0.9.0/lib/addon-image.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
-const state = { list: [], selected: null, term: null, ws: null, key: new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "" };
+const state = {
+  list: [],
+  selected: null,
+  term: null,
+  ws: null,
+  key: new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "",
+};
 
-// --- access key gate ----------------------------------------------------
-// A clean login screen instead of a bare 401. Stores the key after it
-// successfully authenticates once.
+/* ---------------- access gate ---------------- */
 
 const gateEl = document.createElement("div");
 gateEl.id = "gate";
 gateEl.innerHTML = `
   <div class="gate-card">
-    <div class="gate-logo"><span class="dot"></span><span class="name">kohlab</span></div>
-    <p class="gate-sub">agent workspaces</p>
+    <div class="gate-logo"><span class="dot"></span>kohlab</div>
+    <div class="gate-sub">agent workspaces</div>
     <form id="gate-form">
       <input id="gate-key" type="password" placeholder="access key" autocomplete="current-password" autofocus />
       <button type="submit">enter</button>
@@ -304,7 +330,6 @@ gateEl.innerHTML = `
   </div>`;
 document.body.prepend(gateEl);
 
-// hide the app until authenticated
 function showGate(msg) {
   gateEl.style.display = "flex";
   document.querySelector("#sidebar").style.display = "none";
@@ -315,13 +340,11 @@ function showGate(msg) {
     err.style.display = "block";
   }
 }
-
 function hideGate() {
   gateEl.style.display = "none";
   document.querySelector("#sidebar").style.display = "flex";
   document.querySelector("#main").style.display = "flex";
 }
-
 async function testKey(k) {
   try {
     const r = await fetch(`/api/workspaces?key=${encodeURIComponent(k)}`);
@@ -330,18 +353,16 @@ async function testKey(k) {
     return false;
   }
 }
-
 gateEl.querySelector("#gate-form").onsubmit = async (e) => {
   e.preventDefault();
   const k = gateEl.querySelector("#gate-key").value.trim();
-  const ok = await testKey(k);
-  if (ok) {
+  if (await testKey(k)) {
     state.key = k;
     localStorage.setItem("kohlab_key", k);
     hideGate();
     boot();
   } else {
-    gateEl.querySelector("#gate-error").textContent = "wrong key — try again";
+    gateEl.querySelector("#gate-error").textContent = "wrong key - try again";
   }
 };
 
@@ -351,17 +372,15 @@ const api = async (path, opts) => {
   const r = await fetch(url, { ...opts, headers: { ...(opts?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (r.status === 401) {
-    // key rejected (server restarted with new key) → back to the gate
     localStorage.removeItem("kohlab_key");
     state.key = "";
-    showGate("access key changed — enter the new one");
+    showGate("access key changed - enter the new one");
     throw new Error("unauthorized");
   }
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 };
 
-// wrap the original boot calls behind authentication
 let booted = false;
 function boot() {
   if (booted) return;
@@ -372,7 +391,6 @@ function boot() {
   loadAgentStatus();
 }
 
-// entry: valid stored/URL key → straight in; none → gate
 (async () => {
   if (state.key && (await testKey(state.key))) {
     hideGate();
@@ -387,21 +405,22 @@ function toast(msg, ms = 2500) {
   const t = $("#toast");
   t.textContent = msg;
   t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), ms);
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("show"), ms);
 }
 
-// --- sidebar list -------------------------------------------------------
+/* ---------------- sidebar list ---------------- */
 
 async function refresh() {
   try {
     state.list = await api("/api/workspaces");
   } catch (e) {
-    toast("failed to load: " + e.message);
+    if (e.message !== "unauthorized") toast("failed to load: " + e.message);
     return;
   }
   const list = $("#ws-list");
   if (state.list.length === 0) {
-    list.innerHTML = '<div class="empty">no workspaces yet</div>';
+    list.innerHTML = '<div class="empty">no workspaces yet<br/>describe a task above to launch your first agent</div>';
     return;
   }
   list.innerHTML = "";
@@ -410,7 +429,7 @@ async function refresh() {
     el.className = "ws" + (state.selected === w.id ? " active" : "");
     el.innerHTML = `
       <div class="top"><span class="status ${w.running ? "run" : "stopped"}"></span><span class="id">${w.id}</span></div>
-      <div class="meta"><span class="task">${esc(w.task)}</span><span>${w.agent}</span><span>${w.running ? "running" : "stopped"}</span></div>`;
+      <div class="meta"><span class="task">${esc(w.task)}</span><span>${w.agent}</span><span>${w.running ? "running" : w.stopped ? "done" : "stopped"}</span></div>`;
     el.onclick = () => select(w.id);
     list.appendChild(el);
   }
@@ -426,22 +445,24 @@ function select(id) {
   const w = state.list.find((x) => x.id === id);
   if (!w) return;
   $("#t-id").textContent = w.id;
-  $("#t-status").textContent = w.running ? "● running" : "○ stopped";
+  $("#t-status").textContent = w.running ? "running" : w.stopped ? "done" : "stopped";
   $("#t-path").textContent = w.path;
   $("#btn-start").disabled = w.running;
   $("#btn-stop").disabled = !w.running;
   renderListActive();
   attachTerminal(id);
   refreshDiff(id);
+  loadTree(id);
 }
 
 function renderListActive() {
   for (const el of $("#ws-list").children) {
-    el.classList.toggle("active", el.querySelector(".id").textContent === state.selected);
+    const idEl = el.querySelector(".id");
+    el.classList.toggle("active", idEl && idEl.textContent === state.selected);
   }
 }
 
-// --- actions ------------------------------------------------------------
+/* ---------------- actions ---------------- */
 
 async function act(action, extra) {
   if (!state.selected) return;
@@ -453,7 +474,7 @@ async function act(action, extra) {
     toast(`${action} ${state.selected}`);
     await refresh();
   } catch (e) {
-    toast(e.message);
+    if (e.message !== "unauthorized") toast(e.message);
   }
 }
 
@@ -468,7 +489,7 @@ $("#btn-share").onclick = async () => {
     await navigator.clipboard.writeText(link).catch(() => {});
     toast("share link copied (read-only)");
   } catch (e) {
-    toast("share: " + e.message);
+    if (e.message !== "unauthorized") toast("share: " + e.message);
   }
 };
 $("#btn-delete").onclick = async () => {
@@ -485,7 +506,7 @@ $("#btn-commit").onclick = async () => {
   refreshDiff(state.selected);
 };
 
-// --- terminal (xterm + ws) ----------------------------------------------
+/* ---------------- terminal (xterm + images + copy) ---------------- */
 
 function attachTerminal(id) {
   if (!state.term) {
@@ -493,11 +514,84 @@ function attachTerminal(id) {
       cursorBlink: true,
       fontSize: 13,
       fontFamily: 'ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace',
-      theme: { background: "#000", foreground: "#d0d7e5", cursor: "#4f8cff" },
-      scrollback: 5000,
+      lineHeight: 1.45,
+      rightClickSelectsWord: true,
+      scrollback: 10000,
+      theme: {
+        background: "#05070b",
+        foreground: "#d7e0ee",
+        cursor: "#34d399",
+        selectionBackground: "rgba(52, 211, 153, .3)",
+        black: "#05070b",
+        brightBlack: "#4a5568",
+        red: "#f87171",
+        green: "#34d399",
+        yellow: "#fbbf24",
+        blue: "#60a5fa",
+        magenta: "#c084fc",
+        cyan: "#22d3ee",
+        white: "#d7e0ee",
+      },
     });
+    // image support: renders SIXEL / iTerm inline images (codex, claude code output)
+    if (typeof ImageAddon !== "undefined") {
+      try {
+        t.loadAddon(new ImageAddon({
+          sixelSupport: true,
+          iipSupport: true,
+          kittySupport: true,
+          storageLimit: 64,
+          pixelLimit: 8388608,
+          sixelSizeLimit: 8388608,
+          iipSizeLimit: 8388608,
+        }));
+      } catch (e) {
+        console.warn("image addon failed:", e);
+      }
+    }
     t.open(document.getElementById("terminal"));
     state.term = t;
+
+    // copy: selection -> clipboard on Ctrl+Shift+C / Cmd+C, and select-to-copy
+    const copySel = () => {
+      const sel = t.getSelection();
+      if (!sel) return false;
+      navigator.clipboard.writeText(sel).catch(() => {});
+      t.clearSelection();
+      toast("copied");
+      return true;
+    };
+    const paste = () => {
+      navigator.clipboard.readText().then((txt) => {
+        if (txt && state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(txt);
+      }).catch(() => {});
+    };
+    // terminal key handlers
+    t.attachCustomKeyEventHandler((e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "c") return copySel();
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "v") { paste(); return false; }
+      return true;
+    });
+    // select-to-copy: highlight ends -> copy
+    t.onSelectionChange(() => {
+      if (t.hasSelection() && !t._copied) {
+        t._copied = true;
+        setTimeout(() => {
+          if (t.hasSelection()) {
+            navigator.clipboard.writeText(t.getSelection()).catch(() => {});
+            toast("copied");
+          }
+          t._copied = false;
+        }, 60);
+      }
+    });
+    // browser paste event -> terminal
+    document.addEventListener("paste", (e) => {
+      if (!state.term || !state.ws) return;
+      const txt = e.clipboardData && e.clipboardData.getData("text");
+      if (txt && state.ws.readyState === WebSocket.OPEN) state.ws.send(txt);
+      e.preventDefault();
+    });
   }
   if (state.ws) state.ws.close();
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -505,7 +599,7 @@ function attachTerminal(id) {
   const ws = new WebSocket(`${proto}//${location.host}${keyq}`);
   ws.onopen = () => ws.send(JSON.stringify({ type: "attach", id }));
   ws.onmessage = (ev) => state.term.write(ev.data);
-  ws.onclose = () => state.term.write("\r\n\x1b[31m[disconnected — server or session ended]\x1b[0m\r\n");
+  ws.onclose = () => state.term.write("\r\n\x1b[90m[disconnected]\x1b[0m\r\n");
   state.ws = ws;
   state.term.focus();
   state.term.onData((d) => {
@@ -513,7 +607,7 @@ function attachTerminal(id) {
   });
 }
 
-// --- diff ---------------------------------------------------------------
+/* ---------------- diff ---------------- */
 
 async function refreshDiff(id) {
   if (!id) return;
@@ -536,41 +630,88 @@ async function refreshDiff(id) {
     }
     content.innerHTML = html;
   } catch (e) {
-    toast("diff: " + e.message);
+    if (e.message !== "unauthorized") toast("diff: " + e.message);
   }
 }
 
-// --- agent status + clone support --------------------------------------
+/* ---------------- file tree + code view ---------------- */
+
+async function loadTree(id) {
+  try {
+    const tree = await api(`/api/workspaces/${id}/files`);
+    const box = $("#tree-content");
+    box.innerHTML = "";
+    const ul = renderTree(tree, id);
+    box.appendChild(ul);
+  } catch (e) {
+    if (e.message !== "unauthorized") $("#tree-content").textContent = "failed to load files: " + e.message;
+  }
+}
+
+function renderTree(nodes, id) {
+  const ul = document.createElement("div");
+  ul.className = "tree-children";
+  for (const n of nodes) {
+    const row = document.createElement("div");
+    row.className = "tree-item";
+    if (n.type === "dir") {
+      row.innerHTML = `<span class="arrow">+</span><span>${esc(n.name)}/</span>`;
+      const kids = renderTree(n.children || [], id);
+      kids.style.display = "none";
+      row.onclick = () => {
+        const open = kids.style.display !== "none";
+        kids.style.display = open ? "none" : "block";
+        row.querySelector(".arrow").textContent = open ? "+" : "-";
+      };
+      ul.appendChild(row);
+      ul.appendChild(kids);
+    } else {
+      row.innerHTML = `<span class="arrow"></span><span>${esc(n.name)}</span>`;
+      row.onclick = () => openFile(id, n.name);
+      ul.appendChild(row);
+    }
+  }
+  return ul;
+}
+
+async function openFile(id, name) {
+  try {
+    const f = await api(`/api/workspaces/${id}/file?path=${encodeURIComponent(name)}`);
+    $("#code-path").textContent = f.path;
+    $("#code-content").textContent = f.content;
+    showView("code");
+  } catch (e) {
+    if (e.message !== "unauthorized") toast("open file: " + e.message);
+  }
+}
+
+function showView(name) {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === name + "-view"));
+}
+
+$("#btn-refresh-tree").onclick = () => loadTree(state.selected);
+
+/* ---------------- agent status + clone ---------------- */
 
 async function loadAgentStatus() {
   try {
     const st = await api("/api/agents-status");
-    const parts = Object.entries(st)
-      .filter(([, ok]) => ok)
-      .map(([n]) => n);
+    const parts = Object.entries(st).filter(([, ok]) => ok).map(([n]) => n);
     const box = $("#agent-status");
-    if (parts.length === 0) {
-      box.textContent = "no agents installed yet — install omp, claude, codex…";
-    } else {
-      box.textContent = `installed: ${parts.join(", ")}`;
-    }
+    box.textContent = parts.length ? "agents: " + parts.join(", ") : "no agents installed";
   } catch {
-    // ignore — non-blocking
+    // non-blocking
   }
 }
 
-
-
-// --- tabs ---------------------------------------------------------------
+/* ---------------- tabs ---------------- */
 
 for (const tab of document.querySelectorAll(".tab")) {
-  tab.onclick = () => {
-    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
-    document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === tab.dataset.view + "-view"));
-  };
+  tab.onclick = () => showView(tab.dataset.view);
 }
 
-// --- new workspace ------------------------------------------------------
+/* ---------------- new workspace ---------------- */
 
 $("#new-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -590,19 +731,16 @@ $("#new-form").onsubmit = async (e) => {
     await refresh();
     select(w.id);
   } catch (err) {
-    toast("create: " + err.message);
+    if (err.message !== "unauthorized") toast("create: " + err.message);
   }
 };
 
+/* ---------------- completion notifications ---------------- */
 
-// --- completion notifications -------------------------------------------
-
-// listen for workspace.done pushes over the same websocket the terminal uses
 function listenForDone() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const keyq = state.key ? `?key=${encodeURIComponent(state.key)}` : "";
   const sock = new WebSocket(`${proto}//${location.host}${keyq}`);
-
   sock.onmessage = (ev) => {
     let msg;
     try {
@@ -611,102 +749,29 @@ function listenForDone() {
       return;
     }
     if (msg.type === "workspace.done") {
-      toast(`✓ ${msg.agent} finished: ${msg.task}`);
+      toast("agent finished: " + (msg.task || msg.id));
       refresh();
     }
   };
   sock.onclose = () => setTimeout(listenForDone, 3000);
 }
 
-// --- file tree + code view ----------------------------------------------
-
-async function loadTree(id) {
-  try {
-    const tree = await api(`/api/workspaces/${id}/files`);
-    const box = $("#tree-content");
-    box.innerHTML = "";
-    const ul = renderTree(tree, id);
-    box.appendChild(ul);
-  } catch (e) {
-    $("#tree-content").textContent = "failed to load files: " + e.message;
-  }
-}
-
-function renderTree(nodes, id) {
-  const ul = document.createElement("div");
-  ul.className = "tree-children";
-  for (const n of nodes) {
-    const row = document.createElement("div");
-    row.className = "tree-item " + n.type;
-    if (n.type === "dir") {
-      row.innerHTML = `<span class="arrow">▸</span><span class="icon">📁</span><span>${esc(n.name)}</span>`;
-      const kids = renderTree(n.children || [], id);
-      kids.style.display = "none";
-      row.onclick = () => {
-        const open = kids.style.display !== "none";
-        kids.style.display = open ? "none" : "block";
-        row.querySelector(".arrow").textContent = open ? "▸" : "▾";
-      };
-      ul.appendChild(row);
-      ul.appendChild(kids);
-    } else {
-      row.innerHTML = `<span class="arrow"></span><span class="icon">📄</span><span>${esc(n.name)}</span>`;
-      row.onclick = () => openFile(id, n.name);
-      ul.appendChild(row);
-    }
-  }
-  return ul;
-}
-
-async function openFile(id, name) {
-  try {
-    const f = await api(`/api/workspaces/${id}/file?path=${encodeURIComponent(name)}`);
-    $("#code-path").textContent = f.path;
-    $("#code-content").textContent = f.content;
-    showView("code");
-  } catch (e) {
-    toast("open file: " + e.message);
-  }
-}
-
-function showView(name) {
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
-  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === name + "-view"));
-}
-
-$("#btn-refresh-tree").onclick = () => loadTree(state.selected);
-
-// hook tree refresh into workspace selection
-const origSelect = select;
-select = function (id) {
-  origSelect(id);
-  loadTree(id);
-};
-
-// --- keyboard shortcuts --------------------------------------------------
+/* ---------------- keyboard shortcuts ---------------- */
 
 document.addEventListener("keydown", (e) => {
-  // ignore when typing in an input
-  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT")) return;
-  // ctrl/⌘ + 1..3: jump to files/terminal/diff
+  const tag = e.target && e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   if ((e.ctrlKey || e.metaKey) && e.key >= "1" && e.key <= "3") {
-    const names = ["tree", "terminal", "diff"];
-    showView(names[Number(e.key) - 1]);
+    showView(["tree", "terminal", "diff"][Number(e.key) - 1]);
     e.preventDefault();
-  }
-  // n: new workspace (focus the task input)
-  if (e.key === "n" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+  } else if (e.key === "n" && !e.ctrlKey && !e.metaKey && !e.altKey) {
     $("#f-task").focus();
     e.preventDefault();
-  }
-  // r: refresh
-  if (e.key === "r" && !e.ctrlKey && !e.metaKey) {
+  } else if (e.key === "r" && !e.ctrlKey && !e.metaKey) {
     refresh();
     if (state.selected) loadTree(state.selected);
   }
 });
-
-
 </script>
 </body>
 </html>
