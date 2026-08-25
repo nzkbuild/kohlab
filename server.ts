@@ -309,10 +309,13 @@ const server = serve({
     const url = new URL(req.url);
     const path = url.pathname;
     // access key gate: share links stay public-read; everything else needs the key
-    // (checked before websocket upgrade so unauthenticated sockets are refused)
+    // (checked before websocket upgrade so unauthenticated sockets are refused).
+    // Static files (the dashboard shell) are always served — the page itself
+    // shows a login screen and does authenticated API calls.
+    const isStatic = !path.startsWith("/api") && !req.headers.get("upgrade");
     const shareIdRes = await shareId(req);
     const isShareLink = !!shareIdRes;
-    if (!isShareLink && !authorized(req)) {
+    if (!isShareLink && !isStatic && !authorized(req)) {
       return json({ error: "unauthorized — set ?key= or Authorization: Bearer" }, 401);
     }
 

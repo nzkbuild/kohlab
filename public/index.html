@@ -185,8 +185,34 @@
   #tree-content { flex: 1; overflow: auto; padding: 8px; }
   .tree-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
   .tree-item:hover { background: var(--panel); }
-  .tree-item.dir { color: var(--muted); }
-  .tree-item.file { color: var(--text); }
+  #code-content { flex: 1; overflow: auto; margin: 0; padding: 14px; font-size: 12.5px; line-height: 1.5; color: var(--text); white-space: pre; }
+
+  /* access gate */
+  #gate {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+  }
+  .gate-card {
+    width: 320px; padding: 32px; border-radius: var(--radius);
+    background: var(--panel); border: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .gate-logo { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; }
+  .gate-logo .name { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .gate-sub { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+  #gate-form { display: flex; flex-direction: column; gap: 10px; }
+  #gate-form input {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 9px 11px; font: inherit; outline: none;
+  }
+  #gate-form input:focus { border-color: var(--accent); }
+  #gate-form button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 9px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  #gate-form button:hover { filter: brightness(1.1); }
+  .gate-error { color: var(--red); font-size: 12px; display: none; }
   .tree-item .arrow { width: 12px; color: var(--muted); }
   .tree-item .icon { width: 14px; color: var(--muted); }
 
@@ -260,36 +286,102 @@
 const $ = (s) => document.querySelector(s);
 const state = { list: [], selected: null, term: null, ws: null, key: new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "" };
 
+// --- access key gate ----------------------------------------------------
+// A clean login screen instead of a bare 401. Stores the key after it
+// successfully authenticates once.
+
+const gateEl = document.createElement("div");
+gateEl.id = "gate";
+gateEl.innerHTML = `
+  <div class="gate-card">
+    <div class="gate-logo"><span class="dot"></span><span class="name">kohlab</span></div>
+    <p class="gate-sub">agent workspaces</p>
+    <form id="gate-form">
+      <input id="gate-key" type="password" placeholder="access key" autocomplete="current-password" autofocus />
+      <button type="submit">enter</button>
+      <div id="gate-error" class="gate-error"></div>
+    </form>
+  </div>`;
+document.body.prepend(gateEl);
+
+// hide the app until authenticated
+function showGate(msg) {
+  gateEl.style.display = "flex";
+  document.querySelector("#sidebar").style.display = "none";
+  document.querySelector("#main").style.display = "none";
+  if (msg) {
+    const err = gateEl.querySelector("#gate-error");
+    err.textContent = msg;
+    err.style.display = "block";
+  }
+}
+
+function hideGate() {
+  gateEl.style.display = "none";
+  document.querySelector("#sidebar").style.display = "flex";
+  document.querySelector("#main").style.display = "flex";
+}
+
+async function testKey(k) {
+  try {
+    const r = await fetch(`/api/workspaces?key=${encodeURIComponent(k)}`);
+    return r.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+gateEl.querySelector("#gate-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const k = gateEl.querySelector("#gate-key").value.trim();
+  const ok = await testKey(k);
+  if (ok) {
+    state.key = k;
+    localStorage.setItem("kohlab_key", k);
+    hideGate();
+    boot();
+  } else {
+    gateEl.querySelector("#gate-error").textContent = "wrong key — try again";
+  }
+};
+
 const api = async (path, opts) => {
   const sep = path.includes("?") ? "&" : "?";
   const url = state.key ? `${path}${sep}key=${encodeURIComponent(state.key)}` : path;
   const r = await fetch(url, { ...opts, headers: { ...(opts?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && state.key) {
-    // key rejected → clear and prompt
+  if (r.status === 401) {
+    // key rejected (server restarted with new key) → back to the gate
     localStorage.removeItem("kohlab_key");
     state.key = "";
-    const k = prompt("Enter kohlab access key:");
-    if (k) {
-      state.key = k;
-      localStorage.setItem("kohlab_key", k);
-      location.reload();
-    }
+    showGate("access key changed — enter the new one");
     throw new Error("unauthorized");
   }
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 };
 
-// if no key stored, ask on first load
-if (!state.key && new URLSearchParams(location.search).has("key") === false && localStorage.getItem("kohlab_key") === null) {
-  const k = prompt("kohlab access key:");
-  if (k) {
-    state.key = k;
-    localStorage.setItem("kohlab_key", k);
-    location.reload();
-  }
+// wrap the original boot calls behind authentication
+let booted = false;
+function boot() {
+  if (booted) return;
+  booted = true;
+  refresh();
+  setInterval(refresh, 5000);
+  listenForDone();
+  loadAgentStatus();
 }
+
+// entry: valid stored/URL key → straight in; none → gate
+(async () => {
+  if (state.key && (await testKey(state.key))) {
+    hideGate();
+    boot();
+  } else {
+    localStorage.removeItem("kohlab_key");
+    showGate();
+  }
+})();
 
 function toast(msg, ms = 2500) {
   const t = $("#toast");
@@ -467,7 +559,7 @@ async function loadAgentStatus() {
   }
 }
 
-loadAgentStatus();
+
 
 // --- tabs ---------------------------------------------------------------
 
@@ -615,9 +707,6 @@ document.addEventListener("keydown", (e) => {
 });
 
 
-refresh();
-setInterval(refresh, 5000);
-listenForDone();
 </script>
 </body>
 </html>
