@@ -1,92 +1,92 @@
-# Release Plan — v1.3.0
+# Release Plan — v1.4.0
 
 **Status:** Planned
-**Type:** Major feature release
-**Theme:** "From zero to running agent, in the browser."
+**Type:** Feature + hardening release
+**Theme:** "Finish the cutover. Make the rewrite correct and fast."
 
 ---
 
-## Goal
+## Context
 
-Kohlab's engine is proven (parallel persistent PTY sessions, worktrees, diff, sharing, notifications). But a vibe coder hitting a fresh VPS cannot go from zero to running agent today: agents are missing, auth is unwalked, and the UI is hand-rolled.
-
-**v1.3.0 delivers functional parity with Superset's core loop** — install, login, pick a repo, launch, review — in a real frontend built on proper primitives.
-
-> **A true vibe coder should be able to run kohlab on a fresh VPS and be talking to their agent within 10 minutes, entirely from the browser.**
+v1.3.0 replaced the hand-rolled HTML dashboard with a real React app and introduced the PTY daemon. The engine and UI are both new, but the **migration is incomplete**: some backend logic still talks to the old tmux model, and the frontend has performance and coverage gaps. v1.4.0 finishes the cutover on both sides.
 
 ---
 
-## Phase A — Frontend rewrite (real primitives, not hand-rolled)
+## The split — what is "frontend" and what is "backend" for this release
 
-The 27KB inline-HTML dashboard has hit its ceiling. Replace it with a proper app.
-
-| Layer | Old (hand-rolled) | New (real primitive) |
+| | Backend (server.ts, lib.ts, pty-daemon.cjs) | Frontend (web/src, React app) |
 |---|---|---|
-| Framework | One giant HTML+JS file | React 18 + Vite + TypeScript |
-| Styling | Hand CSS | Tailwind CSS v4 |
-| Terminal | Raw xterm + manual wiring | `@xterm/xterm` + `@xterm/addon-fit` + `@xterm/addon-image` (official, proper UMD handling) |
-| Icons | Emoji/unicode | Phosphor Icons |
-| Components | `document.createElement` | Radix UI (tabs, dialog, dropdown, toast) |
-| Code view | `<pre>` | Monaco Editor (real VS Code editor) |
-| Diff | Hand-rolled line colors | Monaco diff editor |
-| Fonts | Browser default mono | JetBrains Mono + Geist (self-hosted) |
-| State | Global `state` object | Zustand |
-
-## Phase B — Functional parity (the "vibe coder" necessities)
-
-### 1. Agent installer & launcher config
-- **Detect** installed agents (omp, claude, codex, opencode, pi, gemini)
-- **Offer to install** missing ones (npm/bun/curl commands per agent) from the UI
-- **Agent registry** in the dashboard: see what's available, what's missing, one-click install
-
-### 2. Agent setup/login walkthrough
-- First-run wizard: "Choose your agent" → install → **login/setup step**
-- Per-agent auth guidance: `claude setup`, codex API key, etc. with copyable commands
-- Verify login works before launching (detect agent is ready)
-
-### 3. GitHub integration
-- **`gh` auth check** + guided login (`gh auth login`)
-- **Repo browser** — list GitHub repos (and local dirs) to create workspaces from, not just type a path
-- Clone-from-GitHub already works; make it discoverable
-
-### 4. Workspace creation flow
-- Repo picker (GitHub repos + local paths)
-- Branch selection
-- Task prompt + agent choice in one guided flow (replaces the bare form)
-
-### 5. Multi-terminal
-- Tabbed terminals per workspace (PTY daemon supports it natively)
-- Split view terminal + diff side by side
-
-### 6. Diff & code review
-- Monaco diff editor (real add/remove/context, not colored text)
-- Per-file diff view + commit from the review screen
-
-### 7. Onboarding polish
-- First-run: access key → agent install → login → pick repo → launch
-- Empty states that guide ("install codex to get started")
-
-## Phase C — Docs & release
-
-- Setup docs: fresh-VPS-to-running-agent in 10 minutes
-- CHANGELOG + bump. **Versioning decision: 1.3.0** (feature release, not a product-architecture breakthrough — the engine is unchanged, the frontend is a rewrite but the product concept is the same). The 2.x jump stays reserved for a true breakthrough.
-- Tag + push
+| **Core** | PTY daemon, workspaces, worktrees, git diff/commit, sharing, notifications, auth | React + Vite + TS app, terminal, editor, diff, installer UI |
+| **v1.4 focus** | Finish the PTY cutover + fix correctness | Performance + experience gaps |
 
 ---
 
-## What this explicitly does NOT include
+## Backend focus (correctness first)
 
-- Automations/scheduling (v1.4.0)
+### B1. PTY cutover completion — the "running" status is checking the wrong system
+- `isRunning()` still polls tmux (`has-session`), but the PTY daemon owns sessions now.
+- **Fix:** derive running state from the daemon (sessions list), not tmux.
+- Also affects: workspace list `running` flag, `stop`/`delete` (they kill tmux, not the PTY), and the completion watcher (it fires on tmux session end, which no longer matches PTY process exit).
+- This is the highest-priority fix: **status, stop, delete, and "done" notifications are all subtly wrong today.**
+
+### B2. Session lifecycle hardening
+- Ensure `stop`/`delete` actually close the daemon's PTY session (send `close`, kill process tree).
+- Make the completion watcher listen to the daemon's `exit` events instead of polling tmux.
+- Test: create → start → echo → stop → verify process gone → delete → verify session gone.
+
+### B3. State consistency
+- `started`/`stopped` timestamps should reflect daemon session open/close, not API-call time.
+- Multi-server safety: one daemon socket, reconnects handled (already partly done), stale-socket recovery.
+
+---
+
+## Frontend focus (performance + experience)
+
+### F1. Bundle split — lazy-load Monaco
+- Monaco is statically imported → 613 KB JS (173 KB gzip) before the terminal even opens.
+- **Fix:** `React.lazy` + code-split CodeView/DiffView so the terminal and workspace list load first, Monaco downloads only when the user opens files/diff.
+- Expected: first paint JS drops to ~150-200 KB raw; file/diff view still instant when opened.
+
+### F2. Onboarding experience
+- First-run flow: access key → **agent install prompt** → **agent setup command** → pick repo → launch.
+- Empty state should guide ("install codex to get started") instead of a bare list.
+- Agent installer: show install progress + setup command with a copy button.
+
+### F3. Terminal experience
+- Reconnect with backoff on WebSocket drop (currently just writes "[disconnected]").
+- Scrollback persistence across tab switches (terminals currently remount on tab switch — addon-fit + scrollback should survive).
+- Split view: terminal + diff side by side.
+
+### F4. State & polish
+- Move workspace refresh to a single store action with optimistic updates on start/stop.
+- Keyboard shortcuts (already partly there; make them consistent across views).
+- Loading/empty/error states on every view (files, diff, installer).
+
+---
+
+## Explicitly out of scope for v1.4.0
+
+- Automations/scheduling (v1.5.0)
 - Mobile app / IDE handoff (later)
 - Team collaboration beyond share links (later)
+- Native shell (Tauri/Rust) — only if the browser tab ever feels not-enough
+
+---
+
+## Order of work
+
+1. **Backend B1** (PTY cutover) — correctness, do first
+2. **Backend B2/B3** — lifecycle + state
+3. **Frontend F1** (bundle split) — the big perceived-speed win
+4. **Frontend F2/F3/F4** — onboarding, terminal, polish
 
 ---
 
 ## Definition of done
 
-- [ ] Fresh VPS → running agent in the browser, under 10 minutes, all from the UI
-- [ ] Agent installer works for at least omp, claude, codex
-- [ ] Agent login walkthrough works for installed agents
-- [ ] GitHub repo browser + clone-to-workspace flow
-- [ ] React frontend with Monaco editor + diff, multi-terminal tabs
-- [ ] CHANGELOG 1.3.0, package.json bumped, tagged, pushed
+- [ ] Running status, stop, delete, and completion all derive from the PTY daemon (no tmux in the hot path)
+- [ ] Stop/delete terminate the real PTY process tree; verified end-to-end
+- [ ] First-load JS bundle splits Monaco out; terminal opens fast
+- [ ] Reconnect with backoff; scrollback survives tab switches
+- [ ] First-run onboarding: key → install → setup → pick repo → launch
+- [ ] CHANGELOG v1.4.0, package.json bumped, tagged, pushed

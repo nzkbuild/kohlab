@@ -9,7 +9,26 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
-## [Unreleased] — v1.3.0 (planned)
+## [Unreleased] — v1.4.0 (planned)
+
+Finishes the v1.3 cutover. Backend: the PTY daemon becomes the single source of truth. Frontend: fast, guided, polished.
+
+### Backend
+
+- **PTY cutover completion** — running status, stop, delete, and completion all derive from the PTY daemon, not tmux.
+- **Session lifecycle hardening** — stop/delete terminate the real PTY process tree; watcher listens to daemon exit events.
+- **State consistency** — started/stopped timestamps reflect daemon session open/close.
+
+### Frontend
+
+- **Bundle split** — Monaco lazy-loaded; terminal opens fast without downloading the editor.
+- **First-run onboarding** — access key, agent install, agent setup, pick repo, launch.
+- **Terminal experience** — reconnect with backoff, scrollback survives tab switches, split view.
+- **State & polish** — optimistic updates, loading/empty/error states, consistent shortcuts.
+
+Full plan: RELEASE-PLAN.md
+
+## [1.3.0] - 2026-08-25
 
 The "from zero to running agent" release. Functional parity with the core Superset loop, on a real frontend.
 
@@ -20,8 +39,6 @@ The "from zero to running agent" release. Functional parity with the core Supers
 - **Monaco editor + diff** — real code editing and review, not plain text.
 - **Multi-terminal tabs** — one terminal per workspace, tabbed.
 - **Guided workspace creation** — pick repo, branch, agent, task in one flow.
-
-Full plan: RELEASE-PLAN.md
 
 ## [1.2.0] - 2026-08-25
 
