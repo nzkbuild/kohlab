@@ -303,6 +303,7 @@
 <div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-image@0.9.0/lib/addon-image.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
@@ -533,6 +534,18 @@ function attachTerminal(id) {
         white: "#d7e0ee",
       },
     });
+    // fit the terminal to its container (fixes top-left small rendering)
+    state.fit = null;
+    if (typeof FitAddon !== "undefined") {
+      state.fit = new FitAddon.FitAddon();
+      t.loadAddon(state.fit);
+      try { state.fit.fit(); } catch {}
+    }
+    // re-fit on resize + a moment after mount (container may settle)
+    const doFit = () => { try { state.fit && state.fit.fit(); } catch {} };
+    window.addEventListener("resize", doFit);
+    setTimeout(doFit, 100);
+    setTimeout(doFit, 500);
     // image support: renders SIXEL / iTerm inline images (codex, claude code output)
     if (typeof ImageAddon !== "undefined") {
       try {
@@ -688,6 +701,10 @@ async function openFile(id, name) {
 function showView(name) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === name + "-view"));
+  // re-fit the terminal when it becomes visible (its container was hidden)
+  if (name === "terminal" && state.term && state.fit) {
+    setTimeout(() => { try { state.fit.fit(); } catch {} }, 30);
+  }
 }
 
 $("#btn-refresh-tree").onclick = () => loadTree(state.selected);
