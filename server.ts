@@ -17,6 +17,7 @@ import {
   stopWorkspace,
   commitWorkspace,
   worktreePath,
+  WORKS_DIR,
   startWatcher,
   onWorkspaceDone,
   notifyWebhook,
@@ -42,6 +43,30 @@ onWorkspaceDone((ws) => {
 // poll for finished agents
 startWatcher();
 
+
+
+async function handleClone(req: Request): Promise<Response> {
+  try {
+    const body = (await req.json()) as { url?: string; task?: string; agent?: string; payload?: string };
+    const url = (body.url ?? "").trim();
+    const task = (body.task ?? "work on " + url).trim();
+    if (!url) return json({ error: "url is required" }, 400);
+    // clone into a fresh dir under WORKS_DIR
+    const dest = `${WORKS_DIR}/clones/${Date.now()}`;
+    const { mkdir } = await import("fs/promises");
+    await mkdir(`${WORKS_DIR}/clones`, { recursive: true });
+    const { spawn } = await import("child_process");
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn("git", ["clone", "--quiet", url, dest]);
+      p.on("error", reject);
+      p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git clone failed (${code})`))));
+    });
+    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", payload: body.payload });
+    return json(ws);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
 
 async function handleShare(id: string): Promise<Response> {
   try {
@@ -171,17 +196,77 @@ async function handleAgents(req: Request): Promise<Response> {
   return json(s.agents);
 }
 
+/** Walk a workspace's worktree and return a nested file tree. */
 async function handleFiles(id: string): Promise<Response> {
   try {
     const ws = await getWorkspace(id);
     const tree = worktreePath(ws);
-    const entries = await readdir(tree, { withFileTypes: true });
-    const names = entries
-      .filter((e) => e.isDirectory() ? e.name !== ".git" : true)
-      .filter((e) => !e.name.startsWith("."))
-      .slice(0, 200)
-      .map((e) => e.name);
-    return json(names);
+    const root = await walkDir(tree, 0);
+    return json(root);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", "target", ".works"]);
+const MAX_FILES = 500;
+
+async function walkDir(dir: string, depth: number): Promise<{ name: string; type: "dir" | "file"; children?: unknown[] }[]> {
+  if (depth > 6) return [];
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  let count = 0;
+  for (const e of entries) {
+    if (count >= MAX_FILES) break;
+    if (e.name.startsWith(".")) continue;
+    if (e.isDirectory()) {
+      if (SKIP_DIRS.has(e.name)) continue;
+      out.push({ name: e.name, type: "dir", children: await walkDir(`${dir}/${e.name}`, depth + 1) });
+      count++;
+    } else {
+      out.push({ name: e.name, type: "file" });
+      count++;
+    }
+  }
+  return out;
+}
+
+/** Check which agent CLIs are installed on the host. */
+async function handleAgentsStatus(): Promise<Response> {
+  const names = ["omp", "claude", "codex", "opencode", "pi", "gemini"];
+  const { execFile } = await import("child_process");
+  const status: Record<string, boolean> = {};
+  await Promise.all(
+    names.map(
+      (n) =>
+        new Promise<void>((resolve) => {
+          execFile("which", [n], (err) => {
+            status[n] = !err;
+            resolve();
+          });
+        }),
+    ),
+  );
+  return json(status);
+}
+
+
+/** Read a file's contents for the code view. */
+async function handleFile(id: string, req: Request): Promise<Response> {
+  try {
+    const url = new URL(req.url);
+    const rel = url.searchParams.get("path") ?? "";
+    const ws = await getWorkspace(id);
+    const tree = worktreePath(ws);
+    const abs = `${tree}/${rel}`;
+    if (!abs.startsWith(tree)) return json({ error: "invalid path" }, 400);
+    const buf = await readFile(abs, "utf8");
+    return json({ path: rel, content: buf });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -197,8 +282,6 @@ function json(body: unknown, status = 200): Response {
 // --- WebSocket terminal proxy -------------------------------------------
 
 function openTmuxSocket(ws: ServerWebSocket, session: string) {
-  // tmux has no native websocket; we spawn `tmux attach -t <session>` in a
-  // pty so bytes flow both ways. The tmux session itself survives server
   // restarts — this pty is just a viewer.
   console.error("[ws] attaching pty to session", session);
   const pty = spawn("script", ["-qefc", `tmux attach -t ${session}`, "/dev/null"], {
@@ -225,19 +308,19 @@ const server = serve({
   fetch: async (req, server) => {
     const url = new URL(req.url);
     const path = url.pathname;
-
-    // WebSocket upgrade: any path that asks for an upgrade joins the terminal proxy
-    if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-      if (server.upgrade(req)) return undefined;
-    }
-
     // access key gate: share links stay public-read; everything else needs the key
+    // (checked before websocket upgrade so unauthenticated sockets are refused)
     const shareIdRes = await shareId(req);
     const isShareLink = !!shareIdRes;
     if (!isShareLink && !authorized(req)) {
       return json({ error: "unauthorized — set ?key= or Authorization: Bearer" }, 401);
     }
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|log|files|share)$/);
+
+    // WebSocket upgrade: any path that asks for an upgrade joins the terminal proxy
+    if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+      if (server.upgrade(req)) return undefined;
+    }
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|log|files|file|share)$/);
     if (m) {
       const [, id, action] = m;
       // share-mode access is read-only: only diff/log/files allowed
@@ -248,16 +331,19 @@ const server = serve({
       }
       switch (action) {
         case "start": return handleStart(id);
-        case "stop": return handleStop(id);
-        case "restart": return handleRestart(id);
         case "delete": return handleDelete(id);
         case "diff": return handleDiff(id);
         case "commit": return handleCommit(id, req);
-        case "log": return handleLog(id, req);
-        case "files": return handleFiles(id);
+        case "file": return handleFile(id, req);
         case "share": return handleShare(id);
       }
     }
+
+    if (path === "/api/agents-status") return handleAgentsStatus();
+    if (path === "/api/clone" && req.method === "POST") return handleClone(req);
+    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
+
+
 
     if (path === "/api/workspaces" && req.method === "GET") {
       const url = new URL(req.url);

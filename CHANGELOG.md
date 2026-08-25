@@ -9,7 +9,21 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
-- **Every change is a disciplined bump**: patch (1.0.1) for fixes, minor (1.1.0) for new features, major (2.0.0) only for a breakthrough.
+
+## [1.2.0] - 2026-08-25
+
+### Added
+
+- **File tree & code view** — browse any workspace's repo in the dashboard; click a file to read it with line numbers. No more SSH-ing in to look at code.
+- **Clone from GitHub** — paste a repo URL in the dashboard and kohlab clones it into a workspace. New projects take seconds, not setup.
+- **Agent availability** — the dashboard shows which agents (omp, claude, codex, …) are installed on the host at a glance.
+- **`kohlab` launcher** — typing `kohlab` opens the dashboard in your browser; closing the tab never stops the agents.
+- **Keyboard shortcuts** — ⌘/Ctrl+1/2/3 jump between files/terminal/diff; `n` focuses new-workspace; `r` refreshes.
+- **Access-key prompt** — the dashboard asks for the access key once and remembers it, instead of a bare 401.
+
+### Fixed
+
+- **Security**: WebSocket terminal connections are now gated by the access key — previously unauthenticated sockets could attach.
 
 ## [1.1.0] - 2026-08-25
 

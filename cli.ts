@@ -106,13 +106,29 @@ async function main() {
     }
     case "help":
     case undefined:
-      usage();
+      // bare `kohlab` → open the dashboard (browser as the app)
+      await openDashboard();
       break;
     default:
       console.error(`unknown command: ${cmd}`);
       usage();
   }
 }
+
+/** Open the dashboard in the browser, or print the URL if headless. */
+async function openDashboard() {
+  const port = process.env.PORT ?? "7676";
+  const url = `http://localhost:${port}`;
+  console.log(`kohlab dashboard: ${url}`);
+  try {
+    const { execFile } = await import("child_process");
+    execFile("xdg-open", [url], { detached: true }).unref();
+    console.log("opened in browser — close the tab, agents keep running.");
+  } catch {
+    console.log(`(headless? open ${url} in any browser, or ssh -L ${port}:localhost:${port} user@vps)`);
+  }
+}
+
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);

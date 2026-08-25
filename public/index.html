@@ -15,9 +15,11 @@
     --text: #c8d0e0;
     --muted: #6b7688;
     --accent: #4f8cff;
+    --accent2: #7aa7ff;
     --green: #3ecf8e;
     --red: #ff5c5c;
     --yellow: #f5b83d;
+    --radius: 8px;
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
@@ -36,8 +38,6 @@
     background: var(--bg2);
     border-right: 1px solid var(--border);
     display: flex;
-    flex-direction: column;
-  }
   #brand {
     padding: 14px 16px;
     font-size: 15px;
@@ -47,8 +47,16 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    background: linear-gradient(135deg, var(--bg2), var(--panel));
   }
-  #brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+  #brand .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 8px var(--accent);
+  }
+  #brand .name { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  #brand .sub { color: var(--muted); font-size: 10px; font-weight: 400; margin-left: auto; }
+
   #new-form {
     padding: 12px;
     border-bottom: 1px solid var(--border);
@@ -169,16 +177,31 @@
   #commit-bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg2); }
   #commit-bar input { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 6px 9px; font: inherit; outline: none; }
   #commit-bar input:focus { border-color: var(--accent); }
+
+  /* file tree + code view */
+  #tree-view { display: none; }
+  #tree-view.active { display: flex; flex-direction: column; }
+  #tree-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+  #tree-content { flex: 1; overflow: auto; padding: 8px; }
+  .tree-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .tree-item:hover { background: var(--panel); }
+  .tree-item.dir { color: var(--muted); }
+  .tree-item.file { color: var(--text); }
+  .tree-item .arrow { width: 12px; color: var(--muted); }
+  .tree-item .icon { width: 14px; color: var(--muted); }
+
+  #code-header { padding: 8px 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
+  #code-content { flex: 1; overflow: auto; margin: 0; padding: 14px; font-size: 12.5px; line-height: 1.5; color: var(--text); white-space: pre; }
 </style>
 </head>
 <body>
 
 <aside id="sidebar">
-  <div id="brand"><span class="dot"></span>works</div>
+  <div id="brand"><span class="dot"></span><span class="name">kohlab</span><span class="sub">agent workspaces</span></div>
   <form id="new-form">
     <input id="f-task" placeholder="task description" required />
     <div class="row">
-      <input id="f-repo" placeholder="repo path (default: server cwd)" />
+      <input id="f-repo" placeholder="repo path, or GitHub URL to clone" />
       <select id="f-agent">
         <option value="sh">sh</option>
         <option value="omp">omp</option>
@@ -186,6 +209,7 @@
         <option value="codex">codex</option>
       </select>
     </div>
+    <div id="agent-status" class="muted" style="font-size:11px"></div>
     <button type="submit">new workspace</button>
   </form>
   <div id="ws-list"><div class="empty">no workspaces yet</div></div>
@@ -204,10 +228,19 @@
     <button id="btn-delete" class="btn red">delete</button>
   </div>
   <div id="tabs">
+    <div class="tab" data-view="tree">files</div>
     <div class="tab active" data-view="terminal">terminal</div>
     <div class="tab" data-view="diff">diff</div>
   </div>
   <div id="views">
+    <div id="tree-view" class="view">
+      <div id="tree-header"><span class="muted">files</span><button id="btn-refresh-tree" class="btn">refresh</button></div>
+      <div id="tree-content"></div>
+    </div>
+    <div id="code-view" class="view">
+      <div id="code-header"><span id="code-path"></span></div>
+      <pre id="code-content"></pre>
+    </div>
     <div id="terminal-view" class="view active"><div id="terminal"></div></div>
     <div id="diff-view" class="view">
       <div id="diff-header"><span class="stat"></span><button id="btn-refresh-diff" class="btn">refresh</button></div>
@@ -225,14 +258,38 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
-const state = { list: [], selected: null, term: null, ws: null };
+const state = { list: [], selected: null, term: null, ws: null, key: new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "" };
 
 const api = async (path, opts) => {
-  const r = await fetch(path, opts);
+  const sep = path.includes("?") ? "&" : "?";
+  const url = state.key ? `${path}${sep}key=${encodeURIComponent(state.key)}` : path;
+  const r = await fetch(url, { ...opts, headers: { ...(opts?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && state.key) {
+    // key rejected → clear and prompt
+    localStorage.removeItem("kohlab_key");
+    state.key = "";
+    const k = prompt("Enter kohlab access key:");
+    if (k) {
+      state.key = k;
+      localStorage.setItem("kohlab_key", k);
+      location.reload();
+    }
+    throw new Error("unauthorized");
+  }
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 };
+
+// if no key stored, ask on first load
+if (!state.key && new URLSearchParams(location.search).has("key") === false && localStorage.getItem("kohlab_key") === null) {
+  const k = prompt("kohlab access key:");
+  if (k) {
+    state.key = k;
+    localStorage.setItem("kohlab_key", k);
+    location.reload();
+  }
+}
 
 function toast(msg, ms = 2500) {
   const t = $("#toast");
@@ -352,7 +409,8 @@ function attachTerminal(id) {
   }
   if (state.ws) state.ws.close();
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}`);
+  const keyq = state.key ? `?key=${encodeURIComponent(state.key)}` : "";
+  const ws = new WebSocket(`${proto}//${location.host}${keyq}`);
   ws.onopen = () => ws.send(JSON.stringify({ type: "attach", id }));
   ws.onmessage = (ev) => state.term.write(ev.data);
   ws.onclose = () => state.term.write("\r\n\x1b[31m[disconnected — server or session ended]\x1b[0m\r\n");
@@ -390,6 +448,27 @@ async function refreshDiff(id) {
   }
 }
 
+// --- agent status + clone support --------------------------------------
+
+async function loadAgentStatus() {
+  try {
+    const st = await api("/api/agents-status");
+    const parts = Object.entries(st)
+      .filter(([, ok]) => ok)
+      .map(([n]) => n);
+    const box = $("#agent-status");
+    if (parts.length === 0) {
+      box.textContent = "no agents installed yet — install omp, claude, codex…";
+    } else {
+      box.textContent = `installed: ${parts.join(", ")}`;
+    }
+  } catch {
+    // ignore — non-blocking
+  }
+}
+
+loadAgentStatus();
+
 // --- tabs ---------------------------------------------------------------
 
 for (const tab of document.querySelectorAll(".tab")) {
@@ -405,15 +484,14 @@ $("#new-form").onsubmit = async (e) => {
   e.preventDefault();
   const task = $("#f-task").value.trim();
   if (!task) return;
+  const repo = $("#f-repo").value.trim();
+  const agent = $("#f-agent").value;
+  const isUrl = /^https?:\/\//.test(repo);
   try {
-    const w = await api("/api/workspaces", {
+    const w = await api(isUrl ? "/api/clone" : "/api/workspaces", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        task,
-        repo: $("#f-repo").value.trim() || undefined,
-        agent: $("#f-agent").value,
-      }),
+      body: JSON.stringify(isUrl ? { url: repo, task, agent } : { repo: repo || undefined, task, agent }),
     });
     $("#f-task").value = "";
     toast("created " + w.id);
@@ -424,12 +502,15 @@ $("#new-form").onsubmit = async (e) => {
   }
 };
 
+
 // --- completion notifications -------------------------------------------
 
 // listen for workspace.done pushes over the same websocket the terminal uses
 function listenForDone() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const sock = new WebSocket(`${proto}//${location.host}`);
+  const keyq = state.key ? `?key=${encodeURIComponent(state.key)}` : "";
+  const sock = new WebSocket(`${proto}//${location.host}${keyq}`);
+
   sock.onmessage = (ev) => {
     let msg;
     try {
@@ -445,7 +526,94 @@ function listenForDone() {
   sock.onclose = () => setTimeout(listenForDone, 3000);
 }
 
-// --- boot ---------------------------------------------------------------
+// --- file tree + code view ----------------------------------------------
+
+async function loadTree(id) {
+  try {
+    const tree = await api(`/api/workspaces/${id}/files`);
+    const box = $("#tree-content");
+    box.innerHTML = "";
+    const ul = renderTree(tree, id);
+    box.appendChild(ul);
+  } catch (e) {
+    $("#tree-content").textContent = "failed to load files: " + e.message;
+  }
+}
+
+function renderTree(nodes, id) {
+  const ul = document.createElement("div");
+  ul.className = "tree-children";
+  for (const n of nodes) {
+    const row = document.createElement("div");
+    row.className = "tree-item " + n.type;
+    if (n.type === "dir") {
+      row.innerHTML = `<span class="arrow">▸</span><span class="icon">📁</span><span>${esc(n.name)}</span>`;
+      const kids = renderTree(n.children || [], id);
+      kids.style.display = "none";
+      row.onclick = () => {
+        const open = kids.style.display !== "none";
+        kids.style.display = open ? "none" : "block";
+        row.querySelector(".arrow").textContent = open ? "▸" : "▾";
+      };
+      ul.appendChild(row);
+      ul.appendChild(kids);
+    } else {
+      row.innerHTML = `<span class="arrow"></span><span class="icon">📄</span><span>${esc(n.name)}</span>`;
+      row.onclick = () => openFile(id, n.name);
+      ul.appendChild(row);
+    }
+  }
+  return ul;
+}
+
+async function openFile(id, name) {
+  try {
+    const f = await api(`/api/workspaces/${id}/file?path=${encodeURIComponent(name)}`);
+    $("#code-path").textContent = f.path;
+    $("#code-content").textContent = f.content;
+    showView("code");
+  } catch (e) {
+    toast("open file: " + e.message);
+  }
+}
+
+function showView(name) {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === name + "-view"));
+}
+
+$("#btn-refresh-tree").onclick = () => loadTree(state.selected);
+
+// hook tree refresh into workspace selection
+const origSelect = select;
+select = function (id) {
+  origSelect(id);
+  loadTree(id);
+};
+
+// --- keyboard shortcuts --------------------------------------------------
+
+document.addEventListener("keydown", (e) => {
+  // ignore when typing in an input
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT")) return;
+  // ctrl/⌘ + 1..3: jump to files/terminal/diff
+  if ((e.ctrlKey || e.metaKey) && e.key >= "1" && e.key <= "3") {
+    const names = ["tree", "terminal", "diff"];
+    showView(names[Number(e.key) - 1]);
+    e.preventDefault();
+  }
+  // n: new workspace (focus the task input)
+  if (e.key === "n" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    $("#f-task").focus();
+    e.preventDefault();
+  }
+  // r: refresh
+  if (e.key === "r" && !e.ctrlKey && !e.metaKey) {
+    refresh();
+    if (state.selected) loadTree(state.selected);
+  }
+});
+
 
 refresh();
 setInterval(refresh, 5000);

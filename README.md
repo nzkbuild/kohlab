@@ -67,18 +67,20 @@ ssh -L 7676:localhost:7676 user@your-server
 
 Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
-## What's new in v1.1.0
+## What's new in v1.2.0
 
-- **Completion notifications** — the moment an agent finishes, the dashboard shows it and a webhook can fire. Walk away and trust it.
-- **Workspace sharing** — share a read-only link to a live workspace; a teammate can watch the terminal and review the diff.
-- **Scoped access key** — set `KOHLAB_KEY` and deploy safely behind a reverse proxy.
+- **File tree & code view** — browse any workspace's repo right in the dashboard; click a file to read it.
+- **Clone from GitHub** — paste a repo URL, kohlab clones it into a fresh workspace.
+- **`kohlab` launcher** — type `kohlab` and the dashboard opens in your browser; closing it never stops the agents.
+- **Agent availability** — see at a glance which agents are installed on your server.
+- **Keyboard shortcuts** — ⌘/Ctrl+1/2/3, `n`, `r`.
 
-Next up (see RELEASE-PLAN.md): UI polish, automations. We ship disciplined releases; see CHANGELOG.md.
+Previous: v1.1.0 added completion notifications, workspace sharing, and a scoped access key.
 
 ## Project status
 
 
-**v1.1.0** — parallel agents, persistent sessions, and now: know when they finish, share them, secure them. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.
+**v1.2.0** — browse code, clone projects, launch agents, all from the dashboard. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.
 
 
 
