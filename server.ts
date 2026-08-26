@@ -24,6 +24,9 @@ import {
   workspaceByShare,
   authorized,
   loadState,
+  ptySend,
+  onDaemonMessage,
+  sessionId,
 } from "./lib";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -328,119 +331,57 @@ function json(body: unknown, status = 200): Response {
 // The Bun server speaks to a Node node-pty daemon over a Unix socket.
 // This replaces the old `script`+`tmux attach` hack: real PTYs, proper
 // resize, replay on reconnect, multiple sessions.
-
-const PTY_SOCKET = process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock";
-const PTY_DAEMON = process.env.PTY_DAEMON || join(process.cwd(), "pty-daemon.cjs");
-
-let daemonSock: import("net").Socket | null = null;
-let daemonBuf = "";
-let daemonStarted = false;
-let daemonConnecting: Promise<import("net").Socket> | null = null;
-function ensureDaemon() {
-  if (daemonStarted) return;
-  daemonStarted = true;
-  const fs = require("fs");
-  try { fs.unlinkSync(PTY_SOCKET); } catch {}
-  const child = spawn("node", [PTY_DAEMON], { stdio: "ignore", detached: true });
-  child.unref();
-}
-
-function daemonConnect() {
-  if (daemonSock) return Promise.resolve(daemonSock);
-  if (daemonConnecting) return daemonConnecting;
-  daemonConnecting = new Promise<import("net").Socket>((resolve, reject) => {
-    ensureDaemon();
-    const tryConnect = (attempt: number) => {
-      const sock = (require("net") as typeof import("net")).createConnection(PTY_SOCKET);
-      sock.once("connect", () => {
-        daemonSock = sock;
-        daemonBuf = "";
-        sock.on("data", onDaemonData);
-        sock.on("close", () => {
-          daemonSock = null;
-          daemonConnecting = null;
-        });
-        sock.on("error", () => {
-          daemonSock = null;
-          daemonConnecting = null;
-        });
-        resolve(sock);
-      });
-      sock.once("error", (e: Error) => {
-        if (attempt < 10) setTimeout(() => tryConnect(attempt + 1), 300);
-        else {
-          daemonConnecting = null;
-          reject(e);
-        }
-      });
-    };
-    tryConnect(0);
-  });
-  return daemonConnecting;
-}
+// --- PTY terminal fan-out --------------------------------------------------
+// The daemon connection is owned by lib.ts (shared ptySend / onDaemonMessage);
+// this section only maps WS clients to sessions and fans terminal bytes out.
 
 /** WS client state per terminal: which session + ack subscription */
 const termClients = new Map<ServerWebSocket, string>();
 
-async function daemonSend(msg: unknown) {
-  const sock = await daemonConnect();
-  sock.write(JSON.stringify(msg) + "\n");
-}
-
-function onDaemonData(chunk: Buffer | string) {
-  daemonBuf += chunk.toString("utf8");
-  let idx;
-  while ((idx = daemonBuf.indexOf("\n")) >= 0) {
-    const line = daemonBuf.slice(0, idx);
-    daemonBuf = daemonBuf.slice(idx + 1);
-    if (!line.trim()) continue;
-    try {
-      const msg = JSON.parse(line);
-      if (msg.type === "output") {
-        const txt = Buffer.from(msg.data, "base64").toString("utf8");
-        // fan out to all ws clients subscribed to this session
-        for (const [ws, sessId] of termClients) {
-          // WebSocket.OPEN === 1; `ws.OPEN` is undefined on Bun's ServerWebSocket
-          if (sessId === msg.id && ws.readyState === 1) {
-            ws.send(txt);
-          }
-        }
-      } else if (msg.type === "exit") {
-        for (const [ws, sessId] of termClients) {
-          if (sessId === msg.id && ws.readyState === 1) {
-            ws.send("\x1b[90m[process exited]\x1b[0m\r\n");
-          }
-        }
+// register the fan-out handler once
+onDaemonMessage((msg) => {
+  if (msg.type === "output" && typeof msg.id === "string" && typeof msg.data === "string") {
+    const txt = Buffer.from(msg.data, "base64").toString("utf8");
+    for (const [ws, sessId] of termClients) {
+      // WebSocket.OPEN === 1; `ws.OPEN` is undefined on Bun's ServerWebSocket
+      if (sessId === msg.id && ws.readyState === 1) {
+        ws.send(txt);
       }
-    } catch {}
+    }
+  } else if (msg.type === "exit" && typeof msg.id === "string") {
+    for (const [ws, sessId] of termClients) {
+      if (sessId === msg.id && ws.readyState === 1) {
+        ws.send("\x1b[90m[process exited]\x1b[0m\r\n");
+      }
+    }
   }
-}
+});
 
 /** Attach a ws client to a workspace's named PTY session. */
 function attachPty(ws: ServerWebSocket, id: string, terminalId = "main") {
-  const sessId = `works-${id}-${terminalId}`;
+  const sessId = sessionId(id, terminalId);
   termClients.set(ws, sessId);
-  void daemonSend({ type: "subscribe", id: sessId, replay: true });
+  void ptySend({ type: "subscribe", id: sessId, replay: true });
   ws.send("\x1b[2J\x1b[H");
 }
-
 
 /** Ensure a workspace's named PTY session exists (spawn the agent if not). */
 async function ensurePtySession(id: string, terminalId = "main") {
   const ws = await getWorkspace(id);
   const s = await loadState();
   const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
-  const sessionId = `works-${id}-${terminalId}`;
-  await daemonSend({
+  const sessId = sessionId(id, terminalId);
+  await ptySend({
     type: "open",
-    id: sessionId,
+    id: sessId,
     cwd: worktreePath(ws),
     cmd,
     cols: 120,
     rows: 36,
+    meta: { workspace: id, terminal: terminalId },
   });
   if (ws.payload && terminalId === "main") {
-    await daemonSend({ type: "input", id: sessionId, data: Buffer.from(ws.payload + "\r").toString("base64") });
+    await ptySend({ type: "input", id: sessId, data: Buffer.from(ws.payload + "\r").toString("base64") });
   }
 }
 
@@ -477,8 +418,9 @@ const server = serve({
       }
       switch (action) {
         case "start": return handleStart(id);
+        case "stop": return handleStop(id);
+        case "restart": return handleRestart(id);
         case "delete": return handleDelete(id);
-        case "diff": return handleDiff(id);
         case "commit": return handleCommit(id, req);
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
@@ -545,9 +487,9 @@ const server = serve({
             attachPty(ws, msg.id, msg.terminalId);
             void ensurePtySession(msg.id, msg.terminalId);
           } else if (msg.type === "resize" && msg.id && msg.cols && msg.rows) {
-            void daemonSend({
+            void ptySend({
               type: "resize",
-              id: `works-${msg.id}-${msg.terminalId ?? "main"}`,
+              id: sessionId(msg.id, msg.terminalId),
               cols: msg.cols,
               rows: msg.rows,
             });
@@ -559,7 +501,7 @@ const server = serve({
       }
       const sessId = termClients.get(ws);
       if (sessId) {
-        void daemonSend({ type: "input", id: sessId, data: Buffer.from(str, "utf8").toString("base64") });
+        void ptySend({ type: "input", id: sessId, data: Buffer.from(str, "utf8").toString("base64") });
       }
     },
     close(ws) {

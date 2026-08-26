@@ -1,5 +1,6 @@
-// works — tmux-backed coding-agent workspace runner
-// State lives in $WORKS_DIR/state.json. Sessions are plain tmux sessions.
+// works — PTY-daemon-backed coding-agent workspace runner
+// State lives in $WORKS_DIR/state.json. Sessions are node-pty sessions
+// owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace } from "./types";
 import { mkdir, readFile, writeFile, stat, realpath } from "fs/promises";
@@ -52,6 +53,128 @@ export function onWorkspaceDone(fn: NotifyFn) {
   notifyDone.push(fn);
 }
 
+
+// --- PTY daemon client ----------------------------------------------------
+// Shared client for the node-pty daemon. Server uses it for terminal
+// streaming; lib uses it for lifecycle (isRunning, stop, delete, watcher).
+
+const PTY_SOCKET = process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock";
+const PTY_DAEMON = process.env.PTY_DAEMON || join(cwd(), "pty-daemon.cjs");
+
+let ptySock: import("net").Socket | null = null;
+let ptyBuf = "";
+let ptyStarted = false;
+let ptyConnecting: Promise<import("net").Socket> | null = null;
+/** daemon message handlers (server registers terminal fan-out here) */
+type DaemonHandler = (msg: Record<string, unknown>) => void;
+const daemonHandlers: DaemonHandler[] = [];
+
+export function onDaemonMessage(fn: DaemonHandler) {
+  daemonHandlers.push(fn);
+}
+
+function ensurePtyDaemon() {
+  if (ptyStarted) return;
+  ptyStarted = true;
+  const fs = require("fs");
+  try { fs.unlinkSync(PTY_SOCKET); } catch {}
+  const child = spawn("node", [PTY_DAEMON], { stdio: "ignore", detached: true });
+  child.unref();
+}
+
+function ptyConnect(): Promise<import("net").Socket> {
+  if (ptySock) return Promise.resolve(ptySock);
+  if (ptyConnecting) return ptyConnecting;
+  ptyConnecting = new Promise<import("net").Socket>((resolve, reject) => {
+    ensurePtyDaemon();
+    const tryConnect = (attempt: number) => {
+      const sock = (require("net") as typeof import("net")).createConnection(PTY_SOCKET);
+      sock.once("connect", () => {
+        ptySock = sock;
+        ptyBuf = "";
+        sock.on("data", (chunk: Buffer) => {
+          ptyBuf += chunk.toString("utf8");
+          let idx;
+          while ((idx = ptyBuf.indexOf("\n")) >= 0) {
+            const line = ptyBuf.slice(0, idx);
+            ptyBuf = ptyBuf.slice(idx + 1);
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              daemonHandlers.forEach((h) => h(msg));
+            } catch {}
+          }
+        });
+        sock.on("close", () => { ptySock = null; ptyConnecting = null; });
+        sock.on("error", () => { ptySock = null; ptyConnecting = null; });
+        resolve(sock);
+      });
+      sock.once("error", (e: Error) => {
+        if (attempt < 10) setTimeout(() => tryConnect(attempt + 1), 300);
+        else { ptyConnecting = null; reject(e); }
+      });
+    };
+    tryConnect(0);
+  });
+  return ptyConnecting;
+}
+
+export async function ptySend(msg: unknown) {
+  const sock = await ptyConnect();
+  sock.write(JSON.stringify(msg) + "\n");
+}
+
+/** Send a message and wait for the matching reply. */
+export async function ptyRequest<T extends Record<string, unknown>>(
+  type: string,
+  payload: Record<string, unknown>,
+  replyType: string,
+  timeoutMs = 5000,
+): Promise<T> {
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
+  const timer = setTimeout(() => reject(new Error(`daemon ${replyType} timeout`)), timeoutMs);
+  const handler: DaemonHandler = (msg) => {
+    if (msg.type === replyType) {
+      clearTimeout(timer);
+      removeDaemonHandler(handler);
+      resolve(msg as T);
+    }
+  };
+  daemonHandlers.push(handler);
+  await ptySend({ type, ...payload });
+  return promise;
+}
+
+function removeDaemonHandler(fn: DaemonHandler) {
+  const i = daemonHandlers.indexOf(fn);
+  if (i >= 0) daemonHandlers.splice(i, 1);
+}
+
+/** List live PTY sessions: [{ id, exited, meta }]. */
+export async function ptyList(): Promise<{ id: string; exited: boolean; meta?: Record<string, unknown> }[]> {
+  try {
+    const reply = await ptyRequest<{ sessions: { id: string; exited: boolean; meta?: Record<string, unknown> }[] }>(
+      "list", {}, "list-reply",
+    );
+    return reply.sessions || [];
+  } catch {
+    return [];
+  }
+}
+
+/** Session id for a workspace's named terminal. */
+export function sessionId(workspaceId: string, terminalId = "main") {
+  return `works-${workspaceId}-${terminalId}`;
+}
+
+/** True if the workspace's main PTY session is alive. */
+export async function isRunning(ws: Workspace): Promise<boolean> {
+  const sessions = await ptyList();
+  const sess = sessions.find((s) => s.id === sessionId(ws.id));
+  return !!sess && !sess.exited;
+}
+
+
 interface State {
   workspaces: Workspace[];
   agents: Record<string, string>;
@@ -92,6 +215,29 @@ let previouslyRunning = new Set<string>();
  * so even short-lived sessions that finish between ticks are caught.
  */
 export function startWatcher() {
+  // Event-driven completion: a daemon `exit` for a workspace's main session
+  // means the agent finished. Mark done + notify immediately.
+  onDaemonMessage((msg) => {
+    if (msg.type !== "exit" || typeof msg.id !== "string") return;
+    if (!msg.id.startsWith("works-")) return;
+    const workspaceId = msg.id.slice("works-".length);
+    const dash = workspaceId.indexOf("-");
+    const terminalId = dash >= 0 ? workspaceId.slice(dash + 1) : "main";
+    const wid = dash >= 0 ? workspaceId.slice(0, dash) : workspaceId;
+    if (terminalId !== "main") return; // only the main agent session marks done
+    void (async () => {
+      const s = await loadState();
+      const w = s.workspaces.find((x) => x.id === wid);
+      if (!w) return;
+      if (w.started && !w.stopped) {
+        w.stopped = Date.now();
+        await saveState(s);
+        notifyDone.forEach((fn) => fn(w));
+      }
+    })();
+  });
+
+  // Polling fallback: catches sessions that exited before the server was up.
   setInterval(async () => {
     try {
       const s = await loadState();
@@ -102,7 +248,6 @@ export function startWatcher() {
           running.add(w.id);
           continue;
         }
-        // finished: was running last tick, or was started but never seen running
         if (previouslyRunning.has(w.id) || (w.started && !w.stopped)) {
           w.stopped = Date.now();
           await saveState(s);
@@ -136,31 +281,6 @@ export async function notifyWebhook(ws: Workspace) {
   }
 }
 
-
-// --- tmux ----------------------------------------------------------------
-
-async function tmux(args: string[]): Promise<string> {
-  const { promise, resolve, reject } = Promise.withResolvers<string>();
-  execFile("tmux", args, { timeout: 10000 }, (err, stdout, stderr) => {
-    if (err) reject(new Error(stderr.trim() || err.message));
-    else resolve(stdout.trim());
-  });
-  return promise;
-}
-
-function tid(ws: Workspace) {
-  return `works-${ws.id}`;
-}
-
-/** True if the workspace's tmux session is alive. */
-export async function isRunning(ws: Workspace): Promise<boolean> {
-  try {
-    await tmux(["has-session", "-t", tid(ws)]);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // --- names & paths -------------------------------------------------------
 
@@ -307,8 +427,22 @@ export async function startWorkspace(id: string) {
   const ws = s.workspaces.find((w) => w.id === id);
   if (!ws) throw new Error(`no workspace '${id}'`);
 
-  // PTY sessions are owned by the pty-daemon and spawned on attach;
-  // start just marks the workspace as started.
+  // spawn the main PTY session now so the agent actually starts,
+  // not just on first browser attach
+  const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
+  const sessId = sessionId(id);
+  await ptySend({
+    type: "open",
+    id: sessId,
+    cwd: worktreePath(ws),
+    cmd,
+    cols: 120,
+    rows: 36,
+    meta: { workspace: id, terminal: "main" },
+  });
+  if (ws.payload) {
+    await ptySend({ type: "input", id: sessId, data: Buffer.from(ws.payload + "\r").toString("base64") });
+  }
   ws.started = Date.now();
   ws.stopped = null;
   await saveState(s);
@@ -316,18 +450,32 @@ export async function startWorkspace(id: string) {
 }
 
 export async function stopWorkspace(id: string) {
-  const ws = await getWorkspace(id);
   const s = await loadState();
-  if (await isRunning(ws)) await tmux(["kill-session", "-t", tid(ws)]);
+  const ws = s.workspaces.find((w) => w.id === id);
+  if (!ws) throw new Error(`no workspace '${id}'`);
+  // close every named PTY session for this workspace (main + extra terminals)
+  const sessions = await ptyList();
+  for (const sess of sessions) {
+    if (sess.id.startsWith(`works-${id}-`)) {
+      await ptySend({ type: "close", id: sess.id });
+    }
+  }
   ws.stopped = Date.now();
   await saveState(s);
   return { ...ws, running: false, path: worktreePath(ws) };
 }
 
 export async function deleteWorkspace(id: string) {
-  const ws = await getWorkspace(id);
   const s = await loadState();
-  if (await isRunning(ws)) await tmux(["kill-session", "-t", tid(ws)]);
+  const ws = s.workspaces.find((w) => w.id === id);
+  if (!ws) throw new Error(`no workspace '${id}'`);
+  // close every named PTY session for this workspace
+  const sessions = await ptyList();
+  for (const sess of sessions) {
+    if (sess.id.startsWith(`works-${id}-`)) {
+      await ptySend({ type: "close", id: sess.id });
+    }
+  }
   try {
     await run(ws.repo, "git", ["worktree", "remove", "--force", worktreePath(ws)]);
   } catch (e) {

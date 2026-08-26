@@ -9,22 +9,22 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
-## [Unreleased] — v1.4.0 (planned)
+## [1.4.0] - 2026-08-25
 
-Finishes the v1.3 cutover. Backend: the PTY daemon becomes the single source of truth. Frontend: fast, guided, polished.
+The PTY cutover release. The node-pty daemon is now the single source of truth for session state.
 
 ### Backend
 
-- **PTY cutover completion** — running status, stop, delete, and completion all derive from the PTY daemon, not tmux.
-- **Session lifecycle hardening** — stop/delete terminate the real PTY process tree; watcher listens to daemon exit events.
-- **State consistency** — started/stopped timestamps reflect daemon session open/close.
+- **PTY cutover completion** — running status, stop, delete, and completion all derive from the PTY daemon, not tmux. (tmux is fully out of the hot path.)
+- **Session lifecycle hardening** — stop/delete terminate the real PTY process tree (SIGKILL to the whole tree, not just the shell); orphaned child processes are reliably killed.
+- **Event-driven completion** — the watcher listens to daemon exit events and marks workspaces done immediately; polling remains as a fallback.
+- **State consistency** — started/stopped timestamps reflect daemon session open/close; start now spawns the agent's PTY immediately instead of waiting for the first browser attach.
+- **Shared daemon client** — the socket connection moved into lib.ts, shared by the server (terminal streaming) and lib (lifecycle). No more dual connections or drift.
+- **Fixes** — stop/delete now actually work (routes were missing cases); stop/delete no longer lose state writes (double-load bug fixed).
 
-### Frontend
+### Deferred
 
-- **Bundle split** — Monaco lazy-loaded; terminal opens fast without downloading the editor.
-- **First-run onboarding** — access key, agent install, agent setup, pick repo, launch.
-- **Terminal experience** — reconnect with backoff, scrollback survives tab switches, split view.
-- **State & polish** — optimistic updates, loading/empty/error states, consistent shortcuts.
+Frontend work (bundle split, onboarding polish, terminal reconnect) is planned but not in this release.
 
 Full plan: RELEASE-PLAN.md
 

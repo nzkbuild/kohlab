@@ -34,7 +34,40 @@ function b64(buf) {
   return Buffer.from(buf).toString("base64");
 }
 
-function openSession(id, cwd, cmd, env, cols, rows) {
+function killTree(pid, signal) {
+  // Snapshot the table ONCE, synchronously, before anything dies.
+  let table = [];
+  try {
+    const out = require("child_process").execFileSync("ps", ["-eo", "pid=,ppid=,sid="], { encoding: "utf8" });
+    table = out.trim().split("\n").map((l) => l.trim().split(/\s+/).map(Number)).filter((p) => p.length === 3);
+  } catch {}
+  // 1) descendants by PPID chain
+  const childrenOf = new Map();
+  let session = null;
+  for (const [child, parent, sid] of table) {
+    if (!childrenOf.has(parent)) childrenOf.set(parent, []);
+    childrenOf.get(parent).push(child);
+    if (child === pid) session = sid;
+  }
+  const all = new Set();
+  const walk = (p) => {
+    all.add(p);
+    for (const c of childrenOf.get(p) || []) walk(c);
+  };
+  walk(pid);
+  // 2) strays in the same session (background jobs get their own PGID but share SID)
+  for (const [child, , sid] of table) {
+    if (sid === session) all.add(child);
+  }
+  // kill children first, then roots
+  const ordered = [...all].reverse();
+  for (const p of ordered) {
+    try { process.kill(p, signal); } catch {}
+  }
+  try { process.kill(-pid, signal); } catch {}
+}
+
+function openSession(id, cwd, cmd, env, cols, rows, meta) {
   if (SESSIONS.has(id)) {
     const existing = SESSIONS.get(id);
     if (existing.exited) SESSIONS.delete(id);
@@ -48,9 +81,8 @@ function openSession(id, cwd, cmd, env, cols, rows) {
       cwd: cwd || os.homedir(),
       env: { ...process.env, ...(env || {}) },
     });
-    const sess = { pty: p, buffer: [], exited: false, subs: 0 };
+    const sess = { pty: p, buffer: [], exited: false, subs: 0, meta: meta || {} };
     SESSIONS.set(id, sess);
-    // PTY output -> buffer (ring, keep last ~256KB) + stream to subscribers
     p.onData((data) => {
       const buf = Buffer.from(data);
       sess.buffer.push(buf);
@@ -65,6 +97,11 @@ function openSession(id, cwd, cmd, env, cols, rows) {
     p.onExit(({ exitCode }) => {
       sess.exited = true;
       broadcast(id, { type: "exit", id, code: exitCode });
+      // remove from the map so list() and re-open behave correctly
+      setTimeout(() => {
+        const cur = SESSIONS.get(id);
+        if (cur && cur.exited) SESSIONS.delete(id);
+      }, 1000);
     });
     return { ok: true, pid: p.pid };
   } catch (e) {
@@ -104,7 +141,7 @@ const server = net.createServer((sock) => {
 function handle(msg, sock) {
   switch (msg.type) {
     case "open": {
-      const r = openSession(msg.id, msg.cwd, msg.cmd, msg.env, msg.cols, msg.rows);
+      const r = openSession(msg.id, msg.cwd, msg.cmd, msg.env, msg.cols, msg.rows, msg.meta);
       sock.write(JSON.stringify({ type: "open-result", id: msg.id, ...r }) + "\n");
       break;
     }
@@ -113,17 +150,17 @@ function handle(msg, sock) {
       if (s && !s.exited) s.pty.write(Buffer.from(msg.data, "base64"));
       break;
     }
-    case "resize": {
-      const s = SESSIONS.get(msg.id);
-      if (s && s.pty) s.pty.resize(msg.cols, msg.rows);
-      break;
-    }
     case "close": {
       const s = SESSIONS.get(msg.id);
+
       if (s) {
-        try { s.pty.kill(); } catch {}
+        // kill the whole process tree (children first, with retries)
+        killTree(s.pty.pid, "SIGKILL");
+        setTimeout(() => killTree(s.pty.pid, "SIGKILL"), 80);
+        try { s.pty.kill("SIGHUP"); } catch {}
         s.exited = true;
         SESSIONS.delete(msg.id);
+        broadcast(msg.id, { type: "exit", id: msg.id, code: null });
       }
       sock.write(JSON.stringify({ type: "closed", id: msg.id }) + "\n");
       break;
@@ -147,11 +184,11 @@ function handle(msg, sock) {
       break;
     }
     case "list": {
-      const ids = [...SESSIONS.keys()].map((id) => {
+      const sessions = [...SESSIONS.keys()].map((id) => {
         const s = SESSIONS.get(id);
-        return { id, exited: s.exited };
+        return { id, exited: s.exited, meta: s.meta };
       });
-      sock.write(JSON.stringify({ type: "list-reply", sessions: ids }) + "\n");
+      sock.write(JSON.stringify({ type: "list-reply", sessions }) + "\n");
       break;
     }
   }

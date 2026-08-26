@@ -1,6 +1,6 @@
 # Release Plan — v1.4.0
 
-**Status:** Planned
+**Status:** Backend shipped (v1.4.0); frontend work deferred until requested
 **Type:** Feature + hardening release
 **Theme:** "Finish the cutover. Make the rewrite correct and fast."
 
