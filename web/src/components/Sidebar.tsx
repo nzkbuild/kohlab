@@ -1,18 +1,25 @@
 import { useEffect, useState } from "react";
-import { PlusCircle, FolderOpen, GithubLogo } from "@phosphor-icons/react";
+import { Plus, FolderOpen, GithubLogo, SquaresFour, GearSix, TerminalWindow } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp } from "../store";
 import { withToast } from "../lib/actions";
+import { cn } from "../lib/utils";
 import type { Workspace } from "../types";
 
 function statusDot(w: Workspace) {
-  if (w.running) return <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />;
-  if (w.stopped) return <span className="w-2 h-2 rounded-full bg-amber-400" />;
-  return <span className="w-2 h-2 rounded-full bg-zinc-600" />;
+  if (w.running) return <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] shrink-0" />;
+  if (w.stopped) return <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />;
+  return <span className="w-2 h-2 rounded-full bg-zinc-600 shrink-0" />;
 }
 
+/**
+ * Collapsible icon rail. Collapsed (60px) shows icons only; hovering expands to
+ * 300px with labels. Replaces the fixed-width sidebar without losing any of its
+ * functions (dashboard/settings nav, workspace list, create form, persist footer).
+ */
 export default function Sidebar() {
   const { workspaces, selectedId, view, select, setView, refresh } = useApp();
+  const [open, setOpen] = useState(false);
   const [task, setTask] = useState("");
   const [repo, setRepo] = useState("");
   const [agent, setAgent] = useState("omp");
@@ -52,6 +59,7 @@ export default function Sidebar() {
           : api.create({ task: task.trim(), repo: repo.trim() || undefined, agent, limits: anyLimit ? limits : undefined }),
       );
       setTask("");
+      setShowForm(false);
       await refresh();
       setView("workspaces");
       goWorkspace(w.id);
@@ -61,43 +69,72 @@ export default function Sidebar() {
     setBusy(false);
   };
 
+  const nav = [
+    { key: "dashboard" as const, label: "Dashboard", icon: <SquaresFour className="size-5 shrink-0 text-[#7a869c] group-hover/side:text-[#d7e0ee]" /> },
+    { key: "settings" as const, label: "Settings", icon: <GearSix className="size-5 shrink-0 text-[#7a869c] group-hover/side:text-[#d7e0ee]" /> },
+  ];
+
+  const label = (show: boolean, children: React.ReactNode) => (
+    <span
+      className={cn(
+        "text-sm whitespace-pre overflow-hidden transition-all duration-150",
+        show ? "opacity-100 w-auto ml-2" : "opacity-0 w-0",
+      )}
+    >
+      {children}
+    </span>
+  );
+
   return (
-    <aside className="w-72 min-w-72 bg-[#0f141d] border-r border-[#232d42] flex flex-col">
-      <div className="px-4 py-3.5 border-b border-[#232d42] flex items-center gap-2.5">
-        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]" />
-        <span className="font-bold tracking-tight">kohlab</span>
-        <span className="text-zinc-500 text-[10px] ml-auto">agent workspaces</span>
+    <aside
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      className={cn(
+        "h-full flex flex-col bg-[#0f141d] border-r border-[#232d42] shrink-0 overflow-hidden transition-[width] duration-150",
+        open ? "w-[300px]" : "w-[60px]",
+      )}
+    >
+      {/* logo */}
+      <div className="px-3 h-12 flex items-center border-b border-[#232d42] overflow-hidden">
+        <span className={cn("grid place-items-center rounded-md bg-emerald-400 text-[#04120b]", open ? "h-6 w-6" : "h-6 w-6 mx-auto")}>
+          <TerminalWindow size={14} weight="bold" />
+        </span>
+        {label(open, <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>)}
       </div>
 
-      <div className="flex gap-1 mx-3 mt-2">
+      {/* nav icons */}
+      <div className="flex flex-col gap-1 p-2">
+        {nav.map((n) => (
+          <button
+            key={n.key}
+            onClick={() => setView(n.key)}
+            title={n.label}
+            className={cn(
+              "group/side flex items-center h-9 px-2 rounded-lg hover:bg-[#131926] transition overflow-hidden justify-start",
+              view === n.key && "bg-[#182032]",
+            )}
+          >
+            {n.icon}
+            {label(open, <span className={cn("whitespace-nowrap", view === n.key ? "text-[#d7e0ee]" : "text-[#7a869c]")}>{n.label}</span>)}
+          </button>
+        ))}
+      </div>
+
+      {/* new workspace */}
+      <div className="px-2 pb-2">
         <button
-          onClick={() => setView("dashboard")}
-          className={`flex-1 py-1.5 rounded-lg text-xs transition ${
-            view === "dashboard" ? "bg-[#182032] text-[#d7e0ee]" : "text-[#7a869c] hover:bg-[#131926]"
-          }`}
+          onClick={() => { setShowForm((v) => !v); setOpen(true); }}
+          title="new workspace"
+          className="w-full flex items-center justify-start h-9 px-2 rounded-lg bg-emerald-400 text-[#04120b] font-semibold hover:brightness-110 active:scale-[0.98] transition overflow-hidden"
         >
-          dashboard
-        </button>
-        <button
-          onClick={() => setView("settings")}
-          className={`flex-1 py-1.5 rounded-lg text-xs transition ${
-            view === "settings" ? "bg-[#182032] text-[#d7e0ee]" : "text-[#7a869c] hover:bg-[#131926]"
-          }`}
-        >
-          settings
+          <Plus className={cn("size-5 shrink-0", open ? "" : "mx-auto")} />
+          {label(open, <span className="whitespace-nowrap text-sm">new workspace</span>)}
         </button>
       </div>
 
-      <button
-        onClick={() => setShowForm((v) => !v)}
-        className="mx-3 mt-3 flex items-center justify-center gap-2 py-2 rounded-lg bg-emerald-400 text-[#04120b] font-semibold text-sm hover:brightness-110 active:scale-[0.98] transition"
-      >
-        <PlusCircle weight="bold" size={16} />
-        new workspace
-      </button>
-
-      {showForm && (
-        <form onSubmit={create} className="mx-3 mt-2 p-3 rounded-xl bg-[#131926] border border-[#232d42] flex flex-col gap-2">
+      {/* create form */}
+      {showForm && open && (
+        <form onSubmit={create} className="mx-2 mb-2 p-3 rounded-xl bg-[#131926] border border-[#232d42] flex flex-col gap-2">
           <input
             value={task}
             onChange={(e) => setTask(e.target.value)}
@@ -145,62 +182,50 @@ export default function Sidebar() {
             </select>
           </div>
           <div className="flex gap-2">
-            <input
-              value={maxMem}
-              onChange={(e) => setMaxMem(e.target.value)}
-              placeholder="max mem MB (optional)"
-              inputMode="numeric"
-              className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
-            />
-            <input
-              value={timeout}
-              onChange={(e) => setTimeoutSec(e.target.value)}
-              placeholder="timeout s (optional)"
-              inputMode="numeric"
-              className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
-            />
+            <input value={maxMem} onChange={(e) => setMaxMem(e.target.value)} placeholder="max mem MB" inputMode="numeric" className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
+            <input value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} placeholder="timeout s" inputMode="numeric" className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
           </div>
-          <button
-            type="submit"
-            disabled={busy || !task}
-            className="py-1.5 rounded-lg bg-[#1a2130] border border-[#232d42] text-sm hover:border-emerald-400 disabled:opacity-40 transition"
-          >
+          <button type="submit" disabled={busy || !task} className="py-1.5 rounded-lg bg-[#1a2130] border border-[#232d42] text-sm hover:border-emerald-400 disabled:opacity-40 transition">
             {busy ? "creating..." : "create"}
           </button>
         </form>
       )}
 
-      <nav className="flex-1 overflow-y-auto p-2">
+      {/* workspace list */}
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden p-2">
         {workspaces.length === 0 && (
-          <div className="text-zinc-500 text-xs text-center mt-10 px-4 leading-5">
-            no workspaces yet
-            <br />
-            create one to launch your first agent
+          <div className={cn("text-zinc-500 text-xs text-center leading-5", open ? "px-2 mt-8" : "mt-4")}>
+            {open ? (<>no workspaces yet<br />create one to launch your first agent</>) : <span className="text-zinc-600">—</span>}
           </div>
         )}
         {workspaces.map((w) => (
           <div
             key={w.id}
             onClick={() => goWorkspace(w.id)}
-            className={`px-2.5 py-2 rounded-lg cursor-pointer border border-transparent transition ${
-              w.id === selectedId ? "bg-[#182032] border-[#2c3a55]" : "hover:bg-[#131926]"
-            }`}
+            title={w.id}
+            className={cn(
+              "group/side flex items-center h-9 rounded-lg cursor-pointer border border-transparent transition overflow-hidden",
+              open ? "px-2 justify-start" : "px-2 justify-center",
+              w.id === selectedId ? "bg-[#182032] border-[#2c3a55]" : "hover:bg-[#131926]",
+            )}
           >
-            <div className="flex items-center gap-2">
-              {statusDot(w)}
-              <span className="font-medium text-[13px] truncate">{w.id}</span>
-            </div>
-            <div className="mt-0.5 text-[11px] text-zinc-500 flex gap-2 items-center truncate">
-              <span className="text-zinc-300 truncate">{w.task}</span>
-              <span className="shrink-0">{w.agent}</span>
-            </div>
+            {statusDot(w)}
+            {label(open, (
+              <span className="flex flex-col min-w-0">
+                <span className="font-medium text-[13px] truncate">{w.id}</span>
+                <span className="text-[11px] text-zinc-500 truncate">{w.task} · {w.agent}</span>
+              </span>
+            ))}
           </div>
         ))}
       </nav>
 
-      <div className="px-4 py-2.5 border-t border-[#232d42] text-[10px] text-zinc-600 flex items-center gap-1.5">
-        <FolderOpen size={12} />
-        <span className="truncate">workspaces persist on this server</span>
+      {/* persist footer / avatar */}
+      <div className={cn("border-t border-[#232d42] flex items-center overflow-hidden", open ? "px-3 h-11 justify-start gap-2" : "h-11 justify-center")}>
+        <div className="size-6 shrink-0 rounded-full bg-[#182032] border border-[#2c3a55] grid place-items-center">
+          <FolderOpen size={12} className="text-[#7a869c]" />
+        </div>
+        {label(open, <span className="text-[10px] text-zinc-600 whitespace-nowrap">workspaces persist on this server</span>)}
       </div>
     </aside>
   );
