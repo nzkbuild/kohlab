@@ -2,6 +2,27 @@
 
 :root {
   color-scheme: dark;
+  /* kohlab palette as shadcn tokens so 21st.dev components (which read
+     hsl(var(--x)) work out of the box) */
+  --background: 220 33% 6%;      /* #0a0e14 */
+  --foreground: 220 33% 92%;      /* #d7e0ee */
+  --card: 220 26% 9%;             /* #0f141d */
+  --card-foreground: 220 33% 92%;
+  --popover: 220 26% 9%;
+  --popover-foreground: 220 33% 92%;
+  --primary: 160 84% 51%;         /* emerald #34d399 */
+  --primary-foreground: 160 84% 8%;
+  --secondary: 220 26% 12%;       /* #131926 */
+  --secondary-foreground: 220 33% 85%;
+  --muted: 220 20% 14%;           /* #182032 */
+  --muted-foreground: 220 15% 55%;
+  --accent: 160 84% 51%;
+  --accent-foreground: 160 84% 8%;
+  --destructive: 0 70% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 26% 20%;          /* #232d42 */
+  --input: 220 26% 20%;
+  --ring: 160 84% 51%;
 }
 
 html, body, #root {
@@ -11,8 +32,8 @@ html, body, #root {
 
 body {
   font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  background: #0a0e14;
-  color: #d7e0ee;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
   overflow: hidden;
 }
 

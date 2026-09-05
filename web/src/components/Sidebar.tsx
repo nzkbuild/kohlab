@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { PlusCircle, FolderOpen, GithubLogo } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp } from "../store";
+import { withToast } from "../lib/actions";
 import type { Workspace } from "../types";
 
 function statusDot(w: Workspace) {
@@ -11,7 +12,7 @@ function statusDot(w: Workspace) {
 }
 
 export default function Sidebar() {
-  const { workspaces, selectedId, select, refresh } = useApp();
+  const { workspaces, selectedId, view, select, setView, refresh } = useApp();
   const [task, setTask] = useState("");
   const [repo, setRepo] = useState("");
   const [agent, setAgent] = useState("omp");
@@ -30,18 +31,26 @@ export default function Sidebar() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  const goWorkspace = (id: string) => {
+    setView("workspaces");
+    select(id);
+  };
+
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!task.trim()) return;
     setBusy(true);
     try {
       const isUrl = /^https?:\/\//.test(repo.trim());
-      const w = isUrl
-        ? await api.clone({ url: repo.trim(), task: task.trim(), agent })
-        : await api.create({ task: task.trim(), repo: repo.trim() || undefined, agent });
+      const w = await withToast("Creating workspace", async () =>
+        isUrl
+          ? api.clone({ url: repo.trim(), task: task.trim(), agent })
+          : api.create({ task: task.trim(), repo: repo.trim() || undefined, agent }),
+      );
       setTask("");
       await refresh();
-      select(w.id);
+      setView("workspaces");
+      goWorkspace(w.id);
     } catch (err) {
       console.error(err);
     }
@@ -54,6 +63,25 @@ export default function Sidebar() {
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]" />
         <span className="font-bold tracking-tight">kohlab</span>
         <span className="text-zinc-500 text-[10px] ml-auto">agent workspaces</span>
+      </div>
+
+      <div className="flex gap-1 mx-3 mt-2">
+        <button
+          onClick={() => setView("dashboard")}
+          className={`flex-1 py-1.5 rounded-lg text-xs transition ${
+            view === "dashboard" ? "bg-[#182032] text-[#d7e0ee]" : "text-[#7a869c] hover:bg-[#131926]"
+          }`}
+        >
+          dashboard
+        </button>
+        <button
+          onClick={() => setView("settings")}
+          className={`flex-1 py-1.5 rounded-lg text-xs transition ${
+            view === "settings" ? "bg-[#182032] text-[#d7e0ee]" : "text-[#7a869c] hover:bg-[#131926]"
+          }`}
+        >
+          settings
+        </button>
       </div>
 
       <button
@@ -133,7 +161,7 @@ export default function Sidebar() {
         {workspaces.map((w) => (
           <div
             key={w.id}
-            onClick={() => select(w.id)}
+            onClick={() => goWorkspace(w.id)}
             className={`px-2.5 py-2 rounded-lg cursor-pointer border border-transparent transition ${
               w.id === selectedId ? "bg-[#182032] border-[#2c3a55]" : "hover:bg-[#131926]"
             }`}

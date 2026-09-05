@@ -6,18 +6,20 @@ interface AppState {
   authed: boolean;
   workspaces: Workspace[];
   selectedId: string | null;
+  view: "workspaces" | "dashboard" | "settings";
   loading: boolean;
   error: string | null;
 
   setAuthed: (v: boolean) => void;
   refresh: () => Promise<void>;
   select: (id: string | null) => void;
+  setView: (v: AppState["view"]) => void;
 }
-
 export const useApp = create<AppState>((set) => ({
   authed: false,
   workspaces: [],
   selectedId: null,
+  view: "workspaces",
   loading: false,
   error: null,
 
@@ -34,6 +36,7 @@ export const useApp = create<AppState>((set) => ({
   },
 
   select: (id) => set({ selectedId: id }),
+  setView: (v) => set({ view: v, selectedId: null }),
 }));
 
 export const selectedWorkspace = (s: AppState): Workspace | null =>

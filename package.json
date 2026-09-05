@@ -1,6 +1,6 @@
 {
   "name": "kohlab",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Run your AI coding agents in parallel, persistently, from any device.",
   "license": "MIT",
   "type": "module",
@@ -8,31 +8,12 @@
     "kohlab": "cli.ts"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
-    "@phosphor-icons/react": "^2.1.10",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/addon-image": "^0.9.0",
-    "@xterm/xterm": "^6.0.0",
-    "monaco-editor": "^0.56.0",
-    "node-pty": "^1.0.0",
-    "zustand": "^5.0.15"
+    "node-pty": "^1.0.0"
   },
   "scripts": {
     "start": "bun run server.ts",
     "cli": "bun run cli.ts",
     "dev": "bun run --watch server.ts",
     "pty:daemon": "node pty-daemon.cjs"
-  },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.3.0",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
-    "@vitejs/plugin-react": "^6.1.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2",
-    "vite": "^8.2.2"
   }
 }

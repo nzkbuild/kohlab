@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { api } from "../api";
+import { withToast } from "../lib/actions";
 
 interface Props {
   workspaceId: string;
@@ -31,7 +32,7 @@ export default function DiffView({ workspaceId }: Props) {
 
   const commit = async () => {
     try {
-      await api.commit(workspaceId, msg);
+      await withToast("Committing", () => api.commit(workspaceId, msg));
       setMsg("");
       load();
     } catch (e) {

@@ -1,0 +1,45 @@
+import { useEffect, useState } from "react";
+import { api } from "../api";
+
+interface Props {
+  workspaceId: string;
+}
+
+/** Live tail of the workspace's main-session PTY log buffer. */
+export default function LogView({ workspaceId }: Props) {
+  const [log, setLog] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      api
+        .log(workspaceId)
+        .then((res) => {
+          if (!cancelled) {
+            setLog(res.log);
+            setError(null);
+          }
+        })
+        .catch((e) => !cancelled && setError((e as Error).message));
+    void load();
+    const t = setInterval(load, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [workspaceId]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between border-b border-[#232d42] px-3 py-2 text-xs text-[#7a869c]">
+        <span>session log</span>
+      </div>
+      <pre className="flex-1 min-h-0 overflow-auto p-3 font-mono text-xs leading-relaxed text-[#d7e0ee] whitespace-pre-wrap">
+        {error && <span className="text-red-400">{error}</span>}
+        {!error && !log && <span className="text-[#7a869c]">no output yet — start the workspace</span>}
+        {log}
+      </pre>
+    </div>
+  );
+}

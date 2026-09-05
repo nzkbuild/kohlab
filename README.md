@@ -51,9 +51,9 @@ Anyone who runs AI coding agents — developers, indie hackers, small teams — 
 ## Get started
 
 ```bash
-# 1. Install the CLI (requires bun + tmux + git on your server)
+# 1. Install the CLI (requires bun + git on your server)
 curl -fsSL https://bun.sh/install | bash
-sudo apt-get install -y tmux git
+sudo apt-get install -y git
 
 # 2. Clone and run
 git clone https://github.com/nzkbuild/kohlab.git
@@ -67,34 +67,20 @@ ssh -L 7676:localhost:7676 user@your-server
 
 Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
-## What's new in v1.2.0
+## What's new in v1.4.1
 
-- **File tree & code view** — browse any workspace's repo right in the dashboard; click a file to read it.
-- **Clone from GitHub** — paste a repo URL, kohlab clones it into a fresh workspace.
-- **`kohlab` launcher** — type `kohlab` and the dashboard opens in your browser; closing it never stops the agents.
-- **Agent availability** — see at a glance which agents are installed on your server.
-- **Keyboard shortcuts** — ⌘/Ctrl+1/2/3, `n`, `r`.
+- **Command center** — a dashboard with KPIs, agent availability, and a recent-activity feed.
+- **Command palette** — ⌘K quick actions across workspaces.
+- **Session log view** — live tail of a workspace's output.
+- **Image upload** — paste/send a PNG/JPEG/GIF/WebP into a terminal.
+- **Faster first paint** — Monaco + xterm are lazy-loaded; the shell loads ~3× lighter.
+- **Self-healing sessions** — the PTY daemon respawns on crash; state writes are race-free.
 
-Previous: v1.1.0 added completion notifications, workspace sharing, and a scoped access key.
+Previous releases: v1.4.0 (PTY cutover), v1.3.0 (React rewrite), v1.2.0 (file tree + GitHub clone), v1.1.0 (notifications + sharing).
 
 ## Project status
-## Coming next - v1.3.0
 
-The "from zero to running agent" release:
-
-- **Install agents from the UI** - detect missing ones (codex, opencode, pi) and install in one click.
-- **Agent login walkthrough** - guided setup so your agent is authenticated and ready.
-- **GitHub repo browser** - pick a repo, clone it, launch an agent, all from the dashboard.
-- **Real editor + diff** - Monaco-based code view and review, not plain text.
-- **Multi-terminal tabs** - one terminal per workspace, tabbed.
-
-Full plan: RELEASE-PLAN.md
-
-
-
-**v1.2.0** — browse code, clone projects, launch agents, all from the dashboard. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release.
-
-
+**v1.4.1** — stable. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release. Full plan: RELEASE-PLAN.md.
 
 ## License
 

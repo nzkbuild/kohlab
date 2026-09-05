@@ -60,9 +60,20 @@ export const api = {
   files: (id: string) => json<TreeNode[]>(`/api/workspaces/${id}/files`),
   file: (id: string, path: string) =>
     json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
+  log: (id: string) => json<{ log: string }>(`/api/workspaces/${id}/log`),
   installAgent: (name: string, cmd: string) =>
     json<{ ok: boolean; output?: string }>("/api/agents/install", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, cmd }) }),
   ghRepos: () => json<{ ok: boolean; repos: string[]; authed: boolean }>("/api/gh/repos"),
+  uploadImage: async (workspaceId: string, image: Blob): Promise<{ path: string; mimeType: string; bytes: number }> => {
+    const res = await req(`/api/workspaces/${encodeURIComponent(workspaceId)}/image`, {
+      method: "POST",
+      headers: { "content-type": image.type || "application/octet-stream" },
+      body: image,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
+    return body as { path: string; mimeType: string; bytes: number };
+  },
 };
 
 export type { Workspace };

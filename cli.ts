@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// works — tmux-backed coding-agent workspace runner CLI
+// kohlab — PTY-backed coding-agent workspace CLI
 
 import {
   createWorkspace,
@@ -75,13 +75,6 @@ async function main() {
       console.log(`committed ${args[0]}`);
       break;
     }
-    case "attach": {
-      if (!args[0]) usage("attach <id>");
-      const ws = await getWorkspace(args[0]);
-      const { spawn } = await import("child_process");
-      spawn("tmux", ["attach", "-t", `works-${ws.id}`], { stdio: "inherit" }).on("exit", () => process.exit(0));
-      break;
-    }
     case "agents": {
       const s = await loadState();
       if (args[0] === "add" && args[1] && args[2]) {
@@ -137,11 +130,10 @@ function flag(args: string[], name: string): string | undefined {
 
 function usage(extra?: string) {
   if (extra) console.error(`usage: works ${extra}\n`);
-  console.log(`works — tmux-backed coding-agent workspaces
+  console.log(`kohlab — coding-agent workspaces
   works new <repo> <task> [agent] [--branch b] [--payload '...']   create a worktree workspace
   works ls                                                          list workspaces
   works start|stop|restart <id>                                     control a workspace
-  works attach <id>                                                 tmux attach to a workspace
   works diff <id>                                                   show uncommitted diff
   works commit <id> [message]                                       commit workspace changes
   works delete <id>                                                 remove workspace + worktree

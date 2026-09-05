@@ -55,6 +55,21 @@ export default function AgentInstaller({ compact }: Props) {
           ))}
         </div>
       )}
+      {installed.filter((a) => a.setupCmd).map((a) => (
+        <div key={`setup-${a.name}`} className="flex items-center gap-2 p-3 rounded-xl bg-[#131926] border border-[#232d42] mb-2">
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-zinc-400">{a.name} setup</div>
+            <code className="block mt-0.5 text-[11px] text-zinc-200 truncate">{a.setupCmd}</code>
+            <div className="text-[10px] text-zinc-500 mt-0.5 truncate">{a.setupHint}</div>
+          </div>
+          <button
+            onClick={() => navigator.clipboard.writeText(a.setupCmd ?? "").catch(() => {})}
+            className="px-2.5 py-1 rounded-lg border border-[#232d42] text-[11px] text-zinc-300 hover:border-emerald-400 hover:text-emerald-400 transition"
+          >
+            copy
+          </button>
+        </div>
+      ))}
       {missing.map((a) => (
         <div key={a.name} className="flex items-center gap-3 p-3 rounded-xl bg-[#131926] border border-[#232d42] mb-2">
           <div className="flex-1 min-w-0">

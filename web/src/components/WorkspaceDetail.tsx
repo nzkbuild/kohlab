@@ -1,25 +1,26 @@
-import { useState } from "react";
-import { Play, Stop, ArrowsClockwise, ShareNetwork, Trash, Terminal, Files, GitDiff, Plus, X } from "@phosphor-icons/react";
+import { lazy, Suspense, useState } from "react";
+import { Play, Stop, ArrowsClockwise, ShareNetwork, Trash, Terminal, Files, GitDiff, Plus, X, Scroll } from "@phosphor-icons/react";
 import { api } from "../api";
+import { toastAction } from "../lib/actions";
 import { useApp } from "../store";
-import TerminalView from "./TerminalView";
-import FileTree from "./FileTree";
-import CodeView from "./CodeView";
-import DiffView from "./DiffView";
+import TerminalView, { disposeWorkspaceTerminals } from "./TerminalView";
+import BrowseView from "./BrowseView";
+import LogView from "./LogView";
+// Monaco is heavy (~600 KB) — load it only when files/diff are actually opened
+const DiffView = lazy(() => import("./DiffView"));
 
-type Tab = "terminal" | "files" | "diff";
+type Tab = "terminal" | "files" | "diff" | "log";
 
 export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }) {
   const { workspaces, refresh, select } = useApp();
   const [tab, setTab] = useState<Tab>("terminal");
-  const [openFile, setOpenFile] = useState<string | null>(null);
   const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
   const w = workspaces.find((x) => x.id === workspaceId);
 
   const act = async (action: string) => {
     try {
-      await api.action(workspaceId, action);
+      await toastAction(workspaceId, action);
       await refresh();
     } catch (e) {
       console.error(e);
@@ -63,20 +64,20 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <button
           onClick={async () => {
             if (!confirm("delete this workspace? worktree will be removed")) return;
+            disposeWorkspaceTerminals(workspaceId);
             await act("delete");
             select(null);
           }}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-400/40 text-red-400 text-xs hover:bg-red-400/10 transition" title="delete"
         >
           <Trash size={12} /> delete
         </button>
       </div>
 
       <div className="flex gap-1 px-2 border-b border-[#232d42] bg-[#0f141d]">
-        {([["terminal", Terminal], ["files", Files], ["diff", GitDiff]] as [Tab, typeof Terminal][]).map(([t, Icon]) => (
+        {([["terminal", Terminal], ["files", Files], ["diff", GitDiff], ["log", Scroll]] as [Tab, typeof Terminal][]).map(([t, Icon]) => (
           <button
             key={t}
-            onClick={() => { setTab(t); setOpenFile(null); }}
+            onClick={() => setTab(t)}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition ${tab === t ? "text-zinc-100 border-emerald-400" : "text-zinc-500 border-transparent hover:text-zinc-300"}`}
           >
             <Icon size={13} /> {t}
@@ -121,12 +122,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
       <div className="flex-1 min-h-0">
         {tab === "terminal" && <TerminalView key={`${workspaceId}:${activeTerminal}`} workspaceId={workspaceId} terminalId={activeTerminal} />}
-        {tab === "files" && (openFile ? (
-          <CodeView workspaceId={workspaceId} filePath={openFile} onBack={() => setOpenFile(null)} />
-        ) : (
-          <FileTree workspaceId={workspaceId} onOpenFile={setOpenFile} />
-        ))}
-        {tab === "diff" && <DiffView workspaceId={workspaceId} />}
+        {tab === "files" && <BrowseView workspaceId={workspaceId} />}
+        {tab === "log" && <LogView workspaceId={workspaceId} />}
+        {tab === "diff" && (
+          <Suspense fallback={<div className="p-4 text-zinc-500 text-sm">loading diff...</div>}>
+            <DiffView workspaceId={workspaceId} />
+          </Suspense>
+        )}
       </div>
     </div>
   );

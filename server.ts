@@ -2,10 +2,8 @@
 
 import { serve } from "bun";
 import type { ServerWebSocket } from "bun";
-import { spawn, type ChildProcess } from "child_process";
-import { readdir, readFile } from "fs/promises";
-import { join } from "path";
-import { cwd } from "process";
+import { mkdir, readdir, readFile } from "fs/promises";
+import { isAbsolute, join, relative, resolve } from "path";
 import {
   createWorkspace,
   deleteWorkspace,
@@ -21,15 +19,18 @@ import {
   startWatcher,
   onWorkspaceDone,
   notifyWebhook,
+  shareWorkspace,
   workspaceByShare,
   authorized,
   loadState,
   ptySend,
+  ptyLog,
   onDaemonMessage,
   sessionId,
 } from "./lib";
 
 const PORT = Number(process.env.PORT ?? 7676);
+const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 /** Browser push subscribers (dashboard pages). */
 const pushClients = new Set<ServerWebSocket>();
@@ -80,7 +81,6 @@ async function handleShare(id: string): Promise<Response> {
   }
 }
 
-/** Resolve ?share=<token> to a workspace id, or null. */
 async function shareId(req: Request): Promise<string | null> {
   const url = new URL(req.url);
   const token = url.searchParams.get("share");
@@ -157,6 +157,17 @@ async function handleDiff(id: string): Promise<Response> {
   }
 }
 
+/** Tail a workspace's main-session PTY log buffer (degrades to "" when absent). */
+async function handleLog(id: string): Promise<Response> {
+  try {
+    const ws = await getWorkspace(id);
+    const log = await ptyLog(sessionId(ws.id));
+    return json({ log: log ?? "" });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
 async function handleCommit(id: string, req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { message?: string };
@@ -167,24 +178,6 @@ async function handleCommit(id: string, req: Request): Promise<Response> {
   }
 }
 
-async function handleLog(id: string, req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const lines = Number(url.searchParams.get("lines") ?? 500);
-  try {
-    const ws = await getWorkspace(id);
-    const f = join(WORKS_DIR, ws.id, "session.log");
-    let out = "";
-    try {
-      const buf = await readFile(f, "utf8");
-      out = buf.split("\n").slice(-lines).join("\n");
-    } catch {
-      out = "";
-    }
-    return json({ log: out });
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-}
 
 async function handleAgents(req: Request): Promise<Response> {
   const s = await loadState();
@@ -286,13 +279,55 @@ async function handleFile(id: string, req: Request): Promise<Response> {
     const rel = url.searchParams.get("path") ?? "";
     const ws = await getWorkspace(id);
     const tree = worktreePath(ws);
-    const abs = `${tree}/${rel}`;
-    if (!abs.startsWith(tree)) return json({ error: "invalid path" }, 400);
+    const abs = resolve(tree, rel);
+    const relCheck = relative(tree, abs);
+    if (relCheck.startsWith("..") || isAbsolute(relCheck)) return json({ error: "invalid path" }, 400);
     const buf = await readFile(abs, "utf8");
     return json({ path: rel, content: buf });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
+}
+
+/** Store a browser-pasted image outside the worktree and return its remote path. */
+async function handleImageUpload(id: string, req: Request): Promise<Response> {
+  try {
+    const workspace = await getWorkspace(id);
+    const declaredLength = Number(req.headers.get("content-length") ?? 0);
+    if (declaredLength > MAX_IMAGE_UPLOAD_BYTES) return json({ error: "image exceeds 20 MiB limit" }, 413);
+
+    const bytes = new Uint8Array(await req.arrayBuffer());
+    if (bytes.length === 0) return json({ error: "image is empty" }, 400);
+    if (bytes.length > MAX_IMAGE_UPLOAD_BYTES) return json({ error: "image exceeds 20 MiB limit" }, 413);
+
+    const mimeType = sniffImageMime(bytes);
+    if (!mimeType) return json({ error: "unsupported image; use PNG, JPEG, GIF, or WebP" }, 415);
+
+    const imageDir = join(WORKS_DIR, "images", workspace.id);
+    await mkdir(imageDir, { recursive: true, mode: 0o700 });
+    const extension = mimeType === "image/jpeg" ? "jpg" : mimeType.slice("image/".length);
+    const imagePath = join(imageDir, `${Date.now()}-${crypto.randomUUID()}.${extension}`);
+    await Bun.write(imagePath, bytes);
+    return json({ path: imagePath, mimeType, bytes: bytes.length });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+function sniffImageMime(bytes: Uint8Array): string | undefined {
+  const startsWith = (...values: number[]) => values.every((value, index) => bytes[index] === value);
+  if (bytes.length >= 8 && startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (bytes.length >= 3 && startsWith(0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (bytes.length >= 6) {
+    const gif = new TextDecoder().decode(bytes.slice(0, 6));
+    if (gif === "GIF87a" || gif === "GIF89a") return "image/gif";
+  }
+  if (bytes.length >= 12) {
+    const riff = new TextDecoder().decode(bytes.slice(0, 4));
+    const webp = new TextDecoder().decode(bytes.slice(8, 12));
+    if (riff === "RIFF" && webp === "WEBP") return "image/webp";
+  }
+  return undefined;
 }
 
 /** List GitHub repos via `gh` (if authenticated) for the repo browser. */
@@ -383,38 +418,31 @@ async function ensurePtySession(id: string, terminalId = "main") {
   if (ws.payload && terminalId === "main") {
     await ptySend({ type: "input", id: sessId, data: Buffer.from(ws.payload + "\r").toString("base64") });
   }
+  // a browser-attach start is a real run: record it so completion fires
+  if (terminalId === "main") await markStarted(id);
 }
 
 // --- server --------------------------------------------------------------
-
 const server = serve({
   port: PORT,
   fetch: async (req, server) => {
     const url = new URL(req.url);
     const path = url.pathname;
-    // access key gate: share links stay public-read; everything else needs the key
-    // (checked before websocket upgrade so unauthenticated sockets are refused).
-    // Static files (the dashboard shell) are always served — the page itself
-    // shows a login screen and does authenticated API calls.
     const isStatic = !path.startsWith("/api") && !req.headers.get("upgrade");
-    const shareIdRes = await shareId(req);
-    const isShareLink = !!shareIdRes;
-    if (!isShareLink && !isStatic && !authorized(req)) {
-      return json({ error: "unauthorized — set ?key= or Authorization: Bearer" }, 401);
-    }
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|files|file|image|share|log)$/);
+    const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
-    // WebSocket upgrade: any path that asks for an upgrade joins the terminal proxy
+    // WebSocket upgrade: terminal proxy + push — require the key.
     if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
       if (server.upgrade(req)) return undefined;
     }
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|log|files|file|share)$/);
+
     if (m) {
       const [, id, action] = m;
-      // share-mode access is read-only: only diff/log/files allowed
-      if (action !== "diff" && action !== "log" && action !== "files" && action !== "share") {
-        if (shareIdRes === id) {
-          return json({ error: "read-only share link" }, 403);
-        }
+      const shareReadOnly = action === "diff" || action === "files" || action === "file" || action === "log";
+      if (!(shareReadOnly && shareIdRes === id) && !authorized(req)) {
+        return json({ error: "unauthorized — set ?key= or Authorization: Bearer" }, 401);
       }
       switch (action) {
         case "start": return handleStart(id);
@@ -424,33 +452,49 @@ const server = serve({
         case "commit": return handleCommit(id, req);
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
+        case "log": return handleLog(id);
+        case "image":
+          if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+          return handleImageUpload(id, req);
         case "share": return handleShare(id);
       }
     }
 
-    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
-    if (path === "/api/agents/install" && req.method === "POST") return handleAgentInstall(req);
-    if (path === "/api/agents-status") return handleAgentsStatus();
-    if (path === "/api/gh/repos") return handleGhRepos();
-    if (path === "/api/clone" && req.method === "POST") return handleClone(req);
-    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
-
-
-
+    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) {
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      return handleAgents(req);
+    }
+    if (path === "/api/agents/install" && req.method === "POST") {
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      return handleAgentInstall(req);
+    }
+    if (path === "/api/agents-status") {
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      return handleAgentsStatus();
+    }
+    if (path === "/api/gh/repos") {
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      return handleGhRepos();
+    }
+    if (path === "/api/clone" && req.method === "POST") {
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      return handleClone(req);
+    }
     if (path === "/api/workspaces" && req.method === "GET") {
-      const url = new URL(req.url);
       const wantsShare = url.searchParams.has("share");
-      // ?share= present but invalid → nothing to show
       if (wantsShare && !shareIdRes) return json([]);
       if (shareIdRes) {
         const list = await listWorkspaces();
         const w = list.find((x) => x.id === shareIdRes);
         return json(w ? [w] : []);
       }
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
       return listWorkspaces().then(json).catch((e) => json({ error: (e as Error).message }, 500));
     }
-    if (path === "/api/workspaces" && req.method === "POST") return handleCreate(req);
-    if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) return handleAgents(req);
+    if (path === "/api/workspaces" && req.method === "POST") {
+      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      return handleCreate(req);
+    }
 
     // Static files - serve the React app from web/dist, fall back to legacy public/
     const webDist = join(process.cwd(), "web", "dist");
@@ -463,12 +507,12 @@ const server = serve({
       }
     }
     for (const root of roots) {
-      const staticPath = join(root, path.slice(1));
+      // resolve + containment: a raw path can never escape its root
+      const staticPath = resolve(root, "." + path);
+      if (!staticPath.startsWith(resolve(root) + "/")) continue;
       const f = Bun.file(staticPath);
       if (f.size > 0) return new Response(f);
     }
-    return new Response("not found", { status: 404 });
-
     return new Response("not found", { status: 404 });
   },
   websocket: {
@@ -484,8 +528,8 @@ const server = serve({
         try {
           const msg = JSON.parse(str) as { type?: string; id?: string; terminalId?: string; cols?: number; rows?: number };
           if (msg.type === "attach" && msg.id) {
-            attachPty(ws, msg.id, msg.terminalId);
-            void ensurePtySession(msg.id, msg.terminalId);
+            // open/spawn before subscribe so the replay never misses the first bytes
+            void ensurePtySession(msg.id, msg.terminalId).then(() => attachPty(ws, msg.id, msg.terminalId));
           } else if (msg.type === "resize" && msg.id && msg.cols && msg.rows) {
             void ptySend({
               type: "resize",
@@ -506,6 +550,8 @@ const server = serve({
     },
     close(ws) {
       pushClients.delete(ws);
+      const sessId = termClients.get(ws);
+      if (sessId) void ptySend({ type: "unsubscribe", id: sessId });
       termClients.delete(ws);
     },
     drain(ws) {

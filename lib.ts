@@ -3,8 +3,8 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace } from "./types";
-import { mkdir, readFile, writeFile, stat, realpath } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { mkdir, readFile, realpath, rm, stat, writeFile } from "fs/promises";
 import { basename, join } from "path";
 import { spawn, execFile } from "child_process";
 import { cwd } from "process";
@@ -63,7 +63,7 @@ const PTY_DAEMON = process.env.PTY_DAEMON || join(cwd(), "pty-daemon.cjs");
 
 let ptySock: import("net").Socket | null = null;
 let ptyBuf = "";
-let ptyStarted = false;
+let ptyDaemonProc: import("child_process").ChildProcess | null = null;
 let ptyConnecting: Promise<import("net").Socket> | null = null;
 /** daemon message handlers (server registers terminal fan-out here) */
 type DaemonHandler = (msg: Record<string, unknown>) => void;
@@ -74,12 +74,19 @@ export function onDaemonMessage(fn: DaemonHandler) {
 }
 
 function ensurePtyDaemon() {
-  if (ptyStarted) return;
-  ptyStarted = true;
+  if (ptyDaemonProc) return;
   const fs = require("fs");
   try { fs.unlinkSync(PTY_SOCKET); } catch {}
   const child = spawn("node", [PTY_DAEMON], { stdio: "ignore", detached: true });
   child.unref();
+  ptyDaemonProc = child;
+  // watchdog: if the daemon dies, drop the socket + allow a respawn so the
+  // next pty op starts a fresh daemon instead of failing forever.
+  child.on("exit", () => {
+    if (ptyDaemonProc === child) ptyDaemonProc = null;
+    ptySock = null;
+    ptyConnecting = null;
+  });
 }
 
 function ptyConnect(): Promise<import("net").Socket> {
@@ -132,7 +139,12 @@ export async function ptyRequest<T extends Record<string, unknown>>(
   timeoutMs = 5000,
 ): Promise<T> {
   const { promise, resolve, reject } = Promise.withResolvers<T>();
-  const timer = setTimeout(() => reject(new Error(`daemon ${replyType} timeout`)), timeoutMs);
+  const fail = (err: Error) => {
+    clearTimeout(timer);
+    removeDaemonHandler(handler);
+    reject(err);
+  };
+  const timer = setTimeout(() => fail(new Error(`daemon ${replyType} timeout`)), timeoutMs);
   const handler: DaemonHandler = (msg) => {
     if (msg.type === replyType) {
       clearTimeout(timer);
@@ -141,7 +153,12 @@ export async function ptyRequest<T extends Record<string, unknown>>(
     }
   };
   daemonHandlers.push(handler);
-  await ptySend({ type, ...payload });
+  try {
+    await ptySend({ type, ...payload });
+  } catch (e) {
+    fail(e as Error);
+    return promise;
+  }
   return promise;
 }
 
@@ -150,15 +167,26 @@ function removeDaemonHandler(fn: DaemonHandler) {
   if (i >= 0) daemonHandlers.splice(i, 1);
 }
 
-/** List live PTY sessions: [{ id, exited, meta }]. */
-export async function ptyList(): Promise<{ id: string; exited: boolean; meta?: Record<string, unknown> }[]> {
+/** List live PTY sessions, or null when the daemon is unreachable. */
+export async function ptyList(): Promise<{ id: string; exited: boolean; meta?: Record<string, unknown> }[] | null> {
   try {
     const reply = await ptyRequest<{ sessions: { id: string; exited: boolean; meta?: Record<string, unknown> }[] }>(
       "list", {}, "list-reply",
     );
     return reply.sessions || [];
   } catch {
-    return [];
+    return null;
+  }
+}
+
+/** Fetch a session's buffered output as UTF-8 text, or null if unreachable. */
+export async function ptyLog(id: string): Promise<string | null> {
+  try {
+    const reply = await ptyRequest<{ data?: string }>("log", { id }, "log-reply");
+    if (!reply.data) return "";
+    return Buffer.from(reply.data, "base64").toString("utf8");
+  } catch {
+    return null;
   }
 }
 
@@ -170,8 +198,19 @@ export function sessionId(workspaceId: string, terminalId = "main") {
 /** True if the workspace's main PTY session is alive. */
 export async function isRunning(ws: Workspace): Promise<boolean> {
   const sessions = await ptyList();
+  if (!sessions) return false;
   const sess = sessions.find((s) => s.id === sessionId(ws.id));
   return !!sess && !sess.exited;
+}
+
+export async function markStarted(id: string): Promise<Workspace> {
+  return mutateState(async (s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    ws.started = ws.started ?? Date.now();
+    ws.stopped = null;
+    return ws;
+  });
 }
 
 
@@ -204,10 +243,43 @@ async function saveState(s: State) {
   await writeFile(STATE_FILE, JSON.stringify(s, null, 2));
 }
 
+// --- state mutex -----------------------------------------------------------
+// loadState/saveState is read-modify-write on a single JSON file; concurrent
+// handlers can lost-update each other. Serialize every mutation through this
+// promise chain (a simple mutex) so state.json stays consistent under load.
+
+let stateLock: Promise<unknown> = Promise.resolve();
+
+/** Run a state mutation with exclusive access to the state file. */
+async function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = stateLock.then(fn, fn);
+  // keep the chain alive regardless of fn outcome
+  stateLock = run.catch(() => {});
+  return run;
+}
+
+/** Load state inside the lock, mutate, save. Convenience for one-shot writes. */
+async function mutateState<T>(fn: (s: State) => T | Promise<T>): Promise<T> {
+  return withStateLock(async () => {
+    const s = await loadState();
+    const res = await fn(s);
+    await saveState(s);
+    return res;
+  });
+}
+
 // --- completion watcher --------------------------------------------------
 
 /** Workspaces that were running on the previous watcher tick. */
 let previouslyRunning = new Set<string>();
+
+/** Workspaces stopped manually (stop/delete) — their daemon `exit` must not
+ *  be reported as an agent completion. */
+const intentionallyStopped = new Set<string>();
+
+export function markIntentionallyStopped(id: string) {
+  intentionallyStopped.add(id);
+}
 
 /**
  * Poll every workspace: when a started workspace stops running, mark it done
@@ -220,45 +292,77 @@ export function startWatcher() {
   onDaemonMessage((msg) => {
     if (msg.type !== "exit" || typeof msg.id !== "string") return;
     if (!msg.id.startsWith("works-")) return;
-    const workspaceId = msg.id.slice("works-".length);
-    const dash = workspaceId.indexOf("-");
-    const terminalId = dash >= 0 ? workspaceId.slice(dash + 1) : "main";
-    const wid = dash >= 0 ? workspaceId.slice(0, dash) : workspaceId;
-    if (terminalId !== "main") return; // only the main agent session marks done
+    // session ids are `works-<id>-<terminal>`; workspace ids contain dashes,
+    // so match the exact main-session id (or the legacy id-without-terminal)
+    const s = loadStateSync();
+    const main = s.workspaces.find((w) => msg.id === sessionId(w.id) || msg.id === `works-${w.id}`);
+    if (!main) return;
+    const wid = main.id;
+    if (intentionallyStopped.has(wid)) return;
     void (async () => {
-      const s = await loadState();
-      const w = s.workspaces.find((x) => x.id === wid);
-      if (!w) return;
-      if (w.started && !w.stopped) {
-        w.stopped = Date.now();
-        await saveState(s);
-        notifyDone.forEach((fn) => fn(w));
-      }
+      const w = await mutateState(async (st) => {
+        const found = st.workspaces.find((x) => x.id === wid);
+        if (!found) return null;
+        if (found.started && !found.stopped) {
+          found.stopped = Date.now();
+          return found;
+        }
+        return null;
+      });
+      if (w) notifyDone.forEach((fn) => fn(w));
     })();
   });
 
   // Polling fallback: catches sessions that exited before the server was up.
   setInterval(async () => {
     try {
+      const sessions = await ptyList();
+      if (sessions === null) return; // daemon unreachable — don't read as "all done"
       const s = await loadState();
       const running = new Set<string>();
+      const finished = new Set<string>();
       for (const w of s.workspaces) {
-        const alive = await isRunning(w);
+        const sess = sessions.find((x) => x.id === sessionId(w.id));
+        const alive = !!sess && !sess.exited;
         if (alive) {
           running.add(w.id);
           continue;
         }
+        if (intentionallyStopped.has(w.id)) continue;
         if (previouslyRunning.has(w.id) || (w.started && !w.stopped)) {
-          w.stopped = Date.now();
-          await saveState(s);
-          notifyDone.forEach((fn) => fn(w));
+          finished.add(w.id);
         }
       }
       previouslyRunning = running;
+      if (finished.size) {
+        // apply the completion marks under the state lock so concurrent API
+        // writes can't be lost-updated
+        await mutateState((st) => {
+          for (const wid of finished) {
+            const w = st.workspaces.find((x) => x.id === wid);
+            if (w && w.started && !w.stopped) w.stopped = Date.now();
+          }
+        });
+        const st = await loadState();
+        for (const wid of finished) {
+          const w = st.workspaces.find((x) => x.id === wid);
+          if (w) notifyDone.forEach((fn) => fn(w));
+        }
+      }
     } catch (e) {
       console.error("[watcher]", (e as Error).message);
     }
   }, WATCH_INTERVAL);
+}
+
+/** Synchronous state read for the hot daemon-message path. */
+function loadStateSync(): State {
+  if (!existsSync(STATE_FILE)) return { workspaces: [], agents: { ...DEFAULT_AGENTS } };
+  try {
+    return JSON.parse(readFileSync(STATE_FILE, "utf8")) as State;
+  } catch {
+    return { workspaces: [], agents: { ...DEFAULT_AGENTS } };
+  }
 }
 
 /** Fire the configured webhook for a completed workspace (best-effort). */
@@ -354,27 +458,28 @@ export async function createWorkspace(opts: {
   branch?: string;
   payload?: string;
 }): Promise<Workspace & { running: boolean; path: string }> {
-  const s = await loadState();
-
   const repo = await findRepoRoot(opts.repo);
   if (!repo) throw new Error(`not a git repo: ${opts.repo}`);
   const rootName = basename(repo);
 
   const id = `${slugify(rootName)}-${slugify(opts.task)}`;
-  if (s.workspaces.some((w) => w.id === id)) {
-    throw new Error(`workspace '${id}' already exists (delete or reuse it)`);
-  }
-
-  const ws: Workspace = {
-    id,
-    repo,
-    task: opts.task,
-    agent: opts.agent in s.agents ? opts.agent : "sh",
-    created: Date.now(),
-    started: null,
-    stopped: null,
-    payload: opts.payload,
-  };
+  const ws = await mutateState(async (s) => {
+    if (s.workspaces.some((w) => w.id === id)) {
+      throw new Error(`workspace '${id}' already exists (delete or reuse it)`);
+    }
+    const w: Workspace = {
+      id,
+      repo,
+      task: opts.task,
+      agent: opts.agent in s.agents ? opts.agent : "sh",
+      created: Date.now(),
+      started: null,
+      stopped: null,
+      payload: opts.payload,
+    };
+    s.workspaces.push(w);
+    return w;
+  });
 
   const dir = wsDir(ws);
   const tree = worktreePath(ws);
@@ -394,24 +499,20 @@ export async function createWorkspace(opts: {
     await run(repo, "git", ["worktree", "repair", tree]);
   }
 
-  s.workspaces.push(ws);
-  await saveState(s);
-
   return { ...ws, running: false, path: tree };
 }
 
 // --- sharing -------------------------------------------------------------
 
-/** Generate a read-only share token for a workspace (idempotent). */
 export async function shareWorkspace(id: string) {
-  const s = await loadState();
-  const ws = s.workspaces.find((w) => w.id === id);
-  if (!ws) throw new Error(`no workspace '${id}'`);
-  if (!ws.share) {
-    ws.share = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    await saveState(s);
-  }
-  return { id: ws.id, share: ws.share };
+  return mutateState(async (s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    if (!ws.share) {
+      ws.share = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    }
+    return { id: ws.id, share: ws.share };
+  });
 }
 
 /** Resolve a share token to its workspace (read-only view). */
@@ -428,42 +529,45 @@ export async function startWorkspace(id: string) {
   if (!ws) throw new Error(`no workspace '${id}'`);
 
   // spawn the main PTY session now so the agent actually starts,
-  // not just on first browser attach
+  // not just on first browser attach. The daemon guards duplicate/ghost
+  // sessions itself — we await the open-result and surface its error.
   const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
   const sessId = sessionId(id);
-  await ptySend({
-    type: "open",
-    id: sessId,
-    cwd: worktreePath(ws),
-    cmd,
-    cols: 120,
-    rows: 36,
-    meta: { workspace: id, terminal: "main" },
-  });
+  const res = await ptyRequest<{ ok?: boolean; error?: string }>(
+    "open",
+    { id: sessId, cwd: worktreePath(ws), cmd, cols: 120, rows: 36, meta: { workspace: id, terminal: "main" } },
+    "open-result",
+  );
+  if (res.error) throw new Error(res.error);
   if (ws.payload) {
     await ptySend({ type: "input", id: sessId, data: Buffer.from(ws.payload + "\r").toString("base64") });
   }
-  ws.started = Date.now();
-  ws.stopped = null;
-  await saveState(s);
-  return { ...ws, running: true, path: worktreePath(ws) };
+  return mutateState(async (st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) throw new Error(`no workspace '${id}'`);
+    w.started = Date.now();
+    w.stopped = null;
+    return { ...w, running: true, path: worktreePath(w) };
+  });
 }
 
 export async function stopWorkspace(id: string) {
-  const s = await loadState();
-  const ws = s.workspaces.find((w) => w.id === id);
-  if (!ws) throw new Error(`no workspace '${id}'`);
   // close every named PTY session for this workspace (main + extra terminals)
   const sessions = await ptyList();
-  for (const sess of sessions) {
+  for (const sess of sessions ?? []) {
     if (sess.id.startsWith(`works-${id}-`)) {
       await ptySend({ type: "close", id: sess.id });
     }
   }
-  ws.stopped = Date.now();
-  await saveState(s);
-  return { ...ws, running: false, path: worktreePath(ws) };
+  markIntentionallyStopped(id);
+  return mutateState(async (s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    ws.stopped = Date.now();
+    return { ...ws, running: false, path: worktreePath(ws) };
+  });
 }
+
 
 export async function deleteWorkspace(id: string) {
   const s = await loadState();
@@ -481,17 +585,18 @@ export async function deleteWorkspace(id: string) {
   } catch (e) {
     console.warn(`worktree remove failed (${(e as Error).message}); leaving tree on disk`);
   }
-  s.workspaces = s.workspaces.filter((w) => w.id !== id);
-  await saveState(s);
-  return { ok: true };
+  await rm(join(WORKS_DIR, "images", id), { recursive: true, force: true });
+  markIntentionallyStopped(id);
+  return mutateState(async (st) => {
+    st.workspaces = st.workspaces.filter((w) => w.id !== id);
+    return { ok: true };
+  });
 }
-
 export async function restartWorkspace(id: string) {
   await stopWorkspace(id);
   return startWorkspace(id);
 }
 
-// --- diff ----------------------------------------------------------------
 
 export async function getDiff(id: string): Promise<{ name: string; diff: string }[]> {
   const ws = await getWorkspace(id);

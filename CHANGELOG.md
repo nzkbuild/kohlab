@@ -9,6 +9,30 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
+
+## [1.4.1] - 2026-09-05
+
+The hardening + frontend-experience follow-up. Finishes the v1.4.0 plan's frontend half.
+
+### Backend
+
+- **State mutex** — all `state.json` read-modify-write now serializes through one lock (`mutateState`), eliminating lost-update races between concurrent API handlers and the completion watcher.
+- **Daemon self-healing** — a watchdog respawns the PTY daemon if it dies, dropping the stale socket so the next op starts fresh instead of failing forever. `ptyList` returns `null` (not `[]`) when the daemon is unreachable, so the watcher never misreads an outage as "everything done".
+- **Intentional-stop tracking** — stop/delete mark a workspace so its daemon `exit` isn't reported as an agent completion.
+- **Completion-watcher fix** — session IDs are matched by exact id instead of `split("-")`, which broke on workspace ids containing dashes.
+- **Path containment** — static serving and the `file` endpoint use `resolve`+`relative` checks; a crafted path can no longer escape its root.
+- **PTY log endpoint** — `/log` now tails the daemon's buffered output instead of a legacy `session.log` file.
+
+### Frontend
+
+- **Bundle split (F1)** — Monaco and xterm are now in their own chunks via `manualChunks`; the entry dropped from 728 KB → 275 KB raw (207 KB → 86 KB gzip). Workspace list + shell paint before the editor/terminal load.
+- **Command center** — new dashboard with KPIs, agent availability, and a recent-activity feed.
+- **Command palette** — ⌘K quick actions (start/stop/new/navigate) across workspaces.
+- **Settings** — agent management + server info in one place.
+- **Session log view** — live tail of a workspace's main-session output.
+- **Scrollback persistence** — xterm instances are cached (bounded) so scrollback and fit survive tab switches and remounts.
+- **Image upload** — paste/send a PNG/JPEG/GIF/WebP into a workspace's terminal.
+
 ## [1.4.0] - 2026-08-25
 
 The PTY cutover release. The node-pty daemon is now the single source of truth for session state.

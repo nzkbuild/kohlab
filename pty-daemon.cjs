@@ -97,11 +97,12 @@ function openSession(id, cwd, cmd, env, cols, rows, meta) {
     p.onExit(({ exitCode }) => {
       sess.exited = true;
       broadcast(id, { type: "exit", id, code: exitCode });
-      // remove from the map so list() and re-open behave correctly
+      // remove from the map promptly so re-open works; the buffer is dropped
+      // here too (no replay after exit).
       setTimeout(() => {
         const cur = SESSIONS.get(id);
         if (cur && cur.exited) SESSIONS.delete(id);
-      }, 1000);
+      }, 50);
     });
     return { ok: true, pid: p.pid };
   } catch (e) {
@@ -183,6 +184,11 @@ function handle(msg, sock) {
       sock.write(JSON.stringify({ type: "subscribed", id: msg.id }) + "\n");
       break;
     }
+    case "unsubscribe": {
+      const s = SESSIONS.get(msg.id);
+      if (s) s.subs = Math.max(0, s.subs - 1);
+      break;
+    }
     case "list": {
       const sessions = [...SESSIONS.keys()].map((id) => {
         const s = SESSIONS.get(id);
@@ -191,7 +197,17 @@ function handle(msg, sock) {
       sock.write(JSON.stringify({ type: "list-reply", sessions }) + "\n");
       break;
     }
-  }
+    case "log": {
+      const s = SESSIONS.get(msg.id);
+      if (!s) {
+        sock.write(JSON.stringify({ type: "error", id: msg.id, message: "unknown session" }) + "\n");
+        break;
+      }
+      const all = s.buffer.length ? Buffer.concat(s.buffer) : Buffer.alloc(0);
+      sock.write(JSON.stringify({ type: "log-reply", id: msg.id, data: all.toString("base64") }) + "\n");
+      break;
+    }
+}
 }
 
 // clean up socket file

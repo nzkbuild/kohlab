@@ -1,13 +1,17 @@
 import { useEffect } from "react";
+import { Toaster } from "sonner";
 import { useApp } from "./store";
 import AuthGate from "./components/AuthGate";
 import Sidebar from "./components/Sidebar";
 import WorkspaceDetail from "./components/WorkspaceDetail";
 import AgentInstaller from "./components/AgentInstaller";
+import Dashboard from "./components/Dashboard";
+import Settings from "./components/Settings";
+import CommandPalette from "./components/CommandPalette";
 import { api } from "./api";
 
 export default function App() {
-  const { authed, setAuthed, selectedId, refresh } = useApp();
+  const { authed, setAuthed, selectedId, view, refresh } = useApp();
 
   useEffect(() => {
     const key = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key");
@@ -25,20 +29,27 @@ export default function App() {
   if (!authed) return <AuthGate />;
 
   return (
-    <div className="h-full flex">
-      <Sidebar />
-      <main className="flex-1 min-w-0 flex flex-col">
-        {selectedId ? (
-          <WorkspaceDetail workspaceId={selectedId} />
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-zinc-500">
-            <div className="text-center">
-              <div className="text-lg mb-2">select a workspace</div>
-              <AgentInstaller compact />
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
+    <>
+      <CommandPalette />
+      <Toaster theme="dark" position="bottom-right" />
+      <div className="h-full flex">
+        <Sidebar />
+        <main className="flex-1 min-w-0 flex flex-col">
+          {view === "dashboard" && <Dashboard />}
+          {view === "settings" && <Settings />}
+          {view === "workspaces" &&
+            (selectedId ? (
+              <WorkspaceDetail workspaceId={selectedId} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-zinc-500">
+                <div className="text-center">
+                  <div className="text-lg mb-2">select a workspace</div>
+                  <AgentInstaller compact />
+                </div>
+              </div>
+            ))}
+        </main>
+      </div>
+    </>
   );
 }
