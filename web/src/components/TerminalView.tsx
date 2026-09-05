@@ -44,11 +44,11 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
     rightClickSelectsWord: true,
     scrollback: 10000,
     theme: {
-      background: "#05070b",
-      foreground: "#d7e0ee",
+      background: "#050505",
+      foreground: "#e4e4e7",
       cursor: "#34d399",
       selectionBackground: "rgba(52, 211, 153, 0.3)",
-      black: "#05070b",
+      black: "#050505",
       brightBlack: "#4a5568",
       red: "#f87171",
       green: "#34d399",
@@ -56,7 +56,7 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
       blue: "#60a5fa",
       magenta: "#c084fc",
       cyan: "#22d3ee",
-      white: "#d7e0ee",
+      white: "#e4e4e7",
     },
   });
   const fit = new FitAddon();
@@ -211,5 +211,5 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
     };
   }, [workspaceId, terminalId]);
 
-  return <div ref={containerRef} className="terminal-wrap h-full w-full bg-[#05070b] p-2.5" />;
+  return <div ref={containerRef} className="terminal-wrap h-full w-full bg-[#050505] p-2.5" />;
 }

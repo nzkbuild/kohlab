@@ -32,12 +32,12 @@ export default function LogView({ workspaceId }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-[#232d42] px-3 py-2 text-xs text-[#7a869c]">
+      <div className="flex items-center justify-between border-b border-[#27272a] px-3 py-2 text-xs text-[#a1a1aa]">
         <span>session log</span>
       </div>
-      <pre className="flex-1 min-h-0 overflow-auto p-3 font-mono text-xs leading-relaxed text-[#d7e0ee] whitespace-pre-wrap">
+      <pre className="flex-1 min-h-0 overflow-auto p-3 font-mono text-xs leading-relaxed text-[#e4e4e7] whitespace-pre-wrap">
         {error && <span className="text-red-400">{error}</span>}
-        {!error && !log && <span className="text-[#7a869c]">no output yet — start the workspace</span>}
+        {!error && !log && <span className="text-[#a1a1aa]">no output yet — start the workspace</span>}
         {log}
       </pre>
     </div>

@@ -54,12 +54,12 @@ export default function Onboarding() {
   };
 
   const Step = ({ n, title, active, done, children }: { n: number; title: string; active: boolean; done: boolean; children: React.ReactNode }) => (
-    <section className={`rounded-xl border p-4 transition ${active ? "border-emerald-400/50 bg-[#0f141d]" : "border-[#232d42] bg-[#0d121b]"}`}>
+    <section className={`rounded-xl border p-4 transition ${active ? "border-emerald-400/50 bg-[#111113]" : "border-[#27272a] bg-[#0d0d0f]"}`}>
       <div className="flex items-center gap-2.5 mb-3">
-        <span className={`flex size-5 items-center justify-center rounded-full text-[11px] font-bold ${done ? "bg-emerald-400 text-[#04120b]" : active ? "bg-emerald-400/20 text-emerald-400" : "bg-[#182032] text-[#7a869c]"}`}>
+        <span className={`flex size-5 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-400 text-[#06231a]" : active ? "bg-emerald-400/20 text-emerald-400" : "bg-[#1c1c1f] text-[#a1a1aa]"}`}>
           {done ? "✓" : n}
         </span>
-        <span className="text-sm font-semibold text-[#d7e0ee]">{title}</span>
+        <span className="text-sm font-semibold text-[#e4e4e7]">{title}</span>
       </div>
       <div className={active || done ? "" : "opacity-50 pointer-events-none"}>{children}</div>
     </section>
@@ -72,14 +72,14 @@ export default function Onboarding() {
           <h1 className="text-xl font-bold flex items-center gap-2">
             <Terminal size={20} className="text-emerald-400" /> get your first agent running
           </h1>
-          <p className="text-[#7a869c] text-sm mt-1">three steps — install an agent, point at a repo, launch.</p>
+          <p className="text-[#a1a1aa] text-sm mt-1">three steps — install an agent, point at a repo, launch.</p>
         </div>
 
         <Step n={1} title="Install an agent" active={!hasAgent} done={hasAgent}>
           {hasAgent ? (
             <div className="text-sm text-emerald-400">✓ {installed.join(", ")} installed</div>
           ) : (
-            <div className="text-sm text-[#7a869c] mb-3">pick one to install, or skip if you already run one.</div>
+            <div className="text-sm text-[#a1a1aa] mb-3">pick one to install, or skip if you already run one.</div>
           )}
           <AgentInstaller compact />
         </Step>
@@ -90,7 +90,7 @@ export default function Onboarding() {
               value={task}
               onChange={(e) => setTask(e.target.value)}
               placeholder="what should the agent do? e.g. fix the billing bug"
-              className="bg-[#0f141d] border border-[#232d42] rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"
+              className="bg-[#111113] border border-[#27272a] rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"
             />
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -98,14 +98,14 @@ export default function Onboarding() {
                   value={repo}
                   onChange={(e) => setRepo(e.target.value)}
                   placeholder="repo path or GitHub URL"
-                  className="w-full bg-[#0f141d] border border-[#232d42] rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"
+                  className="w-full bg-[#111113] border border-[#27272a] rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"
                 />
-                <GithubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600" />
+                <GithubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
               </div>
               <select
                 value={agent}
                 onChange={(e) => setAgent(e.target.value)}
-                className="bg-[#0f141d] border border-[#232d42] rounded-lg px-2 py-2 text-sm outline-none focus:border-emerald-400"
+                className="bg-[#111113] border border-[#27272a] rounded-lg px-2 py-2 text-sm outline-none focus:border-emerald-400"
               >
                 {installed.length ? [...installed, "sh"].map((a) => <option key={a} value={a}>{a}</option>) : <option value="sh">sh</option>}
               </select>
@@ -113,14 +113,14 @@ export default function Onboarding() {
             <button
               onClick={() => void create()}
               disabled={busy || !task.trim() || !hasAgent}
-              className="flex items-center justify-center gap-2 py-2 rounded-lg bg-emerald-400 text-[#04120b] font-semibold text-sm disabled:opacity-40 hover:brightness-110 active:scale-[0.98] transition"
+              className="flex items-center justify-center gap-2 py-2 rounded-lg bg-emerald-400 text-[#06231a] font-semibold text-sm disabled:opacity-40 hover:brightness-110 active:scale-[0.98] transition"
             >
               <Rocket size={15} weight="fill" />
               {busy ? "creating..." : "create & launch"}
             </button>
             {created && (
               <div className="rounded-lg border border-emerald-400/30 bg-emerald-400/5 p-3 text-xs flex flex-col gap-1.5">
-                <div className="text-[#7a869c]">workspace <span className="font-mono text-[#d7e0ee]">{created}</span> is open in the terminal tab. Next:</div>
+                <div className="text-[#a1a1aa]">workspace <span className="font-mono text-[#e4e4e7]">{created}</span> is open in the terminal tab. Next:</div>
                 <button onClick={() => void makeShare(created)} className="text-left text-emerald-400 hover:brightness-110 transition">
                   {share ? "share link ready — click to copy" : "get a share link"}
                 </button>
@@ -130,10 +130,10 @@ export default function Onboarding() {
         </Step>
 
         <Step n={3} title="Monitor & merge" active={false} done={false}>
-          <div className="text-sm text-[#7a869c]">after it starts, watch the terminal live and review the diff before committing.</div>
+          <div className="text-sm text-[#a1a1aa]">after it starts, watch the terminal live and review the diff before committing.</div>
         </Step>
 
-        <button onClick={() => setView("dashboard")} className="text-center text-xs text-[#7a869c] hover:text-emerald-400 transition">
+        <button onClick={() => setView("dashboard")} className="text-center text-xs text-[#a1a1aa] hover:text-emerald-400 transition">
           skip — just show the dashboard
         </button>
       </div>

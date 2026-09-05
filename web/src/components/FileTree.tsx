@@ -21,11 +21,11 @@ function TreeRow({ node, depth, path, workspaceId, onOpenFile }: {
     return (
       <>
         <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer hover:bg-[#131926] text-[13px] whitespace-nowrap"
+          className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer hover:bg-[#151517] text-[13px] whitespace-nowrap"
           style={{ paddingLeft: `${depth * 14 + 8}px` }}
           onClick={() => setOpen((v) => !v)}
         >
-          <span className="text-zinc-500 w-3 text-[10px]">{open ? "-" : "+"}</span>
+          <span className="text-zinc-400 w-3 text-xs">{open ? "-" : "+"}</span>
           <span className="text-zinc-400">{node.name}/</span>
         </div>
         {open && node.children?.map((c) => (
@@ -36,7 +36,7 @@ function TreeRow({ node, depth, path, workspaceId, onOpenFile }: {
   }
   return (
     <div
-      className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer hover:bg-[#131926] text-[13px] whitespace-nowrap text-zinc-300"
+      className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer hover:bg-[#151517] text-[13px] whitespace-nowrap text-zinc-300"
       style={{ paddingLeft: `${depth * 14 + 8}px` }}
       onClick={() => onOpenFile(full)}
     >
@@ -65,9 +65,9 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[#232d42] text-xs text-zinc-500">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[#27272a] text-xs text-zinc-400">
         <span>files</span>
-        <button onClick={() => void load()} className="px-2 py-0.5 rounded border border-[#232d42] hover:border-emerald-400 transition text-[11px]">
+        <button onClick={() => void load()} className="px-2 py-0.5 rounded border border-[#27272a] hover:border-emerald-400 transition text-xs">
           refresh
         </button>
       </div>

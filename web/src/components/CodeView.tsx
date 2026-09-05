@@ -29,7 +29,7 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#232d42] text-xs text-zinc-500">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#27272a] text-xs text-zinc-400">
         <button onClick={onBack} className="text-emerald-400 hover:underline">back</button>
         <span className="font-mono text-zinc-300">{filePath}</span>
       </div>

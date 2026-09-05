@@ -34,9 +34,9 @@ export default function Dashboard() {
   const agentNames = Object.keys(agents ?? {});
 
   const card = (label: string, value: number | string, icon: React.ReactNode, accent: string) => (
-    <div className="rounded-xl border border-[#232d42] bg-[#0f141d] p-4">
+    <div className="rounded-xl border border-[#27272a] bg-[#111113] p-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-[#7a869c]">{label}</span>
+        <span className="text-xs text-[#a1a1aa]">{label}</span>
         <span className={`rounded-md p-1.5 ${accent}`}>{icon}</span>
       </div>
       <div className="mt-2 text-2xl font-semibold">{value}</div>
@@ -56,41 +56,41 @@ export default function Dashboard() {
 
       <div className="grid lg:grid-cols-2 gap-5">
         {/* Active workspaces */}
-        <section className="rounded-xl border border-[#232d42] bg-[#0f141d]">
-          <div className="flex items-center gap-2 border-b border-[#232d42] px-4 py-2.5 text-xs text-[#7a869c]">
+        <section className="rounded-xl border border-[#27272a] bg-[#111113]">
+          <div className="flex items-center gap-2 border-b border-[#27272a] px-4 py-2.5 text-xs text-[#a1a1aa]">
             <Activity className="size-3.5" /> Workspaces
           </div>
           <div className="p-2">
-            {workspaces.length === 0 && <div className="p-4 text-sm text-[#7a869c]">no workspaces yet — create one to launch an agent</div>}
+            {workspaces.length === 0 && <div className="p-4 text-sm text-[#a1a1aa]">no workspaces yet — create one to launch an agent</div>}
             {workspaces.map((w) => (
               <button
                 key={w.id}
                 onClick={() => select(w.id)}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-[#131926] transition"
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-[#151517] transition"
               >
-                {w.running ? <PlayCircle className="size-4 shrink-0 text-emerald-400" /> : w.stopped ? <CheckCircle2 className="size-4 shrink-0 text-amber-400" /> : <Circle className="size-4 shrink-0 text-zinc-600" />}
+                {w.running ? <PlayCircle className="size-4 shrink-0 text-emerald-400" /> : w.stopped ? <CheckCircle2 className="size-4 shrink-0 text-amber-400" /> : <Circle className="size-4 shrink-0 text-zinc-400" />}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[#d7e0ee]">{w.id}</span>
-                  <span className="block truncate text-xs text-[#7a869c]">{w.task}</span>
+                  <span className="block truncate text-[#e4e4e7]">{w.id}</span>
+                  <span className="block truncate text-xs text-[#a1a1aa]">{w.task}</span>
                 </span>
-                <span className="text-xs text-[#7a869c]">{w.agent}</span>
+                <span className="text-xs text-[#a1a1aa]">{w.agent}</span>
               </button>
             ))}
           </div>
         </section>
 
         {/* Activity feed */}
-        <section className="rounded-xl border border-[#232d42] bg-[#0f141d]">
-          <div className="flex items-center gap-2 border-b border-[#232d42] px-4 py-2.5 text-xs text-[#7a869c]">
+        <section className="rounded-xl border border-[#27272a] bg-[#111113]">
+          <div className="flex items-center gap-2 border-b border-[#27272a] px-4 py-2.5 text-xs text-[#a1a1aa]">
             <CheckCircle2 className="size-3.5" /> Recent activity
           </div>
-          <div className="divide-y divide-[#131926]">
-            {activity.length === 0 && <div className="p-4 text-sm text-[#7a869c]">nothing yet</div>}
+          <div className="divide-y divide-[#151517]">
+            {activity.length === 0 && <div className="p-4 text-sm text-[#a1a1aa]">nothing yet</div>}
             {activity.map((a) => (
               <div key={a.id} className="flex items-center gap-3 px-4 py-2 text-sm">
                 <span className={`size-1.5 shrink-0 rounded-full ${a.kind === "start" ? "bg-emerald-400" : a.kind === "stop" ? "bg-amber-400" : "bg-blue-400"}`} />
-                <span className="flex-1 truncate text-[#d7e0ee]">{a.message}</span>
-                <span className="shrink-0 text-xs text-[#7a869c]">{fmtTime(a.time)}</span>
+                <span className="flex-1 truncate text-[#e4e4e7]">{a.message}</span>
+                <span className="shrink-0 text-xs text-[#a1a1aa]">{fmtTime(a.time)}</span>
               </div>
             ))}
           </div>
@@ -98,19 +98,19 @@ export default function Dashboard() {
       </div>
 
       {/* Agent availability */}
-      <section className="mt-5 rounded-xl border border-[#232d42] bg-[#0f141d]">
-        <div className="flex items-center gap-2 border-b border-[#232d42] px-4 py-2.5 text-xs text-[#7a869c]">
+      <section className="mt-5 rounded-xl border border-[#27272a] bg-[#111113]">
+        <div className="flex items-center gap-2 border-b border-[#27272a] px-4 py-2.5 text-xs text-[#a1a1aa]">
           <Cpu className="size-3.5" /> Agents on this server
         </div>
         <div className="flex flex-wrap gap-2 p-4">
-          {!agents && <span className="text-sm text-[#7a869c]">checking…</span>}
+          {!agents && <span className="text-sm text-[#a1a1aa]">checking…</span>}
           {agentNames.map((name) => (
             <span
               key={name}
               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
                 agents?.[name]
                   ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-400"
-                  : "border-[#232d42] bg-[#131926] text-[#7a869c]"
+                  : "border-[#27272a] bg-[#151517] text-[#a1a1aa]"
               }`}
             >
               <span className={`size-1.5 rounded-full ${agents?.[name] ? "bg-emerald-400" : "bg-zinc-600"}`} />

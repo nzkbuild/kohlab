@@ -70,8 +70,8 @@ export default function Sidebar() {
   };
 
   const nav = [
-    { key: "dashboard" as const, label: "Dashboard", icon: <SquaresFour className="size-5 shrink-0 text-[#7a869c] group-hover/side:text-[#d7e0ee]" /> },
-    { key: "settings" as const, label: "Settings", icon: <GearSix className="size-5 shrink-0 text-[#7a869c] group-hover/side:text-[#d7e0ee]" /> },
+    { key: "dashboard" as const, label: "Dashboard", icon: <SquaresFour className="size-5 shrink-0 text-[#a1a1aa] group-hover/side:text-[#e4e4e7]" /> },
+    { key: "settings" as const, label: "Settings", icon: <GearSix className="size-5 shrink-0 text-[#a1a1aa] group-hover/side:text-[#e4e4e7]" /> },
   ];
 
   const label = (show: boolean, children: React.ReactNode) => (
@@ -90,13 +90,13 @@ export default function Sidebar() {
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       className={cn(
-        "h-full flex flex-col bg-[#0f141d] border-r border-[#232d42] shrink-0 overflow-hidden transition-[width] duration-150",
+        "h-full flex flex-col bg-[#111113] border-r border-[#27272a] shrink-0 overflow-hidden transition-[width] duration-150",
         open ? "w-[300px]" : "w-[60px]",
       )}
     >
       {/* logo */}
-      <div className="px-3 h-12 flex items-center border-b border-[#232d42] overflow-hidden">
-        <span className={cn("grid place-items-center rounded-md bg-emerald-400 text-[#04120b]", open ? "h-6 w-6" : "h-6 w-6 mx-auto")}>
+      <div className="px-3 h-12 flex items-center border-b border-[#27272a] overflow-hidden">
+        <span className={cn("grid place-items-center rounded-md bg-emerald-400 text-[#06231a]", open ? "h-6 w-6" : "h-6 w-6 mx-auto")}>
           <TerminalWindow size={14} weight="bold" />
         </span>
         {label(open, <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>)}
@@ -110,12 +110,12 @@ export default function Sidebar() {
             onClick={() => setView(n.key)}
             title={n.label}
             className={cn(
-              "group/side flex items-center h-9 px-2 rounded-lg hover:bg-[#131926] transition overflow-hidden justify-start",
-              view === n.key && "bg-[#182032]",
+              "group/side flex items-center h-9 px-2 rounded-lg hover:bg-[#151517] transition overflow-hidden justify-start",
+              view === n.key && "bg-[#1c1c1f]",
             )}
           >
             {n.icon}
-            {label(open, <span className={cn("whitespace-nowrap", view === n.key ? "text-[#d7e0ee]" : "text-[#7a869c]")}>{n.label}</span>)}
+            {label(open, <span className={cn("whitespace-nowrap", view === n.key ? "text-[#e4e4e7]" : "text-[#a1a1aa]")}>{n.label}</span>)}
           </button>
         ))}
       </div>
@@ -125,7 +125,7 @@ export default function Sidebar() {
         <button
           onClick={() => { setShowForm((v) => !v); setOpen(true); }}
           title="new workspace"
-          className="w-full flex items-center justify-start h-9 px-2 rounded-lg bg-emerald-400 text-[#04120b] font-semibold hover:brightness-110 active:scale-[0.98] transition overflow-hidden"
+          className="w-full flex items-center justify-start h-9 px-2 rounded-lg bg-emerald-400 text-[#06231a] font-semibold hover:brightness-110 active:scale-[0.98] transition overflow-hidden"
         >
           <Plus className={cn("size-5 shrink-0", open ? "" : "mx-auto")} />
           {label(open, <span className="whitespace-nowrap text-sm">new workspace</span>)}
@@ -134,13 +134,13 @@ export default function Sidebar() {
 
       {/* create form */}
       {showForm && open && (
-        <form onSubmit={create} className="mx-2 mb-2 p-3 rounded-xl bg-[#131926] border border-[#232d42] flex flex-col gap-2">
+        <form onSubmit={create} className="mx-2 mb-2 p-3 rounded-xl bg-[#151517] border border-[#27272a] flex flex-col gap-2">
           <input
             value={task}
             onChange={(e) => setTask(e.target.value)}
             placeholder="task description"
             required
-            className="bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+            className="bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
           />
           {ghAuthed && ghRepos.length > 0 && (
             <select
@@ -149,7 +149,7 @@ export default function Sidebar() {
                 const ownerRepo = e.target.value.split("\t")[0];
                 if (ownerRepo) setRepo(`https://github.com/${ownerRepo}.git`);
               }}
-              className="bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+              className="bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
             >
               <option value="">choose a GitHub repo</option>
               {ghRepos.map((entry) => {
@@ -159,7 +159,7 @@ export default function Sidebar() {
             </select>
           )}
           {!ghAuthed && (
-            <div className="text-[11px] text-amber-400">GitHub not connected. Run `gh auth login` on the server.</div>
+            <div className="text-xs text-amber-400">GitHub not connected. Run `gh auth login` on the server.</div>
           )}
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -167,14 +167,14 @@ export default function Sidebar() {
                 value={repo}
                 onChange={(e) => setRepo(e.target.value)}
                 placeholder="repo path or GitHub URL"
-                className="w-full bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+                className="w-full bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
               />
-              <GithubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600" />
+              <GithubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
             </div>
             <select
               value={agent}
               onChange={(e) => setAgent(e.target.value)}
-              className="bg-[#0f141d] border border-[#232d42] rounded-lg px-2 py-2 text-sm outline-none focus:border-emerald-400"
+              className="bg-[#111113] border border-[#27272a] rounded-lg px-2 py-2 text-sm outline-none focus:border-emerald-400"
             >
               {["omp", "claude", "codex", "opencode", "pi", "gemini", "sh"].map((a) => (
                 <option key={a} value={a}>{a}</option>
@@ -182,10 +182,10 @@ export default function Sidebar() {
             </select>
           </div>
           <div className="flex gap-2">
-            <input value={maxMem} onChange={(e) => setMaxMem(e.target.value)} placeholder="max mem MB" inputMode="numeric" className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
-            <input value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} placeholder="timeout s" inputMode="numeric" className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
+            <input value={maxMem} onChange={(e) => setMaxMem(e.target.value)} placeholder="max mem MB" inputMode="numeric" className="flex-1 bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
+            <input value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} placeholder="timeout s" inputMode="numeric" className="flex-1 bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
           </div>
-          <button type="submit" disabled={busy || !task} className="py-1.5 rounded-lg bg-[#1a2130] border border-[#232d42] text-sm hover:border-emerald-400 disabled:opacity-40 transition">
+          <button type="submit" disabled={busy || !task} className="py-1.5 rounded-lg bg-[#1c1c1f] border border-[#27272a] text-sm hover:border-emerald-400 disabled:opacity-40 transition">
             {busy ? "creating..." : "create"}
           </button>
         </form>
@@ -194,8 +194,8 @@ export default function Sidebar() {
       {/* workspace list */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden p-2">
         {workspaces.length === 0 && (
-          <div className={cn("text-zinc-500 text-xs text-center leading-5", open ? "px-2 mt-8" : "mt-4")}>
-            {open ? (<>no workspaces yet<br />create one to launch your first agent</>) : <span className="text-zinc-600">—</span>}
+          <div className={cn("text-zinc-400 text-xs text-center leading-5", open ? "px-2 mt-8" : "mt-4")}>
+            {open ? (<>no workspaces yet<br />create one to launch your first agent</>) : <span className="text-zinc-400">—</span>}
           </div>
         )}
         {workspaces.map((w) => (
@@ -206,14 +206,14 @@ export default function Sidebar() {
             className={cn(
               "group/side flex items-center h-9 rounded-lg cursor-pointer border border-transparent transition overflow-hidden",
               open ? "px-2 justify-start" : "px-2 justify-center",
-              w.id === selectedId ? "bg-[#182032] border-[#2c3a55]" : "hover:bg-[#131926]",
+              w.id === selectedId ? "bg-[#1c1c1f] border-[#333338]" : "hover:bg-[#151517]",
             )}
           >
             {statusDot(w)}
             {label(open, (
               <span className="flex flex-col min-w-0">
                 <span className="font-medium text-[13px] truncate">{w.id}</span>
-                <span className="text-[11px] text-zinc-500 truncate">{w.task} · {w.agent}</span>
+                <span className="text-xs text-zinc-400 truncate">{w.task} · {w.agent}</span>
               </span>
             ))}
           </div>
@@ -221,11 +221,11 @@ export default function Sidebar() {
       </nav>
 
       {/* persist footer / avatar */}
-      <div className={cn("border-t border-[#232d42] flex items-center overflow-hidden", open ? "px-3 h-11 justify-start gap-2" : "h-11 justify-center")}>
-        <div className="size-6 shrink-0 rounded-full bg-[#182032] border border-[#2c3a55] grid place-items-center">
-          <FolderOpen size={12} className="text-[#7a869c]" />
+      <div className={cn("border-t border-[#27272a] flex items-center overflow-hidden", open ? "px-3 h-11 justify-start gap-2" : "h-11 justify-center")}>
+        <div className="size-6 shrink-0 rounded-full bg-[#1c1c1f] border border-[#333338] grid place-items-center">
+          <FolderOpen size={12} className="text-[#a1a1aa]" />
         </div>
-        {label(open, <span className="text-[10px] text-zinc-600 whitespace-nowrap">workspaces persist on this server</span>)}
+        {label(open, <span className="text-xs text-zinc-400 whitespace-nowrap">workspaces persist on this server</span>)}
       </div>
     </aside>
   );

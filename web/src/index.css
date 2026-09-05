@@ -2,27 +2,27 @@
 
 :root {
   color-scheme: dark;
-  /* kohlab palette as shadcn tokens so 21st.dev components (which read
-     hsl(var(--x)) work out of the box) */
-  --background: 220 33% 6%;      /* #0a0e14 */
-  --foreground: 220 33% 92%;      /* #d7e0ee */
-  --card: 220 26% 9%;             /* #0f141d */
-  --card-foreground: 220 33% 92%;
-  --popover: 220 26% 9%;
-  --popover-foreground: 220 33% 92%;
-  --primary: 160 84% 51%;         /* emerald #34d399 */
-  --primary-foreground: 160 84% 8%;
-  --secondary: 220 26% 12%;       /* #131926 */
-  --secondary-foreground: 220 33% 85%;
-  --muted: 220 20% 14%;           /* #182032 */
-  --muted-foreground: 220 15% 55%;
-  --accent: 160 84% 51%;
-  --accent-foreground: 160 84% 8%;
-  --destructive: 0 70% 60%;
+  /* kohlab carbon palette — pure-black neutrals (no blue cast), emerald primary
+     + amber supporting accent. Tokens read by shadcn/21st components. */
+  --background: 0 0% 4%;          /* #0a0a0a carbon black */
+  --foreground: 240 6% 90%;       /* #e4e4e7 */
+  --card: 0 0% 7%;                /* #111113 */
+  --card-foreground: 240 6% 90%;
+  --popover: 0 0% 7%;
+  --popover-foreground: 240 6% 90%;
+  --primary: 160 84% 60%;         /* emerald accent */
+  --primary-foreground: 160 60% 6%;
+  --secondary: 0 0% 9%;           /* #151517 */
+  --secondary-foreground: 240 6% 90%;
+  --muted: 0 0% 9%;
+  --muted-foreground: 240 5% 65%; /* #a1a1aa — AA (7.7:1 on bg) */
+  --accent: 160 84% 60%;
+  --accent-foreground: 160 60% 6%;
+  --destructive: 0 72% 56%;
   --destructive-foreground: 0 0% 98%;
-  --border: 220 26% 20%;          /* #232d42 */
-  --input: 220 26% 20%;
-  --ring: 160 84% 51%;
+  --border: 0 0% 16%;             /* #27272a */
+  --input: 0 0% 16%;
+  --ring: 160 84% 60%;
 }
 
 html, body, #root {
@@ -40,4 +40,15 @@ body {
 /* xterm container fills its parent */
 .terminal-wrap .xterm {
   height: 100%;
+}
+
+/* reachability: comfortable base sizing + smooth focus rings for keyboard users */
+:root { font-size: 16px; }
+button, input, select, textarea, a {
+  font-size: 0.875rem; /* 14px floor for controls — WCAG target-size friendly */
+}
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 4px;
 }

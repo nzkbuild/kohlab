@@ -27,21 +27,21 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     }
   };
 
-  if (!w) return <div className="flex-1 flex items-center justify-center text-zinc-500">loading...</div>;
+  if (!w) return <div className="flex-1 flex items-center justify-center text-zinc-400">loading...</div>;
 
   return (
     <div className="flex-1 min-w-0 flex flex-col">
-      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-[#232d42] bg-[#0f141d]">
+      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-[#27272a] bg-[#111113]">
         <span className="font-semibold text-sm truncate">{w.id}</span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${w.running ? "text-emerald-400 border-emerald-400/40 bg-emerald-400/10" : "text-zinc-500 border-zinc-700"}`}>
+        <span className={`text-xs px-1.5 py-0.5 rounded-full border ${w.running ? "text-emerald-400 border-emerald-400/40 bg-emerald-400/10" : "text-zinc-400 border-zinc-700"}`}>
           {w.running ? "running" : w.stopped ? "done" : "stopped"}
         </span>
-        <span className="text-zinc-600 text-xs truncate hidden md:block">{w.path}</span>
+        <span className="text-zinc-400 text-xs truncate hidden md:block">{w.path}</span>
         <div className="flex-1" />
         <button onClick={() => void act("start")} disabled={w.running} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-400/40 text-emerald-400 text-xs disabled:opacity-35 hover:bg-emerald-400/10 transition" title="start">
           <Play size={12} weight="fill" /> start
         </button>
-        <button onClick={() => void act("restart")} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#232d42] text-xs hover:border-emerald-400 transition" title="restart">
+        <button onClick={() => void act("restart")} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#27272a] text-xs hover:border-emerald-400 transition" title="restart">
           <ArrowsClockwise size={12} /> restart
         </button>
         <button
@@ -54,7 +54,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               console.error(e);
             }
           }}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#232d42] text-xs hover:border-emerald-400 transition" title="copy share link"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#27272a] text-xs hover:border-emerald-400 transition" title="copy share link"
         >
           <ShareNetwork size={12} /> share
         </button>
@@ -73,24 +73,24 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </button>
       </div>
 
-      <div className="flex gap-1 px-2 border-b border-[#232d42] bg-[#0f141d]">
+      <div className="flex gap-1 px-2 border-b border-[#27272a] bg-[#111113]">
         {([["terminal", Terminal], ["files", Files], ["diff", GitDiff], ["log", Scroll]] as [Tab, typeof Terminal][]).map(([t, Icon]) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition ${tab === t ? "text-zinc-100 border-emerald-400" : "text-zinc-500 border-transparent hover:text-zinc-300"}`}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition ${tab === t ? "text-zinc-100 border-emerald-400" : "text-zinc-400 border-transparent hover:text-zinc-300"}`}
           >
             <Icon size={13} /> {t}
           </button>
         ))}
       </div>
       {tab === "terminal" && (
-        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[#232d42] bg-[#0a0e14] overflow-x-auto">
+        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[#27272a] bg-[#0a0a0a] overflow-x-auto">
           {terminals.map((term) => (
             <button
               key={term.id}
               onClick={() => setActiveTerminal(term.id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] border transition ${activeTerminal === term.id ? "bg-[#182032] border-[#2c3a55] text-zinc-200" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition ${activeTerminal === term.id ? "bg-[#1c1c1f] border-[#333338] text-zinc-200" : "border-transparent text-zinc-400 hover:text-zinc-300"}`}
             >
               <Terminal size={12} />
               {term.label}
@@ -112,7 +112,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
               setActiveTerminal(id);
             }}
-            className="p-1 rounded text-zinc-500 hover:text-emerald-400 hover:bg-[#131926] transition"
+            className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-[#151517] transition"
             title="new terminal"
           >
             <Plus size={13} />
@@ -125,7 +125,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         {tab === "files" && <BrowseView workspaceId={workspaceId} />}
         {tab === "log" && <LogView workspaceId={workspaceId} />}
         {tab === "diff" && (
-          <Suspense fallback={<div className="p-4 text-zinc-500 text-sm">loading diff...</div>}>
+          <Suspense fallback={<div className="p-4 text-zinc-400 text-sm">loading diff...</div>}>
             <DiffView workspaceId={workspaceId} />
           </Suspense>
         )}

@@ -132,10 +132,10 @@ export function CommandPalette() {
         <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/60" />
         <Dialog.Content
           aria-label="Command palette"
-          className="fixed z-[101] inset-x-2 top-[15vh] mx-auto w-[min(640px,100%-16px)] rounded-xl border border-[#232d42] bg-[#0f141d] shadow-2xl outline-none"
+          className="fixed z-[101] inset-x-2 top-[15vh] mx-auto w-[min(640px,100%-16px)] rounded-xl border border-[#27272a] bg-[#111113] shadow-2xl outline-none"
         >
-          <div className="flex items-center gap-2 border-b border-[#232d42] px-3 py-2.5">
-            <Search className="size-4 text-[#7a869c]" />
+          <div className="flex items-center gap-2 border-b border-[#27272a] px-3 py-2.5">
+            <Search className="size-4 text-[#a1a1aa]" />
             <input
               autoFocus
               value={query}
@@ -156,11 +156,11 @@ export function CommandPalette() {
                 }
               }}
               placeholder="Search workspaces or run a command…"
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#7a869c]"
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#a1a1aa]"
             />
-            <kbd className="rounded bg-[#182032] px-1.5 py-0.5 text-[10px] text-[#7a869c]">⌘K</kbd>
+            <kbd className="rounded bg-[#1c1c1f] px-1.5 py-0.5 text-xs text-[#a1a1aa]">⌘K</kbd>
             <Dialog.Close asChild>
-              <button className="rounded p-1 text-[#7a869c] hover:bg-[#182032] hover:text-[#d7e0ee]">
+              <button className="rounded p-1 text-[#a1a1aa] hover:bg-[#1c1c1f] hover:text-[#e4e4e7]">
                 <X className="size-4" />
               </button>
             </Dialog.Close>
@@ -168,13 +168,13 @@ export function CommandPalette() {
 
           <div className="max-h-[60vh] overflow-y-auto p-1.5">
             {filtered.length === 0 && (
-              <div className="flex items-center justify-center gap-2 px-3 py-8 text-sm text-[#7a869c]">
+              <div className="flex items-center justify-center gap-2 px-3 py-8 text-sm text-[#a1a1aa]">
                 <Loader2 className="size-3 animate-spin" /> no matches
               </div>
             )}
             {[...groups.entries()].map(([group, items]) => (
               <div key={group} className="py-1">
-                <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-[#7a869c]">{group}</div>
+                <div className="px-3 py-1 text-xs uppercase tracking-wider text-[#a1a1aa]">{group}</div>
                 {items.map((item) => {
                   const globalIdx = filtered.indexOf(item);
                   return (
@@ -185,15 +185,15 @@ export function CommandPalette() {
                       className={cn(
                         "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors",
                         globalIdx === activeIndex
-                          ? "bg-[#182032] text-[#d7e0ee]"
-                          : "text-[#7a869c] hover:bg-[#131926] hover:text-[#d7e0ee]",
+                          ? "bg-[#1c1c1f] text-[#e4e4e7]"
+                          : "text-[#a1a1aa] hover:bg-[#151517] hover:text-[#e4e4e7]",
                       )}
                     >
                       <span className="shrink-0">{item.icon}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate">{item.label}</span>
                         {item.subtitle && (
-                          <span className="block truncate text-xs text-[#7a869c]">{item.subtitle}</span>
+                          <span className="block truncate text-xs text-[#a1a1aa]">{item.subtitle}</span>
                         )}
                       </span>
                       {item.group === "Running" && <span className="size-1.5 shrink-0 rounded-full bg-[#34d399]" />}
@@ -204,7 +204,7 @@ export function CommandPalette() {
             ))}
           </div>
 
-          <div className="flex items-center gap-4 border-t border-[#232d42] px-3 py-2 text-xs text-[#7a869c]">
+          <div className="flex items-center gap-4 border-t border-[#27272a] px-3 py-2 text-xs text-[#a1a1aa]">
             <span className="flex items-center gap-1">
               <CornerDownLeft className="size-3" /> select
             </span>
