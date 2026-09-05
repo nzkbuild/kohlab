@@ -32,6 +32,7 @@ The hardening + frontend-experience follow-up. Finishes the v1.4.0 plan's fronte
 - **Settings** — agent management + server info in one place.
 - **Session log view** — live tail of a workspace's main-session output.
 - **Scrollback persistence** — xterm instances are cached (bounded) so scrollback and fit survive tab switches and remounts.
+- **Terminal reconnect with backoff** — exponential backoff (500ms → 10s cap) resets on successful connect, and a drop announces "disconnected" once instead of spamming each retry.
 - **Image upload** — paste/send a PNG/JPEG/GIF/WebP into a workspace's terminal.
 
 ## [1.4.0] - 2026-08-25

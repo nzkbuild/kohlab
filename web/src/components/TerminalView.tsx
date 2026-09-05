@@ -160,24 +160,27 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
       }
     };
 
+    const attemptRef = { current: 0 };
+
     const connect = () => {
       if (!mountedRef.current) return;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       ws.onopen = () => {
+        attemptRef.current = 0; // reset backoff on a successful connect
         ws.send(JSON.stringify({ type: "attach", id: workspaceId, terminalId }));
         sendResize();
       };
       ws.onmessage = (ev) => term.write(ev.data as string);
       ws.onclose = () => {
         if (!mountedRef.current) return;
-        term.write("\r\n\x1b[90m[disconnected — retrying]\x1b[0m\r\n");
+        // only announce on the first drop; later retries stay silent
+        if (attemptRef.current === 0) term.write("\r\n\x1b[90m[disconnected — retrying]\x1b[0m\r\n");
         wsRef.current = null;
-        retryRef.current = setTimeout(connect, Math.min(500 * (attemptRef.current++), MAX_RETRY_MS));
+        const delay = Math.min(500 * Math.pow(2, attemptRef.current++), MAX_RETRY_MS);
+        retryRef.current = setTimeout(connect, delay);
       };
     };
-
-    const attemptRef = { current: 0 };
     const sendResize = () => {
       try {
         fit.fit();
