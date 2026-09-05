@@ -34,6 +34,11 @@ function b64(buf) {
   return Buffer.from(buf).toString("base64");
 }
 
+// POSIX shell-quote a single argv token (for the `sh -c` limits wrapper).
+function quote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
 function killTree(pid, signal) {
   // Snapshot the table ONCE, synchronously, before anything dies.
   let table = [];
@@ -67,14 +72,28 @@ function killTree(pid, signal) {
   try { process.kill(-pid, signal); } catch {}
 }
 
-function openSession(id, cwd, cmd, env, cols, rows, meta) {
+function openSession(id, cwd, cmd, env, cols, rows, meta, limits) {
   if (SESSIONS.has(id)) {
     const existing = SESSIONS.get(id);
     if (existing.exited) SESSIONS.delete(id);
     else return { error: `session already exists: ${id}` };
   }
+  // apply resource caps: `timeout` for wall-clock; a wrapper shell applies
+  // `ulimit -d` (memory, RLIMIT_DATA — constrains Node's heap, unlike -v which
+  // Node's V8 reservation bypasses) and `ulimit -u` (max procs) before exec'ing.
+  const lim = limits || {};
+  let argv = cmd;
+  if (lim.maxMemoryMb || lim.maxProcs) {
+    let preamble = "";
+    if (lim.maxMemoryMb) preamble += `ulimit -d ${Math.floor(lim.maxMemoryMb * 1024)}; `;
+    if (lim.maxProcs) preamble += `ulimit -u ${Math.floor(lim.maxProcs)}; `;
+    argv = ["sh", "-c", `${preamble}exec ${cmd.map(quote).join(" ")}`];
+  }
+  if (lim.timeoutSec) {
+    argv = ["timeout", String(Math.floor(lim.timeoutSec)), ...argv];
+  }
   try {
-    const p = pty.spawn(cmd[0], cmd.slice(1), {
+    const p = pty.spawn(argv[0], argv.slice(1), {
       name: "xterm-256color",
       cols: cols || 80,
       rows: rows || 24,
@@ -142,7 +161,7 @@ const server = net.createServer((sock) => {
 function handle(msg, sock) {
   switch (msg.type) {
     case "open": {
-      const r = openSession(msg.id, msg.cwd, msg.cmd, msg.env, msg.cols, msg.rows, msg.meta);
+      const r = openSession(msg.id, msg.cwd, msg.cmd, msg.env, msg.cols, msg.rows, msg.meta, msg.limits);
       sock.write(JSON.stringify({ type: "open-result", id: msg.id, ...r }) + "\n");
       break;
     }

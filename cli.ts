@@ -28,11 +28,21 @@ async function main() {
   switch (cmd) {
     case "new": {
       const [repo, task, agent = "sh"] = args;
-      if (!repo || !task) usage("new <repo> <task> [agent] [--branch b] [--payload '...']");
+      if (!repo || !task) usage("new <repo> <task> [agent] [--branch b] [--payload '...'] [--timeout sec] [--max-mem mb] [--max-procs n]");
       const branch = flag(args, "--branch");
       const payload = flag(args, "--payload");
-      const ws = await createWorkspace({ repo, task, agent, branch, payload });
+      const timeoutSec = flag(args, "--timeout");
+      const maxMemoryMb = flag(args, "--max-mem");
+      const maxProcs = flag(args, "--max-procs");
+      const limits: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } = {};
+      if (timeoutSec) limits.timeoutSec = Number(timeoutSec);
+      if (maxMemoryMb) limits.maxMemoryMb = Number(maxMemoryMb);
+      if (maxProcs) limits.maxProcs = Number(maxProcs);
+      const ws = await createWorkspace({ repo, task, agent, branch, payload, limits: Object.keys(limits).length ? limits : undefined });
       console.log(`created ${ws.id} at ${ws.path}`);
+      if (limits.timeoutSec || limits.maxMemoryMb || limits.maxProcs) {
+        console.log(`limits: ${[limits.timeoutSec && `${limits.timeoutSec}s`, limits.maxMemoryMb && `${limits.maxMemoryMb}MB`, limits.maxProcs && `${limits.maxProcs} procs`].filter(Boolean).join(", ")}`);
+      }
       console.log(`start it: kohlab start ${ws.id}`);
       break;
     }
@@ -190,7 +200,7 @@ function flag(args: string[], name: string): string | undefined {
 function usage(extra?: string) {
   if (extra) console.error(`usage: kohlab ${extra}\n`);
   console.log(`kohlab — coding-agent workspaces
-  kohlab new <repo> <task> [agent] [--branch b] [--payload '...']  create a worktree workspace
+  kohlab new <repo> <task> [agent] [--branch b] [--payload '...'] [--timeout s] [--max-mem mb] [--max-procs n]  create a worktree workspace
   kohlab ls                                                         list workspaces
   kohlab start|stop|restart <id>                                    control a workspace
   kohlab diff <id>                                                  show uncommitted diff

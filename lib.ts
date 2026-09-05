@@ -2,7 +2,7 @@
 // State lives in $WORKS_DIR/state.json. Sessions are node-pty sessions
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
-import type { Workspace, User, Role } from "./types";
+import type { Workspace, User, Role, WorkspaceLimits } from "./types";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, readFile, realpath, rm, stat, writeFile, appendFile } from "fs/promises";
 import { basename, join } from "path";
@@ -585,6 +585,7 @@ export async function createWorkspace(opts: {
   agent: string;
   branch?: string;
   payload?: string;
+  limits?: WorkspaceLimits;
 }): Promise<Workspace & { running: boolean; path: string }> {
   const repo = await findRepoRoot(opts.repo);
   if (!repo) throw new Error(`not a git repo: ${opts.repo}`);
@@ -604,6 +605,7 @@ export async function createWorkspace(opts: {
       started: null,
       stopped: null,
       payload: opts.payload,
+      limits: opts.limits,
     };
     s.workspaces.push(w);
     return w;
@@ -663,7 +665,7 @@ export async function startWorkspace(id: string) {
   const sessId = sessionId(id);
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
     "open",
-    { id: sessId, cwd: worktreePath(ws), cmd, cols: 120, rows: 36, meta: { workspace: id, terminal: "main" } },
+    { id: sessId, cwd: worktreePath(ws), cmd, cols: 120, rows: 36, meta: { workspace: id, terminal: "main" }, limits: ws.limits ?? {} },
     "open-result",
   );
   if (res.error) throw new Error(res.error);

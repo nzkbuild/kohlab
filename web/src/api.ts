@@ -54,9 +54,9 @@ export const api = {
   },
   workspaces: () => json<Workspace[]>("/api/workspaces"),
   agentsStatus: () => json<AgentStatus>("/api/agents-status"),
-  create: (body: { task: string; repo?: string; agent: string; branch?: string }) =>
+  create: (body: { task: string; repo?: string; agent: string; branch?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-  clone: (body: { url: string; task: string; agent: string }) =>
+  clone: (body: { url: string; task: string; agent: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   action: (id: string, action: string) =>
     json<Workspace>(`/api/workspaces/${id}/${action}`, { method: "POST" }),

@@ -20,6 +20,8 @@ export default function Sidebar() {
   const [showForm, setShowForm] = useState(false);
   const [ghRepos, setGhRepos] = useState<string[]>([]);
   const [ghAuthed, setGhAuthed] = useState(false);
+  const [maxMem, setMaxMem] = useState("");
+  const [timeout, setTimeoutSec] = useState("");
 
   useEffect(() => {
     void refresh();
@@ -42,10 +44,12 @@ export default function Sidebar() {
     setBusy(true);
     try {
       const isUrl = /^https?:\/\//.test(repo.trim());
+      const limits = { timeoutSec: timeout ? Number(timeout) : undefined, maxMemoryMb: maxMem ? Number(maxMem) : undefined };
+      const anyLimit = limits.timeoutSec || limits.maxMemoryMb;
       const w = await withToast("Creating workspace", async () =>
         isUrl
-          ? api.clone({ url: repo.trim(), task: task.trim(), agent })
-          : api.create({ task: task.trim(), repo: repo.trim() || undefined, agent }),
+          ? api.clone({ url: repo.trim(), task: task.trim(), agent, limits: anyLimit ? limits : undefined })
+          : api.create({ task: task.trim(), repo: repo.trim() || undefined, agent, limits: anyLimit ? limits : undefined }),
       );
       setTask("");
       await refresh();
@@ -139,6 +143,22 @@ export default function Sidebar() {
                 <option key={a} value={a}>{a}</option>
               ))}
             </select>
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={maxMem}
+              onChange={(e) => setMaxMem(e.target.value)}
+              placeholder="max mem MB (optional)"
+              inputMode="numeric"
+              className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+            />
+            <input
+              value={timeout}
+              onChange={(e) => setTimeoutSec(e.target.value)}
+              placeholder="timeout s (optional)"
+              inputMode="numeric"
+              className="flex-1 bg-[#0f141d] border border-[#232d42] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+            />
           </div>
           <button
             type="submit"

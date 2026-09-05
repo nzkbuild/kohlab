@@ -57,7 +57,7 @@ startWatcher();
 
 async function handleClone(req: Request): Promise<Response> {
   try {
-    const body = (await req.json()) as { url?: string; task?: string; agent?: string; payload?: string };
+    const body = (await req.json()) as { url?: string; task?: string; agent?: string; payload?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } };
     const url = (body.url ?? "").trim();
     const task = (body.task ?? "work on " + url).trim();
     if (!url) return json({ error: "url is required" }, 400);
@@ -71,7 +71,7 @@ async function handleClone(req: Request): Promise<Response> {
       p.on("error", reject);
       p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git clone failed (${code})`))));
     });
-    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", payload: body.payload });
+    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits });
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -106,12 +106,13 @@ async function handleCreate(req: Request): Promise<Response> {
     agent?: string;
     branch?: string;
     payload?: string;
+    limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number };
   };
   const task = (body.task ?? "").trim();
   if (!task) return json({ error: "task is required" }, 400);
   const repo = (body.repo ?? cwd()).trim();
   try {
-    const ws = await createWorkspace({ repo, task, agent: body.agent ?? "sh", branch: body.branch, payload: body.payload });
+    const ws = await createWorkspace({ repo, task, agent: body.agent ?? "sh", branch: body.branch, payload: body.payload, limits: body.limits });
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -458,6 +459,7 @@ async function ensurePtySession(id: string, terminalId = "main") {
     cols: 120,
     rows: 36,
     meta: { workspace: id, terminal: terminalId },
+    limits: ws.limits ?? {},
   });
   if (ws.payload && terminalId === "main") {
     await ptySend({ type: "input", id: sessId, data: Buffer.from(ws.payload + "\r").toString("base64") });

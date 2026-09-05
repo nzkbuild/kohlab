@@ -10,6 +10,19 @@ Kohlab's versioning philosophy:
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
 
+## [1.7.0] - 2026-09-05
+
+The shared-box safety release. Per-workspace resource caps.
+
+- **Resource caps** — workspaces carry optional `limits` (`timeoutSec`, `maxMemoryMb`, `maxProcs`), applied at agent spawn via `timeout` + `ulimit -d`/`-u` in `pty-daemon.cjs`.
+- **Wall-clock timeout** — a `--timeout <sec>` cap kills a runaway agent and cleans its process tree.
+- **Memory cap** — `--max-mem <mb>` uses `ulimit -d` (RLIMIT_DATA), which actually constrains Node agents' heap (unlike `-v`, which V8's address-space reservation bypasses).
+- **Process cap** — `--max-procs <n>` via `ulimit -u`.
+- **CLI + UI** — `kohlab new … --timeout/--max-mem/--max-procs`; the dashboard create form gains max-mem + timeout fields.
+- **Docs** — `docs/resource-limits.md`.
+
+Full plan: ROADMAP.md
+
 ## [1.6.0] - 2026-09-05
 
 The team release. Named users, roles, and an audit trail — still JSON files, no database.
