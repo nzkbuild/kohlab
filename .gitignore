@@ -7,3 +7,6 @@ node_modules/
 
 # OS / editor
 .DS_Store
+
+# local-only planning (not for GitHub)
+ROADMAP.md
