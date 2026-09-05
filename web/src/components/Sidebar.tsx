@@ -85,21 +85,25 @@ export default function Sidebar() {
     </span>
   );
 
+  // `open` is the hover state; `expanded` pins it open while the create form is
+  // visible so a transient mouse-leave can't collapse the form mid-typing.
+  const expanded = open || showForm;
+
   return (
     <aside
       onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseLeave={() => { if (!showForm) setOpen(false); }}
       className={cn(
         "h-full flex flex-col bg-[#111113] border-r border-[#27272a] shrink-0 overflow-hidden transition-[width] duration-150",
-        open ? "w-[300px]" : "w-[60px]",
+        expanded ? "w-[300px]" : "w-[60px]",
       )}
     >
       {/* logo */}
       <div className="px-3 h-12 flex items-center border-b border-[#27272a] overflow-hidden">
-        <span className={cn("grid place-items-center rounded-md bg-emerald-400 text-[#06231a]", open ? "h-6 w-6" : "h-6 w-6 mx-auto")}>
+        <span className={cn("grid place-items-center rounded-md bg-emerald-400 text-[#06231a]", expanded ? "h-6 w-6" : "h-6 w-6 mx-auto")}>
           <TerminalWindow size={14} weight="bold" />
         </span>
-        {label(open, <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>)}
+        {label(expanded, <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>)}
       </div>
 
       {/* nav icons */}
@@ -115,7 +119,7 @@ export default function Sidebar() {
             )}
           >
             {n.icon}
-            {label(open, <span className={cn("whitespace-nowrap", view === n.key ? "text-[#e4e4e7]" : "text-[#a1a1aa]")}>{n.label}</span>)}
+            {label(expanded, <span className={cn("whitespace-nowrap", view === n.key ? "text-[#e4e4e7]" : "text-[#a1a1aa]")}>{n.label}</span>)}
           </button>
         ))}
       </div>
@@ -127,13 +131,13 @@ export default function Sidebar() {
           title="new workspace"
           className="w-full flex items-center justify-start h-9 px-2 rounded-lg bg-emerald-400 text-[#06231a] font-semibold hover:brightness-110 active:scale-[0.98] transition overflow-hidden"
         >
-          <Plus className={cn("size-5 shrink-0", open ? "" : "mx-auto")} />
-          {label(open, <span className="whitespace-nowrap text-sm">new workspace</span>)}
+          <Plus className={cn("size-5 shrink-0", expanded ? "" : "mx-auto")} />
+          {label(expanded, <span className="whitespace-nowrap text-sm">new workspace</span>)}
         </button>
       </div>
 
       {/* create form */}
-      {showForm && open && (
+      {showForm && expanded && (
         <form onSubmit={create} className="mx-2 mb-2 p-3 rounded-xl bg-[#151517] border border-[#27272a] flex flex-col gap-2">
           <input
             value={task}
@@ -194,8 +198,8 @@ export default function Sidebar() {
       {/* workspace list */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden p-2">
         {workspaces.length === 0 && (
-          <div className={cn("text-zinc-400 text-xs text-center leading-5", open ? "px-2 mt-8" : "mt-4")}>
-            {open ? (<>no workspaces yet<br />create one to launch your first agent</>) : <span className="text-zinc-400">—</span>}
+          <div className={cn("text-zinc-400 text-xs text-center leading-5", expanded ? "px-2 mt-8" : "mt-4")}>
+            {expanded ? (<>no workspaces yet<br />create one to launch your first agent</>) : <span className="text-zinc-400">—</span>}
           </div>
         )}
         {workspaces.map((w) => (
@@ -205,12 +209,12 @@ export default function Sidebar() {
             title={w.id}
             className={cn(
               "group/side flex items-center h-9 rounded-lg cursor-pointer border border-transparent transition overflow-hidden",
-              open ? "px-2 justify-start" : "px-2 justify-center",
+              expanded ? "px-2 justify-start" : "px-2 justify-center",
               w.id === selectedId ? "bg-[#1c1c1f] border-[#333338]" : "hover:bg-[#151517]",
             )}
           >
             {statusDot(w)}
-            {label(open, (
+            {label(expanded, (
               <span className="flex flex-col min-w-0">
                 <span className="font-medium text-[13px] truncate">{w.id}</span>
                 <span className="text-xs text-zinc-400 truncate">{w.task} · {w.agent}</span>
@@ -221,11 +225,11 @@ export default function Sidebar() {
       </nav>
 
       {/* persist footer / avatar */}
-      <div className={cn("border-t border-[#27272a] flex items-center overflow-hidden", open ? "px-3 h-11 justify-start gap-2" : "h-11 justify-center")}>
+      <div className={cn("border-t border-[#27272a] flex items-center overflow-hidden", expanded ? "px-3 h-11 justify-start gap-2" : "h-11 justify-center")}>
         <div className="size-6 shrink-0 rounded-full bg-[#1c1c1f] border border-[#333338] grid place-items-center">
           <FolderOpen size={12} className="text-[#a1a1aa]" />
         </div>
-        {label(open, <span className="text-xs text-zinc-400 whitespace-nowrap">workspaces persist on this server</span>)}
+        {label(expanded, <span className="text-xs text-zinc-400 whitespace-nowrap">workspaces persist on this server</span>)}
       </div>
     </aside>
   );
