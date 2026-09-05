@@ -16,6 +16,10 @@ import {
   loadState,
   saveState,
   WORKS_DIR,
+  listUsers,
+  addUser,
+  removeUser,
+  readAudit,
 } from "./lib";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -114,6 +118,44 @@ async function main() {
       console.log(`auto-start on reboot: docs/systemd.md`);
       break;
     }
+    case "user": {
+      if (args[0] === "add") {
+        const id = args[1];
+        const name = flag(args, "--name") ?? id;
+        const role = flag(args, "--role") ?? "member";
+        if (!id) usage("user add <id> [--name 'Name'] [--role owner|member|viewer]");
+        if (!["owner", "member", "viewer"].includes(role)) usage("role must be owner|member|viewer");
+        try {
+          const { key } = await addUser({ id, name, role: role as "owner" | "member" | "viewer" });
+          console.log(`created user '${id}' (${role})`);
+          console.log(`key (shown once — store it now): ${key}`);
+        } catch (e) {
+          console.error((e as Error).message);
+          process.exit(1);
+        }
+        break;
+      }
+      if (args[0] === "rm") {
+        if (!args[1]) usage("user rm <id>");
+        await removeUser(args[1]);
+        console.log(`removed user '${args[1]}'`);
+        break;
+      }
+      // list (default)
+      const users = listUsers();
+      if (users.length === 0) console.log("no users yet. add one: kohlab user add <id>");
+      for (const u of users) console.log(`${u.id.padEnd(16)} ${u.role.padEnd(8)} ${u.name}`);
+      break;
+    }
+    case "audit": {
+      const limitStr = flag(args, "--limit");
+      const events = await readAudit(limitStr ? Number(limitStr) : 200);
+      for (const e of events) {
+        const when = new Date(e.t).toISOString().slice(11, 19);
+        console.log(`${when}  ${e.user.padEnd(12)} ${e.action.padEnd(12)} ${e.id ?? ""} ${e.detail ?? ""}`);
+      }
+      break;
+    }
     case "help":
     case undefined:
       // bare `kohlab` → open the dashboard (browser as the app)
@@ -158,6 +200,10 @@ function usage(extra?: string) {
   kohlab server                                                     run the web dashboard server
   kohlab open                                                       print dashboard URL + tunnel
   kohlab install                                                    check deps + show setup steps
+  kohlab user add <id> [--name 'N'] [--role R]                       add a team member (owner|member|viewer)
+  kohlab user rm <id>                                                revoke a teammate
+  kohlab user                                                        list users
+  kohlab audit                                                       show the mutation audit trail
 state: ${WORKS_DIR}`);
   process.exit(extra ? 1 : 0);
 }

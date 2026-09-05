@@ -11,3 +11,13 @@ export interface Workspace {
   /** read-only share token; link is <host>/?share=<token> */
   share?: string;
 }
+
+export type Role = "owner" | "member" | "viewer";
+
+export interface User {
+  id: string;
+  name: string;
+  /** SHA-256 hex of the user's key. Plaintext is never stored. */
+  key: string;
+  role: Role;
+}

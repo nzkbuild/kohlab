@@ -21,8 +21,13 @@ import {
   notifyWebhook,
   shareWorkspace,
   workspaceByShare,
-  authorized,
   authRequired,
+  authenticate,
+  listUsers,
+  addUser,
+  removeUser,
+  audit,
+  readAudit,
   loadState,
   ptySend,
   ptyLog,
@@ -233,6 +238,44 @@ async function walkDir(dir: string, depth: number): Promise<{ name: string; type
   return out;
 }
 
+/** List users (keys never exposed), owner-only. */
+async function handleUsersList(): Promise<Response> {
+  return json({ users: listUsers().map((u) => ({ id: u.id, name: u.name, role: u.role })) });
+}
+
+/** Create a user; the plaintext key is returned exactly once. owner-only. */
+async function handleUserAdd(req: Request): Promise<Response> {
+  const body = (await req.json()) as { id?: string; name?: string; role?: string };
+  const id = (body.id ?? "").trim();
+  const name = (body.name ?? "").trim();
+  const role = (body.role ?? "member");
+  if (!id || !name) return json({ error: "id and name are required" }, 400);
+  if (!["owner", "member", "viewer"].includes(role)) return json({ error: "role must be owner|member|viewer" }, 400);
+  try {
+    const { user, key } = await addUser({ id, name, role: role as "owner" | "member" | "viewer" });
+    return json({ user: { id: user.id, name: user.name, role: user.role }, key });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** Revoke a user. owner-only. */
+async function handleUserRemove(id: string): Promise<Response> {
+  try {
+    await removeUser(id);
+    return json({ ok: true });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** Tail the audit log. owner/member. */
+async function handleAudit(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const limit = Number(url.searchParams.get("limit") ?? 200);
+  return json({ events: await readAudit(limit) });
+}
+
 /** Check which agent CLIs are installed on the host. */
 async function handleAgentsStatus(): Promise<Response> {
   const names = ["omp", "claude", "codex", "opencode", "pi", "gemini"];
@@ -429,59 +472,101 @@ const server = serve({
   fetch: async (req, server) => {
     const url = new URL(req.url);
     const path = url.pathname;
-    const isStatic = !path.startsWith("/api") && !req.headers.get("upgrade");
     const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|files|file|image|share|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
-    // WebSocket upgrade: terminal proxy + push — require the key.
+    // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
+    const auth = path.startsWith("/api") ? await authenticate(req) : null;
+    const denied = !auth && authRequired();
+    const actor = auth ? (auth.kind === "user" ? auth.id : auth.kind === "legacy" ? "legacy" : auth.kind === "share" ? "share" : "anonymous") : "anonymous";
+    const role: string | null = auth && (auth.kind === "user" || auth.kind === "legacy") ? auth.role : null;
+    const canMutate = !denied && ((role === "owner" || role === "member") || auth?.kind === "anonymous");
+    const isOwner = !denied && (role === "owner" || auth?.kind === "anonymous");
+
+    // WebSocket upgrade: terminal proxy + push — require auth.
     if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (denied) return json({ error: "unauthorized" }, 401);
       if (server.upgrade(req)) return undefined;
     }
 
     if (m) {
       const [, id, action] = m;
       const shareReadOnly = action === "diff" || action === "files" || action === "file" || action === "log";
-      if (!(shareReadOnly && shareIdRes === id) && !authorized(req)) {
-        return json({ error: "unauthorized — set ?key= or Authorization: Bearer" }, 401);
+      // share-token access to this workspace is read-only
+      if (shareIdRes === id && shareReadOnly) {
+        switch (action) {
+          case "diff": return handleDiff(id);
+          case "files": return handleFiles(id);
+          case "file": return handleFile(id, req);
+          case "log": return handleLog(id);
+        }
+      }
+      const readOnly = action === "diff" || action === "files" || action === "file" || action === "log";
+      if (readOnly) {
+        if (denied) return json({ error: "unauthorized" }, 401);
+      } else if (!canMutate) {
+        return json({ error: "forbidden — viewer cannot " + action }, 403);
       }
       switch (action) {
-        case "start": return handleStart(id);
-        case "stop": return handleStop(id);
-        case "restart": return handleRestart(id);
-        case "delete": return handleDelete(id);
-        case "commit": return handleCommit(id, req);
+        case "start": void audit(actor, "start", id); return handleStart(id);
+        case "stop": void audit(actor, "stop", id); return handleStop(id);
+        case "restart": void audit(actor, "restart", id); return handleRestart(id);
+        case "delete": void audit(actor, "delete", id); return handleDelete(id);
+        case "commit": void audit(actor, "commit", id); return handleCommit(id, req);
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
         case "log": return handleLog(id);
         case "image":
           if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+          void audit(actor, "image", id);
           return handleImageUpload(id, req);
-        case "share": return handleShare(id);
+        case "share": void audit(actor, "share", id); return handleShare(id);
       }
     }
 
     if (path === "/api/auth/required") {
       return json({ required: authRequired() });
     }
+    if (path === "/api/users" && req.method === "GET") {
+      if (!isOwner) return json({ error: "forbidden" }, 403);
+      return handleUsersList();
+    }
+    if (path === "/api/users" && req.method === "POST") {
+      if (!isOwner) return json({ error: "forbidden" }, 403);
+      return handleUserAdd(req);
+    }
+    if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
+      if (!isOwner) return json({ error: "forbidden" }, 403);
+      const uid = decodeURIComponent(path.split("/").pop() ?? "");
+      return handleUserRemove(uid);
+    }
+    if (path === "/api/audit") {
+      if (denied || (!(role === "owner" || role === "member") && auth?.kind !== "anonymous")) {
+        return json({ error: "forbidden" }, 403);
+      }
+      return handleAudit(req);
+    }
     if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) {
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (denied) return json({ error: "unauthorized" }, 401);
+      if (req.method === "POST") void audit(actor, "agent.add");
       return handleAgents(req);
     }
     if (path === "/api/agents/install" && req.method === "POST") {
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (!canMutate) return json({ error: "forbidden" }, 403);
+      void audit(actor, "agent.install");
       return handleAgentInstall(req);
     }
     if (path === "/api/agents-status") {
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (denied) return json({ error: "unauthorized" }, 401);
       return handleAgentsStatus();
     }
     if (path === "/api/gh/repos") {
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (denied) return json({ error: "unauthorized" }, 401);
       return handleGhRepos();
     }
     if (path === "/api/clone" && req.method === "POST") {
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (!canMutate) return json({ error: "forbidden" }, 403);
+      void audit(actor, "clone", undefined);
       return handleClone(req);
     }
     if (path === "/api/workspaces" && req.method === "GET") {
@@ -492,11 +577,11 @@ const server = serve({
         const w = list.find((x) => x.id === shareIdRes);
         return json(w ? [w] : []);
       }
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (denied) return json({ error: "unauthorized" }, 401);
       return listWorkspaces().then(json).catch((e) => json({ error: (e as Error).message }, 500));
     }
     if (path === "/api/workspaces" && req.method === "POST") {
-      if (!authorized(req)) return json({ error: "unauthorized" }, 401);
+      if (!canMutate) return json({ error: "forbidden" }, 403);
       return handleCreate(req);
     }
 

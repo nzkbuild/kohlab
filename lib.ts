@@ -2,15 +2,17 @@
 // State lives in $WORKS_DIR/state.json. Sessions are node-pty sessions
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
-import type { Workspace } from "./types";
+import type { Workspace, User, Role } from "./types";
 import { existsSync, readFileSync } from "fs";
-import { mkdir, readFile, realpath, rm, stat, writeFile } from "fs/promises";
+import { mkdir, readFile, realpath, rm, stat, writeFile, appendFile } from "fs/promises";
 import { basename, join } from "path";
 import { spawn, execFile } from "child_process";
 import { cwd } from "process";
 
 const WORKS_DIR = process.env.WORKS_DIR ?? join(cwd(), ".works");
 const STATE_FILE = join(WORKS_DIR, "state.json");
+const USERS_FILE = join(WORKS_DIR, "users.json");
+const AUDIT_FILE = join(WORKS_DIR, "audit.log");
 /** Webhook URL to hit when an agent finishes (optional). */
 const NOTIFY_WEBHOOK = process.env.NOTIFY_WEBHOOK;
 /** Interval (ms) for the completion watcher. */
@@ -20,7 +22,128 @@ const ACCESS_KEY = process.env.KOHLAB_KEY;
 
 /** True when the server is configured to require an access key. */
 export function authRequired(): boolean {
-  return !!ACCESS_KEY;
+  return !!ACCESS_KEY || usersExist();
+}
+
+/** True when at least one named user exists (users.json non-empty). */
+export function usersExist(): boolean {
+  const us = readUsers();
+  return us.length > 0;
+}
+
+/** SHA-256 hex of a key — stored, never plaintext. */
+async function hashKey(key: string): Promise<string> {
+  const bytes = new TextEncoder().encode(key);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Constant-time compare of a candidate key against a stored hash. */
+async function keyMatches(candidate: string, storedHex: string): Promise<boolean> {
+  const got = await hashKey(candidate);
+  if (got.length !== storedHex.length) return false;
+  let diff = 0;
+  for (let i = 0; i < got.length; i++) diff |= got.charCodeAt(i) ^ storedHex.charCodeAt(i);
+  return diff === 0;
+}
+
+function readUsers(): User[] {
+  if (!existsSync(USERS_FILE)) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(USERS_FILE, "utf8")) as { users?: User[] };
+    return parsed.users ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeUsers(users: User[]): Promise<void> {
+  await mkdir(WORKS_DIR, { recursive: true });
+  await writeFile(USERS_FILE, JSON.stringify({ users }, null, 2));
+}
+
+/** List users (keys hashed). */
+export function listUsers(): User[] {
+  return readUsers();
+}
+
+/** Create a user and return the plaintext key once (it is not stored). */
+export async function addUser(opts: { id: string; name: string; role: Role }): Promise<{ user: User; key: string }> {
+  const keyBytes = crypto.getRandomValues(new Uint8Array(24));
+  const key = [...keyBytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const users = readUsers();
+  if (users.some((u) => u.id === opts.id)) throw new Error(`user '${opts.id}' already exists`);
+  const user: User = { id: opts.id, name: opts.name, role: opts.role, key: await hashKey(key) };
+  users.push(user);
+  await writeUsers(users);
+  await audit("system", "user.add", opts.id);
+  return { user, key };
+}
+
+/** Remove a user (revoke). */
+export async function removeUser(id: string): Promise<void> {
+  const users = readUsers().filter((u) => u.id !== id);
+  await writeUsers(users);
+  await audit("system", "user.rm", id);
+}
+
+/**
+ * Resolve the actor of a request. Returns:
+ *  - { kind: "user", id, role } for a valid named user
+ *  - { kind: "legacy" } for a valid KOHLAB_KEY
+ *  - { kind: "share", id } for a valid share token (workspace-scoped read)
+ *  - { kind: "anonymous" } when no auth is configured at all
+ *  - null when auth is configured but the request fails it
+ */
+export async function authenticate(req: { headers: Headers; url: string }): Promise<
+  { kind: "user"; id: string; role: Role } | { kind: "legacy"; role: Role } | { kind: "share"; id: string } | { kind: "anonymous" } | null
+> {
+  // 1. named users first
+  const key = extractKey(req);
+  if (key) {
+    for (const u of readUsers()) {
+      if (await keyMatches(key, u.key)) return { kind: "user", id: u.id, role: u.role };
+    }
+  }
+  // 2. legacy KOHLAB_KEY
+  if (ACCESS_KEY && key) {
+    const valid = await keyMatches(key, await hashKey(ACCESS_KEY));
+    if (valid) return { kind: "legacy", role: "owner" };
+  }
+  // 3. share token is resolved separately by callers (needs the workspace id)
+  // 4. no auth configured → open
+  if (!authRequired()) return { kind: "anonymous" };
+  return null;
+}
+
+function extractKey(req: { headers: Headers; url: string }): string | null {
+  const q = new URL(req.url).searchParams.get("key");
+  if (q) return q;
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth.startsWith("Bearer ")) return auth.slice(7);
+  return null;
+}
+
+/** Append an audit event (append-only, JSON lines). Best-effort. */
+export async function audit(user: string, action: string, id?: string, detail?: string) {
+  try {
+    await mkdir(WORKS_DIR, { recursive: true });
+    const line = JSON.stringify({ t: Date.now(), user, action, id, detail });
+    await appendFile(AUDIT_FILE, line + "\n");
+  } catch {
+    /* audit is best-effort; never break the mutation over it */
+  }
+}
+
+/** Read the audit log (newest first, capped). */
+export async function readAudit(limit = 200): Promise<{ t: number; user: string; action: string; id?: string; detail?: string }[]> {
+  if (!existsSync(AUDIT_FILE)) return [];
+  const lines = readFileSync(AUDIT_FILE, "utf8").trim().split("\n").filter(Boolean);
+  return lines
+    .slice(-limit)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((x): x is { t: number; user: string; action: string; id?: string; detail?: string } => !!x)
+    .reverse();
 }
 
 /** True when no access key is configured, or the request carries the right one. */

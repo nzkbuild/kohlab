@@ -1,5 +1,6 @@
 import { Server } from "lucide-react";
 import AgentInstaller from "./AgentInstaller";
+import Team from "./Team";
 
 /** Settings: agent management + server info. */
 export default function Settings() {
@@ -30,6 +31,8 @@ export default function Settings() {
             </div>
           </dl>
         </section>
+
+        <Team />
       </div>
     </div>
   );

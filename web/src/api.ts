@@ -1,5 +1,8 @@
 import type { AgentStatus, DiffFile, TreeNode, Workspace } from "./types";
 
+export interface TeamUser { id: string; name: string; role: string; }
+export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
+
 let key = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "";
 
 export function setKey(k: string) {
@@ -70,6 +73,11 @@ export const api = {
   file: (id: string, path: string) =>
     json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
   log: (id: string) => json<{ log: string }>(`/api/workspaces/${id}/log`),
+  users: () => json<{ users: TeamUser[] }>("/api/users"),
+  addUser: (body: { id: string; name: string; role: string }) =>
+    json<{ user: TeamUser; key: string }>("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  removeUser: (id: string) => json<{ ok: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
+  audit: () => json<{ events: AuditEvent[] }>("/api/audit"),
   installAgent: (name: string, cmd: string) =>
     json<{ ok: boolean; output?: string }>("/api/agents/install", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, cmd }) }),
   ghRepos: () => json<{ ok: boolean; repos: string[]; authed: boolean }>("/api/gh/repos"),

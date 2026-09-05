@@ -10,6 +10,28 @@ Kohlab's versioning philosophy:
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
 
+## [1.6.0] - 2026-09-05
+
+The team release. Named users, roles, and an audit trail — still JSON files, no database.
+
+### Team & security
+
+- **Named users with roles** — `owner` / `member` / `viewer`, stored hashed (SHA-256) in `users.json`. A generated key is returned exactly once, never persisted or listed.
+- **Role gating** — `viewer` is read-only (watch terminals, read diffs/logs/files); `member` can create/start/stop/commit/delete and install agents; `owner` alone manages users. Mutating routes return 403 for viewers.
+- **Audit trail** — every mutation (create/start/stop/restart/delete/commit/share/user-manage/agent-install) appends one JSON line to `audit.log`, attributed to the named user. Served at `GET /api/audit` (owner/member only).
+- **Backward compatible** — a bare `KOHLAB_KEY` still works (treated as `owner`); a keyless server stays open.
+
+### CLI
+
+- `kohlab user add <id> [--name 'N'] [--role R]` — prints the key once.
+- `kohlab user rm <id>`, `kohlab user` (list), `kohlab audit`.
+
+### Frontend
+
+- Settings gains a **Team section** — list/add/revoke teammates, show the one-time key, and tail recent activity. Hidden when the caller lacks rights.
+
+Full plan: RELEASE-PLAN.md
+
 ## [1.4.1] - 2026-09-05
 
 The hardening + frontend-experience follow-up. Finishes the v1.4.0 plan's frontend half.
