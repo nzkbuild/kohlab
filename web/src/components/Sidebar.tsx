@@ -77,8 +77,8 @@ export default function Sidebar() {
   const label = (show: boolean, children: React.ReactNode) => (
     <span
       className={cn(
-        "text-sm whitespace-pre overflow-hidden transition-all duration-150",
-        show ? "opacity-100 w-auto ml-2" : "opacity-0 w-0",
+        "text-sm whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-out",
+        show ? "opacity-100 max-w-[200px] ml-2" : "opacity-0 max-w-0 ml-0",
       )}
     >
       {children}
@@ -215,9 +215,9 @@ export default function Sidebar() {
           >
             {statusDot(w)}
             {label(expanded, (
-              <span className="flex flex-col min-w-0">
-                <span className="font-medium text-[13px] truncate">{w.id}</span>
-                <span className="text-xs text-zinc-400 truncate">{w.task} · {w.agent}</span>
+              <span className="text-[13px] truncate">
+                <span className="font-medium">{w.id}</span>
+                <span className="text-zinc-400"> · {w.agent}</span>
               </span>
             ))}
           </div>
