@@ -13,6 +13,8 @@ export default function Onboarding() {
   const [repo, setRepo] = useState("");
   const [agent, setAgent] = useState("omp");
   const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState<string | null>(null);
+  const [share, setShare] = useState<string | null>(null);
 
   useEffect(() => {
     void api.agentsStatus().then((st) => setInstalled(Object.keys(st).filter((k) => st[k])));
@@ -33,10 +35,22 @@ export default function Onboarding() {
       await refresh();
       setView("workspaces");
       select(w.id);
+      setCreated(w.id);
     } catch (e) {
       console.error(e);
     }
     setBusy(false);
+  };
+
+  const makeShare = async (id: string) => {
+    try {
+      const s = await api.share(id);
+      const url = `${location.origin}/?share=${s.share}`;
+      setShare(url);
+      navigator.clipboard.writeText(url).catch(() => {});
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const Step = ({ n, title, active, done, children }: { n: number; title: string; active: boolean; done: boolean; children: React.ReactNode }) => (
@@ -104,6 +118,14 @@ export default function Onboarding() {
               <Rocket size={15} weight="fill" />
               {busy ? "creating..." : "create & launch"}
             </button>
+            {created && (
+              <div className="rounded-lg border border-emerald-400/30 bg-emerald-400/5 p-3 text-xs flex flex-col gap-1.5">
+                <div className="text-[#7a869c]">workspace <span className="font-mono text-[#d7e0ee]">{created}</span> is open in the terminal tab. Next:</div>
+                <button onClick={() => void makeShare(created)} className="text-left text-emerald-400 hover:brightness-110 transition">
+                  {share ? "share link ready — click to copy" : "get a share link"}
+                </button>
+              </div>
+            )}
           </div>
         </Step>
 

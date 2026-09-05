@@ -14,6 +14,15 @@ Kohlab's versioning philosophy:
 
 The hardening + frontend-experience follow-up. Finishes the v1.4.0 plan's frontend half.
 
+### Adoption & UX
+
+- **Fix false access-key prompt** — the login gate now only appears when the server actually requires a key (`GET /api/auth/required`); an open (keyless) server goes straight to the app. Keyed deployment still prompts and still enforces.
+- **One-line installer** — `curl -fsSL https://raw.githubusercontent.com/nzkbuild/kohlab/main/install.sh | bash` clones, installs deps, and builds the dashboard.
+- **`kohlab install` subcommand** — checks git/bun, generates a suggested `KOHLAB_KEY`, prints start + tunnel + auto-start steps.
+- **`docs/` directory** — install, systemd, reverse-proxy, upgrade, and security guides (the README referenced these but the dir didn't exist).
+- **CLI text consistency** — every user-facing `works …` command now reads `kohlab …`, matching the actual binary name.
+- **Onboarding close-the-loop** — after "create & launch", the flow shows a share-link button that copies a read-only URL to the clipboard.
+
 ### Backend
 
 - **State mutex** — all `state.json` read-modify-write now serializes through one lock (`mutateState`), eliminating lost-update races between concurrent API handlers and the completion watcher.

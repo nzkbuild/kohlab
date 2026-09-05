@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // kohlab — PTY-backed coding-agent workspace CLI
 
+import { spawnSync } from "child_process";
 import {
   createWorkspace,
   deleteWorkspace,
@@ -97,6 +98,22 @@ async function main() {
       console.log(`tunnel:    ssh -L ${process.env.PORT ?? 7676}:localhost:${process.env.PORT ?? 7676} user@vps`);
       break;
     }
+    case "install": {
+      // report what's here / what's missing
+      for (const dep of ["git", "bun"]) {
+        const ok = spawnSync("which", [dep]).status === 0;
+        console.log(`${ok ? "✓" : "✗ missing"}  ${dep}`);
+      }
+      // generate + show an access key if none is set
+      if (!process.env.KOHLAB_KEY) {
+        const key = spawnSync("openssl", ["rand", "-hex", "24"]).stdout.toString().trim();
+        console.log(`\nno KOHLAB_KEY set. run the server with one:\n  KOHLAB_KEY=${key} bun run cli.ts server`);
+      }
+      console.log(`\nstart:  bun run cli.ts server`);
+      console.log(`tunnel: ssh -L 7676:localhost:7676 user@vps  →  http://localhost:7676`);
+      console.log(`auto-start on reboot: docs/systemd.md`);
+      break;
+    }
     case "help":
     case undefined:
       // bare `kohlab` → open the dashboard (browser as the app)
@@ -140,6 +157,7 @@ function usage(extra?: string) {
   kohlab agents [add <name> <cmd>]                                  list / add agent launchers
   kohlab server                                                     run the web dashboard server
   kohlab open                                                       print dashboard URL + tunnel
+  kohlab install                                                    check deps + show setup steps
 state: ${WORKS_DIR}`);
   process.exit(extra ? 1 : 0);
 }
