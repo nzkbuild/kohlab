@@ -28,13 +28,13 @@ async function main() {
       const payload = flag(args, "--payload");
       const ws = await createWorkspace({ repo, task, agent, branch, payload });
       console.log(`created ${ws.id} at ${ws.path}`);
-      console.log(`start it: works start ${ws.id}`);
+      console.log(`start it: kohlab start ${ws.id}`);
       break;
     }
     case "ls": {
       const list = await listWorkspaces();
       if (list.length === 0) {
-        console.log("no workspaces. create one: works new <repo> <task> [agent]");
+        console.log("no workspaces. create one: kohlab new <repo> <task> [agent]");
         break;
       }
       for (const w of list) {
@@ -129,17 +129,17 @@ function flag(args: string[], name: string): string | undefined {
 }
 
 function usage(extra?: string) {
-  if (extra) console.error(`usage: works ${extra}\n`);
+  if (extra) console.error(`usage: kohlab ${extra}\n`);
   console.log(`kohlab — coding-agent workspaces
-  works new <repo> <task> [agent] [--branch b] [--payload '...']   create a worktree workspace
-  works ls                                                          list workspaces
-  works start|stop|restart <id>                                     control a workspace
-  works diff <id>                                                   show uncommitted diff
-  works commit <id> [message]                                       commit workspace changes
-  works delete <id>                                                 remove workspace + worktree
-  works agents [add <name> <cmd>]                                   list / add agent launchers
-  works server                                                      run the web dashboard server
-  works open                                                        print dashboard URL + tunnel
+  kohlab new <repo> <task> [agent] [--branch b] [--payload '...']  create a worktree workspace
+  kohlab ls                                                         list workspaces
+  kohlab start|stop|restart <id>                                    control a workspace
+  kohlab diff <id>                                                  show uncommitted diff
+  kohlab commit <id> [message]                                      commit workspace changes
+  kohlab delete <id>                                                remove workspace + worktree
+  kohlab agents [add <name> <cmd>]                                  list / add agent launchers
+  kohlab server                                                     run the web dashboard server
+  kohlab open                                                       print dashboard URL + tunnel
 state: ${WORKS_DIR}`);
   process.exit(extra ? 1 : 0);
 }

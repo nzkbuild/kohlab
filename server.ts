@@ -22,6 +22,7 @@ import {
   shareWorkspace,
   workspaceByShare,
   authorized,
+  authRequired,
   loadState,
   ptySend,
   ptyLog,
@@ -460,6 +461,9 @@ const server = serve({
       }
     }
 
+    if (path === "/api/auth/required") {
+      return json({ required: authRequired() });
+    }
     if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) {
       if (!authorized(req)) return json({ error: "unauthorized" }, 401);
       return handleAgents(req);

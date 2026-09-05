@@ -14,12 +14,20 @@ export default function App() {
   const { authed, setAuthed, selectedId, view, refresh } = useApp();
 
   useEffect(() => {
-    const key = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key");
-    if (key) {
-      void api.testKey(key).then((ok) => {
-        if (ok) setAuthed(true);
-      });
-    }
+    // If the server has no access key configured, skip the login gate entirely.
+    // Only prompt when auth is actually required.
+    void api.authRequired().then((required) => {
+      if (required) {
+        const key = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key");
+        if (key) {
+          void api.testKey(key).then((ok) => {
+            if (ok) setAuthed(true);
+          });
+        }
+      } else {
+        setAuthed(true);
+      }
+    });
   }, [setAuthed]);
 
   useEffect(() => {

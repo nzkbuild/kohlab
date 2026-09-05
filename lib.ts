@@ -18,6 +18,11 @@ const WATCH_INTERVAL = Number(process.env.WATCH_INTERVAL ?? 2000);
 /** If set, the dashboard/API require this key (?key= or Bearer). */
 const ACCESS_KEY = process.env.KOHLAB_KEY;
 
+/** True when the server is configured to require an access key. */
+export function authRequired(): boolean {
+  return !!ACCESS_KEY;
+}
+
 /** True when no access key is configured, or the request carries the right one. */
 export function authorized(req: { headers: Headers; url: string }): boolean {
   if (!ACCESS_KEY) return true;

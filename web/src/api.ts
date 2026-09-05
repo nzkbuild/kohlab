@@ -40,6 +40,15 @@ export const api = {
       return false;
     }
   },
+  async authRequired(): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/auth/required`);
+      const body = (await res.json()) as { required?: boolean };
+      return !!body.required;
+    } catch {
+      return true; // unreachable server → don't silently skip auth
+    }
+  },
   workspaces: () => json<Workspace[]>("/api/workspaces"),
   agentsStatus: () => json<AgentStatus>("/api/agents-status"),
   create: (body: { task: string; repo?: string; agent: string; branch?: string }) =>
