@@ -27,6 +27,7 @@ The hardening + frontend-experience follow-up. Finishes the v1.4.0 plan's fronte
 
 - **Bundle split (F1)** — Monaco and xterm are now in their own chunks via `manualChunks`; the entry dropped from 728 KB → 275 KB raw (207 KB → 86 KB gzip). Workspace list + shell paint before the editor/terminal load.
 - **Command center** — new dashboard with KPIs, agent availability, and a recent-activity feed.
+- **Guided onboarding** — a three-step first-run flow (install agent → create workspace → launch) replaces the bare empty list; the workspace-creation step only activates once an agent is installed.
 - **Command palette** — ⌘K quick actions (start/stop/new/navigate) across workspaces.
 - **Settings** — agent management + server info in one place.
 - **Session log view** — live tail of a workspace's main-session output.

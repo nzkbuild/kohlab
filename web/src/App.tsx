@@ -4,7 +4,7 @@ import { useApp } from "./store";
 import AuthGate from "./components/AuthGate";
 import Sidebar from "./components/Sidebar";
 import WorkspaceDetail from "./components/WorkspaceDetail";
-import AgentInstaller from "./components/AgentInstaller";
+import Onboarding from "./components/Onboarding";
 import Dashboard from "./components/Dashboard";
 import Settings from "./components/Settings";
 import CommandPalette from "./components/CommandPalette";
@@ -41,12 +41,7 @@ export default function App() {
             (selectedId ? (
               <WorkspaceDetail workspaceId={selectedId} />
             ) : (
-              <div className="flex-1 flex items-center justify-center text-zinc-500">
-                <div className="text-center">
-                  <div className="text-lg mb-2">select a workspace</div>
-                  <AgentInstaller compact />
-                </div>
-              </div>
+              <Onboarding />
             ))}
         </main>
       </div>
