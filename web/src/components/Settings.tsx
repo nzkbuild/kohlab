@@ -1,4 +1,4 @@
-import { Server } from "lucide-react";
+import { HardDrives } from "@phosphor-icons/react";
 import AgentInstaller from "./AgentInstaller";
 import Team from "./Team";
 
@@ -7,7 +7,7 @@ export default function Settings() {
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
       <div className="border-b border-[#27272a] px-5 py-3 flex items-center gap-2">
-        <Server className="size-4 text-[#a1a1aa]" />
+        <HardDrives size={16} className="text-[#a1a1aa]" />
         <h1 className="text-lg font-semibold">Settings</h1>
       </div>
       <div className="p-5 max-w-2xl">

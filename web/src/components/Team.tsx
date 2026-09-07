@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Users, UserPlus, Trash2 } from "lucide-react";
+import { Users, UserPlus, Trash } from "@phosphor-icons/react";
 import { api } from "../api";
 import type { TeamUser, AuditEvent } from "../api";
 
@@ -51,7 +51,7 @@ export default function Team() {
   return (
     <section className="mt-4 rounded-xl border border-[#27272a] bg-[#111113]">
       <div className="flex items-center gap-2 border-b border-[#27272a] px-4 py-2.5 text-xs text-[#a1a1aa]">
-        <Users className="size-3.5" /> Team
+        <Users size={14} /> Team
       </div>
 
       <div className="p-4">
@@ -68,7 +68,7 @@ export default function Team() {
             </span>
             <div className="flex-1" />
             <button onClick={() => void remove(u.id)} className="text-zinc-400 hover:text-red-400 transition" title="revoke">
-              <Trash2 size={13} />
+              <Trash size={13} />
             </button>
           </div>
         ))}

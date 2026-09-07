@@ -3,18 +3,18 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  Search,
+  MagnifyingGlass,
   ArrowDown,
   ArrowUp,
-  CornerDownLeft,
+  ArrowElbowDownLeft,
   X,
   Play,
-  CircleStop,
-  RefreshCw,
+  StopCircle,
+  ArrowsClockwise,
   PlusCircle,
-  FileDiff,
-  Loader2,
-} from "lucide-react";
+  GitDiff,
+  CircleNotch,
+} from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/store";
 import { api } from "@/api";
@@ -70,7 +70,7 @@ export function CommandPalette() {
       id: "new",
       label: "New workspace",
       group: "Actions",
-      icon: <PlusCircle className="size-4" />,
+      icon: <PlusCircle size={16} />,
       keywords: ["create", "start", "workspace", "task"],
       onAction: run(() => select(null)),
     },
@@ -78,7 +78,7 @@ export function CommandPalette() {
       id: "refresh",
       label: "Refresh workspaces",
       group: "Actions",
-      icon: <RefreshCw className="size-4" />,
+      icon: <ArrowsClockwise size={16} />,
       keywords: ["reload", "sync", "update"],
       onAction: run(() => refresh()),
     },
@@ -88,7 +88,7 @@ export function CommandPalette() {
         label: w.id,
         group: w.running ? "Running" : w.stopped ? "Done" : "Stopped",
         subtitle: w.task,
-        icon: <FileDiff className="size-4" />,
+        icon: <GitDiff size={16} />,
         keywords: [w.task, w.agent],
         onAction: run(async () => select(w.id)),
       };
@@ -99,7 +99,7 @@ export function CommandPalette() {
           label: `Stop ${w.id}`,
           group: "Workspace actions",
           subtitle: w.task,
-          icon: <CircleStop className="size-4" />,
+          icon: <StopCircle size={16} />,
           keywords: [w.id, "stop", "kill"],
           onAction: run(async () => api.action(w.id, "stop")),
         });
@@ -109,7 +109,7 @@ export function CommandPalette() {
           label: `Start ${w.id}`,
           group: "Workspace actions",
           subtitle: w.task,
-          icon: <Play className="size-4" />,
+          icon: <Play size={16} />,
           keywords: [w.id, "start", "run", "launch"],
           onAction: run(async () => api.action(w.id, "start")),
         });
@@ -135,7 +135,7 @@ export function CommandPalette() {
           className="fixed z-[101] inset-x-2 top-[15vh] mx-auto w-[min(640px,100%-16px)] rounded-xl border border-[#27272a] bg-[#111113] shadow-2xl outline-none"
         >
           <div className="flex items-center gap-2 border-b border-[#27272a] px-3 py-2.5">
-            <Search className="size-4 text-[#a1a1aa]" />
+            <MagnifyingGlass size={16} className="text-[#a1a1aa]" />
             <input
               autoFocus
               value={query}
@@ -161,7 +161,7 @@ export function CommandPalette() {
             <kbd className="rounded bg-[#1c1c1f] px-1.5 py-0.5 text-xs text-[#a1a1aa]">⌘K</kbd>
             <Dialog.Close asChild>
               <button className="rounded p-1 text-[#a1a1aa] hover:bg-[#1c1c1f] hover:text-[#e4e4e7]">
-                <X className="size-4" />
+                <X size={16} />
               </button>
             </Dialog.Close>
           </div>
@@ -169,7 +169,7 @@ export function CommandPalette() {
           <div className="max-h-[60vh] overflow-y-auto p-1.5">
             {filtered.length === 0 && (
               <div className="flex items-center justify-center gap-2 px-3 py-8 text-sm text-[#a1a1aa]">
-                <Loader2 className="size-3 animate-spin" /> no matches
+                <CircleNotch size={12} className="animate-spin" /> no matches
               </div>
             )}
             {[...groups.entries()].map(([group, items]) => (
@@ -206,11 +206,11 @@ export function CommandPalette() {
 
           <div className="flex items-center gap-4 border-t border-[#27272a] px-3 py-2 text-xs text-[#a1a1aa]">
             <span className="flex items-center gap-1">
-              <CornerDownLeft className="size-3" /> select
+              <ArrowElbowDownLeft size={12} /> select
             </span>
             <span className="flex items-center gap-1">
-              <ArrowUp className="size-3" />
-              <ArrowDown className="size-3" /> navigate
+              <ArrowUp size={12} />
+              <ArrowDown size={12} /> navigate
             </span>
             <span className="ml-auto">esc to close</span>
           </div>

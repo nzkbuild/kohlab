@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, CheckCircle2, Circle, PlayCircle, Cpu, FolderOpen } from "lucide-react";
+import { Pulse, CheckCircle, Circle, PlayCircle, Cpu, FolderOpen } from "@phosphor-icons/react";
 import { useApp } from "@/store";
 import { api } from "../api";
 import type { AgentStatus } from "../types";
@@ -48,17 +48,17 @@ export default function Dashboard() {
       <h1 className="text-lg font-semibold mb-4">Command center</h1>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        {card("Running", running.length, <PlayCircle className="size-4" />, "bg-emerald-400/10 text-emerald-400")}
-        {card("Done today", done.length, <CheckCircle2 className="size-4" />, "bg-amber-400/10 text-amber-400")}
-        {card("Workspaces", workspaces.length, <FolderOpen className="size-4" />, "bg-blue-400/10 text-blue-400")}
-        {card("Agents installed", agentNames.length, <Cpu className="size-4" />, "bg-purple-400/10 text-purple-400")}
+        {card("Running", running.length, <PlayCircle size={16} />, "bg-emerald-400/10 text-emerald-400")}
+        {card("Done today", done.length, <CheckCircle size={16} />, "bg-amber-400/10 text-amber-400")}
+        {card("Workspaces", workspaces.length, <FolderOpen size={16} />, "bg-blue-400/10 text-blue-400")}
+        {card("Agents installed", agentNames.length, <Cpu size={16} />, "bg-purple-400/10 text-purple-400")}
       </div>
 
       <div className="grid lg:grid-cols-2 gap-5">
         {/* Active workspaces */}
         <section className="rounded-xl border border-[#27272a] bg-[#111113]">
           <div className="flex items-center gap-2 border-b border-[#27272a] px-4 py-2.5 text-xs text-[#a1a1aa]">
-            <Activity className="size-3.5" /> Workspaces
+            <Pulse size={14} /> Workspaces
           </div>
           <div className="p-2">
             {workspaces.length === 0 && <div className="p-4 text-sm text-[#a1a1aa]">no workspaces yet — create one to launch an agent</div>}
@@ -68,7 +68,7 @@ export default function Dashboard() {
                 onClick={() => select(w.id)}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-[#151517] transition"
               >
-                {w.running ? <PlayCircle className="size-4 shrink-0 text-emerald-400" /> : w.stopped ? <CheckCircle2 className="size-4 shrink-0 text-amber-400" /> : <Circle className="size-4 shrink-0 text-zinc-400" />}
+                {w.running ? <PlayCircle size={16} className="shrink-0 text-emerald-400" /> : w.stopped ? <CheckCircle size={16} className="shrink-0 text-amber-400" /> : <Circle size={16} className="shrink-0 text-zinc-400" />}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[#e4e4e7]">{w.id}</span>
                   <span className="block truncate text-xs text-[#a1a1aa]">{w.task}</span>
@@ -82,7 +82,7 @@ export default function Dashboard() {
         {/* Activity feed */}
         <section className="rounded-xl border border-[#27272a] bg-[#111113]">
           <div className="flex items-center gap-2 border-b border-[#27272a] px-4 py-2.5 text-xs text-[#a1a1aa]">
-            <CheckCircle2 className="size-3.5" /> Recent activity
+            <CheckCircle size={14} /> Recent activity
           </div>
           <div className="divide-y divide-[#151517]">
             {activity.length === 0 && <div className="p-4 text-sm text-[#a1a1aa]">nothing yet</div>}
@@ -100,7 +100,7 @@ export default function Dashboard() {
       {/* Agent availability */}
       <section className="mt-5 rounded-xl border border-[#27272a] bg-[#111113]">
         <div className="flex items-center gap-2 border-b border-[#27272a] px-4 py-2.5 text-xs text-[#a1a1aa]">
-          <Cpu className="size-3.5" /> Agents on this server
+          <Cpu size={14} /> Agents on this server
         </div>
         <div className="flex flex-wrap gap-2 p-4">
           {!agents && <span className="text-sm text-[#a1a1aa]">checking…</span>}
