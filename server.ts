@@ -2,6 +2,7 @@
 
 import { serve } from "bun";
 import type { ServerWebSocket } from "bun";
+import { spawn } from "child_process";
 import { mkdir, readdir, readFile } from "fs/promises";
 import { isAbsolute, join, relative, resolve } from "path";
 import {
@@ -15,6 +16,8 @@ import {
   stopWorkspace,
   commitWorkspace,
   worktreePath,
+  imagesDir,
+  spawnAgentSession,
   WORKS_DIR,
   startWatcher,
   onWorkspaceDone,
@@ -51,21 +54,41 @@ onWorkspaceDone((ws) => {
 });
 
 // poll for finished agents
+/**
+ * v1.8 ownership gate. Owners / legacy-key / anonymous (open server) may touch
+ * every workspace. A named member may only touch workspaces they own; legacy
+ * root-owned workspaces (no ownerId) are off-limits to members entirely.
+ * Viewer is treated like member here (read-only is enforced separately).
+ */
+async function mayAccessWorkspace(auth: { kind?: string; id?: string; role?: string | null }, wsId: string): Promise<boolean> {
+  if (!auth || auth.kind !== "user") return true; // legacy, share, anonymous-open
+  if (auth.role === "owner") return true;
+  try {
+    const ws = await getWorkspace(wsId);
+    return !!ws.ownerId && ws.ownerId === auth.id;
+  } catch {
+    return false;
+  }
+}
 startWatcher();
 
 
 
-async function handleClone(req: Request): Promise<Response> {
+async function handleClone(req: Request, actorUserId?: string): Promise<Response> {
   try {
     const body = (await req.json()) as { url?: string; task?: string; agent?: string; payload?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } };
     const url = (body.url ?? "").trim();
     const task = (body.task ?? "work on " + url).trim();
     if (!url) return json({ error: "url is required" }, 400);
-    // clone into a fresh dir under WORKS_DIR
+    if (actorUserId) {
+      // a named member clones into their own isolated workspace (server does
+      // the git work as root, then hands the tree to the member's OS user)
+      const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits, ownerId: actorUserId });
+      return json(ws);
+    }
+    // legacy/anonymous path: clone into a fresh dir under WORKS_DIR
     const dest = `${WORKS_DIR}/clones/${Date.now()}`;
-    const { mkdir } = await import("fs/promises");
     await mkdir(`${WORKS_DIR}/clones`, { recursive: true });
-    const { spawn } = await import("child_process");
     await new Promise<void>((resolve, reject) => {
       const p = spawn("git", ["clone", "--quiet", url, dest]);
       p.on("error", reject);
@@ -99,7 +122,7 @@ async function shareId(req: Request): Promise<string | null> {
   }
 }
 
-async function handleCreate(req: Request): Promise<Response> {
+async function handleCreate(req: Request, actorUserId?: string): Promise<Response> {
   const body = (await req.json()) as {
     repo?: string;
     task?: string;
@@ -111,8 +134,22 @@ async function handleCreate(req: Request): Promise<Response> {
   const task = (body.task ?? "").trim();
   if (!task) return json({ error: "task is required" }, 400);
   const repo = (body.repo ?? cwd()).trim();
+  const url = repo.match(/^[a-z]+:\/\//) ? repo : undefined;
+  // A named member may only create from a git URL: a host repo path would run
+  // the agent in the legacy root-owned flow (privilege escalation) or reach
+  // outside the member's home. Owners/anonymous keep the host-path flow.
+  if (actorUserId && !url) return json({ error: "members create workspaces from a git URL" }, 403);
   try {
-    const ws = await createWorkspace({ repo, task, agent: body.agent ?? "sh", branch: body.branch, payload: body.payload, limits: body.limits });
+    const ws = await createWorkspace({
+      repo,
+      url,
+      task,
+      agent: body.agent ?? "sh",
+      branch: body.branch,
+      payload: body.payload,
+      limits: body.limits,
+      ownerId: actorUserId,
+    });
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -348,7 +385,7 @@ async function handleImageUpload(id: string, req: Request): Promise<Response> {
     const mimeType = sniffImageMime(bytes);
     if (!mimeType) return json({ error: "unsupported image; use PNG, JPEG, GIF, or WebP" }, 415);
 
-    const imageDir = join(WORKS_DIR, "images", workspace.id);
+    const imageDir = imagesDir(workspace);
     await mkdir(imageDir, { recursive: true, mode: 0o700 });
     const extension = mimeType === "image/jpeg" ? "jpg" : mimeType.slice("image/".length);
     const imagePath = join(imageDir, `${Date.now()}-${crypto.randomUUID()}.${extension}`);
@@ -448,22 +485,7 @@ function attachPty(ws: ServerWebSocket, id: string, terminalId = "main") {
 /** Ensure a workspace's named PTY session exists (spawn the agent if not). */
 async function ensurePtySession(id: string, terminalId = "main") {
   const ws = await getWorkspace(id);
-  const s = await loadState();
-  const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
-  const sessId = sessionId(id, terminalId);
-  await ptySend({
-    type: "open",
-    id: sessId,
-    cwd: worktreePath(ws),
-    cmd,
-    cols: 120,
-    rows: 36,
-    meta: { workspace: id, terminal: terminalId },
-    limits: ws.limits ?? {},
-  });
-  if (ws.payload && terminalId === "main") {
-    await ptySend({ type: "input", id: sessId, data: Buffer.from(ws.payload + "\r").toString("base64") });
-  }
+  await spawnAgentSession(ws, terminalId);
   // a browser-attach start is a real run: record it so completion fires
   if (terminalId === "main") await markStarted(id);
 }
@@ -482,6 +504,7 @@ const server = serve({
     const denied = !auth && authRequired();
     const actor = auth ? (auth.kind === "user" ? auth.id : auth.kind === "legacy" ? "legacy" : auth.kind === "share" ? "share" : "anonymous") : "anonymous";
     const role: string | null = auth && (auth.kind === "user" || auth.kind === "legacy") ? auth.role : null;
+    const actorUserId = auth?.kind === "user" ? auth.id : undefined;
     const canMutate = !denied && ((role === "owner" || role === "member") || auth?.kind === "anonymous");
     const isOwner = !denied && (role === "owner" || auth?.kind === "anonymous");
 
@@ -503,7 +526,13 @@ const server = serve({
           case "log": return handleLog(id);
         }
       }
+      // v1.8 ownership: a named member/viewer may only touch their own
+      // workspaces (share-token reads already returned above). Owners and
+      // the legacy/anonymous single-user flows pass through.
       const readOnly = action === "diff" || action === "files" || action === "file" || action === "log";
+      if (!(await mayAccessWorkspace(auth, id))) {
+        return json({ error: "forbidden — not your workspace" }, 403);
+      }
       if (readOnly) {
         if (denied) return json({ error: "unauthorized" }, 401);
       } else if (!canMutate) {
@@ -534,7 +563,6 @@ const server = serve({
       return handleUsersList();
     }
     if (path === "/api/users" && req.method === "POST") {
-      if (!isOwner) return json({ error: "forbidden" }, 403);
       return handleUserAdd(req);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
@@ -569,7 +597,7 @@ const server = serve({
     if (path === "/api/clone" && req.method === "POST") {
       if (!canMutate) return json({ error: "forbidden" }, 403);
       void audit(actor, "clone", undefined);
-      return handleClone(req);
+      return handleClone(req, actorUserId);
     }
     if (path === "/api/workspaces" && req.method === "GET") {
       const wantsShare = url.searchParams.has("share");
@@ -577,14 +605,18 @@ const server = serve({
       if (shareIdRes) {
         const list = await listWorkspaces();
         const w = list.find((x) => x.id === shareIdRes);
+        if (w && !(await mayAccessWorkspace(auth, w.id))) return json({ error: "forbidden — not your workspace" }, 403);
         return json(w ? [w] : []);
       }
       if (denied) return json({ error: "unauthorized" }, 401);
-      return listWorkspaces().then(json).catch((e) => json({ error: (e as Error).message }, 500));
+      // a named member only ever sees their own workspaces
+      const list = await listWorkspaces();
+      const scoped = auth?.kind === "user" && auth.role !== "owner" ? list.filter((w) => w.ownerId === auth.id) : list;
+      return json(scoped);
     }
     if (path === "/api/workspaces" && req.method === "POST") {
       if (!canMutate) return json({ error: "forbidden" }, 403);
-      return handleCreate(req);
+      return handleCreate(req, actorUserId);
     }
 
     // Static files - serve the React app from web/dist, fall back to legacy public/

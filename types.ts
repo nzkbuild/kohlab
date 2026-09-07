@@ -8,6 +8,11 @@ export interface Workspace {
   stopped: number | null;
   /** json payload given to the agent CLI at launch (may be absent) */
   payload?: string;
+  /** owner's workspace root under their home; legacy records omit it and live
+   *  under the shared store */
+  dir?: string;
+  /** kohlab user id who created the workspace ("" = legacy/anonymous/root) */
+  ownerId?: string;
   /** read-only share token; link is <host>/?share=<token> */
   share?: string;
   /** optional resource caps applied to the agent's PTY session */
@@ -31,4 +36,10 @@ export interface User {
   /** SHA-256 hex of the user's key. Plaintext is never stored. */
   key: string;
   role: Role;
+  /** POSIX user this member maps to ("" when unprovisioned). */
+  osUser?: string;
+  uid?: number;
+  gid?: number;
+  /** /home/<osUser> — where worktrees and agent config live. */
+  home?: string;
 }

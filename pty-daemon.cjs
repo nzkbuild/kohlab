@@ -4,7 +4,7 @@
 // stream bytes, resize, subscribe with replay.
 //
 // Protocol: newline-delimited JSON messages.
-//   client -> { type: "open", id, cwd, cmd[], env? }
+//   client -> { type: "open", id, cwd, cmd[], env?, uid?, gid?, home? }
 //   client -> { type: "input", id, data }
 //   client -> { type: "resize", id, cols, rows }
 //   client -> { type: "close", id }
@@ -72,7 +72,7 @@ function killTree(pid, signal) {
   try { process.kill(-pid, signal); } catch {}
 }
 
-function openSession(id, cwd, cmd, env, cols, rows, meta, limits) {
+function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home) {
   if (SESSIONS.has(id)) {
     const existing = SESSIONS.get(id);
     if (existing.exited) SESSIONS.delete(id);
@@ -93,12 +93,18 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits) {
     argv = ["timeout", String(Math.floor(lim.timeoutSec)), ...argv];
   }
   try {
+    // v1.8: when the owner is provisioned, uid/gid drop privileges for the
+    // whole PTY process tree and $HOME points at the owner's home.
+    const spawnEnv = { ...process.env, ...(env || {}) };
+    if (home) spawnEnv.HOME = home;
     const p = pty.spawn(argv[0], argv.slice(1), {
       name: "xterm-256color",
       cols: cols || 80,
       rows: rows || 24,
       cwd: cwd || os.homedir(),
-      env: { ...process.env, ...(env || {}) },
+      env: spawnEnv,
+      ...(uid ? { uid } : {}),
+      ...(gid ? { gid } : {}),
     });
     const sess = { pty: p, buffer: [], exited: false, subs: 0, meta: meta || {} };
     SESSIONS.set(id, sess);
@@ -161,7 +167,7 @@ const server = net.createServer((sock) => {
 function handle(msg, sock) {
   switch (msg.type) {
     case "open": {
-      const r = openSession(msg.id, msg.cwd, msg.cmd, msg.env, msg.cols, msg.rows, msg.meta, msg.limits);
+      const r = openSession(msg.id, msg.cwd, msg.cmd, msg.env, msg.cols, msg.rows, msg.meta, msg.limits, msg.uid, msg.gid, msg.home);
       sock.write(JSON.stringify({ type: "open-result", id: msg.id, ...r }) + "\n");
       break;
     }

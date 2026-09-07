@@ -10,6 +10,22 @@ Kohlab's versioning philosophy:
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 - **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
 
+## [1.8.0] - 2026-09-07
+
+The isolation release: one VPS, N safe users. Every named member gets a real
+OS account, and their agents run as that user — the OS, not just the role
+check, keeps members out of each other's data.
+
+- **One OS user per member** — `user add` (CLI, API, Settings → Team) provisions `koh-<user>` (uid 10000+, private group, `0700` home + `~/.config`) and records the mapping in `users.json`. Revoke removes the account, home, and worktrees.
+- **Sessions run as the owner** — the PTY daemon spawns each workspace's agent with the owner's `uid`/`gid` and `$HOME` (node-pty setuid). Alice's agent cannot read Bob's home, `~/.config`, or repos; cannot list or signal his sessions; cannot read `/root`.
+- **Isolated workspaces** — members create from a git URL; the workspace is checked out under `/home/<user>/works/<id>/` (`admin/` bare clone + `tree/` + `images/`), all chowned to the member. Path-based creation stays the legacy root flow.
+- **One spawn choke point** — `spawnAgentSession()` in lib.ts now carries caps (v1.7) *and* identity for both the CLI/API start path and the browser-attach path, so they can never drift.
+- **Image pasting works in isolated sessions** — pasted screenshots land in the workspace's private `images/` dir, readable by the agent.
+- **Team UI** — members see the team roster + audit tail; add/revoke stay owner-only.
+- **Docs** — `docs/isolation.md`.
+
+Full plan: ROADMAP.md
+
 ## [1.7.0] - 2026-09-05
 
 The shared-box safety release. Per-workspace resource caps.
