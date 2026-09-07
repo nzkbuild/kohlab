@@ -146,34 +146,6 @@ export async function readAudit(limit = 200): Promise<{ t: number; user: string;
     .reverse();
 }
 
-/** True when no access key is configured, or the request carries the right one. */
-export function authorized(req: { headers: Headers; url: string }): boolean {
-  if (!ACCESS_KEY) return true;
-  const url = new URL(req.url);
-  const q = url.searchParams.get("key");
-  if (q && q.length === ACCESS_KEY.length) {
-    const a = new TextEncoder().encode(q);
-    const b = new TextEncoder().encode(ACCESS_KEY);
-    return a.length === b.length && crypto.subtle
-      ? timingSafe(a, b)
-      : a.every((v, i) => v === b[i]);
-  }
-  const auth = req.headers.get("authorization") ?? "";
-  if (auth.startsWith("Bearer ")) {
-    const t = auth.slice(7);
-    const a = new TextEncoder().encode(t);
-    const b = new TextEncoder().encode(ACCESS_KEY);
-    return a.length === b.length && (crypto.subtle ? timingSafe(a, b) : a.every((v, i) => v === b[i]));
-  }
-  return false;
-}
-
-function timingSafe(a: Uint8Array, b: Uint8Array): boolean {
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  return diff === 0;
-}
-
 /** Completion callbacks (webhook + browser push). Set by the server. */
 type NotifyFn = (ws: Workspace) => void;
 let notifyDone: NotifyFn[] = [];
@@ -531,10 +503,6 @@ export function worktreePath(ws: Workspace) {
 
 // --- repo helpers --------------------------------------------------------
 
-function hasGitRoot(dir: string): boolean {
-  return existsSync(join(dir, ".git"));
-}
-
 /**
  * Resolve the repo root for a path. If the path is inside a worktree, walk up
  * until we find the common dir file. If inside a regular checkout, find .git.
@@ -549,7 +517,7 @@ export async function findRepoRoot(dir: string): Promise<string | null> {
       const root = join(cur, ".git", rel);
       return (await realpath(root)).replace(/\/\.git$/, "");
     }
-    if (hasGitRoot(cur)) return cur;
+    if (existsSync(join(cur, ".git"))) return cur;
     const parent = join(cur, "..");
     if (parent === cur) break;
     cur = parent;
