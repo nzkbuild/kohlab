@@ -1,0 +1,50 @@
+{
+  "name": "kohlab",
+  "description": "Self-hosted agent workspace console. One VPS, N safe users: named members get OS-isolated workspaces, agents run in a PTY cockpit (terminal / files / diff / log), owners manage team + audit. No database, no containers.",
+  "stack": {
+    "framework": "React 18 + TypeScript",
+    "build": "Vite",
+    "styling": "Tailwind CSS v4 with shadcn-style CSS variables",
+    "icons": "@phosphor-icons/react",
+    "uiPrimitives": "Radix Dialog (only Radix primitive in use)",
+    "editor": "Monaco",
+    "terminal": "xterm"
+  },
+  "theme": {
+    "mode": "dark-only",
+    "palette": "carbon-black neutrals, emerald primary, amber warning, red destructive",
+    "tokens": {
+      "background": "#0a0a0a",
+      "card": "#111113",
+      "secondary": "#151517",
+      "border": "#27272a",
+      "primary": "#34d399",
+      "primaryForeground": "#06231a",
+      "muted": "#151517",
+      "mutedForeground": "#a1a1aa",
+      "destructive": "#f87171",
+      "ring": "#34d399"
+    },
+    "typography": "JetBrains Mono / ui-monospace for UI; 16px root, 14px control floor",
+    "radius": "0.75rem (cards), 0.5rem (controls)"
+  },
+  "visualLanguage": {
+    "aesthetic": "developer ops console, terminal-first",
+    "posture": "dense but breathable, no skeuomorphism, no decorative gradients",
+    "statusSemantics": "emerald pulse = running, amber = finished (done), neutral zinc = stopped; red = destructive only",
+    "motion": "fast (150ms), subtle, reduced-motion respected",
+    "brandMark": "glowing emerald dot (as in the auth gate and sidebar), no image logo"
+  },
+  "ux": {
+    "pillars": ["command-center overview", "workspace cockpit with tabs (terminal/files/diff/log)", "keyboard-driven (command palette, shortcuts)", "progressive disclosure (confirms on destructive, onboarding only first-run)"],
+    "views": {
+      "dashboard": "Command center: KPI cards, activity feed, agent availability",
+      "workspaces": "onboarding wizard when empty, else workspace cockpit",
+      "settings": "agents installer + server info + team/audit"
+    }
+  },
+  "constraints": {
+    "avoid": ["light mode", "blue/indigo accents", "charts requiring a new dependency", "route rearchitecture - zustand views stay as-is"],
+    "depsThatMayBeAdded": ["framer-motion only if a picked component requires it (respect reduced-motion)"]
+  }
+}
