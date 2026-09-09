@@ -4,13 +4,8 @@ import { api } from "../api";
 import { useApp } from "../store";
 import { withToast } from "../lib/actions";
 import { cn } from "../lib/utils";
-import type { Workspace } from "../types";
+import { workspaceStatus, STATUS_DOT, STATUS_LABEL } from "../lib/status";
 
-function statusDot(w: Workspace) {
-  if (w.running) return <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] shrink-0" />;
-  if (w.stopped) return <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />;
-  return <span className="w-2 h-2 rounded-full bg-zinc-600 shrink-0" />;
-}
 
 /**
  * Collapsible icon rail. Collapsed (60px) shows icons only; hovering expands to
@@ -114,10 +109,11 @@ export default function Sidebar() {
             onClick={() => setView(n.key)}
             title={n.label}
             className={cn(
-              "group/side flex items-center h-9 px-2 rounded-lg hover:bg-[#151517] transition overflow-hidden justify-start",
+              "group/side relative flex items-center h-9 px-2 rounded-lg hover:bg-[#151517] transition overflow-hidden justify-start",
               view === n.key && "bg-[#1c1c1f]",
             )}
           >
+            {view === n.key && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-emerald-400" />}
             {n.icon}
             {label(expanded, <span className={cn("whitespace-nowrap", view === n.key ? "text-[#e4e4e7]" : "text-[#a1a1aa]")}>{n.label}</span>)}
           </button>
@@ -197,6 +193,9 @@ export default function Sidebar() {
 
       {/* workspace list */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden p-2">
+        {expanded && workspaces.length > 0 && (
+          <div className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-[#a1a1aa]">workspaces</div>
+        )}
         {workspaces.length === 0 && (
           <div className={cn("text-zinc-400 text-xs text-center leading-5", expanded ? "px-2 mt-8" : "mt-4")}>
             {expanded ? (<>no workspaces yet<br />create one to launch your first agent</>) : <span className="text-zinc-400">—</span>}
@@ -206,14 +205,14 @@ export default function Sidebar() {
           <div
             key={w.id}
             onClick={() => goWorkspace(w.id)}
-            title={w.id}
+            title={`${w.id} — ${STATUS_LABEL[workspaceStatus(w)]}`}
             className={cn(
               "group/side flex items-center h-9 rounded-lg cursor-pointer border border-transparent transition overflow-hidden",
               expanded ? "px-2 justify-start" : "px-2 justify-center",
               w.id === selectedId ? "bg-[#1c1c1f] border-[#333338]" : "hover:bg-[#151517]",
             )}
           >
-            {statusDot(w)}
+            <span className={`size-2 shrink-0 rounded-full ${STATUS_DOT[workspaceStatus(w)]}`} />
             {label(expanded, (
               <span className="text-[13px] truncate">
                 <span className="font-medium">{w.id}</span>

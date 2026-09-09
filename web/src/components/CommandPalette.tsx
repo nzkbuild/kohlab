@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useApp } from "@/store";
 import { api } from "@/api";
+import { workspaceStatus } from "@/lib/status";
 
 type PaletteItem = {
   id: string;
@@ -83,16 +84,28 @@ export function CommandPalette() {
       onAction: run(() => refresh()),
     },
     ...workspaces.flatMap((w): PaletteItem[] => {
+      const st = workspaceStatus(w);
       const base: PaletteItem = {
         id: w.id,
         label: w.id,
-        group: w.running ? "Running" : w.stopped ? "Done" : "Stopped",
+        group: st === "running" ? "Running" : st === "needs-review" ? "Needs review" : st === "committed" ? "Committed" : "Stopped",
         subtitle: w.task,
         icon: <GitDiff size={16} />,
         keywords: [w.task, w.agent],
         onAction: run(async () => select(w.id)),
       };
       const control: PaletteItem[] = [];
+      if (st === "needs-review") {
+        control.push({
+          id: `${w.id}-review`,
+          label: `Review ${w.id}`,
+          group: "Review queue",
+          subtitle: w.task,
+          icon: <GitDiff size={16} />,
+          keywords: [w.id, "review", "diff", "commit"],
+          onAction: run(async () => select(w.id)),
+        });
+      }
       if (w.running) {
         control.push({
           id: `${w.id}-stop`,

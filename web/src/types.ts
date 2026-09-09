@@ -9,6 +9,8 @@ export interface Workspace {
   running: boolean;
   path: string;
   share?: string;
+  /** timestamp of the last commit (set on commit; undefined = never committed) */
+  lastCommitAt?: number;
 }
 
 export interface TreeNode {

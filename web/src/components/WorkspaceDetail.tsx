@@ -3,9 +3,11 @@ import { Play, Stop, ArrowsClockwise, ShareNetwork, Trash, Terminal, Files, GitD
 import { api } from "../api";
 import { toastAction } from "../lib/actions";
 import { useApp } from "../store";
+import { workspaceStatus, STATUS_LABEL, STATUS_BADGE } from "../lib/status";
 import TerminalView, { disposeWorkspaceTerminals } from "./TerminalView";
 import BrowseView from "./BrowseView";
 import LogView from "./LogView";
+import ConfirmDialog from "./ConfirmDialog";
 // Monaco is heavy (~600 KB) — load it only when files/diff are actually opened
 const DiffView = lazy(() => import("./DiffView"));
 
@@ -16,6 +18,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [tab, setTab] = useState<Tab>("terminal");
   const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const w = workspaces.find((x) => x.id === workspaceId);
 
   const act = async (action: string) => {
@@ -27,15 +31,26 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     }
   };
 
+  const onDelete = async () => {
+    setDeleting(true);
+    try {
+      disposeWorkspaceTerminals(workspaceId);
+      await act("delete");
+      select(null);
+      setConfirming(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (!w) return <div className="flex-1 flex items-center justify-center text-zinc-400">loading...</div>;
+  const st = workspaceStatus(w);
 
   return (
     <div className="flex-1 min-w-0 flex flex-col">
       <div className="flex items-center gap-2 px-3.5 py-2 border-b border-[#27272a] bg-[#111113]">
         <span className="font-semibold text-sm truncate">{w.id}</span>
-        <span className={`text-xs px-1.5 py-0.5 rounded-full border ${w.running ? "text-emerald-400 border-emerald-400/40 bg-emerald-400/10" : "text-zinc-400 border-zinc-700"}`}>
-          {w.running ? "running" : w.stopped ? "done" : "stopped"}
-        </span>
+        <span className={`text-xs px-1.5 py-0.5 rounded-full border ${STATUS_BADGE[st]}`}>{STATUS_LABEL[st]}</span>
         <span className="text-zinc-400 text-xs truncate hidden md:block">{w.path}</span>
         <div className="flex-1" />
         <button onClick={() => void act("start")} disabled={w.running} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-400/40 text-emerald-400 text-xs disabled:opacity-35 hover:bg-emerald-400/10 transition" title="start">
@@ -62,12 +77,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <Stop size={12} weight="fill" /> stop
         </button>
         <button
-          onClick={async () => {
-            if (!confirm("delete this workspace? worktree will be removed")) return;
-            disposeWorkspaceTerminals(workspaceId);
-            await act("delete");
-            select(null);
-          }}
+          onClick={() => setConfirming(true)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#27272a] text-xs hover:border-red-400 hover:text-red-400 transition" title="delete"
         >
           <Trash size={12} /> delete
         </button>
@@ -81,6 +92,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition ${tab === t ? "text-zinc-100 border-emerald-400" : "text-zinc-400 border-transparent hover:text-zinc-300"}`}
           >
             <Icon size={13} /> {t}
+            {t === "terminal" && terminals.length > 1 && (
+              <span className="grid h-4 min-w-4 place-items-center rounded-full border border-[#27272a] bg-[#151517] px-1 text-[10px] text-[#a1a1aa]">
+                {terminals.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -130,6 +146,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </Suspense>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this workspace?"
+        description="The worktree and any uncommitted changes will be removed. This cannot be undone."
+        confirmLabel="delete"
+        busy={deleting}
+        onConfirm={() => void onDelete()}
+      />
     </div>
   );
 }

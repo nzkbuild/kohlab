@@ -3,6 +3,19 @@ import { Users, UserPlus, Trash } from "@phosphor-icons/react";
 import { api } from "../api";
 import type { TeamUser, AuditEvent } from "../api";
 
+const ACTION_DOT: Record<string, string> = {
+  start: "bg-emerald-400",
+  stop: "bg-zinc-600",
+  delete: "bg-zinc-600",
+  commit: "bg-emerald-300/70",
+  create: "bg-emerald-300/70",
+  clone: "bg-emerald-300/70",
+  share: "bg-emerald-300/70",
+  "agent.install": "bg-amber-400",
+  "user.add": "bg-emerald-300/70",
+  "user.remove": "bg-zinc-600",
+};
+
 /** Team management: member list + audit for everyone; add/revoke only for owners. */
 export default function Team() {
   const [users, setUsers] = useState<TeamUser[] | null>(null);
@@ -100,6 +113,7 @@ export default function Team() {
           {audit.length === 0 && <div className="text-sm text-[#a1a1aa]">no events yet</div>}
           {audit.slice(0, 12).map((e, i) => (
             <div key={i} className="flex items-center gap-2 py-1 text-xs font-mono">
+              <span className={`size-1.5 shrink-0 rounded-full ${ACTION_DOT[e.action] ?? "bg-zinc-600"}`} />
               <span className="text-zinc-400">{new Date(e.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
               <span className="text-zinc-400">{e.user}</span>
               <span className="text-emerald-400">{e.action}</span>

@@ -6,6 +6,8 @@ export interface Workspace {
   created: number;
   started: number | null;
   stopped: number | null;
+  /** timestamp of the last commit (set on commit; undefined = never committed) */
+  lastCommitAt?: number;
   /** json payload given to the agent CLI at launch (may be absent) */
   payload?: string;
   /** owner's workspace root under their home; legacy records omit it and live

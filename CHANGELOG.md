@@ -8,7 +8,34 @@ and this project adheres to Semantic Versioning.
 Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
-- **The major version moves only on a breakthrough release** — a fundamental shift in what Kohlab can do, not just a big feature.
+
+## [1.9.0] - 2026-09-09
+
+The workbench release: one visual language across every screen, plus the usage
+model — task lifecycle, per-file review, and done-ping.
+
+- **One status language** — carbon-black surfaces, emerald running, amber
+  *needs review*, zinc stopped. Encoded once in `lib/status.ts`, shared by the
+  sidebar, dashboard, cockpit header, and ⌘K palette (docs/ux-v1.9.0.md).
+- **Per-file diff review** — the diff tab lists every changed file (the diff
+  API now returns per-file patches); review each and commit in one click.
+- **Review queue** — when an agent stops with an uncommitted diff, the
+  workspace derives *needs review* (`lastCommitAt` on the record) and surfaces
+  first on the dashboard.
+- **Done-ping** — the server's `workspace.done` push is now consumed: title
+  flash plus a browser notification (on first grant) when an agent finishes.
+- **Token-complete CSS** — sidebar/chart/radius/shadow/spacing tokens added to
+  `index.css` (Darkmatter shape, kohlab palette), so 21st.dev components drop
+  in without collisions.
+- **Polished chrome** — confirm dialog on delete, count badges on cockpit
+  tabs, session-log live marker, activity-feed status dots, audit tail dots,
+  toast restyle, sidebar active indicator + workspace groups.
+- **Front door** — README and onboarding copy now tell the task-loop story
+  (post a task → watch → review → commit) and mention team isolation.
+
+Plans: docs/ux-v1.9.0.md, docs/product-v1.10.0.md
+
+
 
 ## [1.8.0] - 2026-09-07
 

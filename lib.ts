@@ -877,10 +877,19 @@ export async function restartWorkspace(id: string) {
 export async function getDiff(id: string): Promise<{ name: string; diff: string }[]> {
   const ws = await getWorkspace(id);
   const tree = worktreePath(ws);
-  const { stdout } = await runOut(tree, "git", ["diff", "--stat", "--no-color"]);
-  const stat = stdout.trim() || "(clean)";
-  const { stdout: patch } = await runOut(tree, "git", ["diff", "--no-color"]);
-  return [{ name: stat, diff: patch }];
+  const { stdout: names } = await runOut(tree, "git", ["diff", "--name-only", "--no-color"]);
+  const files = names.trim().split("\n").filter(Boolean);
+  if (!files.length) return [];
+  const out: { name: string; diff: string }[] = [];
+  for (const f of files) {
+    try {
+      const { stdout: patch } = await runOut(tree, "git", ["diff", "--no-color", "--", f]);
+      out.push({ name: f, diff: patch });
+    } catch {
+      // skip files that vanished mid-diff (deleted between the two calls)
+    }
+  }
+  return out;
 }
 
 export async function commitWorkspace(id: string, message: string) {
@@ -888,7 +897,12 @@ export async function commitWorkspace(id: string, message: string) {
   const tree = worktreePath(ws);
   await run(tree, "git", ["add", "-A"]);
   await run(tree, "git", ["commit", "-m", message || `works: ${ws.task}`]);
-  return { ok: true };
+  return mutateState(async (st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) throw new Error(`no workspace '${id}'`);
+    w.lastCommitAt = Date.now();
+    return { ok: true };
+  });
 }
 
 // --- process helpers -----------------------------------------------------

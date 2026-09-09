@@ -26,16 +26,14 @@ Kohlab fixes all three — and stays out of your way.
 
 - **Parallel agents.** Spin up Claude Code, Codex, omp, or any agent that runs in a terminal — each in its own isolated workspace. They work side by side without touching each other.
 - **Never loses work.** Every agent runs in a persistent session on your server. Close your laptop, switch devices, lose your connection — the agent keeps working. Reconnect anywhere and pick up exactly where you left off.
-- **See everything from a browser.** A clean dashboard shows every workspace: what's running, what's done, and what needs your attention. Attach to any live terminal from your laptop or your phone.
-- **Review before you merge.** A built-in diff view shows exactly what each agent changed. Review, approve, and commit — no surprises landing in your code.
-
-## How it works
+- **See everything from a browser.** A clean dashboard shows every workspace: what's running, what needs review, and what's committed. Attach to any live terminal from your laptop or your phone.
+- **Review before you merge.** When an agent finishes, the workspace flips to *needs review* and pings you. Open the diff tab, review each changed file, and commit — no surprises landing in your code.
 
 **Three things, once.**
 
 1. **Install it on your server** (a $5 VPS is plenty — Kohlab is tiny, a few MB, no heavy infrastructure).
-2. **Point it at your project.** Kohlab creates a clean, isolated workspace for every task.
-3. **Tell it which agent to run.** Launch any agent CLI in a workspace, then go. Check in from any browser.
+2. **Invite your team** (optional) — every member gets their own OS-isolated account; their agents run as them, so nobody can touch anyone else's data.
+3. **Post a task.** Kohlab creates a clean, isolated workspace per task, launches the agent, and tells you when it's done.
 
 That's it. No database to run, no containers, no desktop app to install. One small server, one browser tab.
 
@@ -67,21 +65,26 @@ ssh -L 7676:localhost:7676 user@your-server
 
 Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
-## What's new in v1.4.1
+## What's new in v1.9.0
 
-- **Command center** — a dashboard with KPIs, agent availability, and a recent-activity feed.
-- **Command palette** — ⌘K quick actions across workspaces.
-- **Session log view** — live tail of a workspace's output.
-- **Image upload** — paste/send a PNG/JPEG/GIF/WebP into a terminal.
-- **Faster first paint** — Monaco + xterm are lazy-loaded; the shell loads ~3× lighter.
-- **Self-healing sessions** — the PTY daemon respawns on crash; state writes are race-free.
+- **The workbench** — a single visual language across every screen: carbon-black
+  surfaces, emerald running state, amber *needs review*, zinc stopped.
+- **Review queue** — finished agents with uncommitted diffs surface first on the
+  dashboard; the sidebar, cockpit header, and ⌘K palette all carry the state.
+- **Per-file diff review** — the diff tab lists every changed file; review each
+  one and commit in one click.
+- **Done-ping** — when an agent finishes, the title flashes and (on first grant)
+  a browser notification points you at the review queue.
+- **Polished chrome** — confirm dialogs on destructive actions, count badges on
+  cockpit tabs, live/session markers, toast restyle.
 
-Previous releases: v1.4.0 (PTY cutover), v1.3.0 (React rewrite), v1.2.0 (file tree + GitHub clone), v1.1.0 (notifications + sharing).
+Previous releases: v1.8.0 (per-user OS isolation), v1.7.0 (resource caps),
+v1.6.0 (users, roles, audit), v1.4.x (PTY + command center).
 
-## Project status
 
-**v1.4.1** — stable. Kohlab stays on the 1.x line through steady growth — the major version only moves on a genuine breakthrough release. Full plan: RELEASE-PLAN.md.
-
+**v1.9.0** — stable. Kohlab stays on the 1.x line through steady growth — the
+major version only moves on a genuine breakthrough release. Plans:
+`docs/ux-v1.9.0.md`, `docs/product-v1.10.0.md`.
 ## License
 
 MIT — free to use, modify, and self-host. Built for the community.

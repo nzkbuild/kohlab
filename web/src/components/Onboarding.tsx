@@ -130,7 +130,7 @@ export default function Onboarding() {
         </Step>
 
         <Step n={3} title="Monitor & merge" active={false} done={false}>
-          <div className="text-sm text-[#a1a1aa]">after it starts, watch the terminal live and review the diff before committing.</div>
+          <div className="text-sm text-[#a1a1aa]">watch the terminal live, then open the diff tab when it finishes — review each file and commit. Agents keep running even after you disconnect.</div>
         </Step>
 
         <button onClick={() => setView("dashboard")} className="text-center text-xs text-[#a1a1aa] hover:text-emerald-400 transition">
