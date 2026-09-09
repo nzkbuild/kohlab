@@ -54,7 +54,7 @@ export default function Onboarding() {
   };
 
   const Step = ({ n, title, active, done, children }: { n: number; title: string; active: boolean; done: boolean; children: React.ReactNode }) => (
-    <section className={`rounded-xl border p-4 transition ${active ? "border-emerald-400/50 bg-[#111113]" : "border-[#27272a] bg-[#0d0d0f]"}`}>
+    <section className={`rounded-xl border p-4 transition-colors ${active ? "border-emerald-400/50 bg-[#111113]" : "border-[#27272a] bg-[#0d0d0f]"}`}>
       <div className="flex items-center gap-2.5 mb-3">
         <span className={`flex size-5 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-400 text-[#06231a]" : active ? "bg-emerald-400/20 text-emerald-400" : "bg-[#1c1c1f] text-[#a1a1aa]"}`}>
           {done ? "✓" : n}
@@ -66,8 +66,8 @@ export default function Onboarding() {
   );
 
   return (
-    <div className="flex-1 flex items-center justify-center p-6">
-      <div className="w-full max-w-xl flex flex-col gap-3">
+    <div className="flex flex-1 justify-center p-6">
+      <div className="flex w-full max-w-xl flex-col gap-3 pt-10">
         <div className="mb-2">
           <h1 className="text-xl font-bold flex items-center gap-2">
             <Terminal size={20} className="text-emerald-400" /> get your first agent running

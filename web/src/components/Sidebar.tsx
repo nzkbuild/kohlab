@@ -7,10 +7,11 @@ import { cn } from "../lib/utils";
 import { workspaceStatus, STATUS_DOT, STATUS_LABEL } from "../lib/status";
 
 /**
- * Collapsible rail. One animation only: the aside width (60px ↔ 300px).
- * Inside rows render conditionally — no max-width/opacity fights, so nothing
- * inside jumps. Expanded rows share one grammar: h-9, gap-2.5, px-2.5,
- * 18px icon, truncating label. Collapsed rows center their icon/dot.
+ * Collapsible rail. ONE moving part: the aside width (60px ↔ 300px, 150ms).
+ * Every icon/dot keeps a FIXED x-position in both states (constant px + gap,
+ * no justify-center swap), so nothing slides horizontally on toggle. Labels
+ * fade with opacity — delayed 75ms on expand so text appears as the rail
+ * reveals it, never popping in mid-animation.
  */
 export default function Sidebar() {
   const { workspaces, selectedId, view, select, setView, refresh } = useApp();
@@ -72,7 +73,19 @@ export default function Sidebar() {
   // `showForm` pins the rail open while the create form is visible.
   const expanded = open || showForm;
 
-  const row = cn("flex h-9 w-full items-center rounded-lg", expanded ? "gap-2.5 px-2.5" : "justify-center");
+  // Label fade — the only inner animation. Icons never move.
+  const label = (children: React.ReactNode) => (
+    <span
+      className={cn(
+        "min-w-0 flex-1 truncate whitespace-nowrap transition-opacity duration-150",
+        expanded ? "opacity-100 delay-75" : "pointer-events-none opacity-0",
+      )}
+    >
+      {children}
+    </span>
+  );
+
+  const row = "flex h-9 w-full items-center gap-2.5 px-2.5 rounded-lg";
 
   const inputCls = "w-full bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400";
 
@@ -83,23 +96,21 @@ export default function Sidebar() {
         expanded ? "w-[300px]" : "w-[60px]",
       )}
     >
-      {/* header: brand (expanded) + toggle (always, pinned right when expanded) */}
-      <header className={cn("flex h-12 shrink-0 items-center border-b border-sidebar-border", expanded ? "gap-2 px-3" : "justify-center")}>
-        {expanded && (
-          <>
-            <span className="grid size-6 shrink-0 place-items-center rounded-md bg-emerald-400 text-[#06231a]">
-              <TerminalWindow size={14} weight="bold" />
-            </span>
-            <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>
-          </>
-        )}
+      {/* header — brand fades, toggle pinned right at a fixed x */}
+      <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-3">
+        <span
+          className={cn(
+            "grid size-6 shrink-0 place-items-center rounded-md bg-emerald-400 text-[#06231a] transition-opacity duration-150",
+            expanded ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+        >
+          <TerminalWindow size={14} weight="bold" />
+        </span>
+        {label(<span className="font-bold tracking-tight">kohlab</span>)}
         <button
           onClick={() => setOpen((v) => !v)}
           title={expanded ? "collapse sidebar" : "expand sidebar"}
-          className={cn(
-            "grid size-7 shrink-0 place-items-center rounded-md text-[#a1a1aa] transition-colors hover:bg-sidebar-accent hover:text-[#e4e4e7]",
-            expanded && "ml-auto",
-          )}
+          className="ml-auto grid size-7 shrink-0 place-items-center rounded-md text-[#a1a1aa] transition-colors hover:bg-sidebar-accent hover:text-[#e4e4e7]"
         >
           {expanded ? <SidebarSimple size={16} weight="bold" /> : <CaretDoubleRight size={16} weight="bold" />}
         </button>
@@ -123,7 +134,7 @@ export default function Sidebar() {
               )}
             >
               <n.icon size={18} weight={active ? "fill" : "regular"} className="shrink-0" />
-              {expanded && <span className="truncate">{n.label}</span>}
+              {label(<span>{n.label}</span>)}
             </button>
           );
         })}
@@ -138,12 +149,11 @@ export default function Sidebar() {
           }}
           title="new workspace"
           className={cn(
-            "flex h-9 w-full items-center rounded-lg bg-emerald-400 font-semibold text-[#06231a] transition hover:brightness-110 active:scale-[0.98]",
-            expanded ? "gap-2 px-3" : "justify-center",
+            "flex h-9 w-full items-center gap-2.5 rounded-lg bg-emerald-400 px-2.5 font-semibold text-[#06231a] transition hover:brightness-110 active:scale-[0.98]",
           )}
         >
           <Plus size={18} weight="bold" className="shrink-0" />
-          {expanded && <span className="truncate">new workspace</span>}
+          {label(<span className="truncate">new workspace</span>)}
         </button>
       </div>
 
@@ -202,8 +212,8 @@ export default function Sidebar() {
           <div className="px-2.5 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-[#a1a1aa]">workspaces</div>
         )}
         {workspaces.length === 0 && (
-          <div className={cn("text-xs text-zinc-400", expanded ? "px-2.5 pt-4 leading-5" : "pt-4 text-center")}>
-            {expanded ? (<>no workspaces yet<br />create one to launch your first agent</>) : "—"}
+          <div className={cn("px-2.5 pt-4 text-xs leading-5 text-zinc-400", !expanded && "sr-only")}>
+            no workspaces yet — create one to launch your first agent
           </div>
         )}
         {workspaces.map((w) => (
@@ -218,22 +228,22 @@ export default function Sidebar() {
             )}
           >
             <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[workspaceStatus(w)])} />
-            {expanded && (
-              <span className="min-w-0 flex-1 truncate text-[13px]">
+            {label(
+              <span className="text-[13px]">
                 <span className="font-medium">{w.id}</span>
                 <span className="text-[#a1a1aa]"> · {w.agent}</span>
-              </span>
+              </span>,
             )}
           </div>
         ))}
       </nav>
 
       {/* footer */}
-      <footer className={cn("flex h-11 shrink-0 items-center border-t border-sidebar-border", expanded ? "gap-2.5 px-3" : "justify-center")}>
+      <footer className="flex h-11 shrink-0 items-center gap-2.5 border-t border-sidebar-border px-3">
         <div className="grid size-6 shrink-0 place-items-center rounded-full border border-sidebar-border bg-sidebar-accent text-[#a1a1aa]">
           <FolderOpen size={12} />
         </div>
-        {expanded && <span className="truncate text-xs text-[#a1a1aa]">workspaces persist on this server</span>}
+        {label(<span className="text-xs text-[#a1a1aa]">workspaces persist on this server</span>)}
       </footer>
     </aside>
   );
