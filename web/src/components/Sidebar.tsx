@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
-import { Plus, FolderOpen, GithubLogo, SquaresFour, GearSix, TerminalWindow, SidebarSimple } from "@phosphor-icons/react";
+import { Plus, FolderOpen, GithubLogo, SquaresFour, GearSix, TerminalWindow, SidebarSimple, CaretDoubleRight } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp } from "../store";
 import { withToast } from "../lib/actions";
 import { cn } from "../lib/utils";
 import { workspaceStatus, STATUS_DOT, STATUS_LABEL } from "../lib/status";
 
-
 /**
- * Collapsible icon rail. Collapsed (60px) shows icons only; hovering expands to
- * 300px with labels. Replaces the fixed-width sidebar without losing any of its
- * functions (dashboard/settings nav, workspace list, create form, persist footer).
+ * Collapsible rail. One animation only: the aside width (60px ↔ 300px).
+ * Inside rows render conditionally — no max-width/opacity fights, so nothing
+ * inside jumps. Expanded rows share one grammar: h-9, gap-2.5, px-2.5,
+ * 18px icon, truncating label. Collapsed rows center their icon/dot.
  */
 export default function Sidebar() {
   const { workspaces, selectedId, view, select, setView, refresh } = useApp();
@@ -65,88 +65,92 @@ export default function Sidebar() {
   };
 
   const nav = [
-    { key: "dashboard" as const, label: "Dashboard", icon: <SquaresFour className="size-5 shrink-0 text-[#a1a1aa] group-hover/side:text-[#e4e4e7]" /> },
-    { key: "settings" as const, label: "Settings", icon: <GearSix className="size-5 shrink-0 text-[#a1a1aa] group-hover/side:text-[#e4e4e7]" /> },
+    { key: "dashboard" as const, label: "Dashboard", icon: SquaresFour },
+    { key: "settings" as const, label: "Settings", icon: GearSix },
   ];
 
-  const label = (show: boolean, children: React.ReactNode) => (
-    <span
-      className={cn(
-        "text-sm whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-out",
-        show ? "opacity-100 max-w-[200px] ml-2" : "opacity-0 max-w-0 ml-0",
-      )}
-    >
-      {children}
-    </span>
-  );
-
-  // explicit toggle; `showForm` also pins it open while the form is visible.
+  // `showForm` pins the rail open while the create form is visible.
   const expanded = open || showForm;
+
+  const row = cn("flex h-9 w-full items-center rounded-lg", expanded ? "gap-2.5 px-2.5" : "justify-center");
+
+  const inputCls = "w-full bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400";
 
   return (
     <aside
       className={cn(
-        "h-full flex flex-col bg-[#111113] border-r border-[#27272a] shrink-0 overflow-hidden transition-[width] duration-150",
+        "flex h-full shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-150 ease-out",
         expanded ? "w-[300px]" : "w-[60px]",
       )}
     >
-      {/* logo */}
-      <div className="px-3 h-12 flex items-center gap-2 border-b border-[#27272a] overflow-hidden">
-        <span className="grid size-6 shrink-0 place-items-center rounded-md bg-emerald-400 text-[#06231a]">
-          <TerminalWindow size={14} weight="bold" />
-        </span>
-        {label(expanded, <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>)}
+      {/* header: brand (expanded) + toggle (always, pinned right when expanded) */}
+      <header className={cn("flex h-12 shrink-0 items-center border-b border-sidebar-border", expanded ? "gap-2 px-3" : "justify-center")}>
+        {expanded && (
+          <>
+            <span className="grid size-6 shrink-0 place-items-center rounded-md bg-emerald-400 text-[#06231a]">
+              <TerminalWindow size={14} weight="bold" />
+            </span>
+            <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>
+          </>
+        )}
         <button
           onClick={() => setOpen((v) => !v)}
           title={expanded ? "collapse sidebar" : "expand sidebar"}
-          className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-[#a1a1aa] transition hover:bg-[#1c1c1f] hover:text-[#e4e4e7]"
+          className={cn(
+            "grid size-7 shrink-0 place-items-center rounded-md text-[#a1a1aa] transition-colors hover:bg-sidebar-accent hover:text-[#e4e4e7]",
+            expanded && "ml-auto",
+          )}
         >
-          {expanded ? <SidebarSimple size={14} weight="bold" /> : <SidebarSimple size={14} weight="bold" />}
+          {expanded ? <SidebarSimple size={16} weight="bold" /> : <CaretDoubleRight size={16} weight="bold" />}
         </button>
-      </div>
+      </header>
 
-
-      {/* nav icons */}
-      <div className="flex flex-col gap-1 p-2">
-        {nav.map((n) => (
-          <button
-            key={n.key}
-            onClick={() => setView(n.key)}
-            title={n.label}
-            className={cn(
-              "group/side relative flex items-center h-9 px-2 rounded-lg hover:bg-[#151517] transition overflow-hidden justify-start",
-              view === n.key && "bg-[#1c1c1f]",
-            )}
-          >
-            {view === n.key && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-emerald-400" />}
-            {n.icon}
-            {label(expanded, <span className={cn("whitespace-nowrap", view === n.key ? "text-[#e4e4e7]" : "text-[#a1a1aa]")}>{n.label}</span>)}
-          </button>
-        ))}
-      </div>
+      {/* nav */}
+      <nav className="flex flex-col gap-0.5 p-2">
+        {nav.map((n) => {
+          const active = view === n.key;
+          return (
+            <button
+              key={n.key}
+              onClick={() => setView(n.key)}
+              title={n.label}
+              className={cn(
+                row,
+                "transition-colors",
+                active
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-[#a1a1aa] hover:bg-sidebar-accent/60 hover:text-[#e4e4e7]",
+              )}
+            >
+              <n.icon size={18} weight={active ? "fill" : "regular"} className="shrink-0" />
+              {expanded && <span className="truncate">{n.label}</span>}
+            </button>
+          );
+        })}
+      </nav>
 
       {/* new workspace */}
       <div className="px-2 pb-2">
         <button
-          onClick={() => { setShowForm((v) => !v); setOpen(true); }}
+          onClick={() => {
+            setOpen(true);
+            setShowForm((v) => !v);
+          }}
           title="new workspace"
-          className="w-full flex items-center justify-start h-9 px-2 rounded-lg bg-emerald-400 text-[#06231a] font-semibold hover:brightness-110 active:scale-[0.98] transition overflow-hidden"
+          className={cn(
+            "flex h-9 w-full items-center rounded-lg bg-emerald-400 font-semibold text-[#06231a] transition hover:brightness-110 active:scale-[0.98]",
+            expanded ? "gap-2 px-3" : "justify-center",
+          )}
         >
-          <Plus className={cn("size-5 shrink-0", expanded ? "" : "mx-auto")} />
-          {label(expanded, <span className="whitespace-nowrap text-sm">new workspace</span>)}
+          <Plus size={18} weight="bold" className="shrink-0" />
+          {expanded && <span className="truncate">new workspace</span>}
         </button>
       </div>
 
       {/* create form */}
       {showForm && expanded && (
-        <form onSubmit={create} className="mx-2 mb-2 p-3 rounded-xl bg-[#151517] border border-[#27272a] flex flex-col gap-2">
-          <input
-            value={task}
-            onChange={(e) => setTask(e.target.value)}
-            placeholder="task description"
-            required
-            className="bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
-          />
+        <form onSubmit={create} className="mx-2 mb-2 flex flex-col gap-2 rounded-xl border border-[#27272a] bg-[#151517] p-3">
+          <input value={task} onChange={(e) => setTask(e.target.value)} placeholder="task description" required className={inputCls} />
           {ghAuthed && ghRepos.length > 0 && (
             <select
               defaultValue=""
@@ -154,7 +158,7 @@ export default function Sidebar() {
                 const ownerRepo = e.target.value.split("\t")[0];
                 if (ownerRepo) setRepo(`https://github.com/${ownerRepo}.git`);
               }}
-              className="bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+              className={inputCls}
             >
               <option value="">choose a GitHub repo</option>
               {ghRepos.map((entry) => {
@@ -172,25 +176,21 @@ export default function Sidebar() {
                 value={repo}
                 onChange={(e) => setRepo(e.target.value)}
                 placeholder="repo path or GitHub URL"
-                className="w-full bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400"
+                className={cn(inputCls, "pr-8")}
               />
-              <GithubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <GithubLogo size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
             </div>
-            <select
-              value={agent}
-              onChange={(e) => setAgent(e.target.value)}
-              className="bg-[#111113] border border-[#27272a] rounded-lg px-2 py-2 text-sm outline-none focus:border-emerald-400"
-            >
+            <select value={agent} onChange={(e) => setAgent(e.target.value)} className={cn(inputCls, "w-24 shrink-0")}>
               {["omp", "claude", "codex", "opencode", "pi", "gemini", "sh"].map((a) => (
                 <option key={a} value={a}>{a}</option>
               ))}
             </select>
           </div>
           <div className="flex gap-2">
-            <input value={maxMem} onChange={(e) => setMaxMem(e.target.value)} placeholder="max mem MB" inputMode="numeric" className="flex-1 bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
-            <input value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} placeholder="timeout s" inputMode="numeric" className="flex-1 bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-2 text-sm outline-none focus:border-emerald-400" />
+            <input value={maxMem} onChange={(e) => setMaxMem(e.target.value)} placeholder="max mem MB" inputMode="numeric" className={inputCls} />
+            <input value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} placeholder="timeout s" inputMode="numeric" className={inputCls} />
           </div>
-          <button type="submit" disabled={busy || !task} className="py-1.5 rounded-lg bg-[#1c1c1f] border border-[#27272a] text-sm hover:border-emerald-400 disabled:opacity-40 transition">
+          <button type="submit" disabled={busy || !task} className="rounded-lg border border-[#27272a] bg-[#1c1c1f] py-1.5 text-sm transition hover:border-emerald-400 disabled:opacity-40">
             {busy ? "creating..." : "create"}
           </button>
         </form>
@@ -199,11 +199,11 @@ export default function Sidebar() {
       {/* workspace list */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden p-2">
         {expanded && workspaces.length > 0 && (
-          <div className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-[#a1a1aa]">workspaces</div>
+          <div className="px-2.5 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-[#a1a1aa]">workspaces</div>
         )}
         {workspaces.length === 0 && (
-          <div className={cn("text-zinc-400 text-xs text-center leading-5", expanded ? "px-2 mt-8" : "mt-4")}>
-            {expanded ? (<>no workspaces yet<br />create one to launch your first agent</>) : <span className="text-zinc-400">—</span>}
+          <div className={cn("text-xs text-zinc-400", expanded ? "px-2.5 pt-4 leading-5" : "pt-4 text-center")}>
+            {expanded ? (<>no workspaces yet<br />create one to launch your first agent</>) : "—"}
           </div>
         )}
         {workspaces.map((w) => (
@@ -212,29 +212,29 @@ export default function Sidebar() {
             onClick={() => goWorkspace(w.id)}
             title={`${w.id} — ${STATUS_LABEL[workspaceStatus(w)]}`}
             className={cn(
-              "group/side flex items-center h-9 rounded-lg cursor-pointer border border-transparent transition overflow-hidden",
-              expanded ? "px-2 justify-start" : "px-2 justify-center",
-              w.id === selectedId ? "bg-[#1c1c1f] border-[#333338]" : "hover:bg-[#151517]",
+              row,
+              "mb-0.5 cursor-pointer border border-transparent transition-colors",
+              w.id === selectedId ? "border-sidebar-border bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
             )}
           >
-            <span className={`size-2 shrink-0 rounded-full ${STATUS_DOT[workspaceStatus(w)]}`} />
-            {label(expanded, (
-              <span className="text-[13px] truncate">
+            <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[workspaceStatus(w)])} />
+            {expanded && (
+              <span className="min-w-0 flex-1 truncate text-[13px]">
                 <span className="font-medium">{w.id}</span>
-                <span className="text-zinc-400"> · {w.agent}</span>
+                <span className="text-[#a1a1aa]"> · {w.agent}</span>
               </span>
-            ))}
+            )}
           </div>
         ))}
       </nav>
 
-      {/* persist footer / avatar */}
-      <div className={cn("border-t border-[#27272a] flex items-center overflow-hidden", expanded ? "px-3 h-11 justify-start gap-2" : "h-11 justify-center")}>
-        <div className="size-6 shrink-0 rounded-full bg-[#1c1c1f] border border-[#333338] grid place-items-center">
-          <FolderOpen size={12} className="text-[#a1a1aa]" />
+      {/* footer */}
+      <footer className={cn("flex h-11 shrink-0 items-center border-t border-sidebar-border", expanded ? "gap-2.5 px-3" : "justify-center")}>
+        <div className="grid size-6 shrink-0 place-items-center rounded-full border border-sidebar-border bg-sidebar-accent text-[#a1a1aa]">
+          <FolderOpen size={12} />
         </div>
-        {label(expanded, <span className="text-xs text-zinc-400 whitespace-nowrap">workspaces persist on this server</span>)}
-      </div>
+        {expanded && <span className="truncate text-xs text-[#a1a1aa]">workspaces persist on this server</span>}
+      </footer>
     </aside>
   );
 }

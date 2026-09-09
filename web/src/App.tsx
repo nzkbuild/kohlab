@@ -81,7 +81,6 @@ export default function App() {
     };
     connect();
     return () => {
-      closed = true;
       if (retry) clearTimeout(retry);
       ws?.close();
     };
@@ -97,9 +96,9 @@ export default function App() {
         richColors
         toastOptions={{ style: { background: "#151517", border: "1px solid #27272a", color: "#e4e4e7" } }}
       />
-      <div className="h-full flex">
+      <div className="flex h-full bg-background text-foreground">
         <Sidebar />
-        <main className="flex-1 min-w-0 flex flex-col">
+        <main className="flex min-w-0 flex-1 flex-col">
           {view === "dashboard" && <Dashboard />}
           {view === "settings" && <Settings />}
           {view === "workspaces" &&
