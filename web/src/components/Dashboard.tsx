@@ -39,25 +39,27 @@ export default function Dashboard() {
   const fmtTime = (t: number) =>
     new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const card = (label: string, value: number | string, icon: React.ReactNode, accent: string) => (
-    <div className="rounded-xl border border-[#27272a] bg-[#111113] p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-[#a1a1aa]">{label}</span>
-        <span className={`rounded-md p-1.5 ${accent}`}>{icon}</span>
-      </div>
-      <div className="mt-2 text-2xl font-semibold">{value}</div>
-    </div>
-  );
+  const kpis = [
+    { label: "Running", value: running.length, icon: <PlayCircle size={16} />, accent: "bg-emerald-400/10 text-emerald-400" },
+    { label: "Needs review", value: review.length, icon: <CheckCircle size={16} />, accent: "bg-amber-400/10 text-amber-400" },
+    { label: "Workspaces", value: workspaces.length, icon: <FolderOpen size={16} />, accent: "bg-[#1c1c1f] text-[#a1a1aa]" },
+    { label: "Agents installed", value: agentNames.length, icon: <Cpu size={16} />, accent: "bg-emerald-400/10 text-emerald-300" },
+  ] as const;
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto p-5">
       <h1 className="text-lg font-semibold mb-4">Command center</h1>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        {card("Running", running.length, <PlayCircle size={16} />, "bg-emerald-400/10 text-emerald-400")}
-        {card("Needs review", review.length, <CheckCircle size={16} />, "bg-amber-400/10 text-amber-400")}
-        {card("Workspaces", workspaces.length, <FolderOpen size={16} />, "bg-[#1c1c1f] text-[#a1a1aa]")}
-        {card("Agents installed", agentNames.length, <Cpu size={16} />, "bg-emerald-400/10 text-emerald-300")}
+        {kpis.map((k) => (
+          <div key={k.label} className="min-h-[92px] rounded-xl border border-[#27272a] bg-[#111113] p-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-[#a1a1aa] truncate">{k.label}</span>
+              <span className={`shrink-0 rounded-md p-1.5 ${k.accent}`}>{k.icon}</span>
+            </div>
+            <div className="mt-2 text-2xl font-semibold tabular-nums">{k.value}</div>
+          </div>
+        ))}
       </div>
 
       {review.length > 0 && (

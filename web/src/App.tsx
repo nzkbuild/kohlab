@@ -37,47 +37,55 @@ export default function App() {
     if (authed) void refresh();
   }, [authed, refresh]);
 
-  // done-ping (v1.10): the server broadcasts `workspace.done` over the shared
-  // WebSocket when an agent finishes. Ping once per workspace: refresh the
-  // list, flash the title, and (on first grant) a browser notification.
+  // done-ping: the server broadcasts `workspace.done` over a WebSocket when an
+  // agent finishes. This listener uses its OWN socket — the cockpit terminal
+  // keeps its own ws — and reconnects at most every 3s, so a dropped link
+  // can't turn into a retry storm. Non-JSON frames (raw terminal bytes) are
+  // ignored.
   useEffect(() => {
     if (!authed) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
+
+    const wsUrl = `${proto}//${location.host}`;
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let closed = false;
     const connect = () => {
-      ws = new WebSocket(`${proto}//${location.host}`);
+      ws = new WebSocket(wsUrl);
       ws.onmessage = (ev) => {
+        if (typeof ev.data !== "string") return;
+        let msg: { type?: string; id?: string; task?: string } | null = null;
         try {
-          const msg = JSON.parse(String(ev.data)) as { type?: string; id?: string; task?: string };
-          if (msg.type !== "workspace.done" || !msg.id) return;
-          if (notified.current.has(msg.id)) return;
-          notified.current.add(msg.id);
-          void refresh();
-          document.title = `✓ ${msg.id} finished — needs review`;
-          setTimeout(() => {
-            document.title = baseTitle;
-          }, 5000);
-          if ("Notification" in window) {
-            const ping = () => new Notification("kohlab — needs review", { body: msg.task || `${msg.id} finished` });
-            if (Notification.permission === "granted") ping();
-            else if (Notification.permission === "default") void Notification.requestPermission().then((p) => p === "granted" && ping());
-          }
+          msg = JSON.parse(ev.data) as { type?: string; id?: string; task?: string };
         } catch {
-          // non-JSON frames are terminal bytes, never push messages
+          return;
+        }
+        if (msg?.type !== "workspace.done" || !msg.id) return;
+        if (notified.current.has(msg.id)) return;
+        notified.current.add(msg.id);
+        void refresh();
+        document.title = `✓ ${msg.id} finished — needs review`;
+        setTimeout(() => {
+          document.title = baseTitle;
+        }, 5000);
+        if ("Notification" in window) {
+          const ping = () => new Notification("kohlab — needs review", { body: msg?.task || `${msg.id} finished` });
+          if (Notification.permission === "granted") ping();
+          else if (Notification.permission === "default") void Notification.requestPermission().then((p) => p === "granted" && ping());
         }
       };
       ws.onclose = () => {
+        if (closed) return;
         retry = setTimeout(connect, 3000);
       };
     };
     connect();
     return () => {
+      closed = true;
       if (retry) clearTimeout(retry);
       ws?.close();
     };
   }, [authed, refresh]);
-
   if (!authed) return <AuthGate />;
 
   return (

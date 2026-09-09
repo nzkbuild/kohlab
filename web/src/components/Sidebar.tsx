@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, FolderOpen, GithubLogo, SquaresFour, GearSix, TerminalWindow } from "@phosphor-icons/react";
+import { Plus, FolderOpen, GithubLogo, SquaresFour, GearSix, TerminalWindow, SidebarSimple } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp } from "../store";
 import { withToast } from "../lib/actions";
@@ -14,7 +14,7 @@ import { workspaceStatus, STATUS_DOT, STATUS_LABEL } from "../lib/status";
  */
 export default function Sidebar() {
   const { workspaces, selectedId, view, select, setView, refresh } = useApp();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [task, setTask] = useState("");
   const [repo, setRepo] = useState("");
   const [agent, setAgent] = useState("omp");
@@ -80,26 +80,31 @@ export default function Sidebar() {
     </span>
   );
 
-  // `open` is the hover state; `expanded` pins it open while the create form is
-  // visible so a transient mouse-leave can't collapse the form mid-typing.
+  // explicit toggle; `showForm` also pins it open while the form is visible.
   const expanded = open || showForm;
 
   return (
     <aside
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => { if (!showForm) setOpen(false); }}
       className={cn(
         "h-full flex flex-col bg-[#111113] border-r border-[#27272a] shrink-0 overflow-hidden transition-[width] duration-150",
         expanded ? "w-[300px]" : "w-[60px]",
       )}
     >
       {/* logo */}
-      <div className="px-3 h-12 flex items-center border-b border-[#27272a] overflow-hidden">
-        <span className={cn("grid place-items-center rounded-md bg-emerald-400 text-[#06231a]", expanded ? "h-6 w-6" : "h-6 w-6 mx-auto")}>
+      <div className="px-3 h-12 flex items-center gap-2 border-b border-[#27272a] overflow-hidden">
+        <span className="grid size-6 shrink-0 place-items-center rounded-md bg-emerald-400 text-[#06231a]">
           <TerminalWindow size={14} weight="bold" />
         </span>
         {label(expanded, <span className="font-bold tracking-tight whitespace-nowrap">kohlab</span>)}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          title={expanded ? "collapse sidebar" : "expand sidebar"}
+          className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-[#a1a1aa] transition hover:bg-[#1c1c1f] hover:text-[#e4e4e7]"
+        >
+          {expanded ? <SidebarSimple size={14} weight="bold" /> : <SidebarSimple size={14} weight="bold" />}
+        </button>
       </div>
+
 
       {/* nav icons */}
       <div className="flex flex-col gap-1 p-2">
