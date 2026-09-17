@@ -527,19 +527,18 @@ function containFailure(promise: Promise<unknown>, what: string): void {
 async function ensurePtySession(id: string, terminalId = "main") {
   const ws = await getWorkspace(id);
   /**
-   * Only a workspace that is *meant* to be running is (re)spawned on attach.
+   * Do not resurrect a run that has ENDED.
    *
-   * `stopped` is set when the agent exits, and this function used to spawn
-   * unconditionally — so merely opening a finished workspace launched a fresh
-   * agent in its worktree. That also defeated accepting a workspace: accepting
-   * is the only way out of the review queue, but the run that opening it started
-   * ended after the acceptance and put it straight back in the queue.
+   * `stopped` is set when the agent exits, so a finished workspace used to be
+   * relaunched just by opening it. That also defeated accepting it: accepting is
+   * the only way out of the review queue, but the run that opening it started
+   * ended after the acceptance and put the workspace straight back in the queue.
    *
-   * An existing session (for example one started from the CLI) is still attached
-   * below — this only declines to *create* one.
+   * A workspace that has never run is still spawned here on purpose — creating a
+   * workspace does not start it, and both the onboarding copy and the README
+   * promise that opening it does. Only the ended case is blocked.
    */
-  const shouldBeRunning = ws.stopped === null && ws.started !== null;
-  if (!shouldBeRunning) return;
+  if (ws.stopped !== null) return;
 
   try {
     await spawnAgentSession(ws, terminalId);

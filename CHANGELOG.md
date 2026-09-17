@@ -70,8 +70,10 @@ in `docs/research/`.
 - **Opening a finished workspace relaunched its agent.** The attach path spawned
   unconditionally, so merely looking at a stopped workspace started a new run —
   and when that run ended it put the workspace straight back into the review
-  queue, which meant accepting it never stuck. Attach now only subscribes, and
-  says so with a "start it" affordance instead of a blank terminal.
+  queue, which meant accepting it never stuck. The attach now declines to
+  *resurrect an ended run*; a workspace that has never run is still started by
+  opening it, as the onboarding copy promises, and an ended one shows a
+  "start it" affordance instead of a blank terminal.
 
 ### Changed
 

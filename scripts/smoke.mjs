@@ -221,20 +221,24 @@ try {
         }, 2500);
       });
 
-    // Only a workspace that is *meant* to be running is spawned on attach (see
-    // ensurePtySession), so start it first — this is what makes the attach below
-    // exercise the spawn path, whose missing import used to kill the server on
-    // the very first terminal open.
-    const startBeforeAttach = await post(`/api/workspaces/${createdId}/start`);
-    check("POST .../start -> ok", startBeforeAttach.status === 200);
-    await new Promise((r) => setTimeout(r, 900));
-
-    // Terminal attach. ensurePtySession() records a browser-attach as a real
-    // run; the call existed without its import for several releases, so the
-    // first terminal open threw ReferenceError and killed the whole server.
+    // Terminal attach. Two behaviours live here and a single attach cannot
+    // distinguish them, so the suite checks all three cases below.
+    //
+    // This first attach happens while the workspace has never run, which is the
+    // create → open → running path: creating a workspace does not spawn, and
+    // both the onboarding copy and the README promise that opening it does. It
+    // is also what exercises markStarted, whose missing import used to kill the
+    // server on the very first terminal open.
     const first = await attachOnce();
     check("terminal attach keeps the socket open", first.open === true, `closeCode=${first.closeCode} ${first.failed ?? ""}`);
     check("server survives a terminal attach", first.status === 200, `api returned ${first.status} — the process died`);
+    const afterFirstAttach = await req("/api/workspaces");
+    const rowAfterFirst = Array.isArray(afterFirstAttach.body) ? afterFirstAttach.body.find((w) => w.id === createdId) : null;
+    check(
+      "attaching to a never-run workspace starts it",
+      rowAfterFirst?.running === true,
+      `running=${rowAfterFirst?.running} started=${rowAfterFirst?.started}`,
+    );
 
     // Re-attach. The session already exists by now, which the daemon reports as
     // an error; treating that as fatal killed the server on every browser
