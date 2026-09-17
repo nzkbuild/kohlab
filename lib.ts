@@ -3,7 +3,7 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, renameSync } from "fs";
 import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
 import { basename, join } from "path";
 import { spawn, spawnSync } from "child_process";
@@ -150,7 +150,15 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
 
 /** True when the server is configured to require an access key. */
 export function authRequired(): boolean {
-  return !!ACCESS_KEY || usersExist();
+  if (ACCESS_KEY) return true;
+  // Read FIRST, so corruption latches before the decision is made. Checking the
+  // flag before reading left a one-request window: the flag was set *during*
+  // usersExist(), too late for the check that had already passed, so the first
+  // request after a users.json was damaged was still admitted as anonymous —
+  // and a mutating one would have been allowed through.
+  const users = readUsers();
+  if (usersFileCorrupt) return true;
+  return users.length > 0;
 }
 
 /** True when at least one named user exists (users.json non-empty). */
@@ -175,12 +183,49 @@ async function keyMatches(candidate: string, storedHex: string): Promise<boolean
   return diff === 0;
 }
 
+/**
+ * Preserve a file we could not parse, and say so loudly.
+ *
+ * Renaming rather than deleting keeps the records recoverable by hand. The
+ * alternative — starting from an empty default — makes the loss invisible and
+ * invites writing new state over the only copy that survived.
+ */
+function quarantineCorrupt(file: string, error: unknown): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const target = `${file}.corrupt-${stamp}`;
+  let kept = target;
+  try {
+    renameSync(file, target);
+  } catch {
+    kept = file; // could not move it; leave it where it is
+  }
+  console.error(
+    `\n[kohlab] ${file} is unreadable: ${error instanceof Error ? error.message : String(error)}` +
+      `\n[kohlab] preserved as ${kept}` +
+      `\n[kohlab] restore with: mv '${kept}' '${file}'\n`,
+  );
+  return kept;
+}
+
+/**
+ * Set when users.json could not be parsed. Latched for the process lifetime:
+ * once we cannot trust the user list, we must not conclude there are no users.
+ */
+let usersFileCorrupt = false;
+
 function readUsers(): User[] {
   if (!existsSync(USERS_FILE)) return [];
   try {
     const parsed = JSON.parse(readFileSync(USERS_FILE, "utf8")) as { users?: User[] };
     return parsed.users ?? [];
-  } catch {
+  } catch (error) {
+    // FAIL CLOSED. Returning [] here used to make usersExist() false, which made
+    // authRequired() false, which made `denied` false — so a corrupt users.json
+    // in a users-based deployment (no KOHLAB_KEY) silently stopped requiring
+    // authentication and let anonymous requests mutate. A damaged auth file must
+    // tighten access, never loosen it.
+    usersFileCorrupt = true;
+    quarantineCorrupt(USERS_FILE, error);
     return [];
   }
 }
@@ -494,7 +539,17 @@ async function loadState(): Promise<State> {
     return s;
   }
   const raw = await readFile(STATE_FILE, "utf8");
-  const s = JSON.parse(raw) as State;
+  let s: State;
+  try {
+    s = JSON.parse(raw) as State;
+  } catch (error) {
+    // Loud, never silent. Starting from empty defaults here would present an
+    // empty fleet as if it were the truth, and invite new state being written
+    // over the only surviving copy. This runs on every request, so a corrupt
+    // file surfaces everywhere instead of being discovered later.
+    const kept = quarantineCorrupt(STATE_FILE, error);
+    throw new Error(`${STATE_FILE} is corrupt and was preserved as ${kept} — restore or remove it, then restart`);
+  }
   if (!s.agents) s.agents = { ...DEFAULT_AGENTS };
   return s;
 }
