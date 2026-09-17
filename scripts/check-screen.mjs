@@ -213,6 +213,31 @@ try {
     entry.cols === 60 && entry.rows === 14 && entry.ptyCols === 60 && entry.ptyRows === 14,
     `screen=${entry.cols}x${entry.rows} pty=${entry.ptyCols}x${entry.ptyRows}`,
   );
+  // 3b. The consequence, behaviourally: TUIs draw with absolute cursor
+  //     addressing, so a stale width misplaces everything. `ESC[1;50H` clamps to
+  //     the model's width — column 20 if the mirror never resized, column 50 if
+  //     it did. (This has to use absolute addressing: a line long enough to wrap
+  //     is indistinguishable, because the emulator soft-wraps it and serialize
+  //     emits the wrapped rows as one logical line, so re-rendering un-wraps it
+  //     either way.)
+  // Silence echo first, then clear, so the marker below is the only one on
+  // screen — searching for it in an echoed command line would match the command
+  // text itself and measure the wrong thing.
+  await fireAndForget({
+    type: "input",
+    id: RESIZE_SESSION,
+    data: Buffer.from("stty -echo; printf '\\033[2J\\033[H'; printf '\\033[1;50H@'\n", "utf8").toString("base64"),
+  });
+  await new Promise((r) => setTimeout(r, 900));
+  const placed = await askWithOutput({ type: "subscribe", id: RESIZE_SESSION, replay: true });
+  const placedRows = await render(placed.output, 60, 14);
+  const atRow = placedRows.find((l) => l.includes("@")) ?? "";
+  const col = atRow.indexOf("@");
+  check(
+    "absolute cursor addressing lands where the resized width says it should",
+    col >= 45,
+    `@ at column ${col} (19 => the mirror never resized and the cursor clamped; ~49 => it did) row=${JSON.stringify(atRow.slice(0, 56))}`,
+  );
   await fireAndForget({ type: "close", id: RESIZE_SESSION });
 
   // 4. A finished session still serves its FINAL screen (retained, not dropped).
