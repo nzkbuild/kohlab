@@ -32,6 +32,24 @@ driver than tmux.
 
 ### Fixed
 
+- **`state.json` and `users.json` were written non-atomically.** Both used
+  `writeFile`, which truncates before writing — so a process death mid-write
+  (OOM, `kill -9`, power loss) left a half-written file. For `state.json` that
+  loses *every workspace at once*; for `users.json` it locks out every member.
+  Both now write to a sibling temp file, `fsync`, then `rename`, so a reader sees
+  the old file or the new one and never a torn one.
+- **The daemon had no process-level guard.** It owns every live PTY, so an
+  unhandled throw anywhere took every running agent down with it. It now logs and
+  continues on `uncaughtException`/`unhandledRejection` — a degraded screen model
+  is recoverable from the browser, a lost fleet is not.
+- **A session could briefly outlive its screen.** `onExit` disposed the headless
+  terminal in a write callback while the session stayed in `SESSIONS` for another
+  50 ms, so a subscribe landing in that window wrote to a disposed terminal.
+  Disposal now happens where the session leaves the map, so "in the map" implies
+  "screen alive".
+- **A deferred replay could write to a disconnected caller.** The serialize
+  callback runs a tick after the request, so it now checks `sock.destroyed`
+  before writing.
 - **A dead subscriber could kill the daemon — and every agent with it.** The
   daemon kept a single `client` socket, overwritten by each new connection, and
   had no `'error'` handler on it. When a subscriber went away the reference

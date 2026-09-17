@@ -4,7 +4,7 @@
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
 import { existsSync, readFileSync } from "fs";
-import { mkdir, readFile, realpath, rm, stat, writeFile, appendFile } from "fs/promises";
+import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
 import { basename, join } from "path";
 import { spawn, spawnSync } from "child_process";
 import { cwd } from "process";
@@ -187,7 +187,9 @@ function readUsers(): User[] {
 
 async function writeUsers(users: User[]): Promise<void> {
   await mkdir(WORKS_DIR, { recursive: true });
-  await writeFile(USERS_FILE, JSON.stringify({ users }, null, 2));
+  // Same atomicity requirement as state.json: this file holds every member's
+  // hashed key, and a torn write locks all of them out.
+  await writeJsonAtomic(USERS_FILE, { users });
 }
 
 /** List users (keys hashed). */
@@ -488,7 +490,7 @@ async function loadState(): Promise<State> {
   await mkdir(WORKS_DIR, { recursive: true });
   if (!existsSync(STATE_FILE)) {
     const s: State = { workspaces: [], agents: { ...DEFAULT_AGENTS } };
-    await writeFile(STATE_FILE, JSON.stringify(s, null, 2));
+    await saveState(s);
     return s;
   }
   const raw = await readFile(STATE_FILE, "utf8");
@@ -497,8 +499,33 @@ async function loadState(): Promise<State> {
   return s;
 }
 
+/**
+ * Write a JSON file atomically and durably.
+ *
+ * `writeFile` truncates before writing, so a process death mid-write (OOM,
+ * `kill -9`, power loss) leaves a half-written file. For `state.json` that loses
+ * every workspace at once; for `users.json` it loses every member account.
+ *
+ * A sibling temp file plus `rename` makes the swap all-or-nothing: a reader sees
+ * either the old file or the new one, never a torn one, and the rename is atomic
+ * because it stays within one filesystem. The `sync` is for durability rather
+ * than atomicity — without it a power loss can commit the rename while the
+ * contents are still unwritten.
+ */
+async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+  const tmp = `${file}.tmp`;
+  const handle = await open(tmp, "w");
+  try {
+    await handle.writeFile(JSON.stringify(value, null, 2));
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await rename(tmp, file);
+}
+
 async function saveState(s: State) {
-  await writeFile(STATE_FILE, JSON.stringify(s, null, 2));
+  await writeJsonAtomic(STATE_FILE, s);
 }
 
 // --- state mutex -----------------------------------------------------------

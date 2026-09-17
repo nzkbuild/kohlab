@@ -146,12 +146,29 @@ function fireAndForget(message) {
 const BOX = "\\033[2J\\033[H\\033[36m+--------+\\033[0m\\n\\033[36m|\\033[0m ready  \\033[36m|\\033[0m\\n\\033[36m+--------+\\033[0m\\n";
 const tuiCmd = ["sh", "-c", `printf '${BOX}'; sleep 30`];
 
+/** Accumulated daemon output, so a crash reports its cause, not just ECONNREFUSED. */
+let daemonLog = "";
+let daemonExit = null;
+
 const daemon = spawn("node", ["pty-daemon.cjs"], {
   cwd: new URL("..", import.meta.url).pathname,
   env: { ...process.env, PTY_SOCKET: SOCKET },
-  // inherit so a daemon crash is visible instead of surfacing as a bare ECONNREFUSED
-  stdio: ["ignore", "inherit", "inherit"],
+  stdio: ["ignore", "pipe", "pipe"],
 });
+daemon.stdout.on("data", (d) => {
+  daemonLog += d.toString();
+});
+daemon.stderr.on("data", (d) => {
+  daemonLog += d.toString();
+});
+daemon.on("exit", (code) => {
+  daemonExit = code;
+});
+
+/** Surfaced on any failure — a dead daemon must say why. */
+function daemonReport() {
+  return `daemon exit=${daemonExit}\n${daemonLog.trim().split("\n").slice(-6).join("\n")}`;
+}
 
 try {
   console.log("\nkohlab screen model\n");
@@ -180,18 +197,25 @@ try {
     JSON.stringify(liveScreen),
   );
 
-  // 2. The screen must survive a resize (model and PTY in lockstep).
-  await fireAndForget({ type: "resize", id: SESSION, cols: 24, rows: 6 });
-  await new Promise((r) => setTimeout(r, 300));
-  const afterResize = await askWithOutput({ type: "subscribe", id: SESSION, replay: true });
-  const resizedScreen = await render(afterResize.output, 24, 6);
+  // 3. The screen model must resize with the PTY, or every later replay restores
+  //    a wrongly-wrapped screen. Asserted on the reported dimensions rather than
+  //    behaviourally: the PTY's own width does the wrapping, so a divergent model
+  //    still produces a byte-identical replay — a behavioural check cannot fail.
+  const RESIZE_SESSION = "screen-resize";
+  await askWithOutput({ type: "open", id: RESIZE_SESSION, cwd: "/tmp", cmd: ["sh"], cols: 20, rows: 8 });
+  await new Promise((r) => setTimeout(r, 400));
+  await fireAndForget({ type: "resize", id: RESIZE_SESSION, cols: 60, rows: 14 });
+  await new Promise((r) => setTimeout(r, 600));
+  const listed = await askWithOutput({ type: "list" });
+  const entry = (listed.reply.sessions ?? []).find((s) => s.id === RESIZE_SESSION) ?? {};
   check(
-    "replay still reconstructs after a resize",
-    resizedScreen.some((l) => l.includes("ready")),
-    JSON.stringify(resizedScreen),
+    "the screen model resizes with the PTY",
+    entry.cols === 60 && entry.rows === 14 && entry.ptyCols === 60 && entry.ptyRows === 14,
+    `screen=${entry.cols}x${entry.rows} pty=${entry.ptyCols}x${entry.ptyRows}`,
   );
+  await fireAndForget({ type: "close", id: RESIZE_SESSION });
 
-  // 3. A finished session still serves its FINAL screen (retained, not dropped).
+  // 4. A finished session still serves its FINAL screen (retained, not dropped).
   await askWithOutput({ type: "close", id: SESSION });
   await new Promise((r) => setTimeout(r, 600));
   const gone = await askWithOutput({ type: "subscribe", id: SESSION, replay: true });
@@ -202,7 +226,7 @@ try {
     `reply=${gone.reply.type} screen=${JSON.stringify(finalScreen)}`,
   );
 
-  // 4. The Log tab reads the same retained screen — otherwise a finished
+  // 5. The Log tab reads the same retained screen — otherwise a finished
   //    workspace showed an empty log, since the byte buffer dies with the
   //    session.
   const logReply = await askWithOutput({ type: "log", id: SESSION });
@@ -213,7 +237,7 @@ try {
     `reply=${logReply.reply.type} text=${JSON.stringify(logText.slice(0, 60))}`,
   );
 
-  // 5. An unknown session is still reported, not silently empty.
+  // 6. An unknown session is still reported, not silently empty.
   const unknown = await askWithOutput({ type: "subscribe", id: "no-such-session", replay: true });
   check("an unknown session reports an error", unknown.reply.type === "error", JSON.stringify(unknown.reply));
 } catch (err) {
@@ -229,6 +253,9 @@ try {
   console.log(`\n${passed} passed, ${failures.length} failed`);
   if (failures.length) {
     console.log("failed:\n" + failures.map((f) => `  - ${f}`).join("\n"));
+    // A dead daemon must say why. Without this a crash reads as a bare
+    // ECONNREFUSED, which says nothing about the cause.
+    console.log("\ndaemon output:\n" + daemonReport());
     process.exit(1);
   }
   console.log("screen model intact\n");

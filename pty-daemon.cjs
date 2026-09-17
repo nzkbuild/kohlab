@@ -31,6 +31,22 @@ const SOCKET = process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock";
 const SESSIONS = new Map(); // id -> { pty, buffer: Buffer[], screen, serializer, exited }
 
 /**
+ * Last-resort containment.
+ *
+ * This process owns every live PTY, so an unhandled throw anywhere takes every
+ * running agent down with it — the single worst outcome available here. Logging
+ * and continuing is the better trade: a degraded screen model is recoverable
+ * from the browser, a lost fleet is not. Same reasoning as `containFailure` in
+ * server.ts, applied to the one process whose death is unrecoverable.
+ */
+process.on("uncaughtException", (error) => {
+  console.error("[pty-daemon] uncaughtException:", error instanceof Error ? error.message : error);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[pty-daemon] unhandledRejection:", reason instanceof Error ? reason.message : reason);
+});
+
+/**
  * Screen models, not byte windows.
  *
  * `sess.buffer` is a rolling window trimmed from the front, so replaying it
@@ -168,26 +184,28 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
     p.onExit(({ exitCode }) => {
       sess.exited = true;
       broadcast(id, { type: "exit", id, code: exitCode });
-      // Keep the final screen: a finished workspace should still show what the
-      // agent did, which the byte buffer never could — the session and its
-      // buffer are dropped below.
+      // Capture the final screen while the model is still alive — a finished
+      // workspace should still show what the agent did, which the byte buffer
+      // never could.
       sess.screen.write("", () => {
         try {
           retainScreen(id, sess.serializer.serialize());
         } catch {
           /* nothing to retain */
         }
+      });
+      // Remove the session and dispose its screen together, so "present in
+      // SESSIONS" always implies "screen alive". Disposing in the callback above
+      // left a window where the session was still in the map with a dead
+      // terminal, and the subscribe path writes to exactly that.
+      setTimeout(() => {
+        const cur = SESSIONS.get(id);
+        if (cur && cur.exited) SESSIONS.delete(id);
         try {
           sess.screen.dispose();
         } catch {
           /* already gone */
         }
-      });
-      // remove from the map promptly so re-open works; the buffer is dropped
-      // here too (no replay after exit).
-      setTimeout(() => {
-        const cur = SESSIONS.get(id);
-        if (cur && cur.exited) SESSIONS.delete(id);
       }, 50);
     });
     return { ok: true, pid: p.pid };
@@ -312,6 +330,10 @@ function handle(msg, sock) {
       // parser queue in order, so serialize() here reflects every byte received
       // so far rather than lagging behind the pending writes.
       s.screen.write("", () => {
+        // This runs a tick later, so the caller may already be gone. Writes past
+        // this point would raise EPIPE on a dead socket — contained by the
+        // 'error' listener, but there is nothing to say to a disconnected client.
+        if (sock.destroyed) return;
         try {
           const payload = s.serializer.serialize();
           if (payload) {
@@ -339,7 +361,19 @@ function handle(msg, sock) {
     case "list": {
       const sessions = [...SESSIONS.keys()].map((id) => {
         const s = SESSIONS.get(id);
-        return { id, exited: s.exited, meta: s.meta };
+        // Screen and PTY dimensions are reported together so the invariant that
+        // matters — the model tracks the PTY — is observable and testable. It is
+        // not derivable from the byte stream: the PTY's own width does the
+        // wrapping, so a divergent model produces a byte-identical replay.
+        return {
+          id,
+          exited: s.exited,
+          meta: s.meta,
+          cols: s.screen.cols,
+          rows: s.screen.rows,
+          ptyCols: s.pty.cols,
+          ptyRows: s.pty.rows,
+        };
       });
       sock.write(JSON.stringify({ type: "list-reply", sessions }) + "\n");
       break;
