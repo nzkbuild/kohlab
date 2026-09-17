@@ -1,6 +1,6 @@
 {
   "name": "kohlab",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Run your AI coding agents in parallel, persistently, from any device.",
   "license": "MIT",
   "type": "module",
@@ -15,5 +15,9 @@
     "cli": "bun run cli.ts",
     "dev": "bun run --watch server.ts",
     "pty:daemon": "node pty-daemon.cjs"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
   }
 }

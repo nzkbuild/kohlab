@@ -1,55 +1,77 @@
 import { lazy, Suspense, useState } from "react";
+import { CaretRight, FileCode, TreeStructure } from "@phosphor-icons/react";
+import { cn } from "../lib/utils";
 import FileTree from "./FileTree";
+import { Button, EmptyState, SkeletonRows } from "./ui";
 
+// Monaco is ~600 KB; it loads when a file is actually opened, never with the tab.
 const CodeView = lazy(() => import("./CodeView"));
 
 /**
- * Files tab: file tree on the left, synced code viewer on the right.
- * Mirrors the 21st.dev Tree Code Viewer layout without adding Shiki —
- * Monaco (already lazy-loaded) does highlighting.
+ * Files tab: tree on the left, read-only viewer on the right, with the open
+ * file's path as a breadcrumb across the top.
  */
 export default function BrowseView({ workspaceId }: { workspaceId: string }) {
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [showTree, setShowTree] = useState(true);
 
+  const segments = openFile ? openFile.split("/") : [];
+
   return (
-    <div className="flex h-full min-h-0">
-      {showTree && (
-        <div className="w-64 min-w-64 border-r border-[#27272a]">
-          <FileTree workspaceId={workspaceId} onOpenFile={setOpenFile} />
-        </div>
-      )}
-      <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#27272a] text-xs">
-          {!showTree && (
-            <button
-              onClick={() => setShowTree(true)}
-              className="px-2 py-0.5 rounded border border-[#27272a] hover:border-emerald-400 transition"
-            >
-              show tree
-            </button>
-          )}
-          {openFile && (
-            <>
-              <span className="font-mono text-zinc-300 flex-1 truncate">{openFile}</span>
-              <button
-                onClick={() => setShowTree((v) => !v)}
-                className="px-2 py-0.5 rounded border border-[#27272a] hover:border-emerald-400 transition"
-              >
-                {showTree ? "hide tree" : "show tree"}
-              </button>
-            </>
-          )}
-        </div>
-        <div className="flex-1 min-h-0">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-10 items-center gap-2 border-b border-line-subtle px-3">
+        {openFile ? (
+          <nav aria-label="Breadcrumb" className="min-w-0 flex-1 overflow-hidden">
+            <ol className="flex min-w-0 items-center gap-1">
+              {segments.map((segment, index) => {
+                const last = index === segments.length - 1;
+                return (
+                  <li key={`${index}:${segment}`} className="flex min-w-0 items-center gap-1">
+                    {index > 0 ? <CaretRight size={9} className="shrink-0 text-text-faint" aria-hidden="true" /> : null}
+                    <span
+                      className={cn("mono truncate text-2xs", last ? "text-text-secondary" : "text-text-faint")}
+                      title={last ? (openFile ?? undefined) : undefined}
+                    >
+                      {segment}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+        ) : (
+          <span className="eyebrow flex-1">Files</span>
+        )}
+        <Button
+          variant="quiet"
+          size="sm"
+          iconOnly
+          aria-pressed={showTree}
+          aria-label={showTree ? "Hide file tree" : "Show file tree"}
+          onClick={() => setShowTree((v) => !v)}
+        >
+          <TreeStructure size={14} />
+        </Button>
+      </div>
+
+      <div className="flex min-h-0 flex-1">
+        {showTree ? (
+          <div className="w-64 min-w-64 border-r border-line-subtle">
+            <FileTree workspaceId={workspaceId} onOpenFile={setOpenFile} />
+          </div>
+        ) : null}
+
+        <div className="min-w-0 flex-1">
           {openFile ? (
-            <Suspense fallback={<div className="p-4 text-zinc-400 text-sm">loading editor...</div>}>
-              <CodeView workspaceId={workspaceId} filePath={openFile} onBack={() => setOpenFile(null)} />
+            <Suspense fallback={<SkeletonRows rows={12} className="p-4" />}>
+              <CodeView key={openFile} workspaceId={workspaceId} filePath={openFile} onBack={() => setOpenFile(null)} />
             </Suspense>
           ) : (
-            <div className="h-full flex items-center justify-center text-zinc-400 text-sm">
-              select a file
-            </div>
+            <EmptyState
+              icon={<FileCode size={18} />}
+              title="No file open"
+              description="Pick a file from the tree to read it here. Nothing is editable — this view is for reading the agent's changes."
+            />
           )}
         </div>
       </div>

@@ -2,14 +2,19 @@
 <html lang="en" class="dark">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- viewport-fit=cover is REQUIRED for env(safe-area-inset-*) to be non-zero;
+     without it the drawer and topbar sit under the notch/home indicator. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- Declared before any stylesheet so the UA paints a dark canvas immediately
+     and there is no white flash on load. Mirrors color-scheme: dark in :root. -->
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#090a0c" />
 <title>kohlab</title>
-  <script type="module" crossorigin src="/assets/index-BWJQKXUJ.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/icons-CVavzD8j.js">
-  <link rel="modulepreload" crossorigin href="/assets/monaco-editor-iEPwCM6M.js">
-  <link rel="modulepreload" crossorigin href="/assets/terminal-DMNrwbmi.js">
+  <script type="module" crossorigin src="/assets/index-BX7rE-Jo.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/icons-yeca0NsG.js">
+  <link rel="modulepreload" crossorigin href="/assets/monaco-editor-kz5bjBhD.js">
   <link rel="stylesheet" crossorigin href="/assets/monaco-editor-DBoASOvC.css">
-  <link rel="stylesheet" crossorigin href="/assets/index-DQ2OWPQy.css">
+  <link rel="stylesheet" crossorigin href="/assets/index--eS_wUwh.css">
 </head>
 <body>
 <div id="root"></div>

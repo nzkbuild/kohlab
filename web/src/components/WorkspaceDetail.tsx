@@ -1,158 +1,433 @@
-import { lazy, Suspense, useState } from "react";
-import { Play, Stop, ArrowsClockwise, ShareNetwork, Trash, Terminal, Files, GitDiff, Plus, X, Scroll } from "@phosphor-icons/react";
+import { lazy, Suspense, startTransition, useEffect, useOptimistic, useRef, useState } from "react";
+import {
+  ArrowsClockwise,
+  Files,
+  GitDiff,
+  Ghost,
+  Play,
+  Plus,
+  Scroll,
+  ShareNetwork,
+  Stop,
+  Terminal,
+  Trash,
+  X,
+} from "@phosphor-icons/react";
+import { toast } from "sonner";
 import { api } from "../api";
 import { toastAction } from "../lib/actions";
+import { announce } from "../lib/announce";
 import { useApp } from "../store";
-import { workspaceStatus, STATUS_LABEL, STATUS_BADGE } from "../lib/status";
-import TerminalView, { disposeWorkspaceTerminals } from "./TerminalView";
+import { workspaceStatus } from "../lib/status";
+import { cn } from "../lib/utils";
 import BrowseView from "./BrowseView";
-import LogView from "./LogView";
 import ConfirmDialog from "./ConfirmDialog";
-// Monaco is heavy (~600 KB) — load it only when files/diff are actually opened
+import ErrorBoundary from "./ErrorBoundary";
+import LogView from "./LogView";
+import { disposeWorkspaceTerminals } from "./terminalCache";
+import { Button, EmptyState, SkeletonRows, StatusChip } from "./ui";
+
+// xterm (~390 KB) and Monaco must not load before the cockpit does: only an
+// import through lazy() defers the fetch. A static import here — even one that
+// only wants a helper — would pull the whole chunk into first paint.
+const TerminalView = lazy(() => import("./TerminalView"));
 const DiffView = lazy(() => import("./DiffView"));
 
-type Tab = "terminal" | "files" | "diff" | "log";
+type TabId = "terminal" | "files" | "review" | "log";
+
+const TABS: { id: TabId; label: string; icon: typeof Terminal }[] = [
+  { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "files", label: "Files", icon: Files },
+  { id: "review", label: "Review", icon: GitDiff },
+  { id: "log", label: "Log", icon: Scroll },
+];
+
+/** Tab count badges, noun included so the tab's name reads as a sentence. */
+interface Badge {
+  count: number;
+  noun: string;
+  chip: string;
+}
+
+const ACTION_DONE: Record<string, string> = {
+  start: "started",
+  stop: "stopped",
+  restart: "restarted",
+  delete: "deleted",
+};
+
+const TEXT_ENTRY_TAGS: Record<string, true> = { INPUT: true, TEXTAREA: true, SELECT: true };
 
 export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }) {
-  const { workspaces, refresh, select } = useApp();
-  const [tab, setTab] = useState<Tab>("terminal");
+  const workspaces = useApp((s) => s.workspaces);
+  const loading = useApp((s) => s.loading);
+  const refresh = useApp((s) => s.refresh);
+  const navigate = useApp((s) => s.navigate);
+
+  const [tab, setTab] = useState<TabId>("terminal");
   const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [focusTick, setFocusTick] = useState(0);
+  const [reviewCount, setReviewCount] = useState(0);
+
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const w = workspaces.find((x) => x.id === workspaceId);
 
-  const act = async (action: string) => {
+  // Lifecycle toggles are bounded single-object mutations, so they may show
+  // their outcome before the server confirms it. Deleting and committing never do.
+  const [optimisticRunning, setOptimisticRunning] = useOptimistic(w?.running ?? false);
+
+  const run = (action: string) => {
+    startTransition(async () => {
+      if (action === "start") setOptimisticRunning(true);
+      if (action === "stop") setOptimisticRunning(false);
+      try {
+        await toastAction(workspaceId, action);
+        await refresh();
+        announce(`${workspaceId} ${ACTION_DONE[action] ?? action}`);
+      } catch {
+        announce(`${workspaceId} could not ${action}`);
+      }
+    });
+  };
+
+  const share = async () => {
     try {
-      await toastAction(workspaceId, action);
-      await refresh();
+      const s = await api.share(workspaceId);
+      const link = `${location.origin}/?share=${s.share}`;
+      await navigator.clipboard.writeText(link);
+      toast.success("share link copied");
+      announce(`share link copied for ${workspaceId}`);
     } catch (e) {
-      console.error(e);
+      toast.error(`could not copy the link — ${(e as Error).message}`);
     }
   };
 
   const onDelete = async () => {
     setDeleting(true);
     try {
+      // Cached xterm buffers outlive their pane, so they are dropped explicitly
+      // — the cache module is xterm-free, which is why this stays a static import.
       disposeWorkspaceTerminals(workspaceId);
-      await act("delete");
-      select(null);
+      await toastAction(workspaceId, "delete");
+      await refresh();
+      announce(`${workspaceId} deleted`);
       setConfirming(false);
+      navigate({ kind: "workspaces" });
+    } catch (e) {
+      toast.error(`delete failed — ${(e as Error).message}`);
     } finally {
       setDeleting(false);
     }
   };
 
-  if (!w) return <div className="flex-1 flex items-center justify-center text-zinc-400">loading...</div>;
+  // The review badge has to be readable before the tab is opened, so the count
+  // is fetched once per needs-review state — not polled.
+  const needsReview = w !== undefined && workspaceStatus(w) === "needs-review";
+  useEffect(() => {
+    if (!needsReview) {
+      setReviewCount(0);
+      return;
+    }
+    let alive = true;
+    api
+      .diff(workspaceId)
+      .then((files) => {
+        if (alive) setReviewCount(files.length);
+      })
+      .catch(() => {
+        if (alive) setReviewCount(0);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [workspaceId, needsReview, w?.lastCommitAt]);
+
+  // 1..4 switch panes, `.` puts the cursor back in the terminal. Keys are left
+  // alone while focus is in a text field or in the terminal itself.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target;
+      // A real keydown always targets an element, but the guard must not be the
+      // thing that throws if one ever targets the document.
+      if (target instanceof HTMLElement && (target.isContentEditable || TEXT_ENTRY_TAGS[target.tagName] || target.closest(".xterm")))
+        return;
+      if (e.key === ".") {
+        e.preventDefault();
+        setTab("terminal");
+        setFocusTick((t) => t + 1);
+        return;
+      }
+      const index = Number(e.key) - 1;
+      if (Number.isInteger(index) && index >= 0 && index < TABS.length) {
+        e.preventDefault();
+        setTab(TABS[index].id);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // The terminal bundle may still be in flight on the first `.`, so the focus
+  // request retries briefly instead of silently doing nothing.
+  useEffect(() => {
+    if (tab !== "terminal" || focusTick === 0) return;
+    let alive = true;
+    let tries = 0;
+    let timer: number | undefined;
+    const focus = () => {
+      if (!alive) return;
+      const input = document.querySelector<HTMLTextAreaElement>("[data-terminal-root] .xterm-helper-textarea");
+      if (input) {
+        input.focus();
+        return;
+      }
+      if (++tries < 8) timer = window.setTimeout(focus, 60);
+    };
+    const raf = requestAnimationFrame(focus);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [tab, focusTick]);
+
+  if (!w) {
+    if (loading) {
+      return (
+        <div className="surface">
+          <div className="surface-inner">
+            <SkeletonRows rows={4} className="panel" />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="surface">
+        <div className="surface-inner">
+          <EmptyState
+            icon={<Ghost size={18} />}
+            title="Workspace not found"
+            description={`${workspaceId} is not on this server. It may have been deleted, or the link may be stale.`}
+            action={
+              <Button variant="primary" onClick={() => navigate({ kind: "workspaces" })}>
+                back to workspaces
+              </Button>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+
   const st = workspaceStatus(w);
+  const running = optimisticRunning;
+
+  const badges: Partial<Record<TabId, Badge>> = {};
+  if (terminals.length > 1) badges.terminal = { count: terminals.length, noun: "open terminals", chip: "chip-stopped" };
+  if (reviewCount > 0)
+    badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files", chip: "chip-review" };
+
+  const onTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = TABS.length - 1;
+    const next =
+      e.key === "ArrowRight" ? (index === last ? 0 : index + 1) : e.key === "ArrowLeft" ? (index === 0 ? last : index - 1) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    setTab(TABS[next].id);
+    tabRefs.current[next]?.focus();
+  };
+
+  const closeTerminal = (id: string) => {
+    setTerminals((items) => items.filter((item) => item.id !== id));
+    if (activeTerminal === id) setActiveTerminal("main");
+  };
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col">
-      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-[#27272a] bg-[#111113]">
-        <span className="font-semibold text-sm truncate">{w.id}</span>
-        <span className={`text-xs px-1.5 py-0.5 rounded-full border ${STATUS_BADGE[st]}`}>{STATUS_LABEL[st]}</span>
-        <span className="text-zinc-400 text-xs truncate hidden md:block">{w.path}</span>
-        <div className="flex-1" />
-        <button onClick={() => void act("start")} disabled={w.running} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-400/40 text-emerald-400 text-xs disabled:opacity-35 hover:bg-emerald-400/10 transition" title="start">
-          <Play size={12} weight="fill" /> start
-        </button>
-        <button onClick={() => void act("restart")} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#27272a] text-xs hover:border-emerald-400 transition" title="restart">
-          <ArrowsClockwise size={12} /> restart
-        </button>
-        <button
-          onClick={async () => {
-            try {
-              const s = await api.share(workspaceId);
-              const link = `${location.origin}/?share=${s.share}`;
-              await navigator.clipboard.writeText(link).catch(() => {});
-            } catch (e) {
-              console.error(e);
-            }
-          }}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#27272a] text-xs hover:border-emerald-400 transition" title="copy share link"
-        >
-          <ShareNetwork size={12} /> share
-        </button>
-        <button onClick={() => void act("stop")} disabled={!w.running} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-400/40 text-red-400 text-xs disabled:opacity-35 hover:bg-red-400/10 transition" title="stop">
-          <Stop size={12} weight="fill" /> stop
-        </button>
-        <button
-          onClick={() => setConfirming(true)}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#27272a] text-xs hover:border-red-400 hover:text-red-400 transition" title="delete"
-        >
-          <Trash size={12} /> delete
-        </button>
+    <div className="cockpit">
+      <header className="cockpit-head flex-wrap">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* The workspace id IS this route's page identity, so it carries the
+                single <h1> rather than leaving the route headingless. */}
+            <h1 className="mono m-0 shrink-0 text-base font-semibold text-text-primary">{w.id}</h1>
+            <StatusChip status={st} />
+            <span className="mono min-w-0 truncate text-2xs text-text-faint" title={w.path}>
+              {w.path}
+            </span>
+          </div>
+          <p className="min-w-0 truncate text-xs text-text-muted" title={w.task}>
+            {w.task}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          <Button size="sm" variant="primary" disabled={running} onClick={() => run("start")}>
+            <Play size={12} weight="fill" aria-hidden="true" />
+            start
+          </Button>
+          <Button size="sm" variant="secondary" disabled={!running} onClick={() => run("stop")}>
+            <Stop size={12} weight="fill" aria-hidden="true" />
+            stop
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => run("restart")}>
+            <ArrowsClockwise size={12} aria-hidden="true" />
+            restart
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => void share()}>
+            <ShareNetwork size={12} aria-hidden="true" />
+            share
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => setConfirming(true)}>
+            <Trash size={12} aria-hidden="true" />
+            delete
+          </Button>
+        </div>
+      </header>
+
+      <div className="tabstrip" role="tablist" aria-label="Workspace panes">
+        {TABS.map(({ id, label, icon: Icon }, index) => {
+          const selected = tab === id;
+          const badge = badges[id];
+          return (
+            <button
+              key={id}
+              ref={(el) => {
+                tabRefs.current[index] = el;
+              }}
+              type="button"
+              role="tab"
+              id={`tab-${id}`}
+              aria-selected={selected}
+              aria-controls={`panel-${id}`}
+              aria-label={badge ? `${label} — ${badge.count} ${badge.noun}` : undefined}
+              tabIndex={selected ? 0 : -1}
+              className="tab"
+              onClick={() => setTab(id)}
+              onKeyDown={(e) => onTabKeyDown(e, index)}
+            >
+              <Icon size={14} aria-hidden="true" />
+              {label}
+              {badge ? (
+                <span className={cn("chip", badge.chip, "tnum")} aria-hidden="true">
+                  {badge.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="flex gap-1 px-2 border-b border-[#27272a] bg-[#111113]">
-        {([["terminal", Terminal], ["files", Files], ["diff", GitDiff], ["log", Scroll]] as [Tab, typeof Terminal][]).map(([t, Icon]) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition ${tab === t ? "text-zinc-100 border-emerald-400" : "text-zinc-400 border-transparent hover:text-zinc-300"}`}
-          >
-            <Icon size={13} /> {t}
-            {t === "terminal" && terminals.length > 1 && (
-              <span className="grid h-4 min-w-4 place-items-center rounded-full border border-[#27272a] bg-[#151517] px-1 text-[10px] text-[#a1a1aa]">
-                {terminals.length}
+      {tab === "terminal" ? (
+        <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5" role="group" aria-label="Terminal instances">
+          {terminals.map((term) => {
+            const active = activeTerminal === term.id;
+            return (
+              <span
+                key={term.id}
+                className={cn(
+                  "flex items-center gap-0.5 rounded-md border px-0.5",
+                  active ? "border-line-strong bg-surface-active" : "border-transparent",
+                )}
+              >
+                <button
+                  type="button"
+                  className={cn("file-row border-0 bg-transparent", active ? "text-text-primary" : "text-text-muted")}
+                  aria-pressed={active}
+                  onClick={() => setActiveTerminal(term.id)}
+                >
+                  <Terminal size={12} aria-hidden="true" />
+                  {term.label}
+                </button>
+                {term.id !== "main" ? (
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    iconOnly
+                    aria-label={`Close terminal ${term.label}`}
+                    onClick={() => closeTerminal(term.id)}
+                  >
+                    <X size={11} />
+                  </Button>
+                ) : null}
               </span>
-            )}
-          </button>
-        ))}
-      </div>
-      {tab === "terminal" && (
-        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[#27272a] bg-[#0a0a0a] overflow-x-auto">
-          {terminals.map((term) => (
-            <button
-              key={term.id}
-              onClick={() => setActiveTerminal(term.id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition ${activeTerminal === term.id ? "bg-[#1c1c1f] border-[#333338] text-zinc-200" : "border-transparent text-zinc-400 hover:text-zinc-300"}`}
-            >
-              <Terminal size={12} />
-              {term.label}
-              {term.id !== "main" && (
-                <X
-                  size={11}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setTerminals((items) => items.filter((item) => item.id !== term.id));
-                    if (activeTerminal === term.id) setActiveTerminal("main");
-                  }}
-                />
-              )}
-            </button>
-          ))}
-          <button
+            );
+          })}
+          <Button
+            variant="quiet"
+            size="sm"
+            iconOnly
+            aria-label="Open another terminal"
             onClick={() => {
               const id = `terminal-${Date.now()}`;
               setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
               setActiveTerminal(id);
             }}
-            className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-[#151517] transition"
-            title="new terminal"
           >
             <Plus size={13} />
-          </button>
+          </Button>
         </div>
-      )}
+      ) : null}
 
-      <div className="flex-1 min-h-0">
-        {tab === "terminal" && <TerminalView key={`${workspaceId}:${activeTerminal}`} workspaceId={workspaceId} terminalId={activeTerminal} />}
-        {tab === "files" && <BrowseView workspaceId={workspaceId} />}
-        {tab === "log" && <LogView workspaceId={workspaceId} />}
-        {tab === "diff" && (
-          <Suspense fallback={<div className="p-4 text-zinc-400 text-sm">loading diff...</div>}>
-            <DiffView workspaceId={workspaceId} />
-          </Suspense>
-        )}
+      <div className="cockpit-body">
+        <section
+          role="tabpanel"
+          id="panel-terminal"
+          aria-labelledby="tab-terminal"
+          hidden={tab !== "terminal"}
+          className="h-full min-h-0"
+        >
+          <ErrorBoundary label="Terminal">
+            <Suspense fallback={<SkeletonRows rows={8} className="p-4" />}>
+              {tab === "terminal" ? (
+                <TerminalView key={`${workspaceId}:${activeTerminal}`} workspaceId={workspaceId} terminalId={activeTerminal} />
+              ) : null}
+            </Suspense>
+          </ErrorBoundary>
+        </section>
+
+        <section
+          role="tabpanel"
+          id="panel-files"
+          aria-labelledby="tab-files"
+          hidden={tab !== "files"}
+          className="h-full min-h-0"
+        >
+          <ErrorBoundary label="Files">
+            {tab === "files" ? <BrowseView workspaceId={workspaceId} /> : null}
+          </ErrorBoundary>
+        </section>
+
+        <section
+          role="tabpanel"
+          id="panel-review"
+          aria-labelledby="tab-review"
+          hidden={tab !== "review"}
+          className="h-full min-h-0"
+        >
+          <ErrorBoundary label="Review">
+            <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
+              {tab === "review" ? <DiffView workspaceId={workspaceId} /> : null}
+            </Suspense>
+          </ErrorBoundary>
+        </section>
+
+        <section role="tabpanel" id="panel-log" aria-labelledby="tab-log" hidden={tab !== "log"} className="h-full min-h-0">
+          <ErrorBoundary label="Log">
+            {tab === "log" ? <LogView key={workspaceId} workspaceId={workspaceId} /> : null}
+          </ErrorBoundary>
+        </section>
       </div>
 
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title="Delete this workspace?"
-        description="The worktree and any uncommitted changes will be removed. This cannot be undone."
-        confirmLabel="delete"
+        title={`Delete ${w.id}?`}
+        description={`The worktree at ${w.path} and any uncommitted changes are removed. This cannot be undone.`}
+        confirmLabel="delete workspace"
         busy={deleting}
         onConfirm={() => void onDelete()}
       />

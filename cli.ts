@@ -6,13 +6,11 @@ import {
   createWorkspace,
   deleteWorkspace,
   getDiff,
-  getWorkspace,
   listWorkspaces,
   restartWorkspace,
   startWorkspace,
   stopWorkspace,
   commitWorkspace,
-  worktreePath,
   loadState,
   saveState,
   WORKS_DIR,
@@ -183,8 +181,8 @@ async function openDashboard() {
   const url = `http://localhost:${port}`;
   console.log(`kohlab dashboard: ${url}`);
   try {
-    const { execFile } = await import("child_process");
-    execFile("xdg-open", [url], { detached: true }).unref();
+    const { spawn } = await import("child_process");
+    spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
     console.log("opened in browser — close the tab, agents keep running.");
   } catch {
     console.log(`(headless? open ${url} in any browser, or ssh -L ${port}:localhost:${port} user@vps)`);

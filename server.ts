@@ -18,6 +18,10 @@ import {
   worktreePath,
   imagesDir,
   spawnAgentSession,
+  // ensurePtySession() calls markStarted() to record a browser-attach as a real
+  // run. The call existed but the import did not, so the first terminal attach
+  // threw ReferenceError and took the whole server process down.
+  markStarted,
   WORKS_DIR,
   startWatcher,
   onWorkspaceDone,
@@ -32,6 +36,7 @@ import {
   audit,
   readAudit,
   loadState,
+  saveState,
   ptySend,
   ptyLog,
   onDaemonMessage,
@@ -48,9 +53,11 @@ const pushClients = new Set<ServerWebSocket>();
 onWorkspaceDone((ws) => {
   const msg = JSON.stringify({ type: "workspace.done", id: ws.id, task: ws.task, agent: ws.agent });
   for (const c of pushClients) {
-    if (c.readyState === c.OPEN) c.send(msg);
+    // `c.OPEN` does not exist on a Bun ServerWebSocket, so this comparison was
+    // always false and the done-ping never reached a single client.
+    if (c.readyState === WebSocket.OPEN) c.send(msg);
   }
-  void notifyWebhook(ws);
+  containFailure(notifyWebhook(ws), "notify webhook");
 });
 
 // poll for finished agents
@@ -60,7 +67,7 @@ onWorkspaceDone((ws) => {
  * root-owned workspaces (no ownerId) are off-limits to members entirely.
  * Viewer is treated like member here (read-only is enforced separately).
  */
-async function mayAccessWorkspace(auth: { kind?: string; id?: string; role?: string | null }, wsId: string): Promise<boolean> {
+async function mayAccessWorkspace(auth: { kind?: string; id?: string; role?: string | null } | null, wsId: string): Promise<boolean> {
   if (!auth || auth.kind !== "user") return true; // legacy, share, anonymous-open
   if (auth.role === "owner") return true;
   try {
@@ -133,7 +140,9 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
   };
   const task = (body.task ?? "").trim();
   if (!task) return json({ error: "task is required" }, 400);
-  const repo = (body.repo ?? cwd()).trim();
+  // `cwd()` was never imported here, so creating a workspace without an
+  // explicit repo threw ReferenceError and killed the server.
+  const repo = (body.repo ?? process.cwd()).trim();
   const url = repo.match(/^[a-z]+:\/\//) ? repo : undefined;
   // A named member may only create from a git URL: a host repo path would run
   // the agent in the legacy root-owned flow (privilege escalation) or reach
@@ -259,7 +268,7 @@ async function walkDir(dir: string, depth: number): Promise<{ name: string; type
   } catch {
     return [];
   }
-  const out = [];
+  const out: { name: string; type: "dir" | "file"; children?: unknown[] }[] = [];
   let count = 0;
   for (const e of entries) {
     if (count >= MAX_FILES) break;
@@ -471,27 +480,67 @@ onDaemonMessage((msg) => {
         ws.send("\x1b[90m[process exited]\x1b[0m\r\n");
       }
     }
+  } else if (msg.type === "error") {
+    // The daemon answers { type:"error", message } — e.g. "unknown session"
+    // when a buffer is gone. Unhandled before, so a failed subscribe was
+    // indistinguishable from a slow one in both the client and the logs.
+    console.error(
+      `[kohlab] pty daemon error for session ${String(msg.id ?? "-")}: ${String(msg.message ?? "unknown")}`,
+    );
   }
 });
+
+/**
+ * The size each session was last asked to be, keyed by session id.
+ *
+ * The client sends `attach` and then `resize` immediately, but the PTY is
+ * created asynchronously — so the first resize routinely arrives before the
+ * session exists and would be dropped. The latest size is remembered here and
+ * re-applied as soon as the attach finishes. Bounded by the number of open
+ * terminals, which is bounded by the number of workspaces.
+ */
+const pendingResize = new Map<string, { cols: number; rows: number }>();
 
 /** Attach a ws client to a workspace's named PTY session. */
 function attachPty(ws: ServerWebSocket, id: string, terminalId = "main") {
   const sessId = sessionId(id, terminalId);
   termClients.set(ws, sessId);
-  void ptySend({ type: "subscribe", id: sessId, replay: true });
+  containFailure(ptySend({ type: "subscribe", id: sessId, replay: true }), `subscribe ${id}`);
   ws.send("\x1b[2J\x1b[H");
+}
+
+/**
+ * Run a fire-and-forget promise with its rejection contained.
+ *
+ * Every terminal/push operation below is fire-and-forget by design, but an
+ * unhandled rejection on a socket callback exits the Bun process — one client
+ * attaching twice would take the server down for everyone. Rejections here are
+ * logged and dropped, never fatal.
+ */
+function containFailure(promise: Promise<unknown>, what: string): void {
+  void promise.catch((error: unknown) => {
+    console.error(`[kohlab] ${what} failed:`, error instanceof Error ? error.message : error);
+  });
 }
 
 /** Ensure a workspace's named PTY session exists (spawn the agent if not). */
 async function ensurePtySession(id: string, terminalId = "main") {
   const ws = await getWorkspace(id);
-  await spawnAgentSession(ws, terminalId);
+  try {
+    await spawnAgentSession(ws, terminalId);
+  } catch (error) {
+    // Re-attaching to a session that is already live is the normal case for a
+    // browser reload or a second tab, not a failure. The daemon reports it as
+    // an error ("session already exists: <id>", pty-daemon.cjs), and this is
+    // our own daemon's message, so matching it here is an internal contract.
+    if (!/session already exists/i.test(error instanceof Error ? error.message : String(error))) throw error;
+  }
   // a browser-attach start is a real run: record it so completion fires
   if (terminalId === "main") await markStarted(id);
 }
 
 // --- server --------------------------------------------------------------
-const server = serve({
+serve({
   port: PORT,
   fetch: async (req, server) => {
     const url = new URL(req.url);
@@ -500,7 +549,12 @@ const server = serve({
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
-    const auth = path.startsWith("/api") ? await authenticate(req) : null;
+    // The terminal and done-ping sockets connect to `/`, not `/api`, so the
+    // upgrade request must be authenticated too — otherwise `auth` is null,
+    // `denied` is true, and every socket is rejected 401 the moment an access
+    // key is configured.
+    const isWebSocket = req.headers.get("upgrade")?.toLowerCase() === "websocket";
+    const auth = path.startsWith("/api") || isWebSocket ? await authenticate(req) : null;
     const denied = !auth && authRequired();
     const actor = auth ? (auth.kind === "user" ? auth.id : auth.kind === "legacy" ? "legacy" : auth.kind === "share" ? "share" : "anonymous") : "anonymous";
     const role: string | null = auth && (auth.kind === "user" || auth.kind === "legacy") ? auth.role : null;
@@ -509,7 +563,7 @@ const server = serve({
     const isOwner = !denied && (role === "owner" || auth?.kind === "anonymous");
 
     // WebSocket upgrade: terminal proxy + push — require auth.
-    if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+    if (isWebSocket) {
       if (denied) return json({ error: "unauthorized" }, 401);
       if (server.upgrade(req)) return undefined;
     }
@@ -539,19 +593,20 @@ const server = serve({
         return json({ error: "forbidden — viewer cannot " + action }, 403);
       }
       switch (action) {
-        case "start": void audit(actor, "start", id); return handleStart(id);
-        case "stop": void audit(actor, "stop", id); return handleStop(id);
-        case "restart": void audit(actor, "restart", id); return handleRestart(id);
-        case "delete": void audit(actor, "delete", id); return handleDelete(id);
-        case "commit": void audit(actor, "commit", id); return handleCommit(id, req);
+        case "start": containFailure(audit(actor, "start", id), "audit"); return handleStart(id);
+        case "stop": containFailure(audit(actor, "stop", id), "audit"); return handleStop(id);
+        case "restart": containFailure(audit(actor, "restart", id), "audit"); return handleRestart(id);
+        case "delete": containFailure(audit(actor, "delete", id), "audit"); return handleDelete(id);
+        case "commit": containFailure(audit(actor, "commit", id), "audit"); return handleCommit(id, req);
+        case "diff": return handleDiff(id);
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
         case "log": return handleLog(id);
         case "image":
           if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
-          void audit(actor, "image", id);
+          containFailure(audit(actor, "image", id), "audit");
           return handleImageUpload(id, req);
-        case "share": void audit(actor, "share", id); return handleShare(id);
+        case "share": containFailure(audit(actor, "share", id), "audit"); return handleShare(id);
       }
     }
 
@@ -578,12 +633,12 @@ const server = serve({
     }
     if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) {
       if (denied) return json({ error: "unauthorized" }, 401);
-      if (req.method === "POST") void audit(actor, "agent.add");
+      if (req.method === "POST") containFailure(audit(actor, "agent.add"), "audit");
       return handleAgents(req);
     }
     if (path === "/api/agents/install" && req.method === "POST") {
       if (!canMutate) return json({ error: "forbidden" }, 403);
-      void audit(actor, "agent.install");
+      containFailure(audit(actor, "agent.install"), "audit");
       return handleAgentInstall(req);
     }
     if (path === "/api/agents-status") {
@@ -596,7 +651,7 @@ const server = serve({
     }
     if (path === "/api/clone" && req.method === "POST") {
       if (!canMutate) return json({ error: "forbidden" }, 403);
-      void audit(actor, "clone", undefined);
+      containFailure(audit(actor, "clone", undefined), "audit");
       return handleClone(req, actorUserId);
     }
     if (path === "/api/workspaces" && req.method === "GET") {
@@ -636,6 +691,19 @@ const server = serve({
       const f = Bun.file(staticPath);
       if (f.size > 0) return new Response(f);
     }
+
+    // SPA history fallback. Client routes (/w/:id, /workspaces, /settings) have
+    // no file behind them, so without this a refresh or a shared deep link
+    // 404s in production while `vite dev` hides it behind its own fallback.
+    // Only navigations that actually want a document get the shell — an XHR for
+    // a missing asset must still 404 so the client can see the real failure.
+    const wantsHtml = (req.headers.get("accept") ?? "").includes("text/html");
+    if ((req.method === "GET" || req.method === "HEAD") && wantsHtml && !path.startsWith("/api")) {
+      for (const root of roots) {
+        const f = Bun.file(join(root, "index.html"));
+        if (f.size > 0) return new Response(f);
+      }
+    }
     return new Response("not found", { status: 404 });
   },
   websocket: {
@@ -651,15 +719,36 @@ const server = serve({
         try {
           const msg = JSON.parse(str) as { type?: string; id?: string; terminalId?: string; cols?: number; rows?: number };
           if (msg.type === "attach" && msg.id) {
+            // Hoisted out of the closures below: TypeScript cannot carry the
+            // `msg.id` narrowing into a callback.
+            const attachId = msg.id;
+            const attachTerminal = msg.terminalId;
             // open/spawn before subscribe so the replay never misses the first bytes
-            void ensurePtySession(msg.id, msg.terminalId).then(() => attachPty(ws, msg.id, msg.terminalId));
+            containFailure(
+              ensurePtySession(attachId, attachTerminal)
+                .then(() => {
+                  // The session exists now: apply the size this client already
+                  // asked for, which may have been sent before the PTY existed.
+                  const sessId = sessionId(attachId, attachTerminal);
+                  const dims = pendingResize.get(sessId);
+                  if (!dims) return;
+                  return ptySend({ type: "resize", id: sessId, cols: dims.cols, rows: dims.rows });
+                })
+                .then(() => attachPty(ws, attachId, attachTerminal)),
+              `attach ${attachId}`,
+            );
           } else if (msg.type === "resize" && msg.id && msg.cols && msg.rows) {
-            void ptySend({
-              type: "resize",
-              id: sessionId(msg.id, msg.terminalId),
-              cols: msg.cols,
-              rows: msg.rows,
-            });
+            const sessId = sessionId(msg.id, msg.terminalId);
+            pendingResize.set(sessId, { cols: msg.cols, rows: msg.rows });
+            containFailure(
+              ptySend({
+                type: "resize",
+                id: sessId,
+                cols: msg.cols,
+                rows: msg.rows,
+              }),
+              `resize ${msg.id}`,
+            );
           }
           return;
         } catch {
@@ -668,16 +757,19 @@ const server = serve({
       }
       const sessId = termClients.get(ws);
       if (sessId) {
-        void ptySend({ type: "input", id: sessId, data: Buffer.from(str, "utf8").toString("base64") });
+        containFailure(
+          ptySend({ type: "input", id: sessId, data: Buffer.from(str, "utf8").toString("base64") }),
+          "terminal input",
+        );
       }
     },
     close(ws) {
       pushClients.delete(ws);
       const sessId = termClients.get(ws);
-      if (sessId) void ptySend({ type: "unsubscribe", id: sessId });
+      if (sessId) containFailure(ptySend({ type: "unsubscribe", id: sessId }), "terminal unsubscribe");
       termClients.delete(ws);
     },
-    drain(ws) {
+    drain(_ws) {
       // no-op
     },
   },

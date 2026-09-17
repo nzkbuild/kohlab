@@ -2,7 +2,13 @@
 <html lang="en" class="dark">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- viewport-fit=cover is REQUIRED for env(safe-area-inset-*) to be non-zero;
+     without it the drawer and topbar sit under the notch/home indicator. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- Declared before any stylesheet so the UA paints a dark canvas immediately
+     and there is no white flash on load. Mirrors color-scheme: dark in :root. -->
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#090a0c" />
 <title>kohlab</title>
 </head>
 <body>

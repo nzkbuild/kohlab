@@ -9,6 +9,87 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.10.0] - 2026-09-17
+
+The overhaul release: the frontend was rebuilt from scratch on a researched,
+audited design system — and verifying it surfaced twelve backend defects, five
+of them process-fatal. Full evaluation in `docs/EVAL-AND-REDESIGN.md`; sourcing
+in `docs/research/`.
+
+### Added
+
+- **New design system.** OKLCH primitive → semantic token tiers, bridged to
+  Tailwind through `@theme inline`. Every pair audited against WCAG 2.2 AA
+  (`scripts/check-contrast.mjs` — 21 pairs, ratios unrounded). Zero colour
+  literals in components.
+- **URL routing.** `/`, `/workspaces`, `/w/:id`, `/settings`. Refresh preserves
+  context, links are shareable, Back/Forward work. The server gained the SPA
+  history fallback it never had.
+- **Accept a clean workspace.** A stopped workspace with no changes could never
+  leave the review queue — commit was the only exit and it failed on a clean
+  index. It now records acceptance, from the API and from the UI.
+- **Mobile drawer.** The rail becomes an off-canvas drawer with a real toggle;
+  previously the toggle was `display: none` below 680px, leaving an unlabelled
+  icon rail that could not be opened. Closed, it leaves the tab order.
+- **Error containment.** Root, per-pane, and per-lazy-region boundaries; the
+  root reports through `onUncaughtError`/`onCaughtError`.
+- **Realtime honesty.** Connection chip driven by socket state, exponential
+  backoff with jitter, visibility-gated polling, coalesced screen-reader
+  announcements with a pause control in Settings.
+- **A backend typecheck.** Root `tsconfig.json` — `server.ts`, `lib.ts` and
+  `cli.ts` were never checked, which is how five missing imports shipped.
+
+### Fixed
+
+- **`/api/workspaces/:id/diff` 404'd** on every non-share request — the main
+  action switch had no `case "diff"`. Review-before-merge, the headline
+  feature, was dead.
+- **Untracked files were invisible to review** while `git add -A` committed
+  them. You could commit files you were never shown.
+- **WebSockets were never authenticated.** With an access key configured — the
+  documented deployment — the terminal and the done-ping were both rejected 401.
+- **`markStarted` was called but never imported**, killing the server on the
+  first terminal attach (since v1.4.1).
+- **`ensurePtySession` was not idempotent**, killing the server on the second
+  attach — a reload, a second tab, a re-open.
+- **Unhandled rejections on the socket path were fatal.** One client could take
+  the server down for everyone.
+- **The PTY daemon had no `resize` handler** despite documenting one, so the PTY
+  stayed at 120×36 and the agent never received SIGWINCH.
+- **Every server restart orphaned the PTY daemon**, losing all live sessions.
+  It now adopts a running daemon instead of replacing it.
+- **The done-ping broadcast never sent**: it guarded on `c.OPEN`, which does not
+  exist on Bun's `ServerWebSocket`.
+- **`cwd()` and `saveState` were called without being imported** — two more
+  crashes on reachable paths.
+- **Monaco rendered the patch, not the change.** `original=""` and
+  `modified={diff}` showed raw `@@` hunks as file content against a blank pane.
+  Diffs are now split into two real documents.
+
+### Changed
+
+- React 18.3 → 19.3. Terminal and editor chunks are lazily fetched; the entry
+  chunk no longer pulls xterm on first paint.
+- `web/dist` is rebuilt, and `docs/upgrade.md` no longer tells you to back up
+  the wrong directory.
+
+### Deployment notes
+
+- **Add `KillMode=process` to your unit** (`docs/systemd.md`). Without it,
+  systemd's default `control-group` kills the detached PTY daemon on every
+  restart, taking all live agent sessions with it — which defeats the point of
+  the daemon-adoption fix.
+- Restarting the daemon itself still ends every live session; its PTYs are its
+  children.
+
+### Known limitations
+
+- PTY replay of a full-screen TUI lands on the final frame rather than the
+  scrollback; it needs terminal-state capture, not a frontend change.
+- Opening a stopped workspace re-attaches and therefore restarts it, since a
+  browser attach is treated as a real run.
+- No bulk dismiss for the review queue.
+
 ## [1.9.0] - 2026-09-09
 
 The workbench release: one visual language across every screen, plus the usage

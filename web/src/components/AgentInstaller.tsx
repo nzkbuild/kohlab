@@ -1,94 +1,206 @@
-import { useEffect, useState } from "react";
-import { CheckCircle, CircleNotch, DownloadSimple } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowsClockwise,
+  CheckCircle,
+  CircleNotch,
+  Copy,
+  DownloadSimple,
+  WarningCircle,
+} from "@phosphor-icons/react";
 import { api } from "../api";
-import { AGENT_CATALOG } from "../types";
-import type { AgentInfo } from "../types";
+import { announce } from "../lib/announce";
+import { cn } from "../lib/utils";
+import { AGENT_CATALOG, type AgentInfo } from "../types";
+import { Button, SkeletonRows } from "./ui";
 
-interface Props {
-  compact?: boolean;
+interface AgentCard extends AgentInfo {
+  installed: boolean;
 }
 
-export default function AgentInstaller({ compact }: Props) {
-  const [agents, setAgents] = useState<AgentInfo[]>(AGENT_CATALOG.map((a) => ({ ...a, installed: false })));
+const STATUS_CHIP = {
+  detected: "chip-running",
+  missing: "chip-stopped",
+} as const;
+
+export default function AgentInstaller() {
+  const [agents, setAgents] = useState<AgentCard[]>(
+    AGENT_CATALOG.map((a) => ({ ...a, installed: false })),
+  );
+  const [loading, setLoading] = useState(true);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  /** One install at a time: a global npm install is heavy and the states would race. */
   const [running, setRunning] = useState<string | null>(null);
-  const [log, setLog] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState<string | null>(null);
+  const copyTimer = useRef<number | undefined>(undefined);
 
   const load = async () => {
+    setLoading(true);
     try {
-      const st = await api.agentsStatus();
-      setAgents(AGENT_CATALOG.map((a) => ({ ...a, installed: !!st[a.name] })));
-    } catch {
-      /* ignore */
+      const status = await api.agentsStatus();
+      setAgents(AGENT_CATALOG.map((a) => ({ ...a, installed: !!status[a.name] })));
+      setStatusError(null);
+    } catch (e) {
+      setStatusError((e as Error).message);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     void load();
+    return () => window.clearTimeout(copyTimer.current);
   }, []);
 
-  const install = async (a: AgentInfo) => {
-    if (!a.installCmd) return;
-    setRunning(a.name);
-    setLog(null);
+  const install = async (agent: AgentCard) => {
+    if (!agent.installCmd || running) return;
+    setRunning(agent.name);
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[agent.name];
+      return next;
+    });
     try {
-      const res = await api.installAgent(a.name, a.installCmd);
-      setLog(`installed ${a.name}${res.output ? `\n${res.output.slice(0, 300)}` : ""}`);
+      await api.installAgent(agent.name, agent.installCmd);
+      announce(`${agent.name} installed`);
       await load();
     } catch (e) {
-      setLog(`install failed: ${(e as Error).message}`);
+      // Verbatim per card: the server sends the installer's stderr, and a
+      // generic banner would throw away the only useful line.
+      setErrors((prev) => ({ ...prev, [agent.name]: (e as Error).message }));
+    } finally {
+      setRunning(null);
     }
-    setRunning(null);
   };
 
-  const installed = agents.filter((a) => a.installed);
+  const copy = async (agent: AgentCard, cmd: string) => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopied(agent.name);
+      window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(null), 2000);
+    } catch (e) {
+      setErrors((prev) => ({ ...prev, [agent.name]: `copy failed: ${(e as Error).message}` }));
+    }
+  };
+
   const missing = agents.filter((a) => !a.installed);
 
   return (
-    <div className={compact ? "text-left" : "p-6"}>
-      {!compact && <h3 className="text-lg font-semibold mb-3">Agents</h3>}
-      {installed.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
-          {installed.map((a) => (
-            <span key={a.name} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-400/10 border border-emerald-400/30 text-emerald-400 text-xs">
-              <CheckCircle size={13} weight="fill" /> {a.name}
-            </span>
-          ))}
-        </div>
+    <div className="text-left">
+      <div className="flex items-center gap-2 px-1 py-1">
+        <p className="tnum text-2xs text-text-muted">
+          {loading
+            ? "checking…"
+            : missing.length === 0
+              ? "all agents detected"
+              : `${missing.length} of ${agents.length} not detected`}
+        </p>
+        <div className="flex-1" />
+        <Button
+          variant="quiet"
+          size="sm"
+          iconOnly
+          aria-label="Re-check installed agents"
+          disabled={loading}
+          onClick={() => void load()}
+        >
+          <ArrowsClockwise size={14} />
+        </Button>
+      </div>
+
+      {statusError ? (
+        <p role="alert" className="mb-2 flex flex-wrap items-center gap-2 px-1 text-2xs text-status-danger">
+          Could not read agent status: {statusError}
+          <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
+            retry
+          </Button>
+        </p>
+      ) : null}
+
+      {loading && !statusError ? (
+        <SkeletonRows rows={3} />
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {agents.map((agent) => {
+            const busy = running === agent.name;
+            const error = errors[agent.name];
+            return (
+              <li key={agent.name} className="rounded-lg border border-line-subtle p-3">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2">
+                      <span className="mono text-sm text-text-primary">{agent.name}</span>
+                      <span
+                        className={cn(
+                          "chip",
+                          agent.installed ? STATUS_CHIP.detected : STATUS_CHIP.missing,
+                        )}
+                      >
+                        {agent.installed ? (
+                          <CheckCircle size={11} weight="fill" aria-hidden="true" />
+                        ) : (
+                          <span className="chip-dot" aria-hidden="true" />
+                        )}
+                        {agent.installed ? "detected" : "not detected"}
+                      </span>
+                    </p>
+                    {agent.setupHint ? (
+                      <p className="mt-1 text-2xs leading-relaxed text-text-muted">{agent.setupHint}</p>
+                    ) : null}
+                    {agent.installCmd ? (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <code className="mono min-w-0 flex-1 truncate text-xs text-text-secondary">
+                          {agent.installCmd}
+                        </code>
+                        <Button
+                          variant="quiet"
+                          size="sm"
+                          iconOnly
+                          aria-label={`Copy install command for ${agent.name}`}
+                          title={copied === agent.name ? "Copied" : "Copy install command"}
+                          onClick={() => void copy(agent, agent.installCmd ?? "")}
+                        >
+                          <Copy size={13} />
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {!agent.installed && agent.installCmd ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={running !== null}
+                      aria-busy={busy}
+                      onClick={() => void install(agent)}
+                    >
+                      {busy ? (
+                        <CircleNotch size={14} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <DownloadSimple size={14} aria-hidden="true" />
+                      )}
+                      {busy ? "installing…" : "install"}
+                    </Button>
+                  ) : null}
+                </div>
+
+                {error ? (
+                  <p
+                    role="alert"
+                    className="mt-2 flex items-start gap-1.5 border-t border-line-subtle pt-2 text-2xs text-status-danger"
+                  >
+                    <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
+                    <span className="mono min-w-0 break-words">
+                      {agent.name} install failed: {error}
+                    </span>
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
       )}
-      {installed.filter((a) => a.setupCmd).map((a) => (
-        <div key={`setup-${a.name}`} className="flex items-center gap-2 p-3 rounded-xl bg-[#151517] border border-[#27272a] mb-2">
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-zinc-400">{a.name} setup</div>
-            <code className="block mt-0.5 text-xs text-zinc-200 truncate">{a.setupCmd}</code>
-            <div className="text-xs text-zinc-400 mt-0.5 truncate">{a.setupHint}</div>
-          </div>
-          <button
-            onClick={() => navigator.clipboard.writeText(a.setupCmd ?? "").catch(() => {})}
-            className="px-2.5 py-1 rounded-lg border border-[#27272a] text-xs text-zinc-300 hover:border-emerald-400 hover:text-emerald-400 transition"
-          >
-            copy
-          </button>
-        </div>
-      ))}
-      {missing.map((a) => (
-        <div key={a.name} className="flex items-center gap-3 p-3 rounded-xl bg-[#151517] border border-[#27272a] mb-2">
-          <div className="flex-1 min-w-0">
-            <div className="font-medium text-sm">{a.name}</div>
-            <div className="text-xs text-zinc-400 truncate">{a.setupHint}</div>
-            <code className="block mt-1 text-xs text-zinc-400 truncate">{a.installCmd}</code>
-          </div>
-          <button
-            onClick={() => void install(a)}
-            disabled={running === a.name}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-400 text-[#06231a] text-xs font-semibold disabled:opacity-50 hover:brightness-110 transition"
-          >
-            {running === a.name ? <CircleNotch size={13} className="animate-spin" /> : <DownloadSimple size={13} />}
-            install
-          </button>
-        </div>
-      ))}
-      {missing.length === 0 && <div className="text-xs text-zinc-400">all agents installed</div>}
-      {log && <pre className="mt-2 p-2 bg-[#0a0a0a] rounded-lg text-xs text-emerald-400 whitespace-pre-wrap">{log}</pre>}
     </div>
   );
 }

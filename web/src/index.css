@@ -1,126 +1,948 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   Kohlab design tokens
+   ----------------------------------------------------------------------------
+   Direction: graphite planes, acid-lime live state, compact sans for UI, mono
+   only for code and measurement.
+
+   Two tiers, and only two:
+     1. PRIMITIVE  — raw OKLCH ramps. The ONLY place a colour literal exists.
+     2. SEMANTIC   — what a thing IS (surface-raised, text-muted, status-running).
+   Components consume the semantic tier. No component holds a hex literal or a
+   primitive name.
+
+   OKLCH rather than HSL: HSL hue is not perceptually uniform (CSS Color 4
+   states it normatively), so equal-L steps across two hues do not read as equal
+   weight. That is why the previous emerald/amber chips did not match.
+   ========================================================================== */
+
 :root {
   color-scheme: dark;
-  /* kohlab carbon palette — pure-black neutrals (no blue cast), emerald primary
-     + amber supporting accent. Tokens read by shadcn/21st components. */
-  --background: 0 0% 4%;          /* #0a0a0a carbon black */
-  --foreground: 240 6% 90%;       /* #e4e4e7 */
-  --card: 0 0% 7%;                /* #111113 */
-  --card-foreground: 240 6% 90%;
-  --popover: 0 0% 7%;
-  --popover-foreground: 240 6% 90%;
-  --primary: 160 84% 60%;         /* emerald accent */
-  --primary-foreground: 160 60% 6%;
-  --secondary: 0 0% 9%;           /* #151517 */
-  --secondary-foreground: 240 6% 90%;
-  --muted: 0 0% 9%;
-  --muted-foreground: 240 5% 65%; /* #a1a1aa — AA (7.7:1 on bg) */
-  --accent: 160 84% 60%;
-  --accent-foreground: 160 60% 6%;
-  --destructive: 0 72% 56%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 16%;             /* #27272a */
-  --input: 0 0% 16%;
-  --ring: 160 84% 60%;
 
-  /* sidebar surface (distinct from card so the rail reads as a separate plane) */
-  --sidebar: 0 0% 6%;             /* #0f0f10 */
-  --sidebar-foreground: 240 6% 90%;
-  --sidebar-primary: 160 84% 60%;
-  --sidebar-primary-foreground: 160 60% 6%;
-  --sidebar-accent: 0 0% 11%;     /* #1c1c1f — selected/hover row */
-  --sidebar-accent-foreground: 240 6% 90%;
-  --sidebar-border: 0 0% 16%;
-  --sidebar-ring: 160 84% 60%;
+  /* --- primitive: graphite neutrals (hue 265, very low chroma) ------------- */
+  --graphite-1000: oklch(0.145 0.005 265);
+  --graphite-950: oklch(0.175 0.006 265);
+  --graphite-900: oklch(0.205 0.007 265);
+  --graphite-800: oklch(0.255 0.008 265);
+  --graphite-700: oklch(0.315 0.009 265);
+  --graphite-600: oklch(0.53 0.012 265);
+  --graphite-500: oklch(0.64 0.011 265);
+  --graphite-400: oklch(0.72 0.011 265);
+  --graphite-300: oklch(0.81 0.008 265);
+  --graphite-100: oklch(0.95 0.004 265);
 
-  /* chart tints — derived from the status semantics, not a new palette */
-  --chart-1: 160 84% 60%;         /* emerald — running */
-  --chart-2: 43 96% 56%;          /* amber — needs review */
-  --chart-3: 0 0% 45%;            /* zinc — stopped */
-  --chart-4: 160 60% 40%;
-  --chart-5: 43 80% 40%;
+  /* --- primitive: accents ------------------------------------------------- */
+  --lime-400: oklch(0.88 0.19 124);
+  --lime-500: oklch(0.84 0.21 124);
+  --lime-600: oklch(0.72 0.19 124);
+  --amber-400: oklch(0.83 0.16 78);
+  --amber-500: oklch(0.78 0.16 72);
+  --red-400: oklch(0.72 0.19 25);
+  --red-500: oklch(0.65 0.21 25);
+  --cyan-400: oklch(0.82 0.11 205);
 
-  --radius: 0.75rem;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --letter-spacing: 0rem;
-  --spacing: 0.25rem;
+  /* --- semantic: surfaces (distinct planes, never one flat black) ---------- */
+  --surface-base: var(--graphite-1000);      /* app canvas */
+  --surface-sunken: oklch(0.125 0.005 265);  /* terminal, code, log */
+  --surface-raised: var(--graphite-950);     /* panels, cards, sidebar */
+  --surface-overlay: var(--graphite-900);    /* dialogs, palette, popovers */
+  --surface-hover: var(--graphite-900);
+  --surface-active: var(--graphite-800);
+
+  /* --- semantic: text ----------------------------------------------------- */
+  --text-primary: var(--graphite-100);
+  --text-secondary: var(--graphite-300);
+  --text-muted: var(--graphite-400);
+  --text-faint: var(--graphite-500);
+  --text-on-accent: oklch(0.20 0.06 124);
+
+  /* --- semantic: lines (borders only — forced-colors deletes box-shadow) --- */
+  --line-subtle: var(--graphite-800);
+  /* Control boundaries must clear 3:1 against their own surface (SC 1.4.11),
+     so this is a full step lighter than the decorative divider. */
+  --line-strong: var(--graphite-600);
+  --line-accent: var(--lime-500);
+
+  /* --- semantic: status lifecycle ---------------------------------------- */
+  /* One tone per status, chosen so the chip LABEL passes 4.5:1 against the
+     chip's own tinted background — the token is used for dot, border and text
+     alike, so it must be legible as text, not merely vivid as a dot. */
+  --status-running: oklch(0.9 0.17 124);
+  --status-review: oklch(0.89 0.13 80);
+  --status-committed: oklch(0.89 0.09 205);
+  --status-stopped: var(--graphite-500);
+  --status-danger: oklch(0.82 0.14 25);
+  --accent: var(--lime-500);
+  --accent-hover: var(--lime-400);
+  --accent-press: var(--lime-600);
+
+  /* --- motion ------------------------------------------------------------ */
+  /* Declared here as well as in @theme: author CSS references var(--ease-*) in
+     `transition` shorthands, and a shorthand with an unresolvable var() is
+     dropped silently — a green build with dead transitions. */
+  --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
+  --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9);
+  --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);
+
+  --duration-fast-01: 70ms;
+  --duration-fast-02: 110ms;
+  --duration-moderate-01: 150ms;
+  --duration-moderate-02: 240ms;
+
+  /* --- type -------------------------------------------------------------- */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    "Noto Sans", Arial, sans-serif;
+  /* No webfont: zero bytes, no FOUT. Metric differences across platforms are
+     the accepted trade for a self-hosted console. */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  /* Layout constants shared by JS and CSS (mobile drawer + sticky chrome). */
+  --topbar-h: 3.25rem;
+  --sidebar-w: 15.5rem;
+  --sidebar-w-collapsed: 3.75rem;
 }
 
+/* Bridge the semantic tier into Tailwind utilities. `inline` is REQUIRED for
+   every token that references another variable — without it the utility body
+   carries the alias name and resolves at the point of use, not to the token. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
+  --color-surface-base: var(--surface-base);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-text-on-accent: var(--text-on-accent);
+
+  --color-line-subtle: var(--line-subtle);
+  --color-line-strong: var(--line-strong);
+  --color-line-accent: var(--line-accent);
+
+  --color-status-running: var(--status-running);
+  --color-status-review: var(--status-review);
+  --color-status-committed: var(--status-committed);
+  --color-status-stopped: var(--status-stopped);
+  --color-status-danger: var(--status-danger);
   --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
+  --color-accent-hover: var(--accent-hover);
+
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --radius: var(--radius);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  /* rem-based type scale (Resize Text / SC 1.4.4 — never px, never clamp()). */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.0625rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.1875rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.3125rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5625rem;
+  --text-2xl--line-height: 2rem;
+
+  --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
+  --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9);
+  --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);
+
+  --breakpoint-shell: 56.25rem; /* 900px — where the sidebar becomes a drawer */
 }
 
-html, body, #root {
+/* ============================ base ======================================= */
+
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
 }
 
+/* 100vh bleeds behind mobile browser chrome; the dvh line wins where supported. */
+#root {
+  height: 100vh;
+  height: 100dvh;
+}
+
 body {
-  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
+  overflow: hidden;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea,
+a {
+  font: inherit;
+  font-size: 0.875rem; /* 14px control floor */
+}
+
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Focus: a real outline, not a box-shadow — forced-colors forces box-shadow to
+   none. Offset outward so it is never swallowed by the component background. */
+:focus-visible {
+  outline: 2px solid var(--line-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: color-mix(in oklch, var(--accent) 32%, transparent);
+  color: var(--text-primary);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--graphite-700) transparent;
+}
+
+/* Only transform/opacity/colour-ish properties may animate. */
+@media (prefers-reduced-motion: no-preference) {
+  :root {
+    --motion-ok: 1;
+  }
+}
+
+/* ============================ components ================================= */
+
+@layer components {
+  /* --- surfaces --------------------------------------------------------- */
+  .panel {
+    border: 1px solid var(--line-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+  }
+
+  .panel-head {
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-bottom: 1px solid var(--line-subtle);
+    padding: 0.5rem 0.875rem;
+  }
+
+  .panel-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  /* --- controls --------------------------------------------------------- */
+  /* min-height, never height: SC 1.4.12 text-spacing overrides must not clip. */
+  .btn {
+    display: inline-flex;
+    min-height: 2.125rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4375rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 550;
+    line-height: 1.2;
+    transition: background-color var(--duration-fast-02) var(--ease-standard),
+      border-color var(--duration-fast-02) var(--ease-standard),
+      color var(--duration-fast-02) var(--ease-standard);
+  }
+
+  .btn-sm {
+    min-height: 1.75rem;
+    padding: 0.25rem 0.5625rem;
+    font-size: 0.75rem;
+  }
+  /* Icon-only controls keep a 24x24 minimum hit area (SC 2.5.8 AA). */
+  .btn-icon {
+    min-width: 2.125rem;
+    min-height: 2.125rem;
+    padding: 0;
+  }
+  .btn-icon.btn-sm {
+    min-width: 1.75rem;
+    min-height: 1.75rem;
+  }
+
+  .btn-primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--text-on-accent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+  .btn-primary:active:not(:disabled) {
+    background: var(--accent-press);
+  }
+
+  .btn-secondary {
+    border-color: var(--line-strong);
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    border-color: var(--graphite-600);
+    background: var(--surface-active);
+  }
+
+  .btn-quiet {
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-muted);
+  }
+  .btn-quiet:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+
+  .btn-danger {
+    border-color: color-mix(in oklch, var(--status-danger) 45%, transparent);
+    background: color-mix(in oklch, var(--status-danger) 12%, transparent);
+    color: var(--status-danger);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--status-danger) 22%, transparent);
+  }
+
+  /* --- fields ----------------------------------------------------------- */
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+  .field-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .field-input,
+  .field-select,
+  .field-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 2.25rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    padding: 0.4375rem 0.625rem;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    outline: none;
+    transition: border-color var(--duration-fast-02) var(--ease-standard);
+  }
+  .field-input::placeholder,
+  .field-textarea::placeholder {
+    color: var(--text-faint);
+  }
+  .field-input:focus,
+  .field-select:focus,
+  .field-textarea:focus {
+    border-color: var(--accent);
+  }
+  .field-help {
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+  }
+
+  /* --- chips / badges --------------------------------------------------- */
+  /* Every status chip pairs colour with a text label, so state survives
+     greyscale, colour-blindness and forced-colors (SC 1.4.1). */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 0.1875rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
+    color: var(--text-secondary);
+  }
+  .chip-dot {
+    width: 0.375rem;
+    height: 0.375rem;
+    flex: 0 0 0.375rem;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .chip-running {
+    border-color: color-mix(in oklch, var(--status-running) 42%, transparent);
+    background: color-mix(in oklch, var(--status-running) 12%, transparent);
+    color: var(--status-running);
+  }
+  /* The only decorative animation in the product. 3 x 1.6s = 4.8s total, i.e.
+     under the five-second window SC 2.2.2 exempts, so no pause control is
+     required for it. Reduced-motion users get a static dot. */
+  .chip-running .chip-dot {
+    animation: kohlab-pulse 1.6s var(--ease-standard) 3;
+  }
+  .chip-review {
+    border-color: color-mix(in oklch, var(--status-review) 42%, transparent);
+    background: color-mix(in oklch, var(--status-review) 12%, transparent);
+    color: var(--status-review);
+  }
+  .chip-committed {
+    border-color: color-mix(in oklch, var(--status-committed) 38%, transparent);
+    background: color-mix(in oklch, var(--status-committed) 10%, transparent);
+    color: var(--status-committed);
+  }
+  .chip-stopped {
+    border-color: var(--line-strong);
+    color: var(--text-muted);
+  }
+  .chip-danger {
+    border-color: color-mix(in oklch, var(--status-danger) 45%, transparent);
+    background: color-mix(in oklch, var(--status-danger) 12%, transparent);
+    color: var(--status-danger);
+  }
+
+  /* --- misc ------------------------------------------------------------- */
+  .kbd {
+    display: inline-flex;
+    min-width: 1.25rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-hover);
+    padding: 0.0625rem 0.3125rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+  }
+
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  /* Align live counters and timestamps so digits do not jitter. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: oklch(0.1 0.005 265 / 0.66);
+  }
+}
+
+/* ============================ utilities ================================== */
+
+@keyframes kohlab-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* forced-colors deletes box-shadow and non-URL background-image, so nothing
+   load-bearing may rely on them. Native elements get system colours for free. */
+@media (forced-colors: active) {
+  .chip,
+  .panel,
+  .btn {
+    border-color: CanvasText;
+  }
+  .chip-dot {
+    background: CanvasText;
+  }
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+/* ============================ shell ====================================== */
+
+.app-shell {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  background: var(--surface-base);
+}
+
+.app-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.app-topbar {
+  display: flex;
+  min-height: var(--topbar-h);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line-subtle);
+  padding: 0.5rem 1rem;
+  /* Real translucency rather than a faux alpha fill. */
+  background: color-mix(in oklch, var(--surface-base) 82%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+/* Above the shell breakpoint the sidebar is always present and every surface
+   renders its own <h1>, so this bar would only repeat the page title while
+   holding a menu button that no longer exists. Chrome is thin and quiet: drop
+   it, and keep it for mobile where it is the only route context. */
+@media (min-width: 56.25rem) {
+  .app-topbar {
+    display: none;
+  }
+}
+
+.app-content {
+  min-height: 0;
+  flex: 1;
   overflow: hidden;
 }
 
-/* xterm container fills its parent */
+/* --- sidebar ------------------------------------------------------------- */
+.sidebar {
+  display: flex;
+  width: var(--sidebar-w);
+  flex: 0 0 var(--sidebar-w);
+  flex-direction: column;
+  overflow: hidden;
+  border-inline-end: 1px solid var(--line-subtle);
+  background: var(--surface-raised);
+  transition: width var(--duration-moderate-01) var(--ease-standard),
+    flex-basis var(--duration-moderate-01) var(--ease-standard);
+}
+
+.sidebar[data-collapsed="true"] {
+  width: var(--sidebar-w-collapsed);
+  flex-basis: var(--sidebar-w-collapsed);
+}
+
+.sidebar-row {
+  display: flex;
+  min-height: 2.25rem;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 0.25rem 0.5rem;
+  color: var(--text-secondary);
+  text-align: start;
+  transition: background-color var(--duration-fast-02) var(--ease-standard),
+    color var(--duration-fast-02) var(--ease-standard);
+}
+
+.sidebar-row:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-row[aria-current="page"],
+.sidebar-row[data-selected="true"] {
+  border-color: var(--line-subtle);
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.sidebar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Collapsed rail: labels are hidden from layout AND from assistive tech only
+   via the visual state — the accessible name lives on the control itself. */
+.sidebar[data-collapsed="true"] .sidebar-label,
+.sidebar[data-collapsed="true"] .sidebar-section-title {
+  display: none;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-row {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* --- mobile drawer ------------------------------------------------------- */
+@media (max-width: 56.25rem) {
+  .sidebar {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 50;
+    width: min(19rem, 84vw);
+    flex-basis: auto;
+    padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
+    transform: translateX(-100%);
+    /* Translating an element does not remove it from the tab order or the
+       accessibility tree, and the aside precedes <main> — so without this the
+       first Tab on a phone lands inside an off-screen nav. Delay the visibility
+       flip so the slide-out animation still plays. */
+    visibility: hidden;
+    transition: transform var(--duration-moderate-02) var(--ease-standard),
+      visibility 0s linear var(--duration-moderate-02);
+  }
+  .sidebar[data-open="true"] {
+    transform: translateX(0);
+    visibility: visible;
+    transition-delay: 0s;
+  }
+  .sidebar[data-collapsed="true"] {
+    width: min(19rem, 84vw);
+  }
+  .sidebar[data-collapsed="true"] .sidebar-label,
+  .sidebar[data-collapsed="true"] .sidebar-section-title {
+    display: block;
+  }
+  .sidebar[data-collapsed="true"] .sidebar-row {
+    justify-content: flex-start;
+    padding-inline: 0.5rem;
+  }
+}
+
+/* ============================ surfaces =================================== */
+
+.surface {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.75rem 2rem 3rem;
+  padding-block-end: max(3rem, env(safe-area-inset-bottom, 0px));
+}
+
+.surface-inner {
+  width: min(78rem, 100%);
+  margin: 0 auto;
+}
+
+.surface-title {
+  margin: 0;
+  font-size: 1.5625rem;
+  font-weight: 620;
+  letter-spacing: -0.022em;
+}
+
+.surface-description {
+  max-width: 42rem;
+  margin: 0.375rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* Container queries so a panel adapts to its pane, not the viewport. */
+.pane {
+  container-type: inline-size;
+}
+
+@media (max-width: 40rem) {
+  .surface {
+    padding: 1.25rem 1rem 2.5rem;
+  }
+  .surface-title {
+    font-size: 1.3125rem;
+  }
+}
+
+/* --- data table ---------------------------------------------------------- */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th {
+  padding: 0.5rem 0.875rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: start;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 0.6875rem 0.875rem;
+  font-size: 0.8125rem;
+  vertical-align: middle;
+}
+
+.data-table tbody tr {
+  border-top: 1px solid var(--line-subtle);
+}
+
+/* contain: layout paint bounds the cost of per-row updates in a live table. */
+.data-table tbody tr {
+  contain: layout paint;
+}
+
+.data-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+/* ============================ cockpit ==================================== */
+
+.cockpit {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.cockpit-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line-subtle);
+  padding: 0.625rem 1rem;
+}
+
+.tabstrip {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line-subtle);
+  padding: 0 0.75rem;
+  scrollbar-width: none;
+}
+
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.4375rem;
+  border-bottom: 2px solid transparent;
+  padding: 0 0.6875rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  color: var(--text-muted);
+  transition: color var(--duration-fast-02) var(--ease-standard);
+}
+
+.tab:hover {
+  color: var(--text-primary);
+}
+
+.tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.cockpit-body {
+  min-height: 0;
+  flex: 1;
+}
+
+/* --- terminal ------------------------------------------------------------ */
+.terminal-wrap {
+  height: 100%;
+  background: var(--surface-sunken);
+}
+
 .terminal-wrap .xterm {
   height: 100%;
+  padding: 0.625rem;
 }
 
-/* reachability: comfortable base sizing + smooth focus rings for keyboard users */
-:root { font-size: 16px; }
-button, input, select, textarea, a {
-  font-size: 0.875rem; /* 14px floor for controls — WCAG target-size friendly */
-}
-:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
-  border-radius: 4px;
+/* --- log ----------------------------------------------------------------- */
+.log-line {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.0625rem 1rem;
+  /* content-visibility bounds rendering of an unbounded tail; the intrinsic
+     size keeps the scrollbar honest. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.125rem;
 }
 
-/* status badge/dot grammar — one place for the lifecycle colors */
-@layer utilities {
-  .dot-running {
-    @apply bg-emerald-400 shadow-[0_0_6px_hsl(var(--chart-1))];
+.log-line:hover {
+  background: var(--surface-hover);
+}
+
+.log-time {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-text {
+  min-width: 0;
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --- skeleton ------------------------------------------------------------ */
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    animation: kohlab-shimmer 1.4s var(--ease-standard) infinite;
   }
-  .dot-review {
-    @apply bg-amber-400;
+}
+
+@keyframes kohlab-shimmer {
+  0%,
+  100% {
+    opacity: 1;
   }
-  .dot-stopped {
-    @apply bg-zinc-600;
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* --- modal (Radix) ------------------------------------------------------- */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  /* Radix sets this; we only supply colour. */
+  background: oklch(0.1 0.005 265 / 0.7);
+}
+
+.dialog-content {
+  position: fixed;
+  z-index: 101;
+  inset-inline: 0;
+  inset-block-start: 22%;
+  width: min(30rem, calc(100% - 2rem));
+  margin-inline: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+  box-shadow: 0 1.5rem 4rem oklch(0.08 0.005 265 / 0.55);
+}
+
+/* --- palette ------------------------------------------------------------- */
+.palette-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.625rem;
+  color: var(--text-secondary);
+  text-align: start;
+}
+
+.palette-item[aria-selected="true"] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+/* --- misc helpers -------------------------------------------------------- */
+.split-view {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.file-row {
+  display: flex;
+  min-height: 1.75rem;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: var(--radius-sm);
+  padding-inline: 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.file-row:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.file-row[data-selected="true"] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+/* Row actions appear on focus as well as hover — hover must never be the only
+   path (SC 1.4.13 / 2.1.1). */
+.row-actions {
+  opacity: 0;
+  transition: opacity var(--duration-fast-02) var(--ease-standard);
+}
+
+*:hover > .row-actions,
+*:focus-within > .row-actions,
+.row-actions:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .row-actions {
+    opacity: 1;
   }
 }

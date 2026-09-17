@@ -65,26 +65,33 @@ ssh -L 7676:localhost:7676 user@your-server
 
 Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
-## What's new in v1.9.0
+## What's new in v1.10.0
 
-- **The workbench** — a single visual language across every screen: carbon-black
-  surfaces, emerald running state, amber *needs review*, zinc stopped.
-- **Review queue** — finished agents with uncommitted diffs surface first on the
-  dashboard; the sidebar, cockpit header, and ⌘K palette all carry the state.
-- **Per-file diff review** — the diff tab lists every changed file; review each
-  one and commit in one click.
-- **Done-ping** — when an agent finishes, the title flashes and (on first grant)
-  a browser notification points you at the review queue.
-- **Polished chrome** — confirm dialogs on destructive actions, count badges on
-  cockpit tabs, live/session markers, toast restyle.
+- **Rebuilt frontend** — a researched, audited design system: OKLCH tokens in
+  semantic tiers, every colour pair checked against WCAG 2.2 AA, zero hard-coded
+  colours in components, dark-only with a real mobile drawer.
+- **Shareable URLs** — `/workspaces`, `/w/<id>` and `/settings` are real routes:
+  refresh keeps your place, links work, Back/Forward work.
+- **Twelve backend defects fixed**, five of them crashing the server — including
+  a `/diff` route that made review-before-merge unreachable, and a PTY daemon
+  that was orphaned (losing every live agent) on each restart.
+- **Review that tells the truth** — the diff pane now shows the actual change
+  instead of the raw patch, new files are no longer hidden, and a clean
+  workspace can be accepted out of the queue.
+- **Reconnect honesty** — an explicit live/reconnecting/offline chip, backoff
+  with jitter, and polling that stops while the tab is hidden.
 
-Previous releases: v1.8.0 (per-user OS isolation), v1.7.0 (resource caps),
-v1.6.0 (users, roles, audit), v1.4.x (PTY + command center).
+Upgrading: add `KillMode=process` to your systemd unit first — see
+[docs/upgrade.md](docs/upgrade.md) and [docs/systemd.md](docs/systemd.md).
+
+Previous releases: v1.9.0 (the workbench), v1.8.0 (per-user OS isolation),
+v1.7.0 (resource caps), v1.6.0 (users, roles, audit), v1.4.x (PTY + command
+center).
 
 
-**v1.9.0** — stable. Kohlab stays on the 1.x line through steady growth — the
-major version only moves on a genuine breakthrough release. Plans:
-`docs/ux-v1.9.0.md`, `docs/product-v1.10.0.md`.
+**v1.10.0** — stable. Kohlab stays on the 1.x line through steady growth — the
+major version only moves on a genuine breakthrough release. Evaluation and
+redesign notes: `docs/EVAL-AND-REDESIGN.md`.
 ## License
 
 MIT — free to use, modify, and self-host. Built for the community.

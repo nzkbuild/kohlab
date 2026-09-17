@@ -1,250 +1,176 @@
 import { useEffect, useState } from "react";
-import { Plus, FolderOpen, GithubLogo, SquaresFour, GearSix, TerminalWindow, SidebarSimple, CaretDoubleRight } from "@phosphor-icons/react";
-import { api } from "../api";
-import { useApp } from "../store";
-import { withToast } from "../lib/actions";
+import {
+  CaretDoubleLeft,
+  CaretDoubleRight,
+  GearSix,
+  Plus,
+  SquaresFour,
+  Stack,
+  TerminalWindow,
+  X,
+} from "@phosphor-icons/react";
+import { useApp, type Connection } from "../store";
+import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import { workspaceStatus, STATUS_DOT, STATUS_LABEL } from "../lib/status";
+import { Button } from "./ui";
 
-/**
- * Collapsible rail. ONE moving part: the aside width (60px ↔ 300px, 150ms).
- * Every icon/dot keeps a FIXED x-position in both states (constant px + gap,
- * no justify-center swap), so nothing slides horizontally on toggle. Labels
- * fade with opacity — delayed 75ms on expand so text appears as the rail
- * reveals it, never popping in mid-animation.
- */
-export default function Sidebar() {
-  const { workspaces, selectedId, view, select, setView, refresh } = useApp();
-  const [open, setOpen] = useState(true);
-  const [task, setTask] = useState("");
-  const [repo, setRepo] = useState("");
-  const [agent, setAgent] = useState("omp");
-  const [busy, setBusy] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [ghRepos, setGhRepos] = useState<string[]>([]);
-  const [ghAuthed, setGhAuthed] = useState(false);
-  const [maxMem, setMaxMem] = useState("");
-  const [timeout, setTimeoutSec] = useState("");
+const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
+
+const CONNECTION_LABEL: Record<Connection, string> = {
+  connecting: "connecting",
+  live: "live",
+  reconnecting: "reconnecting",
+  offline: "offline",
+};
+
+const CONNECTION_CHIP: Record<Connection, string> = {
+  connecting: "chip-stopped",
+  live: "chip-running",
+  reconnecting: "chip-review",
+  offline: "chip-danger",
+};
+
+interface Props {
+  /** Mobile drawer visibility. On desktop the rail is always present. */
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function Sidebar({ open, onClose }: Props) {
+  const route = useApp((s) => s.route);
+  const workspaces = useApp((s) => s.workspaces);
+  const connection = useApp((s) => s.connection);
+  const navigate = useApp((s) => s.navigate);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
 
   useEffect(() => {
-    void refresh();
-    void api.ghRepos().then((result) => {
-      setGhAuthed(result.authed);
-      setGhRepos(result.repos);
-    });
-    const t = setInterval(refresh, 5000);
-    return () => clearInterval(t);
-  }, [refresh]);
+    localStorage.setItem(COLLAPSE_KEY, String(collapsed));
+  }, [collapsed]);
 
-  const goWorkspace = (id: string) => {
-    setView("workspaces");
-    select(id);
-  };
-
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!task.trim()) return;
-    setBusy(true);
-    try {
-      const isUrl = /^https?:\/\//.test(repo.trim());
-      const limits = { timeoutSec: timeout ? Number(timeout) : undefined, maxMemoryMb: maxMem ? Number(maxMem) : undefined };
-      const anyLimit = limits.timeoutSec || limits.maxMemoryMb;
-      const w = await withToast("Creating workspace", async () =>
-        isUrl
-          ? api.clone({ url: repo.trim(), task: task.trim(), agent, limits: anyLimit ? limits : undefined })
-          : api.create({ task: task.trim(), repo: repo.trim() || undefined, agent, limits: anyLimit ? limits : undefined }),
-      );
-      setTask("");
-      setShowForm(false);
-      await refresh();
-      setView("workspaces");
-      goWorkspace(w.id);
-    } catch (err) {
-      console.error(err);
-    }
-    setBusy(false);
-  };
+  const ordered = [...workspaces].sort(byReviewFirst);
+  const reviewCount = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
 
   const nav = [
-    { key: "dashboard" as const, label: "Dashboard", icon: SquaresFour },
-    { key: "settings" as const, label: "Settings", icon: GearSix },
+    { kind: "dashboard" as const, label: "Command center", icon: SquaresFour, badge: 0 },
+    { kind: "workspaces" as const, label: "Workspaces", icon: Stack, badge: 0 },
+    { kind: "settings" as const, label: "Settings", icon: GearSix, badge: 0 },
   ];
 
-  // `showForm` pins the rail open while the create form is visible.
-  const expanded = open || showForm;
-
-  // Label fade — the only inner animation. Icons never move.
-  const label = (children: React.ReactNode) => (
-    <span
-      className={cn(
-        "min-w-0 flex-1 truncate whitespace-nowrap transition-opacity duration-150",
-        expanded ? "opacity-100 delay-75" : "pointer-events-none opacity-0",
-      )}
-    >
-      {children}
-    </span>
-  );
-
-  const row = "flex h-9 w-full items-center gap-2.5 px-2.5 rounded-lg";
-
-  const inputCls = "w-full bg-[#111113] border border-[#27272a] rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400";
+  const activeKind = route.kind === "workspace" ? "workspaces" : route.kind;
 
   return (
     <aside
-      className={cn(
-        "flex h-full shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-150 ease-out",
-        expanded ? "w-[300px]" : "w-[60px]",
-      )}
+      className="sidebar"
+      data-open={open}
+      data-collapsed={collapsed}
+      aria-label="Primary navigation"
     >
-      {/* header — brand fades, toggle pinned right at a fixed x */}
-      <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-3">
-        <span
-          className={cn(
-            "grid size-6 shrink-0 place-items-center rounded-md bg-emerald-400 text-[#06231a] transition-opacity duration-150",
-            expanded ? "opacity-100" : "pointer-events-none opacity-0",
-          )}
-        >
-          <TerminalWindow size={14} weight="bold" />
+      <div className="flex min-h-13 items-center gap-2.5 border-b border-line-subtle px-3">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
+          <TerminalWindow size={15} weight="bold" />
         </span>
-        {label(<span className="font-bold tracking-tight">kohlab</span>)}
-        <button
-          onClick={() => setOpen((v) => !v)}
-          title={expanded ? "collapse sidebar" : "expand sidebar"}
-          className="ml-auto grid size-7 shrink-0 place-items-center rounded-md text-[#a1a1aa] transition-colors hover:bg-sidebar-accent hover:text-[#e4e4e7]"
+        <span className="sidebar-label text-base font-semibold tracking-tight">kohlab</span>
+        <div className="flex-1" />
+        {/* Desktop: collapse the rail. Mobile: dismiss the drawer. */}
+        <Button
+          variant="quiet"
+          iconOnly
+          size="sm"
+          className="hidden shell:inline-flex"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((v) => !v)}
         >
-          {expanded ? <SidebarSimple size={16} weight="bold" /> : <CaretDoubleRight size={16} weight="bold" />}
-        </button>
-      </header>
-
-      {/* nav */}
-      <nav className="flex flex-col gap-0.5 p-2">
-        {nav.map((n) => {
-          const active = view === n.key;
-          return (
-            <button
-              key={n.key}
-              onClick={() => setView(n.key)}
-              title={n.label}
-              className={cn(
-                row,
-                "transition-colors",
-                active
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-[#a1a1aa] hover:bg-sidebar-accent/60 hover:text-[#e4e4e7]",
-              )}
-            >
-              <n.icon size={18} weight={active ? "fill" : "regular"} className="shrink-0" />
-              {label(<span>{n.label}</span>)}
-            </button>
-          );
-        })}
-      </nav>
-
-      {/* new workspace */}
-      <div className="px-2 pb-2">
-        <button
-          onClick={() => {
-            setOpen(true);
-            setShowForm((v) => !v);
-          }}
-          title="new workspace"
-          className={cn(
-            "flex h-9 w-full items-center gap-2.5 rounded-lg bg-emerald-400 px-2.5 font-semibold text-[#06231a] transition hover:brightness-110 active:scale-[0.98]",
-          )}
+          {collapsed ? <CaretDoubleRight size={15} /> : <CaretDoubleLeft size={15} />}
+        </Button>
+        <Button
+          variant="quiet"
+          iconOnly
+          size="sm"
+          className="shell:hidden"
+          aria-label="Close navigation"
+          onClick={onClose}
         >
-          <Plus size={18} weight="bold" className="shrink-0" />
-          {label(<span className="truncate">new workspace</span>)}
-        </button>
+          <X size={15} />
+        </Button>
       </div>
 
-      {/* create form */}
-      {showForm && expanded && (
-        <form onSubmit={create} className="mx-2 mb-2 flex flex-col gap-2 rounded-xl border border-[#27272a] bg-[#151517] p-3">
-          <input value={task} onChange={(e) => setTask(e.target.value)} placeholder="task description" required className={inputCls} />
-          {ghAuthed && ghRepos.length > 0 && (
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                const ownerRepo = e.target.value.split("\t")[0];
-                if (ownerRepo) setRepo(`https://github.com/${ownerRepo}.git`);
-              }}
-              className={inputCls}
-            >
-              <option value="">choose a GitHub repo</option>
-              {ghRepos.map((entry) => {
-                const [name, description] = entry.split("\t");
-                return <option key={name} value={entry}>{name}{description ? ` - ${description}` : ""}</option>;
-              })}
-            </select>
-          )}
-          {!ghAuthed && (
-            <div className="text-xs text-amber-400">GitHub not connected. Run `gh auth login` on the server.</div>
-          )}
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                placeholder="repo path or GitHub URL"
-                className={cn(inputCls, "pr-8")}
-              />
-              <GithubLogo size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-            </div>
-            <select value={agent} onChange={(e) => setAgent(e.target.value)} className={cn(inputCls, "w-24 shrink-0")}>
-              {["omp", "claude", "codex", "opencode", "pi", "gemini", "sh"].map((a) => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <input value={maxMem} onChange={(e) => setMaxMem(e.target.value)} placeholder="max mem MB" inputMode="numeric" className={inputCls} />
-            <input value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} placeholder="timeout s" inputMode="numeric" className={inputCls} />
-          </div>
-          <button type="submit" disabled={busy || !task} className="rounded-lg border border-[#27272a] bg-[#1c1c1f] py-1.5 text-sm transition hover:border-emerald-400 disabled:opacity-40">
-            {busy ? "creating..." : "create"}
-          </button>
-        </form>
-      )}
+      <div className="px-2.5 pt-3">
+        <Button
+          variant="primary"
+          className={cn("w-full", collapsed && "shell:px-0")}
+          aria-label="New workspace"
+          onClick={() => navigate({ kind: "workspaces" })}
+        >
+          <Plus size={16} weight="bold" />
+          <span className="sidebar-label">new workspace</span>
+        </Button>
+      </div>
 
-      {/* workspace list */}
-      <nav className="flex-1 overflow-y-auto overflow-x-hidden p-2">
-        {expanded && workspaces.length > 0 && (
-          <div className="px-2.5 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-[#a1a1aa]">workspaces</div>
-        )}
-        {workspaces.length === 0 && (
-          <div className={cn("px-2.5 pt-4 text-xs leading-5 text-zinc-400", !expanded && "sr-only")}>
-            no workspaces yet — create one to launch your first agent
-          </div>
-        )}
-        {workspaces.map((w) => (
-          <div
-            key={w.id}
-            onClick={() => goWorkspace(w.id)}
-            title={`${w.id} — ${STATUS_LABEL[workspaceStatus(w)]}`}
-            className={cn(
-              row,
-              "mb-0.5 cursor-pointer border border-transparent transition-colors",
-              w.id === selectedId ? "border-sidebar-border bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
-            )}
+      <nav className="flex flex-col gap-0.5 p-2.5" aria-label="Views">
+        {nav.map(({ kind, label, icon: Icon, badge }) => (
+          <button
+            key={kind}
+            type="button"
+            className="sidebar-row"
+            aria-current={activeKind === kind ? "page" : undefined}
+            aria-label={label}
+            title={label}
+            onClick={() => navigate({ kind })}
           >
-            <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[workspaceStatus(w)])} />
-            {label(
-              <span className="text-[13px]">
-                <span className="font-medium">{w.id}</span>
-                <span className="text-[#a1a1aa]"> · {w.agent}</span>
-              </span>,
-            )}
-          </div>
+            <Icon size={17} className="shrink-0" weight={activeKind === kind ? "fill" : "regular"} />
+            <span className="sidebar-label flex-1">{label}</span>
+            {badge > 0 ? <span className="chip chip-review">{badge}</span> : null}
+          </button>
         ))}
       </nav>
 
-      {/* footer */}
-      <footer className="flex h-11 shrink-0 items-center gap-2.5 border-t border-sidebar-border px-3">
-        <div className="grid size-6 shrink-0 place-items-center rounded-full border border-sidebar-border bg-sidebar-accent text-[#a1a1aa]">
-          <FolderOpen size={12} />
-        </div>
-        {label(<span className="text-xs text-[#a1a1aa]">workspaces persist on this server</span>)}
-      </footer>
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
+        <p className="sidebar-section-title mb-2 px-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">
+          Workspaces
+          {reviewCount > 0 ? <span className="text-status-review"> · {reviewCount} to review</span> : null}
+        </p>
+
+        {ordered.length === 0 ? (
+          <p className="sidebar-label px-2 text-xs leading-relaxed text-text-muted">
+            Nothing yet. Create a workspace and its agent starts immediately.
+          </p>
+        ) : (
+          ordered.map((workspace) => {
+            const status = workspaceStatus(workspace);
+            const selected = route.kind === "workspace" && route.id === workspace.id;
+            return (
+              <button
+                key={workspace.id}
+                type="button"
+                className="sidebar-row"
+                data-selected={selected}
+                aria-current={selected ? "page" : undefined}
+                aria-label={`${workspace.id} — ${STATUS_LABEL[status]}`}
+                title={`${workspace.id} — ${STATUS_LABEL[status]}`}
+                onClick={() => navigate({ kind: "workspace", id: workspace.id })}
+              >
+                <span
+                  className={cn("chip-dot shrink-0", STATUS_TEXT[status])}
+                  aria-hidden="true"
+                />
+                <span className="sidebar-label flex-1">
+                  <span className="block truncate text-xs font-medium text-text-primary">{workspace.id}</span>
+                  <span className="mono block truncate text-2xs text-text-muted">{workspace.agent}</span>
+                </span>
+              </button>
+            );
+          })
+        )}
+      </nav>
+
+      <div className="flex min-h-11 items-center gap-2 border-t border-line-subtle px-3">
+        <span className={cn("chip", CONNECTION_CHIP[connection])}>
+          <span className="chip-dot" aria-hidden="true" />
+          {CONNECTION_LABEL[connection]}
+        </span>
+        <span className="sidebar-label text-2xs text-text-faint">persists on this server</span>
+      </div>
     </aside>
   );
 }

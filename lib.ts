@@ -6,7 +6,7 @@ import type { Workspace, User, Role, WorkspaceLimits } from "./types";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, readFile, realpath, rm, stat, writeFile, appendFile } from "fs/promises";
 import { basename, join } from "path";
-import { spawn, spawnSync, execFile } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { cwd } from "process";
 
 const WORKS_DIR = process.env.WORKS_DIR ?? join(cwd(), ".works");
@@ -315,9 +315,22 @@ export function onDaemonMessage(fn: DaemonHandler) {
   daemonHandlers.push(fn);
 }
 
+/**
+ * Start a daemon — called ONLY after a connection attempt has failed, so a
+ * live daemon is never orphaned.
+ *
+ * Spawning unconditionally (and unlinking the socket first) used to sever the
+ * running daemon on every server start: it stayed alive, detached, still
+ * holding every agent PTY and its scrollback, but nothing could reach it ever
+ * again. A restart silently lost every live session — the opposite of the
+ * product's promise — while state.json still reported those workspaces as
+ * running.
+ */
 function ensurePtyDaemon() {
-  if (ptyDaemonProc) return;
+  if (ptyDaemonProc) return; // at most one spawn per server process
   const fs = require("fs");
+  // Nothing is listening on this path (we only get here after ECONNREFUSED /
+  // ENOENT), so any file here is a stale socket from a dead daemon.
   try { fs.unlinkSync(PTY_SOCKET); } catch {}
   const child = spawn("node", [PTY_DAEMON], { stdio: "ignore", detached: true });
   child.unref();
@@ -335,7 +348,6 @@ function ptyConnect(): Promise<import("net").Socket> {
   if (ptySock) return Promise.resolve(ptySock);
   if (ptyConnecting) return ptyConnecting;
   ptyConnecting = new Promise<import("net").Socket>((resolve, reject) => {
-    ensurePtyDaemon();
     const tryConnect = (attempt: number) => {
       const sock = (require("net") as typeof import("net")).createConnection(PTY_SOCKET);
       sock.once("connect", () => {
@@ -359,6 +371,10 @@ function ptyConnect(): Promise<import("net").Socket> {
         resolve(sock);
       });
       sock.once("error", (e: Error) => {
+        // Connect FIRST: if a daemon is already running it is still holding
+        // every live session, so we adopt it rather than replacing it. Only
+        // when nothing answers do we start one, then keep retrying.
+        ensurePtyDaemon();
         if (attempt < 10) setTimeout(() => tryConnect(attempt + 1), 300);
         else { ptyConnecting = null; reject(e); }
       });
@@ -439,7 +455,7 @@ export function sessionId(workspaceId: string, terminalId = "main") {
 
 /** True if the workspace's main PTY session is alive. */
 export async function isRunning(ws: Workspace): Promise<boolean> {
-  const sessions = await ptyList();
+  const sessions = (await ptyList()) ?? [];
   if (!sessions) return false;
   const sess = sessions.find((s) => s.id === sessionId(ws.id));
   return !!sess && !sess.exited;
@@ -737,7 +753,7 @@ export async function createWorkspace(opts: {
     }
     const w: Workspace = {
       id,
-      repo,
+      repo: repo ?? "",
       task: opts.task,
       agent: opts.agent in s.agents ? opts.agent : "sh",
       created: Date.now(),
@@ -821,7 +837,7 @@ export async function startWorkspace(id: string) {
 
 export async function stopWorkspace(id: string) {
   // close every named PTY session for this workspace (main + extra terminals)
-  const sessions = await ptyList();
+  const sessions = (await ptyList()) ?? [];
   for (const sess of sessions ?? []) {
     if (sess.id.startsWith(`works-${id}-`)) {
       await ptySend({ type: "close", id: sess.id });
@@ -842,7 +858,7 @@ export async function deleteWorkspace(id: string) {
   const ws = s.workspaces.find((w) => w.id === id);
   if (!ws) throw new Error(`no workspace '${id}'`);
   // close every named PTY session for this workspace
-  const sessions = await ptyList();
+  const sessions = (await ptyList()) ?? [];
   for (const sess of sessions) {
     if (sess.id.startsWith(`works-${id}-`)) {
       await ptySend({ type: "close", id: sess.id });
@@ -874,14 +890,24 @@ export async function restartWorkspace(id: string) {
 }
 
 
+/** New files above this size are listed but not previewed. */
+const MAX_DIFF_PREVIEW_BYTES = 512 * 1024;
+
 export async function getDiff(id: string): Promise<{ name: string; diff: string }[]> {
   const ws = await getWorkspace(id);
   const tree = worktreePath(ws);
-  const { stdout: names } = await runOut(tree, "git", ["diff", "--name-only", "--no-color"]);
-  const files = names.trim().split("\n").filter(Boolean);
-  if (!files.length) return [];
+
+  // `git diff` only reports tracked edits. Agents create files constantly, and
+  // an untracked file is still staged by commitWorkspace's `git add -A` — so
+  // without the untracked pass, review silently omits files that get committed.
+  const [{ stdout: modified }, { stdout: untracked }] = await Promise.all([
+    runOut(tree, "git", ["diff", "--name-only", "--no-color"]),
+    runOut(tree, "git", ["ls-files", "--others", "--exclude-standard"]),
+  ]);
+
   const out: { name: string; diff: string }[] = [];
-  for (const f of files) {
+
+  for (const f of modified.trim().split("\n").filter(Boolean)) {
     try {
       const { stdout: patch } = await runOut(tree, "git", ["diff", "--no-color", "--", f]);
       out.push({ name: f, diff: patch });
@@ -889,6 +915,24 @@ export async function getDiff(id: string): Promise<{ name: string; diff: string 
       // skip files that vanished mid-diff (deleted between the two calls)
     }
   }
+
+  for (const f of untracked.trim().split("\n").filter(Boolean)) {
+    let size: number;
+    try {
+      ({ size } = await stat(join(tree, f)));
+    } catch {
+      continue; // vanished between listing and stat
+    }
+    if (size > MAX_DIFF_PREVIEW_BYTES) {
+      out.push({ name: f, diff: `new file — ${size} bytes, too large to preview` });
+      continue;
+    }
+    // --no-index exits 1 whenever the files differ: that is the success path.
+    // Output carries `--- /dev/null` + `+++ b/<file>`, a valid unified diff.
+    const { stdout: patch } = await runOut(tree, "git", ["diff", "--no-color", "--no-index", "--", "/dev/null", f], [1]);
+    out.push({ name: f, diff: patch });
+  }
+
   return out;
 }
 
@@ -896,7 +940,17 @@ export async function commitWorkspace(id: string, message: string) {
   const ws = await getWorkspace(id);
   const tree = worktreePath(ws);
   await run(tree, "git", ["add", "-A"]);
-  await run(tree, "git", ["commit", "-m", message || `works: ${ws.task}`]);
+  // A clean tree has nothing to stage and `git commit` exits 1, which surfaced
+  // as a raw "git commit -m … exited 1". Nothing staged means the workspace is
+  // already in the accepted state, so record it and continue — otherwise a
+  // stopped workspace with no changes can never leave the review queue, since
+  // accepting it is the only path out.
+  const { stdout: staged } = await runOut(tree, "git", ["diff", "--cached", "--name-only"]);
+  if (staged.trim()) {
+    await run(tree, "git", ["commit", "-m", message || `works: ${ws.task}`]);
+  } else {
+    console.log(`[kohlab] ${id}: nothing to commit — accepting the workspace as-is`);
+  }
   return mutateState(async (st) => {
     const w = st.workspaces.find((x) => x.id === id);
     if (!w) throw new Error(`no workspace '${id}'`);
@@ -918,7 +972,7 @@ function run(cwdArg: string, cmd: string, args: string[]): Promise<void> {
   return promise;
 }
 
-function runOut(cwdArg: string, cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+function runOut(cwdArg: string, cmd: string, args: string[], allowExit: number[] = []): Promise<{ stdout: string; stderr: string }> {
   const { promise, resolve, reject } = Promise.withResolvers<{ stdout: string; stderr: string }>();
   const p = spawn(cmd, args, { cwd: cwdArg, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
@@ -927,7 +981,7 @@ function runOut(cwdArg: string, cmd: string, args: string[]): Promise<{ stdout: 
   p.stderr.on("data", (d) => (err += d));
   p.on("error", reject);
   p.on("close", (code) => {
-    if (code === 0) resolve({ stdout: out, stderr: err });
+    if (code === 0 || (code !== null && allowExit.includes(code))) resolve({ stdout: out, stderr: err });
     else reject(new Error(`${cmd} ${args.join(" ")} exited ${code}\n${err}`));
   });
   return promise;

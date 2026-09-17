@@ -1,43 +1,62 @@
 import { create } from "zustand";
 import { api } from "./api";
 import type { Workspace } from "./types";
+import { parseRoute, routePath, type Route } from "./lib/route";
 
-interface AppState {
+/** Explicit socket state — never inferred from navigator.onLine. */
+export type Connection = "connecting" | "live" | "reconnecting" | "offline";
+
+export interface AppState {
   authed: boolean;
+  route: Route;
   workspaces: Workspace[];
-  selectedId: string | null;
-  view: "workspaces" | "dashboard" | "settings";
+  /** True only for the very first load, when a skeleton is warranted. */
   loading: boolean;
   error: string | null;
+  lastUpdated: number | null;
+  connection: Connection;
 
-  setAuthed: (v: boolean) => void;
+  setAuthed: (value: boolean) => void;
+  setConnection: (value: Connection) => void;
   refresh: () => Promise<void>;
-  select: (id: string | null) => void;
-  setView: (v: AppState["view"]) => void;
+  /** Push a new route onto history. */
+  navigate: (route: Route) => void;
+  /** Adopt the current URL without touching history (Back/Forward). */
+  adoptRoute: (route: Route) => void;
 }
+
 export const useApp = create<AppState>((set) => ({
   authed: false,
+  route: parseRoute(location.pathname),
   workspaces: [],
-  selectedId: null,
-  view: "workspaces",
-  loading: false,
+  loading: true,
   error: null,
+  lastUpdated: null,
+  connection: "connecting",
 
-  setAuthed: (v) => set({ authed: v }),
+  setAuthed: (value) => set({ authed: value }),
+  setConnection: (value) => set({ connection: value }),
 
   refresh: async () => {
-    set({ loading: true, error: null });
     try {
       const workspaces = await api.workspaces();
-      set({ workspaces, loading: false });
+      set({ workspaces, loading: false, error: null, lastUpdated: Date.now() });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
   },
 
-  select: (id) => set({ selectedId: id }),
-  setView: (v) => set({ view: v, selectedId: null }),
+  navigate: (route) => {
+    // Preserve the query string: an access key or share token may live there.
+    history.pushState(null, "", `${routePath(route)}${location.search}`);
+    set({ route });
+  },
+
+  adoptRoute: (route) => set({ route }),
 }));
 
-export const selectedWorkspace = (s: AppState): Workspace | null =>
-  s.workspaces.find((w) => w.id === s.selectedId) ?? null;
+/** Selector kept beside the store so consumers do not hand-roll the lookup. */
+export function findWorkspace(workspaces: Workspace[], id: string | null): Workspace | null {
+  if (!id) return null;
+  return workspaces.find((w) => w.id === id) ?? null;
+}

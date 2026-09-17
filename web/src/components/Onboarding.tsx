@@ -1,141 +1,150 @@
-import { useEffect, useState } from "react";
-import { Terminal, GithubLogo, Rocket } from "@phosphor-icons/react";
-import { api } from "../api";
+import { useState, type ReactNode } from "react";
+import { Rocket, Terminal } from "@phosphor-icons/react";
 import { useApp } from "../store";
-import { withToast } from "../lib/actions";
+import { Button, EmptyState, Panel } from "./ui";
 import AgentInstaller from "./AgentInstaller";
+import { NewWorkspaceForm } from "./WorkspacesView";
 
-/** First-run guided flow: install an agent → create a workspace → launch. */
-export default function Onboarding() {
-  const { refresh, select, setView } = useApp();
-  const [installed, setInstalled] = useState<string[]>([]);
-  const [task, setTask] = useState("");
-  const [repo, setRepo] = useState("");
-  const [agent, setAgent] = useState("omp");
-  const [busy, setBusy] = useState(false);
-  const [created, setCreated] = useState<string | null>(null);
-  const [share, setShare] = useState<string | null>(null);
-
-  useEffect(() => {
-    void api.agentsStatus().then((st) => setInstalled(Object.keys(st).filter((k) => st[k])));
-  }, []);
-
-  const hasAgent = installed.length > 0;
-
-  const create = async () => {
-    if (!task.trim()) return;
-    setBusy(true);
-    try {
-      const isUrl = /^https?:\/\//.test(repo.trim());
-      const w = await withToast("Creating workspace", async () =>
-        isUrl
-          ? api.clone({ url: repo.trim(), task: task.trim(), agent })
-          : api.create({ task: task.trim(), repo: repo.trim() || undefined, agent }),
-      );
-      await refresh();
-      setView("workspaces");
-      select(w.id);
-      setCreated(w.id);
-    } catch (e) {
-      console.error(e);
-    }
-    setBusy(false);
-  };
-
-  const makeShare = async (id: string) => {
-    try {
-      const s = await api.share(id);
-      const url = `${location.origin}/?share=${s.share}`;
-      setShare(url);
-      navigator.clipboard.writeText(url).catch(() => {});
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const Step = ({ n, title, active, done, children }: { n: number; title: string; active: boolean; done: boolean; children: React.ReactNode }) => (
-    <section className={`rounded-xl border p-4 transition-colors ${active ? "border-emerald-400/50 bg-[#111113]" : "border-[#27272a] bg-[#0d0d0f]"}`}>
-      <div className="flex items-center gap-2.5 mb-3">
-        <span className={`flex size-5 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-400 text-[#06231a]" : active ? "bg-emerald-400/20 text-emerald-400" : "bg-[#1c1c1f] text-[#a1a1aa]"}`}>
-          {done ? "✓" : n}
+/**
+ * One wizard step. Steps are numbered but never gated: every step renders its
+ * own controls immediately, so arriving at step 2 without doing step 1 is a
+ * supported path rather than a dead end.
+ */
+function Step({
+  n,
+  title,
+  description,
+  children,
+  onSkip,
+}: {
+  n: number;
+  title: string;
+  description: string;
+  children: ReactNode;
+  onSkip: () => void;
+}) {
+  return (
+    <Panel className="p-4">
+      <div className="flex items-start gap-3">
+        <span className="tnum inline-flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-line-strong px-1.5 text-2xs font-semibold text-text-secondary">
+          {n}
         </span>
-        <span className="text-sm font-semibold text-[#e4e4e7]">{title}</span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
+          <p className="mt-0.5 text-xs leading-relaxed text-text-muted">{description}</p>
+        </div>
       </div>
-      <div className={active || done ? "" : "opacity-50 pointer-events-none"}>{children}</div>
-    </section>
+      <div className="mt-3">{children}</div>
+      <div className="mt-3 flex justify-end border-t border-line-subtle pt-3">
+        <Button variant="quiet" size="sm" onClick={onSkip}>
+          skip to command center
+        </Button>
+      </div>
+    </Panel>
   );
+}
+
+/**
+ * First run. The empty state is the base layer and stands on its own; the
+ * three-step guide is an optional layer opened from it, never a gate — the app
+ * is fully usable with the guide closed or abandoned halfway.
+ */
+export default function Onboarding() {
+  const navigate = useApp((s) => s.navigate);
+  const [guide, setGuide] = useState(false);
+
+  const skip = () => navigate({ kind: "dashboard" });
 
   return (
-    <div className="flex flex-1 justify-center p-6">
-      <div className="flex w-full max-w-xl flex-col gap-3 pt-10">
-        <div className="mb-2">
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Terminal size={20} className="text-emerald-400" /> get your first agent running
-          </h1>
-          <p className="text-[#a1a1aa] text-sm mt-1">three steps — install an agent, point at a repo, launch.</p>
-        </div>
+    <div className="surface">
+      <div className="surface-inner">
+        {/* A route must expose exactly one <h1>; with no workspaces the surface
+            below is an empty state, so the heading lives here. */}
+        <header className="mb-4">
+          <h1 className="surface-title">Workspaces</h1>
+          <p className="surface-description">
+            One task, one repository, one agent — each in its own isolated worktree.
+          </p>
+        </header>
 
-        <Step n={1} title="Install an agent" active={!hasAgent} done={hasAgent}>
-          {hasAgent ? (
-            <div className="text-sm text-emerald-400">✓ {installed.join(", ")} installed</div>
-          ) : (
-            <div className="text-sm text-[#a1a1aa] mb-3">pick one to install, or skip if you already run one.</div>
-          )}
-          <AgentInstaller compact />
-        </Step>
-
-        <Step n={2} title="Create a workspace" active={hasAgent} done={false}>
-          <div className="flex flex-col gap-2">
-            <input
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              placeholder="what should the agent do? e.g. fix the billing bug"
-              className="bg-[#111113] border border-[#27272a] rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"
-            />
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  value={repo}
-                  onChange={(e) => setRepo(e.target.value)}
-                  placeholder="repo path or GitHub URL"
-                  className="w-full bg-[#111113] border border-[#27272a] rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"
-                />
-                <GithubLogo size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
-              </div>
-              <select
-                value={agent}
-                onChange={(e) => setAgent(e.target.value)}
-                className="bg-[#111113] border border-[#27272a] rounded-lg px-2 py-2 text-sm outline-none focus:border-emerald-400"
+        <EmptyState
+          icon={<Terminal size={18} />}
+          title="No workspaces yet"
+          description="A workspace is one task, one repository and one agent. The three steps below take about two minutes — or skip them entirely and explore first."
+          action={
+            <>
+              <Button
+                variant="primary"
+                aria-expanded={guide}
+                aria-controls="onboarding-steps"
+                onClick={() => setGuide(true)}
               >
-                {installed.length ? [...installed, "sh"].map((a) => <option key={a} value={a}>{a}</option>) : <option value="sh">sh</option>}
-              </select>
-            </div>
-            <button
-              onClick={() => void create()}
-              disabled={busy || !task.trim() || !hasAgent}
-              className="flex items-center justify-center gap-2 py-2 rounded-lg bg-emerald-400 text-[#06231a] font-semibold text-sm disabled:opacity-40 hover:brightness-110 active:scale-[0.98] transition"
+                <Rocket size={15} weight="fill" />
+                get started
+              </Button>
+              <Button variant="quiet" onClick={skip}>
+                skip to command center
+              </Button>
+            </>
+          }
+        />
+
+        {guide ? (
+          <div id="onboarding-steps" className="flex flex-col gap-3">
+            <Step
+              n={1}
+              title="Install an agent"
+              description="Kohlab runs the CLI agent you already trust. Install one here, or skip this step if you already have one on this server."
+              onSkip={skip}
             >
-              <Rocket size={15} weight="fill" />
-              {busy ? "creating..." : "create & launch"}
-            </button>
-            {created && (
-              <div className="rounded-lg border border-emerald-400/30 bg-emerald-400/5 p-3 text-xs flex flex-col gap-1.5">
-                <div className="text-[#a1a1aa]">workspace <span className="font-mono text-[#e4e4e7]">{created}</span> is open in the terminal tab. Next:</div>
-                <button onClick={() => void makeShare(created)} className="text-left text-emerald-400 hover:brightness-110 transition">
-                  {share ? "share link ready — click to copy" : "get a share link"}
-                </button>
+              <AgentInstaller />
+            </Step>
+
+            <Step
+              n={2}
+              title="Create a workspace"
+              description="One task, one repository, one agent. Creating the workspace starts the agent — there is nothing to launch afterwards."
+              onSkip={skip}
+            >
+              {/* No cancel here: the step's own skip and "hide the guide" are the
+                  ways out, and neither of them throws away the other steps. */}
+              <NewWorkspaceForm />
+            </Step>
+
+            <Step
+              n={3}
+              title="Monitor and commit"
+              description="What you do with a running agent, in one place."
+              onSkip={skip}
+            >
+              <ul className="flex flex-col gap-1.5 text-sm leading-relaxed text-text-secondary">
+                <li>
+                  <span className="text-text-primary">The terminal is the agent, live.</span> The log tab keeps the full
+                  tail; the file tree shows what it touched.
+                </li>
+                <li>
+                  <span className="text-text-primary">Finishing lands it in the review queue.</span> The workspace shows
+                  its diff, so you read the change before anything else happens to it.
+                </li>
+                <li>
+                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically —
+                  you write the message and press commit.
+                </li>
+              </ul>
+              <div className="mt-3">
+                <Button variant="primary" onClick={skip}>
+                  open the command center
+                </Button>
               </div>
-            )}
+            </Step>
+
+            <div className="flex justify-end">
+              <Button variant="quiet" size="sm" onClick={() => setGuide(false)}>
+                hide the guide
+              </Button>
+            </div>
           </div>
-        </Step>
-
-        <Step n={3} title="Monitor & merge" active={false} done={false}>
-          <div className="text-sm text-[#a1a1aa]">watch the terminal live, then open the diff tab when it finishes — review each file and commit. Agents keep running even after you disconnect.</div>
-        </Step>
-
-        <button onClick={() => setView("dashboard")} className="text-center text-xs text-[#a1a1aa] hover:text-emerald-400 transition">
-          skip — just show the dashboard
-        </button>
+        ) : null}
       </div>
     </div>
   );

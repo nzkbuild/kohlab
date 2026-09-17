@@ -176,6 +176,16 @@ function handle(msg, sock) {
       if (s && !s.exited) s.pty.write(Buffer.from(msg.data, "base64"));
       break;
     }
+    case "resize": {
+      const s = SESSIONS.get(msg.id);
+      // Documented in the protocol header but never implemented, so every
+      // resize was silently dropped: the PTY stayed at its spawn size while the
+      // browser fitted a different one, and the agent never received SIGWINCH.
+      if (s && !s.exited && msg.cols > 0 && msg.rows > 0) {
+        try { s.pty.resize(msg.cols, msg.rows); } catch {}
+      }
+      break;
+    }
     case "close": {
       const s = SESSIONS.get(msg.id);
 
