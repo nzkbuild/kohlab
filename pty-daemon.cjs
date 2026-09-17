@@ -28,7 +28,39 @@ try {
 }
 
 const SOCKET = process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock";
-const SESSIONS = new Map(); // id -> { pty, buffer: Buffer[] , exited }
+const SESSIONS = new Map(); // id -> { pty, buffer: Buffer[], screen, serializer, exited }
+
+/**
+ * Screen models, not byte windows.
+ *
+ * `sess.buffer` is a rolling window trimmed from the front, so replaying it
+ * cannot rebuild a full-screen TUI — the screen's current state depends on bytes
+ * that scrolled out. A headless terminal holds the rendered grid instead, so a
+ * reattach can be handed the screen itself.
+ *
+ * Runs here rather than in the server because this process is already Node (a
+ * hard requirement of node-pty) and @xterm/headless is Node-only.
+ */
+const { Terminal } = require("@xterm/headless");
+const { SerializeAddon } = require("@xterm/addon-serialize");
+
+/** Lines of scrollback each screen keeps. Bounds memory per live session. */
+const SCREEN_SCROLLBACK = 2000;
+/** Final screens retained after exit, newest first. Bounds memory overall. */
+const RETAINED_SCREEN_LIMIT = 32;
+/** id -> serialized screen of a session that has already exited. */
+const retainedScreens = new Map();
+
+function retainScreen(id, payload) {
+  if (!payload) return;
+  retainedScreens.delete(id); // re-insert so Map order stays oldest-first
+  retainedScreens.set(id, payload);
+  while (retainedScreens.size > RETAINED_SCREEN_LIMIT) {
+    const oldest = retainedScreens.keys().next().value;
+    if (oldest === undefined) break;
+    retainedScreens.delete(oldest);
+  }
+}
 
 function b64(buf) {
   return Buffer.from(buf).toString("base64");
@@ -106,7 +138,18 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
       ...(uid ? { uid } : {}),
       ...(gid ? { gid } : {}),
     });
-    const sess = { pty: p, buffer: [], exited: false, subs: 0, meta: meta || {} };
+    // `allowProposedApi` is REQUIRED by @xterm/headless v6 — without it even a
+    // plain write() throws, and SerializeAddon refuses to load at all.
+    const screen = new Terminal({
+      cols: cols || 80,
+      rows: rows || 24,
+      scrollback: SCREEN_SCROLLBACK,
+      allowProposedApi: true,
+    });
+    const serializer = new SerializeAddon();
+    screen.loadAddon(serializer);
+
+    const sess = { pty: p, buffer: [], screen, serializer, exited: false, subs: 0, meta: meta || {} };
     SESSIONS.set(id, sess);
     p.onData((data) => {
       const buf = Buffer.from(data);
@@ -117,11 +160,29 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
         if (total > 262144) sess.buffer.shift();
         else break;
       }
+      // Second parse, into the screen model. Same parser major as the browser's
+      // terminal, so what this produces is what the client reconstructs.
+      sess.screen.write(data);
       broadcast(id, { type: "output", id, data: b64(buf) });
     });
     p.onExit(({ exitCode }) => {
       sess.exited = true;
       broadcast(id, { type: "exit", id, code: exitCode });
+      // Keep the final screen: a finished workspace should still show what the
+      // agent did, which the byte buffer never could — the session and its
+      // buffer are dropped below.
+      sess.screen.write("", () => {
+        try {
+          retainScreen(id, sess.serializer.serialize());
+        } catch {
+          /* nothing to retain */
+        }
+        try {
+          sess.screen.dispose();
+        } catch {
+          /* already gone */
+        }
+      });
       // remove from the map promptly so re-open works; the buffer is dropped
       // here too (no replay after exit).
       setTimeout(() => {
@@ -135,14 +196,37 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
   }
 }
 
+/**
+ * Every connected server, not one.
+ *
+ * This was a single `client` overwritten by each new connection, so an earlier
+ * subscriber silently stopped receiving output. Worse, when a socket died the
+ * reference lingered: the next write raised EPIPE, and with no 'error' handler
+ * on the socket that became an unhandled event that KILLED THE DAEMON — taking
+ * every live agent session with it. That is reachable in production whenever the
+ * server dies abruptly (kill -9, OOM) and leaves the daemon holding a dead
+ * subscriber.
+ */
+const clients = new Set();
+
 function broadcast(id, msg) {
-  // The daemon is single-client (the Bun server) for now; it fans out.
-  if (client) client.write(JSON.stringify(msg) + "\n");
+  const line = JSON.stringify(msg) + "\n";
+  for (const c of clients) {
+    try {
+      c.write(line);
+    } catch {
+      clients.delete(c);
+    }
+  }
 }
-let client = null;
 
 const server = net.createServer((sock) => {
-  client = sock;
+  clients.add(sock);
+  // An 'error' with no listener is fatal to the process. A subscriber dropping
+  // must never be able to take the daemon — and every agent — down with it.
+  sock.on("error", () => {
+    clients.delete(sock);
+  });
   let buf = "";
   sock.on("data", (chunk) => {
     buf += chunk.toString("utf8");
@@ -159,8 +243,8 @@ const server = net.createServer((sock) => {
     }
   });
   sock.on("close", () => {
-    // keep sessions alive - just detach
-    client = null;
+    // keep sessions alive - just detach this subscriber
+    clients.delete(sock);
   });
 });
 
@@ -183,6 +267,9 @@ function handle(msg, sock) {
       // browser fitted a different one, and the agent never received SIGWINCH.
       if (s && !s.exited && msg.cols > 0 && msg.rows > 0) {
         try { s.pty.resize(msg.cols, msg.rows); } catch {}
+        // The screen model must resize in lockstep or it diverges from the PTY
+        // and every subsequent replay restores a wrongly-wrapped screen.
+        try { s.screen.resize(msg.cols, msg.rows); } catch {}
       }
       break;
     }
@@ -204,19 +291,44 @@ function handle(msg, sock) {
     case "subscribe": {
       const s = SESSIONS.get(msg.id);
       if (!s) {
+        // A finished session is gone from SESSIONS, but its final screen is
+        // retained — so a stopped workspace still shows its output instead of
+        // replaying nothing.
+        const retained = retainedScreens.get(msg.id);
+        if (retained && msg.replay !== false) {
+          sock.write(JSON.stringify({ type: "output", id: msg.id, data: b64(Buffer.from(retained, "utf8")) }) + "\n");
+          sock.write(JSON.stringify({ type: "subscribed", id: msg.id }) + "\n");
+          break;
+        }
         sock.write(JSON.stringify({ type: "error", id: msg.id, message: "unknown session" }) + "\n");
         break;
       }
       s.subs++;
-      // replay: send buffered bytes
-      if (msg.replay !== false && s.buffer.length) {
-        const all = Buffer.concat(s.buffer);
-        sock.write(JSON.stringify({ type: "output", id: msg.id, data: b64(all) }) + "\n");
+      if (msg.replay === false) {
+        sock.write(JSON.stringify({ type: "subscribed", id: msg.id }) + "\n");
+        break;
       }
-      if (s.exited) {
-        sock.write(JSON.stringify({ type: "exit", id: msg.id }) + "\n");
-      }
-      sock.write(JSON.stringify({ type: "subscribed", id: msg.id }) + "\n");
+      // Replay the SCREEN, not the byte window. An empty write flushes the
+      // parser queue in order, so serialize() here reflects every byte received
+      // so far rather than lagging behind the pending writes.
+      s.screen.write("", () => {
+        try {
+          const payload = s.serializer.serialize();
+          if (payload) {
+            sock.write(JSON.stringify({ type: "output", id: msg.id, data: b64(Buffer.from(payload, "utf8")) }) + "\n");
+          }
+        } catch {
+          // Fall back to the byte window if the model is unavailable; worse for
+          // a TUI, but better than replaying nothing.
+          if (s.buffer.length) {
+            sock.write(JSON.stringify({ type: "output", id: msg.id, data: b64(Buffer.concat(s.buffer)) }) + "\n");
+          }
+        }
+        if (s.exited) {
+          sock.write(JSON.stringify({ type: "exit", id: msg.id }) + "\n");
+        }
+        sock.write(JSON.stringify({ type: "subscribed", id: msg.id }) + "\n");
+      });
       break;
     }
     case "unsubscribe": {
@@ -235,6 +347,16 @@ function handle(msg, sock) {
     case "log": {
       const s = SESSIONS.get(msg.id);
       if (!s) {
+        // The session is gone from SESSIONS, but its final screen is retained.
+        // Without this a finished workspace showed an empty log, because the
+        // byte buffer is dropped with the session.
+        const retained = retainedScreens.get(msg.id);
+        if (retained) {
+          sock.write(
+            JSON.stringify({ type: "log-reply", id: msg.id, data: Buffer.from(retained, "utf8").toString("base64") }) + "\n",
+          );
+          break;
+        }
         sock.write(JSON.stringify({ type: "error", id: msg.id, message: "unknown session" }) + "\n");
         break;
       }

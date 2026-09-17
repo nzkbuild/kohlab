@@ -1,6 +1,6 @@
 {
   "name": "kohlab",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "Run your AI coding agents in parallel, persistently, from any device.",
   "license": "MIT",
   "type": "module",
@@ -8,6 +8,8 @@
     "kohlab": "cli.ts"
   },
   "dependencies": {
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
     "node-pty": "^1.0.0"
   },
   "scripts": {

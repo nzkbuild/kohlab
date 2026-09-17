@@ -9,6 +9,45 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.11.0] - 2026-09-17
+
+Reattaching to a running agent now shows its screen, not a truncated byte
+stream. This is the fix for the one behaviour that made Kohlab a worse daily
+driver than tmux.
+
+### Added
+
+- **A screen model per session.** The daemon keeps a headless terminal
+  (`@xterm/headless`, the same parser major as the browser) alongside each PTY
+  and replays the *screen* on attach instead of a rolling byte window. Reattaching
+  to a full-screen TUI — `omp`, `claude` — now reproduces it exactly, including
+  after a resize, because the model resizes in lockstep with the PTY.
+- **A finished agent's output survives.** The final screen is retained when a
+  session exits, so a stopped workspace still shows what it did. Previously both
+  the terminal *and* the log went blank the instant the agent exited: the byte
+  buffer was dropped with the session, and `log` had nothing to answer with.
+- **`scripts/check-screen.mjs`** — drives a real daemon over its real socket and
+  asserts the round trip, the resize, the retained screen and the log fallback.
+  7 assertions.
+
+### Fixed
+
+- **A dead subscriber could kill the daemon — and every agent with it.** The
+  daemon kept a single `client` socket, overwritten by each new connection, and
+  had no `'error'` handler on it. When a subscriber went away the reference
+  lingered, the next PTY write raised `EPIPE`, and an unhandled `'error'` event
+  terminated the process — losing every live session. Reachable in production
+  whenever the server dies abruptly (`kill -9`, OOM). Subscribers are now a set
+  of live sockets, deregistered on `error`/`close`, and a failed write can no
+  longer escape. The new check surfaced this; the old suite could not.
+
+### Known limitation added
+
+- Retained screens live in the daemon's memory, so they are lost when the daemon
+  restarts. Reattaching to a *live* session is unaffected — that is the model,
+  not a cache. Persisting the serialized screen next to the workspace would close
+  it.
+
 ## [1.10.0] - 2026-09-17
 
 The overhaul release: the frontend was rebuilt from scratch on a researched,

@@ -301,10 +301,13 @@ I deliberately did not edit `/etc` for you.
 
 ### Known limitations, stated plainly
 
-- **PTY replay of a full-screen TUI is imperfect.** The daemon replays raw bytes,
-  so re-attaching to a `claude`/`omp` style alternate-screen UI can land on the
-  final frame rather than the full scrollback. Inherent to raw-byte replay;
-  fixing it needs terminal-state capture, not a frontend change.
+- **PTY replay of a full-screen TUI — fixed in 1.11.0.** The daemon now keeps a
+  headless terminal per session and replays the screen rather than a rolling byte
+  window, so reattaching reproduces a TUI exactly and a finished agent's final
+  screen survives. What remains bounded: retained screens are in the daemon's
+  memory, so they are lost if the daemon restarts (a live session is unaffected —
+  that is the model, not a cache). Persisting them beside the workspace would
+  close it.
 - **The log tail of a TUI is mostly whitespace.** The `/log` endpoint returns the
   raw PTY buffer; after ANSI stripping, a redrawing UI produces many blank rows.
   The terminal tab is the right surface for those agents.

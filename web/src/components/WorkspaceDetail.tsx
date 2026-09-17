@@ -378,30 +378,35 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           id="panel-terminal"
           aria-labelledby="tab-terminal"
           hidden={tab !== "terminal"}
-          className="h-full min-h-0"
+          className="flex h-full min-h-0 flex-col"
         >
           <ErrorBoundary label="Terminal">
             <Suspense fallback={<SkeletonRows rows={8} className="p-4" />}>
               {tab === "terminal" ? (
-                running ? (
-                  <TerminalView key={`${workspaceId}:${activeTerminal}`} workspaceId={workspaceId} terminalId={activeTerminal} />
-                ) : (
-                  /* Opening a finished workspace no longer relaunches its agent,
-                     so say what to do rather than showing a blank terminal. */
-                  <div className="grid h-full place-items-center p-6">
-                    <EmptyState
-                      icon={<Play size={18} />}
-                      title="No live session"
-                      description="This workspace is not running, so there is nothing to attach to. Starting it launches the agent again in its worktree."
-                      action={
-                        <Button variant="primary" size="sm" onClick={() => run("start")}>
-                          <Play size={14} weight="fill" aria-hidden="true" />
-                          start
-                        </Button>
-                      }
+                <>
+                  {/* The terminal is mounted even when the workspace is not
+                      running, because the daemon retains the final screen of a
+                      finished session — replacing it with a notice would throw
+                      away the only surviving record of what the agent did. */}
+                  {running ? null : (
+                    <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5">
+                      <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
+                      <span className="min-w-0 flex-1 text-xs text-text-muted">
+                        Not running — showing the last screen. Start it to take over the terminal.
+                      </span>
+                      <Button variant="primary" size="sm" onClick={() => run("start")}>
+                        start
+                      </Button>
+                    </div>
+                  )}
+                  <div className="min-h-0 flex-1">
+                    <TerminalView
+                      key={`${workspaceId}:${activeTerminal}`}
+                      workspaceId={workspaceId}
+                      terminalId={activeTerminal}
                     />
                   </div>
-                )
+                </>
               ) : null}
             </Suspense>
           </ErrorBoundary>
