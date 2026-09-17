@@ -25,7 +25,7 @@ regression check.
 | B5 | `ensurePtySession` was not idempotent: it called `spawnAgentSession`, which throws `session already exists` when the session is live. The doc comment says "spawn the agent if not". So the **second** attach — a reload, a second tab, a re-open — killed the server. | **Proven:** server log `error: session already exists: works-…-main at spawnAgentSession (lib.ts:144) ← ensurePtySession (server.ts:492)`, process exited 1. Verified live: page reload now returns 200 and the terminal re-attaches. | **fixed** (server.ts, `ensurePtySession`) |
 | B6 | Every fire-and-forget promise on the WebSocket path was unguarded — `void ensurePtySession(…).then(…)`, `void ptySend(…)`, and `void audit(…)` on every mutation. Any rejection anywhere on that path exits the Bun process, so a single client could take the server down for everyone. | Read: server.ts `message`/`close` handlers and the `void audit` call sites. | **fixed** (`containFailure` at every site) |
 | B7 | `pty-daemon.cjs` documented `{type:"resize", id, cols, rows}` in its protocol header, but `handle()` had **no `case "resize"`** — only open/input/close/subscribe/unsubscribe/list/log. Every resize was silently dropped: the PTY stayed at the spawn default 120×36 while the browser fitted a different size, and **no SIGWINCH ever reached the agent**. This is why the terminal rendered only a `╰─` fragment. | Read: protocol header lines 8-9 vs the switch at line 168. | **fixed** (daemon `resize` case + pending-size replay in server.ts) |
-| B8 | `ensurePtyDaemon()` unconditionally `unlinkSync(PTY_SOCKET)` and then spawned a **new detached** daemon — and it ran *before* the connection attempt. Every server start therefore severed the live daemon: it kept running, still holding every agent PTY and its scrollback, but nothing could ever reach it again. A restart silently lost every live session, while `state.json` still reported those workspaces as running. Six orphaned daemons accumulated during this session. | Read: lib.ts `ensurePtyDaemon`/`ptyConnect`. **Verified fixed:** killed only the server process, restarted it, confirmed the *same* daemon PID was adopted and `list` still returned the live agent session. (Consequence stated precisely: `running` is derived live from the daemon's `list`, so an orphaned workspace read **stopped** — the UI showed it as finished and *enabled* `start`, which would spawn a second agent into a worktree an orphaned agent was still working in.) | **fixed** (connect-first; spawn only when nothing answers) |
+| B8 | `ensurePtyDaemon()` unconditionally `unlinkSync(PTY_SOCKET)` and then spawned a **new detached** daemon — and it ran *before* the connection attempt. Every server start therefore severed the live daemon: it kept running, still holding every agent PTY and its scrollback, but nothing could ever reach it again, so a restart silently lost every live session. Six orphaned daemons accumulated during this session. | Read: lib.ts `ensurePtyDaemon`/`ptyConnect`. **Verified fixed:** killed only the server process, restarted it, confirmed the *same* daemon PID was adopted and `list` still returned the live agent session. | **fixed** (connect-first; spawn only when nothing answers) |
 | B9 | The server had **no SPA history fallback**: `index.html` was served only for `/` and `/index.html`, so `/w/:id`, `/workspaces` and `/settings` all 404'd when served by Bun. `vite dev` hid it behind its own fallback. Any client-side routing would have broken on refresh and on every deep link. | **Proven:** `GET /w/abc-123` → `404 not found`. | **fixed** (server.ts, GET + `Accept: text/html`, excluding `/api`) |
 
 These next three were found only after adding a root `tsconfig.json`, because
@@ -308,9 +308,15 @@ I deliberately did not edit `/etc` for you.
 - **The log tail of a TUI is mostly whitespace.** The `/log` endpoint returns the
   raw PTY buffer; after ANSI stripping, a redrawing UI produces many blank rows.
   The terminal tab is the right surface for those agents.
-- **Stale `running: true`.** If the daemon dies outright, `state.json` still says
-  the workspace is running. B8 removes the *common* cause (restart orphaning), but
-  there is no reconciliation pass against the daemon's `list`.
+- **A reboot or daemon crash ends every running agent.** Not a stale flag —
+  `running` is derived live from the daemon's `list` (`isRunning` →
+  `ptyList`), and `state.json` never stores it, so the UI cannot lie about it.
+  But when a session dies the record keeps `stopped === null`, so the workspace
+  reads *stopped* while its agent is gone. The attach guard revives it on first
+  open (`stopped === null` means never-ended, so it spawns), which makes this
+  self-healing the moment you look at it — but nothing brings the agents back
+  unattended, so a reboot silently leaves your fleet down until you open each
+  workspace.
 - **Monaco is loaded via `@monaco-editor/react`'s default CDN loader** unless
   configured otherwise. For a self-hosted product this is worth revisiting, but it
   is pre-existing behaviour and was left alone.

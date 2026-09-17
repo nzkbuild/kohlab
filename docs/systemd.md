@@ -55,8 +55,21 @@ journalctl -u kohlab -f
 - Restarting the **daemon** itself still terminates every live agent session,
   because the PTYs are its children. Restart the server freely; restart the
   daemon only when you accept losing running agents.
+- **`systemctl stop kohlab` does not stop your agents.** `KillMode=process`
+  signals only the server, so the detached daemon survives the stop, keeps every
+  PTY and its CPU/memory, and is re-adopted on the next start. An operator
+  stopping the service to free the box will find agents still running with no UI
+  to show them. To end them, kill the daemon — which discards their sessions:
+  ```bash
+  pkill -f pty-daemon.cjs
+  ```
 - If several Kohlab servers run on one box, give each its own `PTY_SOCKET`,
   `PORT`, and `WORKS_DIR`. They otherwise share `/tmp/kohlab-pty.sock` and will
   fight over the same daemon.
-- Workspace state lives in `.works/` inside `WorkingDirectory`. Back it up if
-  your workspaces matter (see [upgrade.md](upgrade.md)).
+- Workspace state lives wherever `WORKS_DIR` points — **not** necessarily
+  `.works/` next to the code. Read it from the unit rather than assuming:
+  ```bash
+  systemctl show kohlab -p Environment | tr ' ' '\n' | sed -n 's/^WORKS_DIR=//p'
+  ```
+  Back that path up if your workspaces matter
+  (see [upgrade.md](upgrade.md)).
