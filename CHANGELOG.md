@@ -27,7 +27,9 @@ in `docs/research/`.
   history fallback it never had.
 - **Accept a clean workspace.** A stopped workspace with no changes could never
   leave the review queue — commit was the only exit and it failed on a clean
-  index. It now records acceptance, from the API and from the UI.
+  index. It now records acceptance, from the API and from the UI, and the
+  affordance is offered **only** to a workspace actually in review (an empty diff
+  alone also matches a workspace that has never run).
 - **Mobile drawer.** The rail becomes an off-canvas drawer with a real toggle;
   previously the toggle was `display: none` below 680px, leaving an unlabelled
   icon rail that could not be opened. Closed, it leaves the tab order.
@@ -65,6 +67,11 @@ in `docs/research/`.
 - **Monaco rendered the patch, not the change.** `original=""` and
   `modified={diff}` showed raw `@@` hunks as file content against a blank pane.
   Diffs are now split into two real documents.
+- **Opening a finished workspace relaunched its agent.** The attach path spawned
+  unconditionally, so merely looking at a stopped workspace started a new run —
+  and when that run ended it put the workspace straight back into the review
+  queue, which meant accepting it never stuck. Attach now only subscribes, and
+  says so with a "start it" affordance instead of a blank terminal.
 
 ### Changed
 
@@ -86,9 +93,7 @@ in `docs/research/`.
 
 - PTY replay of a full-screen TUI lands on the final frame rather than the
   scrollback; it needs terminal-state capture, not a frontend change.
-- Opening a stopped workspace re-attaches and therefore restarts it, since a
-  browser attach is treated as a real run.
-- No bulk dismiss for the review queue.
+- No bulk dismiss for the review queue — accept one at a time.
 
 ## [1.9.0] - 2026-09-09
 

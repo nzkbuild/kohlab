@@ -12,6 +12,7 @@ import { useApp } from "../store";
 import { announce } from "../lib/announce";
 import { diffStats } from "../lib/format";
 import { languageForFile, splitUnifiedDiff } from "../lib/diff";
+import { workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
 import type { DiffFile } from "../types";
 import { Button, EmptyState, Skeleton, SkeletonRows } from "./ui";
@@ -55,6 +56,7 @@ function Totals({ added, removed }: { added: number; removed: number }) {
  */
 export default function DiffView({ workspaceId }: Props) {
   const task = useApp((s) => s.workspaces.find((w) => w.id === workspaceId)?.task ?? "");
+  const workspace = useApp((s) => s.workspaces.find((w) => w.id === workspaceId) ?? null);
   const refresh = useApp((s) => s.refresh);
 
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -132,22 +134,22 @@ export default function DiffView({ workspaceId }: Props) {
   const canCommit = files.length > 0 && message.trim().length > 0 && !committing;
   const firstRun = !loading && files.length === 0 && !error;
   /**
-   * A workspace with no changes must still be able to leave the review queue,
-   * and accepting it is the only exit: `workspaceStatus` keeps any stopped
-   * workspace without a commit in `needs-review` indefinitely. Gating this on
-   * `canCommit` — which requires at least one changed file — left the queue
-   * impossible to empty from the UI.
+   * Accepting is the exit from the review queue, so it must only be offered to a
+   * workspace that is actually in it. An empty diff is not enough: a workspace
+   * that has never run, or one already committed, also has no changes — and
+   * accepting those would stamp a commit on something that never happened.
    */
-  const canAccept = firstRun && !committing;
+  const awaitingReview = workspace !== null && workspaceStatus(workspace) === "needs-review";
+  const canAccept = firstRun && awaitingReview && !committing;
 
-  const runCommit = async (text: string) => {
+  const runCommit = async (text: string, verb: "committed" | "accepted") => {
     setCommitting(true);
     setCommitError(null);
     try {
       // Never optimistic: the list stays exactly as it was until the server
       // confirms, so a rejected commit cannot look like a successful one.
       await api.commit(workspaceId, text);
-      announce(`accepted ${workspaceId}`);
+      announce(`${verb} ${workspaceId}`);
       setDraft(null);
       setReviewed(new Set());
       await Promise.all([load(), refresh()]);
@@ -160,12 +162,13 @@ export default function DiffView({ workspaceId }: Props) {
 
   const commit = () => {
     if (!canCommit) return;
-    return runCommit(message.trim());
+    // A real commit says "committed"; only the empty-tree path says "accepted".
+    return runCommit(message.trim(), "committed");
   };
 
   const accept = () => {
     if (!canAccept) return;
-    return runCommit(defaultMessage);
+    return runCommit(defaultMessage, "accepted");
   };
 
   return (
@@ -227,19 +230,25 @@ export default function DiffView({ workspaceId }: Props) {
           <EmptyState
             icon={<Files size={18} />}
             title="Nothing to commit"
-            description="The working tree matches the last commit, so there is no diff to review. Accepting records that you are done with it and clears it out of the review queue."
+            description={
+              awaitingReview
+                ? "The working tree matches the last commit, so there is nothing to review. Accepting records that you are done with it and clears it out of the review queue."
+                : "The working tree matches the last commit, so there is no diff to review."
+            }
             action={
               <>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={!canAccept}
-                  aria-busy={committing}
-                  onClick={() => void accept()}
-                >
-                  <GitCommit size={15} weight="bold" aria-hidden="true" />
-                  {committing ? "accepting…" : "accept"}
-                </Button>
+                {awaitingReview ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={!canAccept}
+                    aria-busy={committing}
+                    onClick={() => void accept()}
+                  >
+                    <GitCommit size={15} weight="bold" aria-hidden="true" />
+                    {committing ? "accepting…" : "accept"}
+                  </Button>
+                ) : null}
                 <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
                   check again
                 </Button>

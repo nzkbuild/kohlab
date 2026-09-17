@@ -221,6 +221,14 @@ try {
         }, 2500);
       });
 
+    // Only a workspace that is *meant* to be running is spawned on attach (see
+    // ensurePtySession), so start it first — this is what makes the attach below
+    // exercise the spawn path, whose missing import used to kill the server on
+    // the very first terminal open.
+    const startBeforeAttach = await post(`/api/workspaces/${createdId}/start`);
+    check("POST .../start -> ok", startBeforeAttach.status === 200);
+    await new Promise((r) => setTimeout(r, 900));
+
     // Terminal attach. ensurePtySession() records a browser-attach as a real
     // run; the call existed without its import for several releases, so the
     // first terminal open threw ReferenceError and killed the whole server.
@@ -238,6 +246,18 @@ try {
 
     const stop = await post(`/api/workspaces/${createdId}/stop`);
     check("POST .../stop -> ok", stop.status === 200);
+
+    // Opening a finished workspace must not relaunch its agent. It used to: the
+    // attach spawned a fresh run, and when that run ended the workspace went
+    // straight back into the review queue — so accepting it never stuck.
+    const stoppedAttach = await attachOnce();
+    const rowsAfterStop = await req("/api/workspaces");
+    const rowAfterStop = Array.isArray(rowsAfterStop.body) ? rowsAfterStop.body.find((w) => w.id === createdId) : null;
+    check(
+      "attaching to a stopped workspace does not restart it",
+      stoppedAttach.status === 200 && rowAfterStop?.running === false,
+      `api=${stoppedAttach.status} running=${rowAfterStop?.running}`,
+    );
   }
 
   console.log("websocket push channel");

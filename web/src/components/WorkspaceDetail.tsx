@@ -383,7 +383,25 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <ErrorBoundary label="Terminal">
             <Suspense fallback={<SkeletonRows rows={8} className="p-4" />}>
               {tab === "terminal" ? (
-                <TerminalView key={`${workspaceId}:${activeTerminal}`} workspaceId={workspaceId} terminalId={activeTerminal} />
+                running ? (
+                  <TerminalView key={`${workspaceId}:${activeTerminal}`} workspaceId={workspaceId} terminalId={activeTerminal} />
+                ) : (
+                  /* Opening a finished workspace no longer relaunches its agent,
+                     so say what to do rather than showing a blank terminal. */
+                  <div className="grid h-full place-items-center p-6">
+                    <EmptyState
+                      icon={<Play size={18} />}
+                      title="No live session"
+                      description="This workspace is not running, so there is nothing to attach to. Starting it launches the agent again in its worktree."
+                      action={
+                        <Button variant="primary" size="sm" onClick={() => run("start")}>
+                          <Play size={14} weight="fill" aria-hidden="true" />
+                          start
+                        </Button>
+                      }
+                    />
+                  </div>
+                )
               ) : null}
             </Suspense>
           </ErrorBoundary>
