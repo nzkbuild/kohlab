@@ -3,7 +3,7 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { existsSync, readFileSync, renameSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
 import { basename, join } from "path";
 import { spawn, spawnSync } from "child_process";
@@ -184,27 +184,22 @@ async function keyMatches(candidate: string, storedHex: string): Promise<boolean
 }
 
 /**
- * Preserve a file we could not parse, and say so loudly.
+ * Report a file we could not parse — loudly, and WITHOUT moving it.
  *
- * Renaming rather than deleting keeps the records recoverable by hand. The
- * alternative — starting from an empty default — makes the loss invisible and
- * invites writing new state over the only copy that survived.
+ * An earlier version renamed the file aside as `<file>.corrupt-<ts>`. That
+ * defeated its own purpose. The "we are damaged" signal is module state, so a
+ * restart cleared it — and the renamed-away file then read as simply *absent*:
+ * for `users.json` that meant "no members", and therefore "no authentication
+ * required", so a damaged auth file re-opened anonymous access on every restart;
+ * for `state.json` it meant starting from an empty fleet and presenting that as
+ * the truth. Leaving the file in place makes the failure re-arm on every start,
+ * which is what failing closed actually requires.
  */
-function quarantineCorrupt(file: string, error: unknown): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const target = `${file}.corrupt-${stamp}`;
-  let kept = target;
-  try {
-    renameSync(file, target);
-  } catch {
-    kept = file; // could not move it; leave it where it is
-  }
+function reportCorrupt(file: string, error: unknown, remedy: string): void {
   console.error(
     `\n[kohlab] ${file} is unreadable: ${error instanceof Error ? error.message : String(error)}` +
-      `\n[kohlab] preserved as ${kept}` +
-      `\n[kohlab] restore with: mv '${kept}' '${file}'\n`,
+      `\n[kohlab] ${remedy}\n`,
   );
-  return kept;
 }
 
 /**
@@ -225,7 +220,11 @@ function readUsers(): User[] {
     // authentication and let anonymous requests mutate. A damaged auth file must
     // tighten access, never loosen it.
     usersFileCorrupt = true;
-    quarantineCorrupt(USERS_FILE, error);
+    reportCorrupt(
+      USERS_FILE,
+      error,
+      "left in place — authentication stays required until it is restored or removed",
+    );
     return [];
   }
 }
@@ -543,12 +542,14 @@ async function loadState(): Promise<State> {
   try {
     s = JSON.parse(raw) as State;
   } catch (error) {
-    // Loud, never silent. Starting from empty defaults here would present an
-    // empty fleet as if it were the truth, and invite new state being written
-    // over the only surviving copy. This runs on every request, so a corrupt
-    // file surfaces everywhere instead of being discovered later.
-    const kept = quarantineCorrupt(STATE_FILE, error);
-    throw new Error(`${STATE_FILE} is corrupt and was preserved as ${kept} — restore or remove it, then restart`);
+    // Loud, never silent — and the file stays where it is, so the failure
+    // repeats on every start instead of quietly becoming an empty fleet.
+    reportCorrupt(
+      STATE_FILE,
+      error,
+      "left in place — restore it from a backup, or delete it to start with no workspaces",
+    );
+    throw new Error(`${STATE_FILE} is corrupt — see the message above, then restart`);
   }
   if (!s.agents) s.agents = { ...DEFAULT_AGENTS };
   return s;
