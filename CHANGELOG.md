@@ -36,16 +36,19 @@ driver than tmux.
   swallowed parse errors and returned `[]`, so `usersExist()` read false, so
   `authRequired()` read false, so `denied` read false — and anonymous requests
   could mutate. A damaged auth file must tighten access, never loosen it. It now
-  fails closed, latching for the process lifetime and quarantining the file. The
-  flag is checked *after* the read, because checking it first left a
-  one-request window where the damage was detected too late to matter.
+  fails closed, latching for the process lifetime. The file is **left in place**,
+  not moved: an earlier version renamed it aside, which cleared the latch on
+  restart and re-opened anonymous access on the next start. The flag is checked
+  *after* the read, because checking it first left a one-request window where the
+  damage was detected too late to matter.
 - **A corrupt `state.json` bricked the service with a bare stack trace.**
   `JSON.parse` ran unguarded on a path that every request touches, so a damaged
-  file meant an unexplained failure with no recovery route. It now quarantines
-  the file as `state.json.corrupt-<ts>`, logs the restore command, and fails with
-  a message naming both paths — rather than silently starting from empty
-  defaults, which would make the loss invisible and invite new state being
-  written over the only surviving copy.
+  file meant an unexplained failure with no recovery route. It now fails with a
+  message naming the file and the remedy — restore it from a backup, or delete it
+  to start with no workspaces. The file is **left in place** so the failure
+  repeats on every start rather than quietly becoming an empty fleet on the next
+  one; silently starting from empty defaults would present a missing fleet as the
+  truth and invite new state being written over the only surviving copy.
 - **`state.json` and `users.json` were written non-atomically.** Both used
   `writeFile`, which truncates before writing — so a process death mid-write
   (OOM, `kill -9`, power loss) left a half-written file. For `state.json` that
