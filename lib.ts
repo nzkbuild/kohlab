@@ -439,6 +439,24 @@ export async function setUserRole(id: string, role: Role): Promise<User> {
   return user;
 }
 
+/**
+ * Rotate a member's own key, returning the new one exactly once.
+ *
+ * The old key stops working the moment this returns, so the caller has to store
+ * the new one immediately — the Account panel does, which is why rotating does
+ * not sign you out of the browser you did it in.
+ */
+export async function rotateOwnKey(id: string): Promise<{ key: string }> {
+  const users = readUsers();
+  const user = users.find((u) => u.id === id);
+  if (!user) throw new Error(`no user '${id}'`);
+  const key = randomBytes(24).toString("hex");
+  user.key = await hashKey(key);
+  await writeUsers(users);
+  await audit(id, "key.rotate", id);
+  return { key };
+}
+
 /** Remove a user (revoke): drop the record and its OS account + home. */
 export async function removeUser(id: string): Promise<{ removed: boolean; warning?: string }> {
   const target = readUsers().find((u) => u.id === id);
@@ -490,11 +508,26 @@ export async function authenticate(req: { headers: Headers; url: string }): Prom
   return null;
 }
 
-function extractKey(req: { headers: Headers; url: string }): string | null {
+/** The WebSocket subprotocol a browser uses to carry its key. A browser cannot
+ *  set an `Authorization` header on an upgrade, but it *can* set
+ *  `Sec-WebSocket-Protocol`, and that header does not end up in a URL — which is
+ *  the whole point: a key in a query string leaks into history, logs and Referer. */
+export const KEY_PROTOCOL = "kohlab.key.";
+
+/** The key a request presents, in order of how little it leaks. Exported so the
+ *  throttle in server.ts counts exactly what this authenticates. */
+export function extractKey(req: { headers: Headers; url: string }): string | null {
+  const bearer = req.headers.get("authorization") ?? "";
+  if (bearer.startsWith("Bearer ")) return bearer.slice(7);
+
+  const protocols = (req.headers.get("sec-websocket-protocol") ?? "").split(",").map((p) => p.trim());
+  const carried = protocols.find((p) => p.startsWith(KEY_PROTOCOL));
+  if (carried) return carried.slice(KEY_PROTOCOL.length);
+
+  // Still accepted: existing bookmarks, curl, and the CLI. The dashboard no
+  // longer sends it.
   const q = new URL(req.url).searchParams.get("key");
   if (q) return q;
-  const auth = req.headers.get("authorization") ?? "";
-  if (auth.startsWith("Bearer ")) return auth.slice(7);
   return null;
 }
 

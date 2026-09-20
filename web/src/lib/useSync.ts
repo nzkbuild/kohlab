@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { socketProtocol } from "../api";
 import { useApp } from "../store";
 import { announce } from "./announce";
 import { parseRoute } from "./route";
@@ -47,9 +48,9 @@ export function useSync(): void {
     if (!authed) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     // The socket must carry the key: the server authenticates the upgrade, and
-    // without it an access-key deployment silently never connects.
-    const key = new URLSearchParams(location.search).get("key") ?? localStorage.getItem("kohlab_key") ?? "";
-    const url = `${proto}//${location.host}${key ? `?key=${encodeURIComponent(key)}` : ""}`;
+    // without it an access-key deployment silently never connects. It rides in
+    // the subprotocol, not the query string — see socketProtocol.
+    const url = `${proto}//${location.host}`;
 
     const seen = new Set<string>();
     let socket: WebSocket | null = null;
@@ -60,7 +61,7 @@ export function useSync(): void {
     const connect = () => {
       if (disposed) return;
       setConnection(attempt === 0 ? "connecting" : "reconnecting");
-      socket = new WebSocket(url);
+      socket = new WebSocket(url, socketProtocol());
 
       socket.onopen = () => {
         attempt = 0;

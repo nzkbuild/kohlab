@@ -3,6 +3,7 @@ import { ArrowsClockwise, Bell, BellRinging, Cpu, HardDrives, SpeakerHigh, Warni
 import { useApp } from "../store";
 import { announce, setAnnouncementsPaused } from "../lib/announce";
 import { cn } from "../lib/utils";
+import Account from "./Account";
 import AgentInstaller from "./AgentInstaller";
 import Team from "./Team";
 import UpdatePanel from "./UpdatePanel";
@@ -182,6 +183,8 @@ export default function Settings() {
             </div>
           </div>
         </Panel>
+
+        <Account />
 
         <Team />
       </div>

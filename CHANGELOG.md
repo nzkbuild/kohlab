@@ -9,6 +9,64 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.14.0] - 2026-09-20
+
+The access story, finished — and three of the structural seams the roadmap called
+thin, closed with a check behind each.
+
+### Security
+
+- **One gate, so 401 and 403 mean what they say.** Eleven gate sites each decided
+  for themselves whether to answer 401 or 403, and ten of them answered 403 to a
+  caller with no credentials at all — they tested the role before testing whether
+  there was anyone to have one. Both refuse, so neither was a hole, but a client
+  could not tell "you sent no key" from "your key is not enough", and testing a
+  role before testing authentication is exactly the shape that let `POST
+  /api/users` ship with no gate at all in 1.13.1. It is now one predicate every
+  route goes through.
+- **Guessing keys is throttled.** 20 refusals per address per minute, in memory.
+  The key is verified *before* the throttle is consulted, so a correct key still
+  works after a run of wrong ones — otherwise anyone behind the same NAT could
+  lock everyone else out by guessing. A revoked key reports 429 rather than 401
+  while a window is open: the throttle cannot tell a revoked key from a guessed
+  one, and refusing both is the point.
+- **Keys no longer travel in URLs.** The dashboard now sends `Authorization:
+  Bearer`, and the terminal and push sockets carry theirs in a WebSocket
+  subprotocol — a browser cannot set a header on an upgrade, which is why the
+  query parameter existed. A key in a query string leaks into browser history,
+  proxy logs and `Referer`. The `?key=` form still works for bookmarks, curl and
+  the CLI; the app never sends it.
+
+### Added
+
+- **Account panel** (Settings): who you are — id and role — with two actions.
+  **Rotate my key** replaces your key without an owner minting one and handing it
+  over, which is how keys end up in chat windows. The new key is shown once and
+  stored in the browser *before* the UI re-renders, because the old one stops
+  working the instant the server answers. **Sign out** clears it from this
+  browser only.
+- **`GET /api/account`** — the caller's own id, role and credential kind, so a
+  member can see how they are seen rather than inferring it.
+- **`docs/architecture.md`** — the shape in four diagrams: the three processes and
+  what survives what, the request path where authorization happens, a workspace's
+  life, and how someone gets in. Plus the five seams that are thin and the
+  smallest fix for each.
+- **`SECURITY.md`** — what is in scope, the trust model in plain terms, the access
+  model, and an explicit statement that the checks in `scripts/` are the only
+  evidence behind any of it.
+- **`CONTRIBUTING.md`** — setup, the bar for a change (a claim needs a check), and
+  the conventions.
+
+### Changed
+
+- `bun run check` is now 14 checks: a new one asserts the gate uniformities
+  (five routes, no credentials, 401 not 403), the throttle (a loop is refused; a
+  correct key is not), rotation end-to-end (new key works, old key dead in a
+  header *and* in a URL, the rotation is in the audit trail), and both socket
+  handshakes — with the key, and without.
+- `docs/security.md` documents the throttle, the header-only key, self-service
+  rotation, and the 401-before-403 rule.
+
 ## [1.13.1] - 2026-09-20
 
 Security release: a route-table audit found two gates that were not what their

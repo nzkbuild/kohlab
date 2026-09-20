@@ -82,6 +82,7 @@ try {
   run("release checking (OTA)", "bun", ["scripts/check-release.ts"]);
   run("cli surface", "node", ["scripts/check-cli.mjs"]);
   run("access bootstrap", "node", ["scripts/check-access.mjs"]);
+  run("auth hardening (gate, throttle, rotation, socket key)", "node", ["scripts/check-auth-hardening.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again — it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);

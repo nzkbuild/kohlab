@@ -17,9 +17,24 @@ it runs.
   and `kohlab key rotate` issues a new one. Both run on the machine only, so
   neither can be reached over the network.
 - **`KOHLAB_KEY`** is the single-operator key. When set, every `/api/*` route and
-  the terminal WebSocket require `?key=<key>` or `Authorization: Bearer <key>`.
-  Comparison is constant-time. It is treated as an **owner**, so single-user
+  the terminal WebSocket require a key. The dashboard sends it in an
+  `Authorization: Bearer` header, never in a URL — the sockets carry theirs in a
+  WebSocket subprotocol, because a browser cannot set a header on an upgrade. The
+  old `?key=` form still works for bookmarks and curl, and is never sent by the
+  app. Comparison is constant-time. It is treated as an **owner**, so single-user
   installs keep working unchanged.
+- **Repeated wrong keys are throttled** — 20 refusals per address per minute, in
+  memory. The key is checked before the throttle is consulted, so a correct key
+  still works after a run of wrong ones, and one address cannot lock out another.
+  A revoked key reports 429 rather than 401 while a window is open: the throttle
+  cannot tell a revoked key from a guessed one.
+- **Every gate answers 401 before 403**, through one predicate rather than a
+  convention at each route. A request with no credentials is told it sent nothing;
+  a request with insufficient credentials is told it is not enough. Ten routes used
+  to answer 403 to an anonymous caller, which is how one route ended up with no
+  gate at all — see the 1.13.1 notes above.
+- **A member rotates their own key** from **Settings → Account**, without an owner
+  handing them a new one. The old key dies the instant the server answers.
 - **Named users** (`kohlab user add <id> [--role owner|member|viewer]`) each get
   their own key — shown once, stored only as a hash. Roles gate the API: viewers
   read, members act on their own workspaces, owners run the box (members, updates,

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, socketProtocol } from "../api";
 import { cn } from "../lib/utils";
 import { Button } from "./ui";
 import { cacheTerminal, termCache } from "./terminalCache";
@@ -175,8 +175,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
 
     // websocket to server, with reconnect + backoff
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const urlKey = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "";
-    const wsUrl = `${proto}//${location.host}${urlKey ? `?key=${encodeURIComponent(urlKey)}` : ""}`;
+    const wsUrl = `${proto}//${location.host}`;
 
     let attempts = 0;
     /** Inbound bytes land here, never in React state. */
@@ -214,7 +213,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
 
     const connect = () => {
       if (!mountedRef.current) return;
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(wsUrl, socketProtocol());
       wsRef.current = ws;
       ws.onopen = () => {
         attempts = 0; // reset backoff on a successful connect

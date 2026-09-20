@@ -33,6 +33,9 @@ import {
   listUsers,
   addUser,
   removeUser,
+  rotateOwnKey,
+  extractKey,
+  KEY_PROTOCOL,
   audit,
   readAudit,
   loadState,
@@ -57,6 +60,38 @@ const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 /** Browser push subscribers (dashboard pages). */
 const pushClients = new Set<ServerWebSocket>();
+
+/**
+ * Failed key attempts per address. A key is 24 random bytes, so guessing is
+ * already hopeless — this is not the thing that saves you, it is what stops a
+ * loop from filling the audit log and burning CPU. In memory on purpose: a
+ * restart clears it, which is the right trade for a lock-out nobody can trip by
+ * accident, and there is no shared store to keep it in.
+ */
+const authFailures = new Map<string, { count: number; until: number }>();
+const AUTH_WINDOW_MS = 60_000;
+const AUTH_MAX_FAILURES = 20;
+
+function authThrottle(address: string): number {
+  const rec = authFailures.get(address);
+  if (!rec) return 0;
+  if (Date.now() > rec.until) {
+    authFailures.delete(address);
+    return 0;
+  }
+  return rec.count >= AUTH_MAX_FAILURES ? Math.ceil((rec.until - Date.now()) / 1000) : 0;
+}
+
+function recordAuthFailure(address: string): void {
+  const now = Date.now();
+  const rec = authFailures.get(address);
+  if (!rec || now > rec.until) authFailures.set(address, { count: 1, until: now + AUTH_WINDOW_MS });
+  else rec.count += 1;
+  // Keep the map from growing without bound on a long-lived server.
+  if (authFailures.size > 4096) {
+    for (const [k, v] of authFailures) if (now > v.until) authFailures.delete(k);
+  }
+}
 
 // completion → push to every open dashboard + fire webhook
 onWorkspaceDone((ws) => {
@@ -363,6 +398,27 @@ async function handleUserRole(id: string, req: Request): Promise<Response> {
   try {
     const user = await setUserRole(id, role);
     return json({ user: { id: user.id, name: user.name, role: user.role } });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+type Auth = Awaited<ReturnType<typeof authenticate>>;
+
+/** Rotate the caller's own key. Owner, member and viewer alike. */
+async function handleAccountKey(auth: Auth): Promise<Response> {
+  if (!auth || auth.kind !== "user") {
+    return json(
+      {
+        error:
+          "this server authenticates with a single KOHLAB_KEY, which lives on the box - rotate it there: kohlab key rotate",
+      },
+      400,
+    );
+  }
+  try {
+    const { key } = await rotateOwnKey(auth.id);
+    return json({ key });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -686,7 +742,25 @@ serve({
     // `denied` is true, and every socket is rejected 401 the moment an access
     // key is configured.
     const isWebSocket = req.headers.get("upgrade")?.toLowerCase() === "websocket";
-    const auth = path.startsWith("/api") || isWebSocket ? await authenticate(req) : null;
+    const apiish = path.startsWith("/api") || isWebSocket;
+
+    // Throttle the guessing, never the guessing's victim: the key is checked
+    // first, and only a request that *presented* a key and was refused counts. A
+    // browser with no key at all is the normal state before the gate screen, not
+    // a guess. Checking first costs one HMAC per attempt, and it means a correct
+    // key still works after twenty wrong ones from the same address — otherwise
+    // anyone behind the same NAT could lock everyone else out.
+    const address = server?.requestIP?.(req)?.address ?? "unknown";
+    const presentedKey = !!extractKey({ headers: req.headers, url: req.url });
+    const auth = apiish ? await authenticate(req) : null;
+    if (apiish && presentedKey && !auth) {
+      recordAuthFailure(address);
+      const wait = authThrottle(address);
+      if (wait > 0) {
+        return json({ error: `too many failed key attempts — try again in ${wait}s` }, 429);
+      }
+    }
+
     const denied = !auth && authRequired();
     const actor = auth ? (auth.kind === "user" ? auth.id : auth.kind === "legacy" ? "legacy" : auth.kind === "share" ? "share" : "anonymous") : "anonymous";
     const role: string | null = auth && (auth.kind === "user" || auth.kind === "legacy") ? auth.role : null;
@@ -694,10 +768,30 @@ serve({
     const canMutate = !denied && ((role === "owner" || role === "member") || auth?.kind === "anonymous");
     const isOwner = !denied && (role === "owner" || auth?.kind === "anonymous");
 
+    /**
+     * One gate, so "refused" is structural instead of remembered.
+     *
+     * Ten routes used to answer 403 to a caller with no credentials at all,
+     * because they tested the role before testing whether there was anyone to
+     * have a role. Both refuse, so neither was a hole — but a client cannot tell
+     * "you sent no key" from "your key is not enough", and that difference is the
+     * whole reason 401 and 403 are separate. Adding a route now means wrapping it
+     * in this, not remembering which check goes first.
+     */
+    const gate = (allowed: boolean, why = "forbidden"): Response | null =>
+      denied ? json({ error: "unauthorized" }, 401) : allowed ? null : json({ error: why }, 403);
+
     // WebSocket upgrade: terminal proxy + push — require auth.
     if (isWebSocket) {
       if (denied) return json({ error: "unauthorized" }, 401);
-      if (server.upgrade(req)) return undefined;
+      // Echo the protocol the client offered, or the browser fails the
+      // handshake ("no response was received").
+      const offered = (req.headers.get("sec-websocket-protocol") ?? "")
+        .split(",")
+        .map((p) => p.trim())
+        .find((p) => p === "kohlab" || p.startsWith(KEY_PROTOCOL));
+      const upgradeOpts = offered ? { headers: { "sec-websocket-protocol": offered } } : undefined;
+      if (server.upgrade(req, upgradeOpts)) return undefined;
     }
 
     if (m) {
@@ -721,8 +815,9 @@ serve({
       }
       if (readOnly) {
         if (denied) return json({ error: "unauthorized" }, 401);
-      } else if (!canMutate) {
-        return json({ error: "forbidden — viewer cannot " + action }, 403);
+      } else {
+        const refused = gate(canMutate, "forbidden — viewer cannot " + action);
+        if (refused) return refused;
       }
       switch (action) {
         case "start": containFailure(audit(actor, "start", id), "audit"); return handleStart(id);
@@ -745,8 +840,19 @@ serve({
     if (path === "/api/auth/required") {
       return json({ required: authRequired() });
     }
+    if (path === "/api/account" && req.method === "GET") {
+      if (!auth) return json({ error: "unauthorized" }, 401);
+      if (auth.kind === "share") return json({ id: "shared link", role: "viewer", kind: "share" });
+      if (auth.kind === "anonymous") return json({ id: "anonymous", role: "owner", kind: "anonymous" });
+      if (auth.kind === "legacy") return json({ id: "owner", role: auth.role, kind: "legacy" });
+      return json({ id: auth.id, role: auth.role, kind: "user" });
+    }
+    if (path === "/api/account/key" && req.method === "POST") {
+      return handleAccountKey(auth);
+    }
     if (path === "/api/users" && req.method === "GET") {
-      if (!isOwner) return json({ error: "forbidden" }, 403);
+      const refused = gate(isOwner, "forbidden — only an owner can list members");
+      if (refused) return refused;
       return handleUsersList();
     }
     if (path === "/api/users" && req.method === "POST") {
@@ -754,29 +860,30 @@ serve({
       // all — not even `denied` — so any authenticated caller could POST
       // {role: "owner"} and mint themselves an owner key. A viewer escalating to
       // owner is the whole box, and it provisions an OS account while it does it.
-      if (denied) return json({ error: "unauthorized" }, 401);
-      if (!isOwner) return json({ error: "forbidden — only an owner can add members" }, 403);
+      const refused = gate(isOwner, "forbidden — only an owner can add members");
+      if (refused) return refused;
       return handleUserAdd(req);
     }
     // Inviting, and redeeming an invitation. `/api/join` is the one route that
     // must work without credentials: the token *is* the credential, it is
     // single-use and it expires. Inviting is an owner action.
     if (path === "/api/invites" && req.method === "POST") {
-      if (denied) return json({ error: "unauthorized" }, 401);
-      if (!isOwner) return json({ error: "forbidden — only an owner can invite" }, 403);
+      const refused = gate(isOwner, "forbidden — only an owner can invite");
+      if (refused) return refused;
       return handleInviteCreate(req, actor);
     }
     if (path === "/api/join" && req.method === "POST") {
       return handleJoin(req);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "PATCH") {
-      if (denied) return json({ error: "unauthorized" }, 401);
-      if (!isOwner) return json({ error: "forbidden — only an owner can change roles" }, 403);
+      const refused = gate(isOwner, "forbidden — only an owner can change roles");
+      if (refused) return refused;
       const uid = decodeURIComponent(path.split("/").pop() ?? "");
       return handleUserRole(uid, req);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
-      if (!isOwner) return json({ error: "forbidden" }, 403);
+      const refused = gate(isOwner, "forbidden — only an owner can remove members");
+      if (refused) return refused;
       const uid = decodeURIComponent(path.split("/").pop() ?? "");
       return handleUserRemove(uid);
     }
@@ -790,12 +897,16 @@ serve({
       if (denied) return json({ error: "unauthorized" }, 401);
       // A launcher is a command that later runs in someone's workspace, and
       // adding one writes state. Viewers read; this is not a read.
-      if (req.method === "POST" && !canMutate) return json({ error: "forbidden — viewer cannot add agents" }, 403);
-      if (req.method === "POST") containFailure(audit(actor, "agent.add"), "audit");
+      if (req.method === "POST") {
+        const refused = gate(canMutate, "forbidden — viewer cannot add agents");
+        if (refused) return refused;
+        containFailure(audit(actor, "agent.add"), "audit");
+      }
       return handleAgents(req);
     }
     if (path === "/api/agents/install" && req.method === "POST") {
-      if (!canMutate) return json({ error: "forbidden" }, 403);
+      const refused = gate(canMutate, "forbidden — viewer cannot install agents");
+      if (refused) return refused;
       containFailure(audit(actor, "agent.install"), "audit");
       return handleAgentInstall(req);
     }
@@ -817,14 +928,15 @@ serve({
       // Updating rewrites the checkout and restarts the service, so it is an
       // owner action, never a member/viewer one, and never a share token.
       // No credentials is 401; credentials without the role is 403.
-      if (denied) return json({ error: "unauthorized" }, 401);
-      if (!isOwner) return json({ error: "forbidden — only an owner can update the server" }, 403);
+      const refused = gate(isOwner, "forbidden — only an owner can update the server");
+      if (refused) return refused;
       if ((await updateRunState()).running) return json({ error: "an update is already running" }, 409);
       containFailure(audit(actor, "update", undefined, "OTA"), "audit");
       return handleReleaseUpdate();
     }
     if (path === "/api/clone" && req.method === "POST") {
-      if (!canMutate) return json({ error: "forbidden" }, 403);
+      const refused = gate(canMutate, "forbidden — viewer cannot clone");
+      if (refused) return refused;
       containFailure(audit(actor, "clone", undefined), "audit");
       return handleClone(req, actorUserId);
     }
@@ -844,7 +956,8 @@ serve({
       return json(scoped);
     }
     if (path === "/api/workspaces" && req.method === "POST") {
-      if (!canMutate) return json({ error: "forbidden" }, 403);
+      const refused = gate(canMutate, "forbidden — viewer cannot create workspaces");
+      if (refused) return refused;
       return handleCreate(req, actorUserId);
     }
 

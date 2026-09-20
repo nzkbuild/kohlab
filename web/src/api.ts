@@ -17,14 +17,22 @@ export function hasKey() {
   return !!key;
 }
 
+/**
+ * Every HTTP call carries the key in a header, never in the URL. The URL form is
+ * still accepted by the server, for existing bookmarks and curl, but a key in a
+ * query string leaks into browser history, proxy logs and Referer.
+ */
 async function req(path: string, opts: RequestInit = {}): Promise<Response> {
-  const sep = path.includes("?") ? "&" : "?";
-  const url = key ? `${path}${sep}key=${encodeURIComponent(key)}` : path;
-  const res = await fetch(url, {
+  const res = await fetch(path, {
     ...opts,
-    headers: { ...(opts.headers || {}) },
+    headers: key ? { ...(opts.headers || {}), authorization: `Bearer ${key}` } : { ...(opts.headers || {}) },
   });
   return res;
+}
+
+/** The subprotocol a socket offers to carry the key. Mirrors the server's KEY_PROTOCOL. */
+export function socketProtocol(k = key): string[] {
+  return k ? [`kohlab.key.${k}`] : ["kohlab"];
 }
 
 async function json<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -37,7 +45,7 @@ async function json<T>(path: string, opts?: RequestInit): Promise<T> {
 export const api = {
   async testKey(k: string): Promise<boolean> {
     try {
-      const res = await fetch(`/api/workspaces?key=${encodeURIComponent(k)}`);
+      const res = await fetch("/api/workspaces", { headers: { authorization: `Bearer ${k}` } });
       return res.status === 200;
     } catch {
       return false;
@@ -74,6 +82,10 @@ export const api = {
     json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
   log: (id: string) => json<{ log: string }>(`/api/workspaces/${id}/log`),
   users: () => json<{ users: TeamUser[]; canInvite: boolean }>("/api/users"),
+  /** Who this browser is, as far as the server is concerned. */
+  account: () => json<{ id: string; role: string; kind: string }>("/api/account"),
+  /** Rotate my own key. Returns the new one once; the old one dies here. */
+  rotateMyKey: () => json<{ key: string }>("/api/account/key", { method: "POST" }),
   invite: (body: { id: string; name?: string; role?: string }) =>
     json<{ id: string; role: string; expires: number; path: string }>("/api/invites", {
       method: "POST",

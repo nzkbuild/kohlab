@@ -106,7 +106,9 @@ with the changelog above its own version as the release notes and one button to
 take it. Agents keep running, and a release that fails to come up is rolled back
 automatically. [docs/upgrade.md](docs/upgrade.md) has the details.
 
-Full setup, systemd (auto-start on reboot), and every command are in docs/.
+Full setup, systemd (auto-start on reboot), and every command are in docs/. How
+the pieces fit together — the processes, the request path, and where the seams are
+thin — is in [docs/architecture.md](docs/architecture.md).
 
 ## What's new in v1.10.0
 
