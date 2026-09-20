@@ -65,7 +65,7 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
           <ArrowLeft size={12} aria-hidden="true" />
           close
         </Button>
-        {/* The path itself is in the tab's breadcrumb — repeating it here would
+        {/* The path itself is in the tab's breadcrumb, repeating it here would
             just push the actions off a narrow pane. */}
         <div className="flex-1" />
         <Button

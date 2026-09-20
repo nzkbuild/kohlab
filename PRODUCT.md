@@ -29,7 +29,7 @@ your laptop closes, your SSH drops, or your phone screen sleeps. You attach from
 any browser to see what they did and decide what to keep.
 
 What it refuses to be is a terminal multiplexer. `tmux` keeps a session alive and
-stops there — no review, no isolation, no account for the second person. Kohlab
+stops there, no review, no isolation, no account for the second person. Kohlab
 keeps the session alive and then closes the loop: the agent's work arrives as a
 diff on its own branch, and accepting it is a decision you make.
 
@@ -42,7 +42,7 @@ Three mechanisms, which the alternatives do not combine:
    single run.
 2. **A review gate, not just a shell.** Every agent works in its own git worktree
    on its own branch, so finishing means *needs review*, not *done*. Nothing the
-   agent did lands on your branch until you accept it — and accepting commits it
+   agent did lands on your branch until you accept it, and accepting commits it
    where it is, on the agent's branch, not on yours.
 3. **A team on one box, without containers.** Each member is a real OS account
    and their agents run as them. "Alice cannot read Bob's repositories" is
@@ -68,7 +68,7 @@ own home, and their own view of the work. Revoking them takes the account away
 again.
 
 **Showing work.** Read-only share links expose one workspace's terminal, diff and
-log to someone outside the team — never a life-cycle action, never a commit.
+log to someone outside the team, never a life-cycle action, never a commit.
 
 ## Capabilities and Constraints
 
@@ -91,7 +91,7 @@ Shipped and claimed:
 Constraints, stated plainly rather than discovered by a user:
 
 - Agents are not namespaced. There is no `bwrap` or container per session yet, so
-  a member's agent can still `ps` the whole host — it cannot read or signal
+  a member's agent can still `ps` the whole host, it cannot read or signal
   another member's processes, but it can see that they exist.
 - Member OS accounts need root to provision. Without it, members share the
   server's user and only the role check separates them.
@@ -103,7 +103,7 @@ Constraints, stated plainly rather than discovered by a user:
 ## Brand Commitments
 
 - Product name: Kohlab.
-- Calm, precise, developer-native, operational — an instrument panel, not a
+- Calm, precise, developer-native, operational, an instrument panel, not a
   landing page. The v1.10 frontend is the standard, not a one-off.
 - Plain language in every string a user reads.
 - No invented metrics, customers, benchmarks or pricing claims.
@@ -124,7 +124,7 @@ Constraints, stated plainly rather than discovered by a user:
 4. Keep destructive and irreversible actions explicit.
 5. Prefer dense, legible operational surfaces over decorative chrome.
 6. Nobody arrives uninvited: a server is claimed once, and access is granted by
-   the person who owns it — never by being first to reach the port.
+   the person who owns it, never by being first to reach the port.
 
 ## Accessibility & Inclusion
 

@@ -1,9 +1,9 @@
 /**
  * One coalesced announcement channel.
  *
- * A live terminal or log tail must never be an aria-live region — screen
+ * A live terminal or log tail must never be an aria-live region: screen
  * readers would read every line. Instead the app emits discrete *state
- * transitions* here ("ws-3 finished — needs review") and a single permanently
+ * transitions* here ("ws-3 finished: needs review") and a single permanently
  * present role="status" region renders the latest one.
  *
  * Announcements coalesce: bursts within COALESCE_MS collapse to the last

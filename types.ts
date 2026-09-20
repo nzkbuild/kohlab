@@ -36,14 +36,14 @@ export interface User {
   id: string;
   name: string;
   /** SHA-256 hex of the user's key. Plaintext is never stored. Absent while an
-   *  invitation is outstanding — they exist, but cannot sign in yet. */
+   *  invitation is outstanding: they exist, but cannot sign in yet. */
   key?: string;
   role: Role;
   /** POSIX user this member maps to ("" when unprovisioned). */
   osUser?: string;
   uid?: number;
   gid?: number;
-  /** /home/<osUser> — where worktrees and agent config live. */
+  /** /home/<osUser>, where worktrees and agent config live. */
   home?: string;
   /** Present while an invitation is outstanding; cleared when it is accepted. */
   invite?: Invite;
@@ -52,7 +52,7 @@ export interface User {
 export interface Invite {
   /** SHA-256 hex of the invite token. The token itself is shown once, like a key. */
   token: string;
-  /** epoch ms — after this the invitation is dead and must be re-sent. */
+  /** epoch ms, after this the invitation is dead and must be re-sent. */
   expires: number;
   invitedBy?: string;
 }

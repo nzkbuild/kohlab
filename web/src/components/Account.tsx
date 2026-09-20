@@ -9,7 +9,7 @@ import { Button, Panel, PanelHead } from "./ui";
  *
  * Rotation is self-service on purpose. The alternative is asking an owner to mint
  * you a key and hand it over, which is how keys end up in chat windows. The new
- * key is shown once and stored in this browser immediately — the old one stops
+ * key is shown once and stored in this browser immediately: the old one stops
  * working the instant the server answers, so doing the store *after* a re-render
  * would sign you out of the tab you are standing in.
  */
@@ -37,7 +37,7 @@ export default function Account() {
       const { key } = await api.rotateMyKey();
       setKey(key); // before anything else: this browser must survive its own rotation
       setFresh(key);
-      announce("key rotated — the previous key no longer works");
+      announce("key rotated, the previous key no longer works");
     } catch (e) {
       const message = (e as Error).message;
       setError(message);
@@ -70,11 +70,11 @@ export default function Account() {
 
         {fresh ? (
           <div className="rounded-lg border border-line-subtle bg-surface-sunken p-3">
-            <p className="text-xs font-medium text-text-primary">Your new key — shown once</p>
+            <p className="text-xs font-medium text-text-primary">Your new key, shown once</p>
             <code className="mt-2 block break-all font-mono text-xs text-text-primary">{fresh}</code>
             <p className="mt-2 text-2xs leading-relaxed text-text-muted">
               Saved in this browser. Any other device or script using the old key must be updated
-              now — it has already stopped working.
+              now, it has already stopped working.
             </p>
           </div>
         ) : null}

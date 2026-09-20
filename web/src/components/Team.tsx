@@ -16,7 +16,7 @@ import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
 import { Button, Field, Panel, PanelHead, SkeletonRows } from "./ui";
 
-/** Static dot colour per audit action — Tailwind cannot read an interpolated class. */
+/** Static dot colour per audit action, Tailwind cannot read an interpolated class. */
 const ACTION_DOT: Record<string, string> = {
   start: "bg-status-running",
   stop: "bg-status-stopped",
@@ -36,7 +36,7 @@ const DOT_FALLBACK = "bg-status-stopped";
 /**
  * `/api/users` answers 403 unless the caller is an owner; `/api/audit` needs
  * owner or member. A refusal is a permission state, not a network error, so it
- * is reported as one — and never as a red "something broke".
+ * is reported as one: and never as a red "something broke".
  */
 function refusal(message: string): boolean {
   return /forbidden|not your|unauthorized|permission/i.test(message);
@@ -107,7 +107,7 @@ export default function Team() {
 
   /**
    * Invite, rather than mint a key and hand it over. The link carries the
-   * credential to the person it is for, and is spent when they open it — nobody
+   * credential to the person it is for, and is spent when they open it: nobody
    * has to copy a secret into a chat window.
    */
   const invite = async (e: React.FormEvent) => {
@@ -198,7 +198,7 @@ export default function Team() {
               <div className="flex flex-col gap-3">
                 {users.length === 0 ? (
                   <p className="text-xs leading-relaxed text-text-muted">
-                    It is just you. Invite someone and they get their own account on this box — you
+                    It is just you. Invite someone and they get their own account on this box, you
                     never see their files, and they never see yours.
                   </p>
                 ) : (
@@ -337,7 +337,7 @@ export default function Team() {
                 <ShieldWarning size={15} className="mt-px shrink-0 text-text-muted" aria-hidden="true" />
                 <p className="text-xs leading-relaxed text-text-muted">
                   {usersError && refusal(usersError)
-                    ? "Member management needs an owner key — your role can read activity below, but not the member list."
+                    ? "Member management needs an owner key, your role can read activity below, but not the member list."
                     : `Could not load members: ${usersError ?? "unknown error"}`}
                   {usersError && !refusal(usersError) ? (
                     <Button
@@ -395,7 +395,7 @@ export default function Team() {
                       <span className="mono shrink-0 text-text-primary">{e.action}</span>
                       <span className="log-text text-text-muted">
                         {e.id ?? ""}
-                        {e.detail ? ` — ${e.detail}` : ""}
+                        {e.detail ? `, ${e.detail}` : ""}
                       </span>
                     </li>
                   ))}
@@ -418,7 +418,7 @@ export default function Team() {
             </Dialog.Title>
             <Dialog.Description className="mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-status-review">
               <ShieldWarning size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-              Send this to them. It works once and expires {freshLink ? new Date(freshLink.expires).toLocaleString() : ""} — the server stores only a hash, so it cannot be shown again. If it is
+              Send this to them. It works once and expires {freshLink ? new Date(freshLink.expires).toLocaleString() : ""}, the server stores only a hash, so it cannot be shown again. If it is
               lost or already used, invite them again to get a new one.
             </Dialog.Description>
             <code className="mono mt-3 block break-all rounded-md border border-line-strong bg-surface-sunken px-2.5 py-2 text-xs text-text-primary">

@@ -28,7 +28,7 @@ export default defineConfig({
           // xterm + Monaco are the heavy per-view deps; they are also lazy()
           // imports, so keeping them out of the entry lets the shell paint first.
           // (lucide-react was listed here but is absent from package.json and
-          // imported nowhere — removed.)
+          // imported nowhere: removed.)
           "monaco-editor": ["@monaco-editor/react", "monaco-editor"],
           terminal: ["@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-image"],
           icons: ["@phosphor-icons/react"],

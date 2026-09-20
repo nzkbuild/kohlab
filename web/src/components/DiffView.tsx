@@ -46,11 +46,11 @@ function Totals({ added, removed }: { added: number; removed: number }) {
 }
 
 /**
- * Diff review — the headline surface: what changed, sign it off, commit once.
+ * Diff review: the headline surface: what changed, sign it off, commit once.
  *
  * Two payloads arrive in the same shape: real unified diffs, and prose stubs
  * (binary files, and untracked files over the preview ceiling). `diffStats`
- * is the discriminator — it returns null for anything that is not a parseable
+ * is the discriminator: it returns null for anything that is not a parseable
  * diff, and those must be rendered as text: handing the stub to Monaco shows a
  * broken editor.
  */
@@ -136,7 +136,7 @@ export default function DiffView({ workspaceId }: Props) {
   /**
    * Accepting is the exit from the review queue, so it must only be offered to a
    * workspace that is actually in it. An empty diff is not enough: a workspace
-   * that has never run, or one already committed, also has no changes — and
+   * that has never run, or one already committed, also has no changes: and
    * accepting those would stamp a commit on something that never happened.
    */
   const awaitingReview = workspace !== null && workspaceStatus(workspace) === "needs-review";
@@ -346,7 +346,7 @@ export default function DiffView({ workspaceId }: Props) {
                         </span>
                       ) : (
                         <span className="shrink-0 text-2xs text-text-faint" title="no line stats">
-                          —
+                          ,
                         </span>
                       )}
                     </li>
@@ -389,7 +389,7 @@ export default function DiffView({ workspaceId }: Props) {
                       options={{
                         readOnly: true,
                         minimap: { enabled: false },
-                        // Side-by-side on a wide pane, inline when it narrows —
+                        // Side-by-side on a wide pane, inline when it narrows ,
                         // Monaco decides, so there is no breakpoint to maintain.
                         renderSideBySide: true,
                         useInlineViewWhenSpaceIsLimited: true,
@@ -445,7 +445,7 @@ export default function DiffView({ workspaceId }: Props) {
         </div>
         <p className="mt-1.5 text-2xs leading-relaxed text-text-muted">
           Commit stages every file in this workspace (<span className="mono">git add -A</span>) and is
-          final — Kohlab cannot undo, amend or un-commit it.
+          final, Kohlab cannot undo, amend or un-commit it.
         </p>
         {commitError ? (
           <p role="alert" className="mt-1.5 break-words text-2xs text-status-danger">

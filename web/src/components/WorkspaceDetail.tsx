@@ -28,8 +28,8 @@ import { disposeWorkspaceTerminals } from "./terminalCache";
 import { Button, EmptyState, SkeletonRows, StatusChip } from "./ui";
 
 // xterm (~390 KB) and Monaco must not load before the cockpit does: only an
-// import through lazy() defers the fetch. A static import here — even one that
-// only wants a helper — would pull the whole chunk into first paint.
+// import through lazy() defers the fetch. A static import here: even one that
+// only wants a helper: would pull the whole chunk into first paint.
 const TerminalView = lazy(() => import("./TerminalView"));
 const DiffView = lazy(() => import("./DiffView"));
 
@@ -101,7 +101,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       toast.success("share link copied");
       announce(`share link copied for ${workspaceId}`);
     } catch (e) {
-      toast.error(`could not copy the link — ${(e as Error).message}`);
+      toast.error(`could not copy the link, ${(e as Error).message}`);
     }
   };
 
@@ -109,7 +109,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     setDeleting(true);
     try {
       // Cached xterm buffers outlive their pane, so they are dropped explicitly
-      // — the cache module is xterm-free, which is why this stays a static import.
+      //: the cache module is xterm-free, which is why this stays a static import.
       disposeWorkspaceTerminals(workspaceId);
       await toastAction(workspaceId, "delete");
       await refresh();
@@ -117,14 +117,14 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       setConfirming(false);
       navigate({ kind: "workspaces" });
     } catch (e) {
-      toast.error(`delete failed — ${(e as Error).message}`);
+      toast.error(`delete failed, ${(e as Error).message}`);
     } finally {
       setDeleting(false);
     }
   };
 
   // The review badge has to be readable before the tab is opened, so the count
-  // is fetched once per needs-review state — not polled.
+  // is fetched once per needs-review state: not polled.
   const needsReview = w !== undefined && workspaceStatus(w) === "needs-review";
   useEffect(() => {
     if (!needsReview) {
@@ -303,7 +303,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               id={`tab-${id}`}
               aria-selected={selected}
               aria-controls={`panel-${id}`}
-              aria-label={badge ? `${label} — ${badge.count} ${badge.noun}` : undefined}
+              aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}
               tabIndex={selected ? 0 : -1}
               className="tab"
               onClick={() => setTab(id)}
@@ -386,13 +386,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                 <>
                   {/* The terminal is mounted even when the workspace is not
                       running, because the daemon retains the final screen of a
-                      finished session — replacing it with a notice would throw
+                      finished session, replacing it with a notice would throw
                       away the only surviving record of what the agent did. */}
                   {running ? null : (
                     <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5">
                       <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
                       <span className="min-w-0 flex-1 text-xs text-text-muted">
-                        Not running — showing the last screen. Start it to take over the terminal.
+                        Not running, showing the last screen. Start it to take over the terminal.
                       </span>
                       <Button variant="primary" size="sm" onClick={() => run("start")}>
                         start

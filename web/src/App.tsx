@@ -17,7 +17,7 @@ import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 import { Announcer, Button, SkeletonRows } from "./components/ui";
 
-// xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch* —
+// xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch* ,
 // a static import would pull them into the entry chunk and block first paint.
 const WorkspaceDetail = lazy(() => import("./components/WorkspaceDetail"));
 
@@ -52,7 +52,7 @@ export default function App() {
   // notification, so it carries the review count rather than a transient flash.
   useEffect(() => {
     const review = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
-    document.title = review > 0 ? `kohlab — ${review} ready for review` : "kohlab";
+    document.title = review > 0 ? `kohlab, ${review} ready for review` : "kohlab";
   }, [workspaces]);
 
   // The drawer is a mobile affordance; leaving it open across a route change
@@ -107,7 +107,7 @@ export default function App() {
 
             {/* No route label here: every surface renders its own <h1> directly
                 below, so a label in the bar reads as the title twice. On mobile
-                this bar is the app chrome — menu button and brand — and the page
+                this bar is the app chrome (menu button and brand) and the page
                 supplies the heading. */}
             <span className="text-base font-semibold tracking-tight">kohlab</span>
 

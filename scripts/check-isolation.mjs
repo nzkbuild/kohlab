@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Per-user isolation — the claim the whole team story rests on.
+ * Per-user isolation: the claim the whole team story rests on.
  *
  * Run:  node scripts/check-isolation.mjs      (needs root; skips itself otherwise)
  *
  * v1.8 promised that "Bob cannot read Alice's files or signal her processes"
  * because each member is a real OS account and their agents run as that account.
- * It was true, documented, and its definition-of-done was ticked **by hand** —
+ * It was true, documented, and its definition-of-done was ticked **by hand** ,
  * which is to say the most important claim in the product was asserted by
  * nothing. This asserts it.
  *
@@ -15,7 +15,7 @@
  * check asserts the OS boundary the drop depends on.
  *
  * Creating accounts is a host mutation, which is why this skips itself when it
- * cannot create them — and cleans up in a finally block either way.
+ * cannot create them: and cleans up in a finally block either way.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
@@ -32,7 +32,7 @@ const tmp = mkdtempSync(join(tmpdir(), "kohlab-iso-"));
  *
  * A fixed port silently tested the wrong process: a server left behind by an
  * earlier run answered every request here, with a state directory that no longer
- * existed — so `DELETE /api/users/x` found no user, deprovisioned nothing and
+ * existed: so `DELETE /api/users/x` found no user, deprovisioned nothing and
  * reported success, and this check failed for a reason that had nothing to do
  * with isolation.
  */
@@ -103,7 +103,7 @@ const osB = `koh-${B}`.slice(0, 24);
 let server = null;
 
 try {
-  console.log("\nkohlab — per-user isolation\n");
+  console.log("\nkohlab, per-user isolation\n");
 
   if (process.getuid?.() !== 0) {
     console.log("  skip  not root: accounts cannot be provisioned, so there is nothing to assert");
@@ -178,7 +178,7 @@ try {
     check("A's process is running as A", !!sleepPid, "could not find it");
     // The process is deliberately left running. Revoking a member whose agent is
     // still alive is the case that matters, and `userdel` refuses while any of
-    // their processes hold the account — so this is what exercises the kill-first
+    // their processes hold the account: so this is what exercises the kill-first
     // step in deprovisionOsUser. A test that tidies up first proves nothing.
     check("A's process is still running at revoke time", !!sleepPid, "nothing to revoke against");
   }
@@ -188,7 +188,7 @@ try {
   check("revoking succeeds", goneA.status === 200, `${goneA.status} ${JSON.stringify(goneA.body)}`);
   check("revoking reports no leftovers", !goneA.body?.warning, JSON.stringify(goneA.body));
   const stillThere = account(osA);
-  check("the OS account is gone", stillThere === null, `${JSON.stringify(stillThere)} — server said: ${log.trim().split("\n").slice(-4).join(" | ")}`);
+  check("the OS account is gone", stillThere === null, `${JSON.stringify(stillThere)}, server said: ${log.trim().split("\n").slice(-4).join(" | ")}`);
   if (accA) check("the home is gone", !existsSync(accA.home), `server said: ${log.trim().split("\n").slice(-4).join(" | ")}`);
   const survivors = spawnSync("pgrep", ["-u", osA], { encoding: "utf8" }).stdout.trim();
   check("none of their processes survive the revoke", survivors === "", survivors);

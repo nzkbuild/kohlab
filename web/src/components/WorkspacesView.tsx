@@ -49,7 +49,7 @@ function matches(w: Workspace, query: string): boolean {
 /**
  * Agent options come from the server, never a hand-kept list. The catalog is
  * only a fallback for a server that reports nothing (fresh install, or the
- * status call failed) — it must never be the primary source.
+ * status call failed): it must never be the primary source.
  */
 function useAgentOptions(): { names: string[]; reported: boolean } {
   const [installed, setInstalled] = useState<string[]>([]);
@@ -94,7 +94,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
     try {
       const res = await api.ghRepos();
       setRepos(res.repos);
-      if (!res.authed) setReposError("GitHub is not authenticated on this server — paste a path or URL instead.");
+      if (!res.authed) setReposError("GitHub is not authenticated on this server, paste a path or URL instead.");
       else if (res.repos.length === 0) setReposError("GitHub returned no repositories for this account.");
     } catch (e) {
       setRepos([]);
@@ -122,7 +122,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
           : api.create({ task: task.trim(), repo: trimmed || undefined, agent: chosenAgent, limits }),
       );
       await refresh();
-      announce(`${created.id} created — the agent is starting`);
+      announce(`${created.id} created, the agent is starting`);
       navigate({ kind: "workspace", id: created.id });
     } catch {
       /* withToast already reported the reason */
@@ -185,7 +185,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         <Field
           label="Agent"
           htmlFor="new-workspace-agent"
-          help={reported ? "Reported as installed by this server." : "This server reports none installed — showing every known agent."}
+          help={reported ? "Reported as installed by this server." : "This server reports none installed, showing every known agent."}
         >
           <select
             id="new-workspace-agent"
@@ -426,12 +426,12 @@ export default function WorkspacesView() {
             </Panel>
           ) : visible.length === 0 ? (
             /* The system has data; the filter excluded it. Creation is the wrong
-               offer here — the way out is to widen the filter again. */
+               offer here, the way out is to widen the filter again. */
             <Panel>
               <EmptyState
                 icon={<MagnifyingGlass size={18} />}
                 title={`No workspaces match ${describedFilter}`}
-                description="Nothing is hidden — the filter is just narrower than the list."
+                description="Nothing is hidden, the filter is just narrower than the list."
                 action={<Button onClick={clearFilters}>clear filters</Button>}
               />
             </Panel>
@@ -513,7 +513,7 @@ export default function WorkspacesView() {
               </Panel>
 
               {/* Below the shell breakpoint a table reflows into one card per
-                  workspace with a single primary action — never a sideways scroll. */}
+                  workspace with a single primary action, never a sideways scroll. */}
               <ul className="flex flex-col gap-2 shell:hidden">
                 {visible.map((w) => (
                   <li key={w.id} className="panel p-3">

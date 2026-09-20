@@ -3,7 +3,7 @@ import { api } from "./api";
 import type { Workspace } from "./types";
 import { parseRoute, routePath, type Route } from "./lib/route";
 
-/** Explicit socket state — never inferred from navigator.onLine. */
+/** Explicit socket state, never inferred from navigator.onLine. */
 export type Connection = "connecting" | "live" | "reconnecting" | "offline";
 
 export interface AppState {

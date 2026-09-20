@@ -17,7 +17,7 @@ interface Row {
   depth: number;
 }
 
-/** Visible rows in visual order — the order the arrow keys walk. */
+/** Visible rows in visual order, the order the arrow keys walk. */
 function flattenTree(nodes: TreeNode[], expanded: Set<string>, depth = 0, prefix = ""): Row[] {
   const rows: Row[] = [];
   for (const node of nodes) {

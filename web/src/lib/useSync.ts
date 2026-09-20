@@ -20,7 +20,7 @@ interface DoneMessage {
  * The single place the client talks to the server in the background:
  * the push socket, the visibility-gated poll, and Back/Forward.
  *
- * Polling is gated on document.visibilityState — browsers throttle timers in
+ * Polling is gated on document.visibilityState: browsers throttle timers in
  * hidden tabs but exempt WebSockets, so the socket stays up while a hidden tab
  * stops polling entirely. The socket uses exponential backoff with jitter so a
  * server restart cannot turn every open tab into a retry storm.
@@ -49,7 +49,7 @@ export function useSync(): void {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     // The socket must carry the key: the server authenticates the upgrade, and
     // without it an access-key deployment silently never connects. It rides in
-    // the subprotocol, not the query string — see socketProtocol.
+    // the subprotocol, not the query string: see socketProtocol.
     const url = `${proto}//${location.host}`;
 
     const seen = new Set<string>();
@@ -82,13 +82,13 @@ export function useSync(): void {
         seen.add(message.id);
 
         void refresh();
-        announce(`${message.id} finished — ready for review`);
+        announce(`${message.id} finished, ready for review`);
 
         // An OS notification only when the tab is hidden, always tagged so a
         // repeat replaces rather than stacks, and never requesting permission
-        // here — that belongs to a user gesture in Settings.
+        // here: that belongs to a user gesture in Settings.
         if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
-          new Notification("kohlab — ready for review", {
+          new Notification("kohlab, ready for review", {
             body: message.task || `${message.id} finished`,
             tag: `kohlab-${message.id}`,
           });

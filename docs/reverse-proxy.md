@@ -3,7 +3,7 @@
 The dashboard is not meant to be exposed publicly without TLS. Put it behind
 a reverse proxy (Caddy or nginx) that terminates HTTPS.
 
-Kohlab serves both HTTP and WebSocket on the same port (7676) — the terminal
+Kohlab serves both HTTP and WebSocket on the same port (7676), the terminal
 streaming runs over the WebSocket, so the proxy must upgrade connections.
 
 ## Caddy (simplest)

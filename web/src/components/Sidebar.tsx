@@ -146,8 +146,8 @@ export default function Sidebar({ open, onClose }: Props) {
                 className="sidebar-row"
                 data-selected={selected}
                 aria-current={selected ? "page" : undefined}
-                aria-label={`${workspace.id} — ${STATUS_LABEL[status]}`}
-                title={`${workspace.id} — ${STATUS_LABEL[status]}`}
+                aria-label={`${workspace.id}, ${STATUS_LABEL[status]}`}
+                title={`${workspace.id}, ${STATUS_LABEL[status]}`}
                 onClick={() => navigate({ kind: "workspace", id: workspace.id })}
               >
                 <span

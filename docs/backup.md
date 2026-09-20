@@ -18,7 +18,7 @@ back up your repositories. A backup of the state directory restores *what Kohlab
 was doing*, not the work itself.
 
 `state.json` alone is usually enough to make sense of an installation after a
-loss. It is also the one file whose corruption stops the server — it is read at
+loss. It is also the one file whose corruption stops the server, it is read at
 startup and refused loudly if unparseable, deliberately: a half-read fleet is
 worse than a refusal.
 
@@ -30,7 +30,7 @@ kohlab backup /backups/kohlab.tar.gz
 ```
 
 The archive contains the four files above, and is written with `tar` so it opens
-with anything. The command works while the server is running — every one of those
+with anything. The command works while the server is running, every one of those
 files is either written atomically or appended to, so a copy taken mid-write is
 either the old version or the new one.
 
@@ -43,7 +43,7 @@ backup against one failure mode out of several.
 kohlab restore /backups/kohlab.tar.gz
 ```
 
-The current files are **moved aside**, not deleted — each becomes
+The current files are **moved aside**, not deleted, each becomes
 `<name>.before-restore-<timestamp>` in the state directory. There is no merge: a
 restore replaces. If you restore the wrong archive, the previous state is still
 there; move it back.
@@ -53,7 +53,7 @@ keeps serving what it already has in hand.
 
 Restoring `users.json` restores the member list *and* their keys, because only
 hashes are stored. Anyone who was removed since the backup can sign in again with
-their old key — a restore is a rollback of access as well as of data, which is
+their old key, a restore is a rollback of access as well as of data, which is
 worth knowing before doing it on a live box. Their OS accounts are not recreated
 by a restore; a member whose account was removed gets a key that works and no
 workspace.

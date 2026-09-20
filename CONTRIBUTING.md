@@ -23,7 +23,7 @@ themselves with a printed reason when they cannot provision.
 
 ## Before you open a pull request
 
-- **`bun run check` passes.** Not "mostly" — the suite is the argument that the
+- **`bun run check` passes.** Not "mostly", the suite is the argument that the
   change is safe.
 - **A new claim needs a check.** This repository's convention is that nothing is
   stated as working without something runnable behind it. If you fix a bug, the
@@ -41,7 +41,7 @@ themselves with a printed reason when they cannot provision.
   a lot; `node:fs`, `node:crypto`, `fetch` and `Intl` cover most of what this
   project needs.
 - **Frontend:** Tailwind with the tokens in `web/src/styles.css`, no hard-coded
-  colours — `scripts/check-contrast.mjs` fails the build otherwise. Primitives come
+  colours, `scripts/check-contrast.mjs` fails the build otherwise. Primitives come
   from `web/src/components/ui.tsx`; use them rather than new markup.
 - **Accessibility is not a follow-up.** Keyboard reachable, labelled controls, and a
   live-region announcement for state changes. `docs/frontend-contract.md`.
@@ -51,7 +51,7 @@ themselves with a printed reason when they cannot provision.
 ## Documentation
 
 `docs/` is part of the product. If you change behaviour an operator can see, the doc
-that describes it changes in the same commit — `docs/architecture.md` for the shape,
+that describes it changes in the same commit, `docs/architecture.md` for the shape,
 `docs/upgrade.md` for updates, `docs/isolation.md` for the trust boundary.
 
 ## Reporting a bug

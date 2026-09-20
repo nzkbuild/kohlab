@@ -13,11 +13,11 @@ flowchart TB
 
   subgraph box["your server"]
     subgraph unit["kohlab.service (systemd, Restart=always, KillMode=process)"]
-      SRV["server.ts — Bun HTTP + WebSocket<br/>routes · auth · static SPA"]
+      SRV["server.ts, Bun HTTP + WebSocket<br/>routes · auth · static SPA"]
     end
 
     subgraph detached["detached, not supervised"]
-      DMN["pty-daemon.cjs — node<br/>owns every agent session"]
+      DMN["pty-daemon.cjs, node<br/>owns every agent session"]
     end
 
     subgraph trees["workspaces on disk"]
@@ -71,7 +71,7 @@ flowchart LR
 ```
 
 **No handler checks a role itself.** The route table is the single place
-authorization happens, so a route that forgets its gate is simply open — which is
+authorization happens, so a route that forgets its gate is simply open, which is
 exactly how `POST /api/users` shipped with no check at all, in a table where the
 two routes beside it both had one. The check suite now walks every mutating route
 as a viewer and as an anonymous caller for that reason. If you add a route, add it
@@ -83,7 +83,7 @@ to that list in the same commit.
 stateDiagram-v2
   [*] --> created: create (path repo → worktree,<br/>URL → bare clone + tree owned by the member)
   created --> running: start (daemon spawns the agent,<br/>uid/gid + caps applied)
-  running --> running: tab close, device switch,<br/>server restart — nothing stops
+  running --> running: tab close, device switch,<br/>server restart, nothing stops
   running --> review: the agent exits
   review --> committed: accept (commit on the agent's branch)
   review --> running: more work
@@ -106,8 +106,8 @@ flowchart TB
   KEY -->|no| MEMBERS{"users.json exists?"}
   MEMBERS -->|yes| GATED
   MEMBERS -->|no| BIND{"bound beyond loopback?"}
-  BIND -->|no| OPEN["open — acceptable: only this box can reach it"]
-  BIND -->|yes| GEN["generates a key, stores it 0600,<br/>logs it once — never open by accident"]
+  BIND -->|no| OPEN["open, acceptable: only this box can reach it"]
+  BIND -->|yes| GEN["generates a key, stores it 0600,<br/>logs it once, never open by accident"]
 
   GATED --> INVITE["owner invites: /join#‹token›<br/>32 bytes, hashed, single-use, expiring"]
   INVITE --> JOIN["they open it → POST /api/join<br/>→ their own key, stored in that browser"]
@@ -117,11 +117,11 @@ flowchart TB
 
 ## Where the design is thin
 
-Not gaps in features — gaps in *shape*. Each has a smallest fix.
+Not gaps in features, gaps in *shape*. Each has a smallest fix.
 
 | Seam | Why it is thin | Smallest fix |
 | --- | --- | --- |
-| **Supervision** | The daemon is deliberately unsupervised, so its death is silent and total | A liveness beat the server can read, plus a systemd unit for the daemon with `Restart=on-failure` — sessions would still be lost, but you would *know* |
+| **Supervision** | The daemon is deliberately unsupervised, so its death is silent and total | A liveness beat the server can read, plus a systemd unit for the daemon with `Restart=on-failure`, sessions would still be lost, but you would *know* |
 | **Storage** | One JSON file, re-read and re-parsed on every call. Fine at 400 bytes, wrong shape at scale, and there is no seam to change it | Keep the file; put every read behind one cached accessor so a move to SQLite is one file, not every call site |
 | **Authorization** | All of it lives in one switch, by convention | One `gate(roleOk)` helper returning 401-not-authenticated or 403-wrong-role, so "refused" is structural and the ten routes that answer 403 for no credentials become uniform with it |
 | **Events** | Completion is a 2-second poll; session death has no path to the user at all | One outbound event seam (the push channel already exists) that both completion and death go through |
@@ -132,26 +132,26 @@ Not gaps in features — gaps in *shape*. Each has a smallest fix.
 Each of the thin seams above now has its smallest fix attached, or a check that
 measures it:
 
-- **Supervision** — a liveness probe (`GET /api/health`, `kohlab health`), the
+- **Supervision**, a liveness probe (`GET /api/health`, `kohlab health`), the
   daemon's death pushed to every open dashboard the moment its socket closes, the
   death recorded in the audit trail, and `lastDaemonDeath` reported even after a
   probe has brought a new daemon up. Still no supervisor: the daemon is not
   restarted by systemd, only by the next operation that needs it.
-- **Storage** — `schemaVersion`, with a file from a newer build refused rather
+- **Storage**, `schemaVersion`, with a file from a newer build refused rather
   than half-read, and a versionless file loaded, stamped and kept. Single JSON
   file still; the read path is the seam to change when it stops being enough.
-- **Authorization** — one `gate()` predicate, so 401 precedes 403 structurally
+- **Authorization**, one `gate()` predicate, so 401 precedes 403 structurally
   instead of by convention, plus a throttle on the auth path.
-- **Events** — one outbound path: completion and daemon death both go through the
+- **Events**, one outbound path: completion and daemon death both go through the
   push channel and the audit trail.
-- **Evidence** — 18 checks, including a static accessibility scan that verifies
+- **Evidence**, 18 checks, including a static accessibility scan that verifies
   itself, performance budgets, and a backup/restore round trip.
 
 ## What the roadmap still adds to this picture
 
 - **Standalone terminals**: a session that belongs to a *person* rather than a
-  repository, several at once, with names. The daemon needs no change — it takes
-  an id, a cwd and a command, and does not care what the id means — so this is a
+  repository, several at once, with names. The daemon needs no change, it takes
+  an id, a cwd and a command, and does not care what the id means, so this is a
   model and UI change in the server and the dashboard.
 - **A supervisor for the daemon** with `Restart=on-failure`, so a death is
   repaired rather than merely reported.

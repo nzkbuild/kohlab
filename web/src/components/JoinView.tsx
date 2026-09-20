@@ -8,7 +8,7 @@ import { Button } from "./ui";
 /**
  * Redeeming an invitation.
  *
- * Rendered before the key gate, because whoever opens this link has no key yet —
+ * Rendered before the key gate, because whoever opens this link has no key yet ,
  * that is what the link is for. The token arrives in the URL fragment, which is
  * never sent to the server, so it cannot appear in an access log.
  *
@@ -63,7 +63,7 @@ export default function JoinView() {
             <p className="mt-1 text-xs text-text-muted">nothing to accept</p>
             <p className="mt-5 flex items-start gap-1.5 text-2xs text-status-danger">
               <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
-              This link is missing its invitation. It may have been truncated — ask the person who
+              This link is missing its invitation. It may have been truncated, ask the person who
               invited you to send it again, and open it exactly as it arrives.
             </p>
           </>

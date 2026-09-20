@@ -34,7 +34,7 @@ const SESSIONS = new Map(); // id -> { pty, buffer: Buffer[], screen, serializer
  * Last-resort containment.
  *
  * This process owns every live PTY, so an unhandled throw anywhere takes every
- * running agent down with it — the single worst outcome available here. Logging
+ * running agent down with it: the single worst outcome available here. Logging
  * and continuing is the better trade: a degraded screen model is recoverable
  * from the browser, a lost fleet is not. Same reasoning as `containFailure` in
  * server.ts, applied to the one process whose death is unrecoverable.
@@ -50,7 +50,7 @@ process.on("unhandledRejection", (reason) => {
  * Screen models, not byte windows.
  *
  * `sess.buffer` is a rolling window trimmed from the front, so replaying it
- * cannot rebuild a full-screen TUI — the screen's current state depends on bytes
+ * cannot rebuild a full-screen TUI: the screen's current state depends on bytes
  * that scrolled out. A headless terminal holds the rendered grid instead, so a
  * reattach can be handed the screen itself.
  *
@@ -127,7 +127,7 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
     else return { error: `session already exists: ${id}` };
   }
   // apply resource caps: `timeout` for wall-clock; a wrapper shell applies
-  // `ulimit -d` (memory, RLIMIT_DATA — constrains Node's heap, unlike -v which
+  // `ulimit -d` (memory, RLIMIT_DATA: constrains Node's heap, unlike -v which
   // Node's V8 reservation bypasses) and `ulimit -u` (max procs) before exec'ing.
   const lim = limits || {};
   let argv = cmd;
@@ -154,7 +154,7 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
       ...(uid ? { uid } : {}),
       ...(gid ? { gid } : {}),
     });
-    // `allowProposedApi` is REQUIRED by @xterm/headless v6 — without it even a
+    // `allowProposedApi` is REQUIRED by @xterm/headless v6: without it even a
     // plain write() throws, and SerializeAddon refuses to load at all.
     const screen = new Terminal({
       cols: cols || 80,
@@ -184,7 +184,7 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
     p.onExit(({ exitCode }) => {
       sess.exited = true;
       broadcast(id, { type: "exit", id, code: exitCode });
-      // Capture the final screen while the model is still alive — a finished
+      // Capture the final screen while the model is still alive: a finished
       // workspace should still show what the agent did, which the byte buffer
       // never could.
       sess.screen.write("", () => {
@@ -220,7 +220,7 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
  * This was a single `client` overwritten by each new connection, so an earlier
  * subscriber silently stopped receiving output. Worse, when a socket died the
  * reference lingered: the next write raised EPIPE, and with no 'error' handler
- * on the socket that became an unhandled event that KILLED THE DAEMON — taking
+ * on the socket that became an unhandled event that KILLED THE DAEMON: taking
  * every live agent session with it. That is reachable in production whenever the
  * server dies abruptly (kill -9, OOM) and leaves the daemon holding a dead
  * subscriber.
@@ -241,7 +241,7 @@ function broadcast(id, msg) {
 const server = net.createServer((sock) => {
   clients.add(sock);
   // An 'error' with no listener is fatal to the process. A subscriber dropping
-  // must never be able to take the daemon — and every agent — down with it.
+  // must never be able to take the daemon (and every agent) down with it.
   sock.on("error", () => {
     clients.delete(sock);
   });
@@ -310,7 +310,7 @@ function handle(msg, sock) {
       const s = SESSIONS.get(msg.id);
       if (!s) {
         // A finished session is gone from SESSIONS, but its final screen is
-        // retained — so a stopped workspace still shows its output instead of
+        // retained: so a stopped workspace still shows its output instead of
         // replaying nothing.
         const retained = retainedScreens.get(msg.id);
         if (retained && msg.replay !== false) {
@@ -331,7 +331,7 @@ function handle(msg, sock) {
       // so far rather than lagging behind the pending writes.
       s.screen.write("", () => {
         // This runs a tick later, so the caller may already be gone. Writes past
-        // this point would raise EPIPE on a dead socket — contained by the
+        // this point would raise EPIPE on a dead socket: contained by the
         // 'error' listener, but there is nothing to say to a disconnected client.
         if (sock.destroyed) return;
         try {
@@ -362,7 +362,7 @@ function handle(msg, sock) {
       const sessions = [...SESSIONS.keys()].map((id) => {
         const s = SESSIONS.get(id);
         // Screen and PTY dimensions are reported together so the invariant that
-        // matters — the model tracks the PTY — is observable and testable. It is
+        // matters (the model tracks the PTY) is observable and testable. It is
         // not derivable from the byte stream: the PTY's own width does the
         // wrapping, so a divergent model produces a byte-identical replay.
         return {

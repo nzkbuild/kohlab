@@ -51,7 +51,7 @@ interface ActivityEntry {
   time: number;
 }
 
-/** The timeline is derived from workspace timestamps — there is no event feed. */
+/** The timeline is derived from workspace timestamps, there is no event feed. */
 function buildActivity(workspaces: Workspace[]): ActivityEntry[] {
   const entries: ActivityEntry[] = [];
   for (const w of workspaces) {
@@ -93,7 +93,7 @@ export default function Dashboard() {
   const activity = useMemo(() => buildActivity(workspaces), [workspaces]);
 
   // A chosen tab sticks. Until the operator chooses, the queue decides, and an
-  // empty queue falls through to whatever is actually live — never a blank table.
+  // empty queue falls through to whatever is actually live: never a blank table.
   const [picked, setPicked] = useState<WorkspaceStatus | null>(null);
   const tab = picked ?? TABS.find((status) => counts[status] > 0) ?? "needs-review";
 
@@ -297,7 +297,7 @@ export default function Dashboard() {
               />
               {activity.length === 0 ? (
                 <p className="px-3.5 py-4 text-sm text-text-muted">
-                  Nothing yet — activity appears here as agents start and finish.
+                  Nothing yet, activity appears here as agents start and finish.
                 </p>
               ) : (
                 <ul>
@@ -328,7 +328,7 @@ export default function Dashboard() {
               {agentsError ? (
                 <>
                   <p className="text-sm text-status-danger" role="alert">
-                    Could not read agent status — {agentsError}
+                    Could not read agent status, {agentsError}
                   </p>
                   <Button size="sm" onClick={loadAgents}>
                     retry
@@ -338,7 +338,7 @@ export default function Dashboard() {
                 <span className="text-sm text-text-muted">checking…</span>
               ) : agentEntries.length === 0 ? (
                 <span className="text-sm text-text-muted">
-                  This server reports no agents installed — install one from the workspace setup steps.
+                  This server reports no agents installed, install one from the workspace setup steps.
                 </span>
               ) : (
                 agentEntries.map(([name, installed]) => (
@@ -347,7 +347,7 @@ export default function Dashboard() {
                     className={cn("chip", installed ? AGENT_CHIP.installed : AGENT_CHIP.missing)}
                   >
                     <span className="chip-dot" aria-hidden="true" />
-                    {name} — {installed ? "installed" : "missing"}
+                    {name}, {installed ? "installed" : "missing"}
                   </span>
                 ))
               )}

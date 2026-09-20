@@ -17,8 +17,8 @@ interface State {
  *
  * Without a boundary a single throwing component blanks the entire app; the
  * user loses their workspace list, their terminal, and any way to recover
- * except a full reload. A boundary here keeps the shell — and every sibling
- * pane — alive, and offers a retry that remounts just this subtree.
+ * except a full reload. A boundary here keeps the shell: and every sibling
+ * pane: alive, and offers a retry that remounts just this subtree.
  */
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null };

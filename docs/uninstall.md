@@ -14,9 +14,9 @@ It asks first, then:
 | The service | `systemctl disable --now kohlab` |
 | The unit file | `/etc/systemd/system/kohlab.service` is removed, daemon reloaded |
 | The command | `/usr/local/bin/kohlab` is removed (skip with `--no-command`) |
-| The pty daemon | `pty-daemon.cjs` is stopped — nothing supervises it, so nothing else would |
+| The pty daemon | `pty-daemon.cjs` is stopped, nothing supervises it, so nothing else would |
 
-**Kept:** your checkout (`~/kohlab`) and your entire state directory — every
+**Kept:** your checkout (`~/kohlab`) and your entire state directory, every
 workspace, member, and audit event. Re-running the installer brings it all back,
 including the access key, because none of it was touched.
 
@@ -25,7 +25,7 @@ Say no at the prompt and nothing happens at all.
 ## What is not covered
 
 Workspaces live in member homes (`/home/koh-<user>/`) and in your repositories,
-not in the checkout. An uninstall does not remove OS accounts or homes — that is
+not in the checkout. An uninstall does not remove OS accounts or homes, that is
 `kohlab user rm <id>`, which is a deliberate act with its own confirmation, and it
 takes a member's work with it.
 
@@ -35,7 +35,7 @@ After the uninstall, by hand, and irreversible:
 
 ```bash
 # Your workspaces and their git branches. In a legacy (path-repository) layout
-# they are worktrees of YOUR repo — remove them with `kohlab workspace remove`
+# they are worktrees of YOUR repo: remove them with `kohlab workspace remove`
 # instead, which cleans the git bookkeeping up as well.
 rm -rf /root/.kohlab           # state, members, audit trail, key
 

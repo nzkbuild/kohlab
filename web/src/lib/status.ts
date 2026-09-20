@@ -1,7 +1,7 @@
 import type { Workspace } from "../types";
 
 /**
- * Workspace lifecycle — the product model:
+ * Workspace lifecycle: the product model:
  *   create → running → needs-review → committed   (or → stopped clean)
  *
  * Derivation is pure and cheap: running wins, then needs-review (the agent

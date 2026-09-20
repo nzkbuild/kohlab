@@ -46,7 +46,7 @@ function Step({
 
 /**
  * First run. The empty state is the base layer and stands on its own; the
- * three-step guide is an optional layer opened from it, never a gate — the app
+ * three-step guide is an optional layer opened from it, never a gate: the app
  * is fully usable with the guide closed or abandoned halfway.
  */
 export default function Onboarding() {
@@ -63,14 +63,14 @@ export default function Onboarding() {
         <header className="mb-4">
           <h1 className="surface-title">Workspaces</h1>
           <p className="surface-description">
-            One task, one repository, one agent — each in its own isolated worktree.
+            One task, one repository, one agent, each in its own isolated worktree.
           </p>
         </header>
 
         <EmptyState
           icon={<Terminal size={18} />}
           title="No workspaces yet"
-          description="A workspace is one task, one repository and one agent. The three steps below take about two minutes — or skip them entirely and explore first."
+          description="A workspace is one task, one repository and one agent. The three steps below take about two minutes, or skip them entirely and explore first."
           action={
             <>
               <Button
@@ -103,7 +103,7 @@ export default function Onboarding() {
             <Step
               n={2}
               title="Create a workspace"
-              description="One task, one repository, one agent. Creating the workspace starts the agent — there is nothing to launch afterwards."
+              description="One task, one repository, one agent. Creating the workspace starts the agent, there is nothing to launch afterwards."
               onSkip={skip}
             >
               {/* No cancel here: the step's own skip and "hide the guide" are the
@@ -127,7 +127,7 @@ export default function Onboarding() {
                   its diff, so you read the change before anything else happens to it.
                 </li>
                 <li>
-                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically —
+                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically ,
                   you write the message and press commit.
                 </li>
               </ul>

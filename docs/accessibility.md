@@ -7,8 +7,8 @@
 | Text meets WCAG 2.2 **AA** contrast | `scripts/check-contrast.mjs` | Every design token pair in both themes, computed from the token values |
 | No markup-level accessibility faults | `scripts/check-a11y-static.mjs` | 36 source files: clickable non-interactive elements, missing `alt`, unlabelled controls, positive `tabindex`, removed focus ring, missing `lang`/`title`, no live region |
 | State changes are announced | `web/src/lib/announce.ts` + the live region the scan requires | Screen-reader announcements for finished / needs-review / committed, with a pause control (SC 2.2.2) |
-| The key entry is not a memory test | `AuthGate.tsx` — `autocomplete="current-password"` | SC 3.3.8 (Accessible Authentication) |
-| The command palette follows the ARIA combobox pattern | `CommandPalette.tsx` — focus stays on the input, the active option is reported through `aria-activedescendant` | No focusable stop per result |
+| The key entry is not a memory test | `AuthGate.tsx`, `autocomplete="current-password"` | SC 3.3.8 (Accessible Authentication) |
+| The command palette follows the ARIA combobox pattern | `CommandPalette.tsx`, focus stays on the input, the active option is reported through `aria-activedescendant` | No focusable stop per result |
 
 ## What has **not** been verified
 
@@ -49,5 +49,5 @@ a clean codebase forever.
 
 Open an issue with what you were doing, what you expected, and what happened.
 Say which assistive technology and browser if you were using one. Reports about
-the gaps listed above are welcome — they are known, but a concrete instance is
+the gaps listed above are welcome, they are known, but a concrete instance is
 worth more than the category.

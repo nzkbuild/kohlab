@@ -8,7 +8,7 @@ import { STATUS_CHIP, STATUS_GLYPH, STATUS_LABEL, type WorkspaceStatus } from ".
 type ButtonVariant = "primary" | "secondary" | "quiet" | "danger";
 type ButtonSize = "md" | "sm";
 
-/** Fully static class strings — Tailwind cannot see interpolated names. */
+/** Fully static class strings, Tailwind cannot see interpolated names. */
 const BUTTON_VARIANT: Record<ButtonVariant, string> = {
   primary: "btn-primary",
   secondary: "btn-secondary",
@@ -22,7 +22,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   iconOnly?: boolean;
-  /** Required when iconOnly — the visible label is absent, the name is not. */
+  /** Required when iconOnly, the visible label is absent, the name is not. */
   "aria-label"?: string;
 }
 

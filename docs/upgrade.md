@@ -1,12 +1,12 @@
 # Upgrade
 
-**Publishing a release is a push.** Nothing else — no registry, no CI, no webhook.
+**Publishing a release is a push.** Nothing else, no registry, no CI, no webhook.
 
 ```bash
 # in your checkout of this repo, on your machine
 #   1. bump `version` in package.json
 #   2. add the section to CHANGELOG.md
-git commit -am "feat: v1.12.0 — ..."
+git commit -am "feat: v1.12.0, ..."
 git push origin main
 ```
 
@@ -19,7 +19,7 @@ the same thing from a terminal.
 
 - The server checks the upstream branch for new commits (cached for
   `RELEASE_CHECK_TTL`, default 5 minutes; the panel's re-check forces it). The
-  dashboard needs to reach `origin` — that is the only requirement.
+  dashboard needs to reach `origin`, that is the only requirement.
 - Applying an update is an **owner** action and is written to the audit trail.
   Without credentials the endpoint answers 401; with the wrong role, 403.
 - The run outlives its own restart: the reload kills the server that started the
@@ -34,8 +34,8 @@ kohlab update --check   # say what would happen, change nothing
 
 **Running agents are not interrupted.** Workspaces are separate git worktrees
 with their own branches, so no step here touches an agent's files. The reload
-restarts only the server process; the detached PTY daemon — and every live
-session — keeps running, which is what `KillMode=process` in the unit is for.
+restarts only the server process; the detached PTY daemon, and every live
+session, keeps running, which is what `KillMode=process` in the unit is for.
 
 One command, six steps:
 
@@ -45,11 +45,11 @@ One command, six steps:
 | **check** | fetches, and stops if there are no new commits behind upstream. |
 | **download** | backs up the state files, then fast-forwards the checkout. |
 | **install** | `bun install`, then `cd web && bun install && bun run build`. |
-| **reload** | `systemctl restart kohlab`, then polls `http://127.0.0.1:$PORT/` until it actually answers — `is-active` alone is not proof, since `Type=simple` marks the unit active the moment the process forks. |
-| **rollback** | if install, build or reload fails, the checkout returns to the commit it started from, is rebuilt, and is reloaded — so the known-good version is the one serving. |
+| **reload** | `systemctl restart kohlab`, then polls `http://127.0.0.1:$PORT/` until it actually answers, `is-active` alone is not proof, since `Type=simple` marks the unit active the moment the process forks. |
+| **rollback** | if install, build or reload fails, the checkout returns to the commit it started from, is rebuilt, and is reloaded, so the known-good version is the one serving. |
 
 Versioning lives in `package.json`. What counts as an update is always *commits
-behind upstream* — never a version string — and a downgrade is refused, because a
+behind upstream* (never a version string) and a downgrade is refused, because a
 lower upstream version means you are ahead, not that you are behind.
 
 It also refuses a reload when the unit's `KillMode` would kill the detached PTY
@@ -73,7 +73,7 @@ newly created agent the wrong base.
 ## Before you upgrade
 
 - **Back up the right directory.** Workspaces and state live in the directory the
-  server was started with as `WORKS_DIR` — **not** necessarily the repo-local
+  server was started with as `WORKS_DIR`, **not** necessarily the repo-local
   `.works/`. The updater backs up `state.json`, `users.json` and `audit.log`
   itself, from wherever the unit says `WORKS_DIR` is. For a full copy, read that
   path from the unit:
@@ -89,7 +89,7 @@ newly created agent the wrong base.
 
   `git pull` never touches it either way.
 
-- **Running agent sessions survive a restart of the *server* — but only if the
+- **Running agent sessions survive a restart of the *server*, but only if the
   daemon is left alive.** The PTY daemon is detached and holds every live
   session, and the server adopts it on start. systemd's default
   `KillMode=control-group`, however, signals the whole unit cgroup, so

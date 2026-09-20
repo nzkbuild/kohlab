@@ -97,7 +97,7 @@ check("no-newline marker is dropped", !n.modified.includes("\\") && !n.original.
 
 // --- payloads that are not a diff at all ------------------------------------
 check("binary prose yields empty sides", splitUnifiedDiff("Binary files /dev/null and b/x differ").original === "");
-check("oversize stub yields empty sides", splitUnifiedDiff("new file — 4194304 bytes, too large to preview").modified === "");
+check("oversize stub yields empty sides", splitUnifiedDiff("new file, 4194304 bytes, too large to preview").modified === "");
 check("empty input is safe", splitUnifiedDiff("").original === "" && splitUnifiedDiff("").modified === "");
 
 // --- language mapping --------------------------------------------------------

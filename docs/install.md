@@ -4,7 +4,7 @@ Kohlab is a single Bun server. No database, no containers, no desktop app.
 
 ## Requirements
 
-- **bun** — installed automatically if missing (`curl -fsSL https://bun.sh/install | bash`)
+- **bun**, installed automatically if missing (`curl -fsSL https://bun.sh/install | bash`)
 - **git**
 - Linux for the service; the server itself runs anywhere bun does
 
@@ -44,7 +44,7 @@ bash install.sh
 
 `KOHLAB_HOME` (checkout), `KOHLAB_REPO`, `KOHLAB_BIN_DIR`, `KOHLAB_UNIT_DIR` and
 `KOHLAB_PORT` override the defaults. Setting `KOHLAB_UNIT_DIR` to anything other
-than `/etc/systemd/system` writes the unit file without touching systemd — useful
+than `/etc/systemd/system` writes the unit file without touching systemd, useful
 for provisioning an image.
 
 The server itself takes `PORT` (7676) and `HOST` (`0.0.0.0`). `HOST=127.0.0.1`
@@ -111,4 +111,4 @@ kohlab logs <id>          # what the agent printed
 kohlab update             # or --check to see what it would do
 ```
 
-See [upgrade.md](upgrade.md) — including over-the-air updates from the dashboard.
+See [upgrade.md](upgrade.md), including over-the-air updates from the dashboard.

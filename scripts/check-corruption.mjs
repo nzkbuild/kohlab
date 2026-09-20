@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Corruption handling — what happens when a state file is unreadable.
+ * Corruption handling: what happens when a state file is unreadable.
  *
  * Run:  node scripts/check-corruption.mjs
  *
  * Three properties, each of which was wrong at some point:
  *   1. A corrupt state.json fails LOUDLY rather than presenting an empty fleet.
- *   2. A corrupt users.json FAILS CLOSED — it used to read as "no users", which
+ *   2. A corrupt users.json FAILS CLOSED: it used to read as "no users", which
  *      made authRequired() false and let anonymous requests mutate.
  *   3. Both survive a RESTART. An earlier fix quarantined the damaged file by
  *      renaming it aside; the "we are damaged" signal was module state, so a
- *      restart cleared it and the renamed-away file simply read as absent —
+ *      restart cleared it and the renamed-away file simply read as absent ,
  *      re-opening anonymous access, and turning a corrupt state file into a
  *      working-looking empty fleet. The file is now left in place.
  */
@@ -52,7 +52,7 @@ async function startServer(port, worksDir) {
     // HOST is pinned to loopback: bound anywhere else, a keyless, userless server
     // now generates itself a key (lib.ts resolveAccessKey), which is the correct
     // behaviour but not what this check is about. Loopback is the documented
-    // case where an open server is acceptable — the only caller is on the box.
+    // case where an open server is acceptable: the only caller is on the box.
     env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", WORKS_DIR: worksDir, PTY_SOCKET: join(worksDir, "pty.sock") },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -75,7 +75,7 @@ const status = (port, path) =>
     .then((r) => r.status)
     .catch(() => 0);
 
-/** Read a file without throwing — a missing file is itself a finding. */
+/** Read a file without throwing, a missing file is itself a finding. */
 const safeRead = (path) => {
   try {
     return readFileSync(path, "utf8");
@@ -132,7 +132,7 @@ try {
   check(
     "a restart does not silently start from an empty fleet",
     afterRestartA !== 200,
-    `got ${afterRestartA} — 200 would mean a corrupt state file quietly became an empty, working fleet`,
+    `got ${afterRestartA}, 200 would mean a corrupt state file quietly became an empty, working fleet`,
   );
 
   kill(a);
@@ -146,7 +146,7 @@ try {
   writeFileSync(join(worksB, "users.json"), GARBAGE_USERS);
   await sleep(250);
   check(
-    "a corrupt users.json FAILS CLOSED — the FIRST request is refused",
+    "a corrupt users.json FAILS CLOSED, the FIRST request is refused",
     (await status(PORT_B, "/api/workspaces")) === 401,
     "200 would mean a damaged auth file disabled authentication",
   );
@@ -162,7 +162,7 @@ try {
   check(
     "a RESTART does not re-open anonymous access",
     (await status(PORT_B, "/api/workspaces")) === 401,
-    "200 would mean a restart cleared the latch and re-opened auth — the bug that renaming the file caused",
+    "200 would mean a restart cleared the latch and re-opened auth, the bug that renaming the file caused",
   );
   const required = await fetch(`http://127.0.0.1:${PORT_B}/api/auth/required`).then((r) => r.json());
   check("auth is reported as required after the restart", required.required === true, JSON.stringify(required));

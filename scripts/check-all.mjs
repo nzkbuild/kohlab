@@ -44,7 +44,7 @@ function run(name, cmd, args, cwd = ROOT) {
 /**
  * Kill the detached PTY daemon this run spawned.
  *
- * The server spawns it detached so it outlives the server — that is the
+ * The server spawns it detached so it outlives the server: that is the
  * product's promise, not a bug. In a throwaway run it simply leaks: one daemon
  * per check run stays behind, holding memory and a stale socket, and the
  * documented way to end agents (`pkill -f pty-daemon.cjs`) would then take out
@@ -59,7 +59,7 @@ function killDaemon(socketPath) {
       if (!readFileSync(`/proc/${pid}/environ`, "utf8").includes(`PTY_SOCKET=${socketPath}`)) continue;
       process.kill(Number(pid), "SIGTERM");
     } catch {
-      /* gone, or not readable — either way not ours */
+      /* gone, or not readable, either way not ours */
     }
   }
 }
@@ -71,7 +71,7 @@ const works = join(tmp, "works");
 let server = null;
 
 try {
-  banner("kohlab — full check suite");
+  banner("kohlab, full check suite");
 
   banner("static checks");
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
@@ -87,7 +87,7 @@ try {
   run("merge last mile", "node", ["scripts/check-merge.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
-  // Needs root, and creates two throwaway OS accounts that it removes again — it
+  // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);
   run("invitations (root)", "node", ["scripts/check-invite.mjs"]);

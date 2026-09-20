@@ -48,7 +48,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * Command palette — an APG combobox + listbox (popup) with grouped options.
+ * Command palette: an APG combobox + listbox (popup) with grouped options.
  *
  * The combobox role lives on the input itself and DOM focus never leaves it:
  * the active option is expressed as `aria-activedescendant`, never as focus, so
@@ -258,7 +258,7 @@ export default function CommandPalette() {
           <div className="max-h-[60vh] overflow-y-auto p-1.5">
             {/* `option` has no native element outside <select>, so the listbox and
                 its options are ARIA roles on plain elements.
-                a11y-ok: they are deliberately NOT focusable — in the ARIA combobox
+                a11y-ok: they are deliberately NOT focusable, in the ARIA combobox
                 pattern focus stays on the input above and movement is announced via
                 aria-activedescendant. Giving the options tabIndex would add a stop
                 for every result and break that pattern. */}

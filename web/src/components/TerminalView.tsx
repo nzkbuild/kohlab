@@ -15,7 +15,7 @@ interface Props {
 
 /**
  * Socket state as seen by this pane. Explicit and driven by the socket's own
- * lifecycle — never by `navigator.onLine`, which is not a reachability signal.
+ * lifecycle: never by `navigator.onLine`, which is not a reachability signal.
  */
 type SocketState = "connecting" | "live" | "reconnecting" | "offline";
 
@@ -42,7 +42,7 @@ const OFFLINE_AFTER_ATTEMPTS = 4;
 /**
  * Resolve a semantic token to a colour string the terminal can parse.
  *
- * xterm takes JS colour values, and the tokens are OKLCH custom properties — so
+ * xterm takes JS colour values, and the tokens are OKLCH custom properties: so
  * the browser does the conversion (paint one pixel, read it back) rather than a
  * literal being pasted into this file. Rounded through 8-bit RGB, which is all a
  * terminal palette can express anyway.
@@ -155,7 +155,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         e.preventDefault();
       }
     };
-    // Typed input goes out as a bare string — the same frame shape as paste. The
+    // Typed input goes out as a bare string: the same frame shape as paste. The
     // subscription is per-mount and must be released, because the terminal it
     // listens on is cached and outlives this effect: without dispose(), every
     // remount would send a keystroke once more.
@@ -231,7 +231,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         if (!mountedRef.current) return;
         // only announce on the first drop; later retries stay silent. Dim, not a
         // colour: the buffer must not carry a palette the tokens do not own.
-        if (attempts === 0) term.write("\r\n\x1b[2m[disconnected — retrying]\x1b[22m\r\n");
+        if (attempts === 0) term.write("\r\n\x1b[2m[disconnected, retrying]\x1b[22m\r\n");
         wsRef.current = null;
         attempts += 1;
         setSocket(attempts >= OFFLINE_AFTER_ATTEMPTS ? "offline" : "reconnecting");

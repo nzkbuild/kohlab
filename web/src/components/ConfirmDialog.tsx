@@ -17,7 +17,7 @@ interface Props {
  *
  * Radix owns the semantics: `role="alertdialog"`, focus trap, focus restore,
  * Escape, and `aria-labelledby` / `aria-describedby` wired from Title and
- * Description — which is why those must be Dialog.Title / Dialog.Description
+ * Description: which is why those must be Dialog.Title / Dialog.Description
  * and not plain headings.
  *
  * The caller is responsible for naming the specific object in `description`

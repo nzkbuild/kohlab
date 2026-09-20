@@ -21,7 +21,7 @@ import { Button, SkeletonRows } from "./ui";
  * release notes for exactly the gap being closed.
  *
  * While an update runs the server restarts underneath the page, so the panel
- * polls rather than streams, and the outcome is read back from the run's log —
+ * polls rather than streams, and the outcome is read back from the run's log ,
  * nothing in memory on either side survives the restart.
  */
 export default function UpdatePanel() {
@@ -63,7 +63,7 @@ export default function UpdatePanel() {
     setBusy(true);
     try {
       await api.applyUpdate();
-      announce("update started — agents keep running; this page reconnects on its own");
+      announce("update started, agents keep running; this page reconnects on its own");
       await load(true);
     } catch (e) {
       setError((e as Error).message);
@@ -84,7 +84,7 @@ export default function UpdatePanel() {
   const failed =
     status?.unfinished === true || (status?.exit !== null && status?.exit !== undefined && status.exit !== 0);
   const lastRun = status?.unfinished
-    ? { danger: true, text: "The last update did not finish — the log below is all it left" }
+    ? { danger: true, text: "The last update did not finish, the log below is all it left" }
     : status?.finishedAt
       ? failed
         ? { danger: true, text: `Last update ${relativeTime(status.finishedAt)} failed (exit ${status.exit})` }

@@ -21,7 +21,7 @@ const ESC = /\u001B[@-Z\\-_]/g;
 const LEADING_TIME = /^\[?(\d{4}-\d{2}-\d{2}[T ])?(\d{2}:\d{2}:\d{2})(?:[.,]\d{1,6})?\]?\s*/;
 
 interface LogLine {
-  /** 1-based line number — the gutter keeps a hold on the reader's place. */
+  /** 1-based line number, the gutter keeps a hold on the reader's place. */
   n: number;
   time: string | null;
   text: string;
@@ -147,7 +147,7 @@ export default function LogView({ workspaceId }: Props) {
 
       {error ? (
         <div role="alert" className="flex items-center gap-2 border-b border-line-subtle px-3 py-1.5 text-xs text-status-danger">
-          <span className="min-w-0 flex-1">log unavailable — {error}</span>
+          <span className="min-w-0 flex-1">log unavailable, {error}</span>
           <Button size="sm" variant="secondary" onClick={() => setNonce((n) => n + 1)}>
             retry
           </Button>

@@ -20,7 +20,7 @@ const PERMISSION_LABEL: Record<Permission, string> = {
   denied: "blocked",
 };
 
-/** Chip class per permission state — static map, Tailwind cannot read a template. */
+/** Chip class per permission state, static map, Tailwind cannot read a template. */
 const PERMISSION_CHIP: Record<Permission, string> = {
   unsupported: "chip-stopped",
   default: "chip-stopped",
@@ -134,13 +134,13 @@ export default function Settings() {
                 </p>
                 <p className="mt-1 text-2xs leading-relaxed text-text-muted">
                   A ping when an agent finishes and its workspace needs review while this tab is
-                  hidden. Nothing is sent while the tab is in front of you — that is what the
+                  hidden. Nothing is sent while the tab is in front of you, that is what the
                   sidebar badge is for.
                 </p>
                 {permission === "denied" ? (
                   <p className="mt-1.5 flex items-start gap-1.5 text-2xs text-status-danger">
                     <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
-                    The browser will not ask again — allow notifications for this site in your browser
+                    The browser will not ask again, allow notifications for this site in your browser
                     settings, then reload.
                   </p>
                 ) : null}
