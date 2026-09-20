@@ -7,6 +7,7 @@ import { ROUTE_LABEL } from "./lib/route";
 import { workspaceStatus } from "./lib/status";
 import { api } from "./api";
 import AuthGate from "./components/AuthGate";
+import JoinView from "./components/JoinView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import CommandPalette from "./components/CommandPalette";
@@ -59,6 +60,10 @@ export default function App() {
   useEffect(() => {
     setNavOpen(false);
   }, [route]);
+
+  // An invitation is redeemed before anyone has a key: the token is the
+  // credential, so this route has to render ahead of the gate.
+  if (route.kind === "join") return <JoinView />;
 
   if (!isAuthed) return <AuthGate />;
 

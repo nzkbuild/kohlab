@@ -14,7 +14,7 @@ import { announce } from "../lib/announce";
 import { clockTime } from "../lib/format";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
-import { Button, Chip, Field, Panel, PanelHead, SkeletonRows } from "./ui";
+import { Button, Field, Panel, PanelHead, SkeletonRows } from "./ui";
 
 /** Static dot colour per audit action — Tailwind cannot read an interpolated class. */
 const ACTION_DOT: Record<string, string> = {
@@ -58,7 +58,11 @@ export default function Team() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
-  const [freshKey, setFreshKey] = useState<{ id: string; name: string; key: string } | null>(null);
+  const [freshLink, setFreshLink] = useState<{ id: string; name: string; url: string; expires: number } | null>(null);
+  /** Whether this server can give a new member their own OS account. */
+  const [canInvite, setCanInvite] = useState(true);
+  const [busyRole, setBusyRole] = useState<string | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
@@ -71,7 +75,7 @@ export default function Team() {
     const [u, a] = await Promise.all([
       api
         .users()
-        .then((res) => ({ ok: true as const, users: res.users }))
+        .then((res) => ({ ok: true as const, users: res.users, canInvite: res.canInvite }))
         .catch((e: unknown) => ({ ok: false as const, message: (e as Error).message })),
       api
         .audit()
@@ -80,6 +84,7 @@ export default function Team() {
     ]);
     if (u.ok) {
       setUsers(u.users);
+      setCanInvite(u.canInvite);
       setUsersError(null);
     } else {
       setUsers(null);
@@ -100,7 +105,12 @@ export default function Team() {
 
   const canManage = users !== null;
 
-  const add = async (e: React.FormEvent) => {
+  /**
+   * Invite, rather than mint a key and hand it over. The link carries the
+   * credential to the person it is for, and is spent when they open it — nobody
+   * has to copy a secret into a chat window.
+   */
+  const invite = async (e: React.FormEvent) => {
     e.preventDefault();
     const userId = id.trim();
     const userName = name.trim();
@@ -108,16 +118,36 @@ export default function Team() {
     setAdding(true);
     setAddError(null);
     try {
-      const res = await api.addUser({ id: userId, name: userName, role });
-      setFreshKey({ id: res.user.id, name: res.user.name, key: res.key });
+      const res = await api.invite({ id: userId, name: userName, role });
+      setFreshLink({
+        id: userId,
+        name: userName,
+        url: `${location.origin}${res.path}`,
+        expires: res.expires,
+      });
       setId("");
       setName("");
-      announce(`added ${res.user.id} as ${res.user.role}`);
+      announce(`invitation created for ${userId}`);
       await load();
     } catch (err) {
       setAddError((err as Error).message);
     } finally {
       setAdding(false);
+    }
+  };
+
+  const changeRole = async (u: TeamUser, next: string) => {
+    if (busyRole || next === u.role) return;
+    setBusyRole(u.id);
+    setRoleError(null);
+    try {
+      await api.setRole(u.id, next);
+      announce(`${u.id} is now ${next}`);
+      await load();
+    } catch (e) {
+      setRoleError((e as Error).message);
+    } finally {
+      setBusyRole(null);
     }
   };
 
@@ -138,13 +168,13 @@ export default function Team() {
     }
   };
 
-  const copyKey = async () => {
-    if (!freshKey) return;
+  const copyLink = async () => {
+    if (!freshLink) return;
     setCopyError(null);
     try {
-      await navigator.clipboard.writeText(freshKey.key);
+      await navigator.clipboard.writeText(freshLink.url);
       setCopied(true);
-      announce(`key for ${freshKey.id} copied`);
+      announce(`invitation link for ${freshLink.id} copied`);
     } catch (e) {
       setCopyError((e as Error).message);
     }
@@ -168,8 +198,8 @@ export default function Team() {
               <div className="flex flex-col gap-3">
                 {users.length === 0 ? (
                   <p className="text-xs leading-relaxed text-text-muted">
-                    No teammates yet. Add one to share this server — each gets their own key and OS
-                    account.
+                    It is just you. Invite someone and they get their own account on this box — you
+                    never see their files, and they never see yours.
                   </p>
                 ) : (
                   <table className="data-table w-full">
@@ -187,19 +217,33 @@ export default function Team() {
                     <tbody>
                       {users.map((u) => (
                         <tr key={u.id}>
-                          <td className="mono text-text-primary">{u.id}</td>
+                          <td className="mono text-text-primary">
+                            {u.id}
+                            {u.pending ? (
+                              <span className="chip chip-review ms-2 align-middle">
+                                <span className="chip-dot" aria-hidden="true" />
+                                invited
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="text-text-secondary">{u.name}</td>
                           <td>
-                            <Chip>
-                              {u.role === "owner" ? (
-                                <>
-                                  <Key size={11} aria-hidden="true" />
-                                  owner
-                                </>
-                              ) : (
-                                u.role
-                              )}
-                            </Chip>
+                            <label className="sr-only" htmlFor={`role-${u.id}`}>
+                              Role for {u.name} ({u.id})
+                            </label>
+                            <select
+                              id={`role-${u.id}`}
+                              className="field-select"
+                              value={u.role}
+                              disabled={busyRole === u.id}
+                              onChange={(e) => void changeRole(u, e.target.value)}
+                            >
+                              {ROLES.map((r) => (
+                                <option key={r} value={r}>
+                                  {r === "owner" ? "owner" : r}
+                                </option>
+                              ))}
+                            </select>
                           </td>
                           <td className="text-end">
                             <Button
@@ -222,7 +266,14 @@ export default function Team() {
                   </table>
                 )}
 
-                <form className="flex flex-wrap items-end gap-2" onSubmit={add}>
+                {!canInvite ? (
+                  <p className="text-2xs leading-relaxed text-status-review">
+                    This server cannot create member accounts, so an invited member would share the
+                    server&apos;s own account instead of getting their own. Run kohlab as root (the
+                    installer&apos;s service unit does) and reload to enable invitations.
+                  </p>
+                ) : null}
+                <form className="flex flex-wrap items-end gap-2" onSubmit={invite}>
                   <Field label="User id" htmlFor="team-user-id" help="also the OS account name">
                     <input
                       id="team-user-id"
@@ -255,15 +306,24 @@ export default function Team() {
                       ))}
                     </select>
                   </Field>
-                  <Button variant="primary" type="submit" disabled={adding || !id.trim() || !name.trim()}>
+                  <Button
+                    variant="primary"
+                    type="submit"
+                    disabled={adding || !canInvite || !id.trim() || !name.trim()}
+                  >
                     <UserPlus size={15} weight="bold" aria-hidden="true" />
-                    {adding ? "adding…" : "add member"}
+                    {adding ? "creating…" : "create invitation"}
                   </Button>
                 </form>
 
                 {addError ? (
                   <p role="alert" className="break-words text-2xs text-status-danger">
-                    could not add member: {addError}
+                    could not invite: {addError}
+                  </p>
+                ) : null}
+                {roleError ? (
+                  <p role="alert" className="break-words text-2xs text-status-danger">
+                    could not change the role: {roleError}
                   </p>
                 ) : null}
                 {revokeError ? (
@@ -346,22 +406,23 @@ export default function Team() {
         )}
       </div>
 
-      {/* One-time key: the only moment it exists in plaintext. */}
-      <Dialog.Root open={freshKey !== null} onOpenChange={(open) => !open && setFreshKey(null)}>
+      {/* One-time link: the token is stored as a hash, so this is the only
+          moment it exists in plaintext. */}
+      <Dialog.Root open={freshLink !== null} onOpenChange={(open) => !open && setFreshLink(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content className="dialog-content p-4">
             <Dialog.Title className="flex items-center gap-2 text-base font-semibold text-text-primary">
               <Key size={16} className="text-status-review" aria-hidden="true" />
-              Key for {freshKey?.name} ({freshKey?.id})
+              Invitation for {freshLink?.name} ({freshLink?.id})
             </Dialog.Title>
             <Dialog.Description className="mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-status-review">
               <ShieldWarning size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-              Shown once. The server stores only a hash — copy it now, because there is no way to
-              read it back later. If it is lost, revoke the member and add them again.
+              Send this to them. It works once and expires {freshLink ? new Date(freshLink.expires).toLocaleString() : ""} — the server stores only a hash, so it cannot be shown again. If it is
+              lost or already used, invite them again to get a new one.
             </Dialog.Description>
             <code className="mono mt-3 block break-all rounded-md border border-line-strong bg-surface-sunken px-2.5 py-2 text-xs text-text-primary">
-              {freshKey?.key}
+              {freshLink?.url}
             </code>
             {copyError ? (
               <p role="alert" className="mt-2 text-2xs text-status-danger">
@@ -369,9 +430,9 @@ export default function Team() {
               </p>
             ) : null}
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="secondary" size="sm" onClick={() => void copyKey()}>
+              <Button variant="secondary" size="sm" onClick={() => void copyLink()}>
                 <Copy size={14} aria-hidden="true" />
-                {copied ? "copied" : "copy key"}
+                {copied ? "copied" : "copy link"}
               </Button>
               <Dialog.Close asChild>
                 <Button variant="primary" size="sm">

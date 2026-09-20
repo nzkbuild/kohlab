@@ -1,6 +1,6 @@
 import type { AgentStatus, DiffFile, ReleaseStatus, TreeNode, Workspace } from "./types";
 
-export interface TeamUser { id: string; name: string; role: string; }
+export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
 
 let key = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "";
@@ -73,7 +73,29 @@ export const api = {
   file: (id: string, path: string) =>
     json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
   log: (id: string) => json<{ log: string }>(`/api/workspaces/${id}/log`),
-  users: () => json<{ users: TeamUser[] }>("/api/users"),
+  users: () => json<{ users: TeamUser[]; canInvite: boolean }>("/api/users"),
+  invite: (body: { id: string; name?: string; role?: string }) =>
+    json<{ id: string; role: string; expires: number; path: string }>("/api/invites", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /**
+   * Redeem an invitation. The one call that carries its own credential: the
+   * helper sends a stored key when there is one, and a joiner has none.
+   */
+  join: (token: string) =>
+    json<{ user: TeamUser; key: string }>("/api/join", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    }),
+  setRole: (id: string, role: string) =>
+    json<{ user: TeamUser }>(`/api/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role }),
+    }),
   addUser: (body: { id: string; name: string; role: string }) =>
     json<{ user: TeamUser; key: string }>("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   removeUser: (id: string) => json<{ ok: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
