@@ -52,6 +52,9 @@ const git = (args: string[], cwd: string) => execFileSync("git", args, { cwd, en
 
 const CHANGELOG_1_0 = `# Changelog
 
+All notable changes are documented here. This preamble must never be shown as
+release notes.
+
 ## [1.0.0] - 2026-09-19
 
 ### Added
@@ -60,6 +63,9 @@ const CHANGELOG_1_0 = `# Changelog
 `;
 
 const CHANGELOG_1_1 = `# Changelog
+
+All notable changes are documented here. This preamble must never be shown as
+release notes.
 
 ## [1.1.0] - 2026-09-20
 
@@ -112,6 +118,8 @@ try {
   check("it lists the pending commit", after.commits.length === 1 && after.commits[0].includes("feat: v1.1.0"), after.commits.join(" | "));
   check("the notes are the new release", after.notes.includes("1.1.0") && after.notes.includes("which is the news"), after.notes);
   check("the notes exclude the running release", !after.notes.includes("which is old news"), after.notes);
+  check("the notes exclude the changelog preamble", !after.notes.includes("This preamble must never be shown"), after.notes);
+  check("the notes start at a heading", after.notes.startsWith("## ["), after.notes.slice(0, 40));
 
   // the pure part, on its own
   check(

@@ -9,6 +9,18 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.12.1] - 2026-09-20
+
+### Fixed
+
+- **Release notes repeated the changelog's own preamble.** The Updates panel cut
+  the notes at the running version's heading but started them at the top of the
+  file, so every release would have opened with `# Changelog` and the versioning
+  philosophy paragraph. It now starts at the first `##` heading. Found by reading
+  the notes back through a scratch clone pinned to 1.11.0 — the same data a second
+  instance would see — rather than by trusting the fixture, whose changelog had no
+  preamble to exclude.
+
 ## [1.12.0] - 2026-09-20
 
 ### Added

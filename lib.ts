@@ -406,16 +406,23 @@ function headingVersion(line: string): string | null {
 }
 
 /**
- * What changed since `version`: the changelog from the top of the file down to,
- * but not including, that version's own heading. The file is newest-first, so
+ * What changed since `version`: the changelog from the first `##` heading down
+ * to, but not including, that version's own heading. The file is newest-first, so
  * this needs no version comparison — "newer than mine" is exactly what sits
  * above my heading.
+ *
+ * It starts at the first `##` heading rather than at the top of the file, so the
+ * boilerplate above it — `# Changelog`, the versioning philosophy paragraph — is
+ * not repeated into every release's notes. (An `## [Unreleased]` section sitting
+ * above the released ones IS included: those changes are part of what is coming.)
  */
 export function releaseNotes(changelog: string, version: string): string {
   const lines = changelog.split("\n");
   const cut = lines.findIndex((l) => headingVersion(l) === version);
   if (cut <= 0) return "";
-  return lines.slice(0, cut).join("\n").trim();
+  const from = lines.findIndex((l) => /^##\s/.test(l));
+  if (from < 0 || from >= cut) return "";
+  return lines.slice(from, cut).join("\n").trim();
 }
 
 /**
