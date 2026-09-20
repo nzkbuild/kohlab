@@ -3,9 +3,10 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
 import { basename, join } from "path";
+import { randomBytes } from "crypto";
 import { spawn, spawnSync } from "child_process";
 import { cwd } from "process";
 
@@ -39,12 +40,47 @@ const WORKS_DIR = resolveWorksDir();
 const STATE_FILE = join(WORKS_DIR, "state.json");
 const USERS_FILE = join(WORKS_DIR, "users.json");
 const AUDIT_FILE = join(WORKS_DIR, "audit.log");
+/** Where a key generated at startup is kept, when none was configured. */
+const KEY_FILE = join(WORKS_DIR, "key");
+
+/**
+ * The access key — or one generated on the spot, when this server is about to be
+ * reachable from somewhere other than this box with no authentication at all.
+ *
+ * Without a key and without named users, every route treats an anonymous caller
+ * as the owner, so the first person to find the port owns the machine. That is
+ * acceptable only on loopback, where the only caller is already on the box. Bound
+ * anywhere else — the default — it is not acceptable, and leaving it to a firewall
+ * the operator may not know they need is not a safety net.
+ *
+ * So: bound beyond loopback, keyless and userless, the server generates a key,
+ * stores it beside the state at 0600, and says so. Nothing else changes; a
+ * deployment that sets KOHLAB_KEY or has members is untouched.
+ */
+function resolveAccessKey(): string | undefined {
+  if (process.env.KOHLAB_KEY) return process.env.KOHLAB_KEY;
+  const host = process.env.HOST ?? "0.0.0.0";
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1") return undefined;
+  if (existsSync(USERS_FILE)) return undefined; // named users already gate every route
+  const key = randomBytes(24).toString("hex");
+  try {
+    mkdirSync(WORKS_DIR, { recursive: true, mode: 0o700 });
+    writeFileSync(KEY_FILE, key + "\n", { mode: 0o600 });
+    console.warn(
+      `[kohlab] no KOHLAB_KEY, and this server is reachable beyond localhost — generated one.\n` +
+        `[kohlab] it is in ${KEY_FILE}. Set KOHLAB_KEY yourself to choose your own.`,
+    );
+  } catch (e) {
+    console.warn(`[kohlab] no KOHLAB_KEY and this server is exposed; could not store one (${(e as Error).message}). Set KOHLAB_KEY.`);
+  }
+  return key;
+}
 /** Webhook URL to hit when an agent finishes (optional). */
 const NOTIFY_WEBHOOK = process.env.NOTIFY_WEBHOOK;
 /** Interval (ms) for the completion watcher. */
 const WATCH_INTERVAL = Number(process.env.WATCH_INTERVAL ?? 2000);
 /** If set, the dashboard/API require this key (?key= or Bearer). */
-const ACCESS_KEY = process.env.KOHLAB_KEY;
+const ACCESS_KEY = resolveAccessKey();
 // --- OS-user provisioning helpers (v1.8 isolation) -----------------------
 // Every named member maps to a real POSIX user: their agent sessions run as
 // that uid/gid with $HOME=/home/<user>, so the filesystem — not just the

@@ -47,6 +47,11 @@ bash install.sh
 than `/etc/systemd/system` writes the unit file without touching systemd — useful
 for provisioning an image.
 
+The server itself takes `PORT` (7676) and `HOST` (`0.0.0.0`). `HOST=127.0.0.1`
+keeps it to this box; anywhere else, a server with no access key and no members
+generates one rather than serving the world, and stores it at `$WORKS_DIR/key`.
+`kohlab key` prints it.
+
 Re-running the installer is safe: it updates the checkout, rewrites its own
 command wrapper, and leaves an existing service, key and unit file untouched.
 

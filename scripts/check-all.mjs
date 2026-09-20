@@ -81,6 +81,7 @@ try {
   run("safe update (save → install → reload)", "node", ["scripts/check-update.mjs"]);
   run("release checking (OTA)", "bun", ["scripts/check-release.ts"]);
   run("cli surface", "node", ["scripts/check-cli.mjs"]);
+  run("access bootstrap", "node", ["scripts/check-access.mjs"]);
   run("backend types", join(ROOT, "node_modules/.bin/tsc"), ["--noEmit"]);
   run("frontend types", join(ROOT, "web/node_modules/.bin/tsc"), ["--noEmit"], join(ROOT, "web"));
 

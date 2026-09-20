@@ -2,8 +2,9 @@
 // kohlab — PTY-backed coding-agent workspace CLI
 
 import { spawn, spawnSync } from "child_process";
-import { accessSync, constants, readFileSync } from "fs";
+import { accessSync, constants, readFileSync, writeFileSync } from "fs";
 import { hostname, networkInterfaces, userInfo } from "os";
+import { randomBytes } from "crypto";
 import { join } from "path";
 import {
   createWorkspace,
@@ -136,6 +137,37 @@ async function main() {
       printVersion();
       break;
     }
+    case "key": {
+      // The recovery channel of last resort. Whoever holds the box can read or
+      // replace the key; nobody else can, and it never travels over the network.
+      const sources: [string, string | undefined][] = [
+        ["KOHLAB_KEY in this environment", process.env.KOHLAB_KEY],
+        ["the systemd unit", unitKey()],
+        [`${join(WORKS_DIR, "key")}`, fileKey()],
+      ];
+      const found = sources.find(([, v]) => v && v.length > 0);
+
+      if (args[0] === "rotate") {
+        const next = randomBytes(24).toString("hex");
+        writeFileSync(join(WORKS_DIR, "key"), next + "\n", { mode: 0o600 });
+        console.log(`new key written to ${join(WORKS_DIR, "key")}\n`);
+        console.log(next);
+        console.log(`\nthe running server still uses the old one. to apply it:`);
+        console.log(`  1. if ${UNIT} sets KOHLAB_KEY, replace that value with the key above`);
+        console.log(`  2. sudo systemctl daemon-reload && sudo systemctl restart ${UNIT}`);
+        console.log(`\nthe old key stops working the moment the server restarts.`);
+        break;
+      }
+
+      if (!found?.[1]) {
+        console.log(`no access key found. this server is open to anything that can reach it.`);
+        console.log(`set one:  kohlab key rotate   (then follow the two steps it prints)`);
+        break;
+      }
+      console.log(found[1]);
+      console.error(`(from ${found[0]})`);
+      break;
+    }
     case "status": {
       await printStatus();
       break;
@@ -234,6 +266,24 @@ function printDashboard() {
 /** Open the dashboard in the browser, or print the URL if headless. */
 
 
+
+/** The unit this deployment runs as, when it runs under systemd. */
+const UNIT = process.env.KOHLAB_UNIT ?? "kohlab";
+
+/** The key as configured in the service unit, if there is one. */
+function unitKey(): string | undefined {
+  // systemd merges every Environment= line into one, so match anywhere on it.
+  return /KOHLAB_KEY=([^ ]+)/.exec(systemctl(["show", UNIT, "-p", "Environment"]).out)?.[1];
+}
+
+/** The key generated at startup, if one was. */
+function fileKey(): string | undefined {
+  try {
+    return readFileSync(join(WORKS_DIR, "key"), "utf8").trim();
+  } catch {
+    return undefined;
+  }
+}
 
 /** kohlab's own version, from the checkout this command runs from. */
 function version(): { version: string; commit: string } {
@@ -403,6 +453,8 @@ access
   user add <id> [--name 'N'] [--role R]      add one (owner|member|viewer)
   user rm <id>                               revoke one
   audit                                      the mutation audit trail
+  key                                        print the access key (from this box)
+  key rotate                                 issue a new one and say how to apply it
 
 agents
   agents                                     list agent launchers

@@ -46,6 +46,9 @@ import {
 } from "./lib";
 
 const PORT = Number(process.env.PORT ?? 7676);
+/** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
+ *  tailnet or the LAN, which is why a keyless server there generates one. */
+const HOST = process.env.HOST ?? "0.0.0.0";
 const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 /** Browser push subscribers (dashboard pages). */
@@ -609,6 +612,10 @@ async function ensurePtySession(id: string, terminalId = "main") {
 // --- server --------------------------------------------------------------
 serve({
   port: PORT,
+  // Every interface by default, as before — but now a choice with a consequence:
+  // bound anywhere but loopback with no key and no users, the server generates
+  // itself one (see resolveAccessKey in lib.ts).
+  hostname: HOST,
   fetch: async (req, server) => {
     const url = new URL(req.url);
     const path = url.pathname;
@@ -867,4 +874,4 @@ serve({
   },
 });
 
-console.log(`works server on http://0.0.0.0:${PORT}`);
+console.log(`works server on http://${HOST}:${PORT}${authRequired() ? " (access key required)" : " (no key — loopback only)"}`);

@@ -49,7 +49,11 @@ async function startServer(port, worksDir) {
   const logs = [];
   const proc = spawn("bun", ["run", "server.ts"], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(port), WORKS_DIR: worksDir, PTY_SOCKET: join(worksDir, "pty.sock") },
+    // HOST is pinned to loopback: bound anywhere else, a keyless, userless server
+    // now generates itself a key (lib.ts resolveAccessKey), which is the correct
+    // behaviour but not what this check is about. Loopback is the documented
+    // case where an open server is acceptable — the only caller is on the box.
+    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", WORKS_DIR: worksDir, PTY_SOCKET: join(worksDir, "pty.sock") },
     stdio: ["ignore", "pipe", "pipe"],
   });
   proc.stdout.on("data", (d) => logs.push(d.toString()));
@@ -137,7 +141,7 @@ try {
 
   // ---- 2. a corrupt users.json must not disable auth ---------------------------
   b = await startServer(PORT_B, worksB);
-  check("with no users file and no KOHLAB_KEY, the API is open", (await status(PORT_B, "/api/workspaces")) === 200);
+  check("with no users file and no KOHLAB_KEY on loopback, the API is open", (await status(PORT_B, "/api/workspaces")) === 200);
 
   writeFileSync(join(worksB, "users.json"), GARBAGE_USERS);
   await sleep(250);

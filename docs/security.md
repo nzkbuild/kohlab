@@ -5,10 +5,17 @@ it runs.
 
 ## Trust boundary
 
-- **An unclaimed server is open.** With no access key and no named users, anyone
-  who can reach port 7676 controls workspaces — anonymous requests count as the
-  owner. Claim the server, or set `KOHLAB_KEY`; the installer generates one for
-  you. (A claim flow is designed in ROADMAP.md, not built.)
+- **An open server is only possible on loopback.** With no `KOHLAB_KEY` and no
+  named users, anonymous requests count as the owner — so the server will not
+  stay that way anywhere it can be reached from off the box. Bound beyond
+  loopback it generates a key, stores it at `$WORKS_DIR/key` (mode 0600) and says
+  so in the journal. `HOST=127.0.0.1` keeps it local and keyless; the installer
+  always sets a key. This is the one dangerous combination, and it is made
+  impossible rather than documented.
+- **Losing the key is not losing the box.** `kohlab key` prints it — from the
+  environment, from the unit, or from the generated file, and says which —
+  and `kohlab key rotate` issues a new one. Both run on the machine only, so
+  neither can be reached over the network.
 - **`KOHLAB_KEY`** is the single-operator key. When set, every `/api/*` route and
   the terminal WebSocket require `?key=<key>` or `Authorization: Bearer <key>`.
   Comparison is constant-time. It is treated as an **owner**, so single-user
