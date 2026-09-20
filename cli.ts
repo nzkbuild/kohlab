@@ -7,6 +7,7 @@ import { hostname, networkInterfaces, userInfo } from "os";
 import { randomBytes } from "crypto";
 import { join } from "path";
 import {
+  mergeWorkspace,
   backupTo,
   ptyList,
   restoreFrom,
@@ -219,6 +220,23 @@ async function main() {
       const users = listUsers();
       if (users.length === 0) console.log("no users yet. add one: kohlab user add <id>");
       for (const u of users) console.log(`${u.id.padEnd(16)} ${u.role.padEnd(8)} ${u.name}`);
+      break;
+    }
+    case "merge": {
+      const id = args[0];
+      if (!id) usage("merge <id> [--into <checkout>] [--message 'text']");
+      try {
+        const r = await mergeWorkspace(id, {
+          into: flag(args, "--into"),
+          message: flag(args, "--message"),
+        });
+        console.log(`merged ${r.branch} into ${r.from} in ${r.repo}`);
+        console.log(`  ${r.previous.slice(0, 8)} -> ${r.to.slice(0, 8)}`);
+        console.log(`not what you wanted?  git -C ${r.repo} reset --hard ${r.previous}`);
+      } catch (e) {
+        console.error((e as Error).message);
+        process.exit(1);
+      }
       break;
     }
     case "backup": {
@@ -484,6 +502,7 @@ workspaces
   logs <id>                                  what the agent has printed
   diff <id>                                  uncommitted changes
   commit <id> [message]                      commit them in the workspace
+  merge <id> [--into <checkout>]             bring the accepted branch into yours
   remove <id>                                delete the workspace and its worktree
 
 server

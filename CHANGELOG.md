@@ -9,6 +9,60 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.16.0] - 2026-09-20
+
+The last mile, evidence for the claims that had none, and the roadmap corrected
+where it had drifted from what is actually in the repository.
+
+### Added
+
+- **`kohlab merge <id>` — the review last mile is a command.** Accepting a
+  workspace committed on `kohlab/<id>` and then stopped: the work was reviewed and
+  safe, and getting it into your own branch was a paragraph of git you had to
+  remember. It merges with `--no-ff` and prints the `reset --hard` that undoes it.
+  Because it mutates a repository you care about, the guards are the feature: it
+  refuses a dirty working tree rather than stashing your work-in-progress, refuses
+  a branch with nothing on it (`Accept the workspace first`), refuses to merge a
+  branch into itself, refuses a bare clone with advice instead, and on conflict
+  **aborts and leaves the repository exactly as it found it**.
+- **`scripts/check-a11y-static.mjs`** — a source scan for the accessibility faults
+  visible in markup: clickable non-interactive elements, missing `alt`, unlabelled
+  controls, positive `tabindex`, a removed focus ring, a page with no language, no
+  live region. It reads whole JSX elements rather than single lines, because props
+  span lines and a line-based check reports correct code as broken. It also
+  **verifies itself** against seven planted faults, since a scanner silently broken
+  by a regex change would report a clean codebase forever. Findings are fixed or
+  acknowledged in code with `a11y-ok: <reason>`.
+- **`scripts/check-load.mjs`** — performance budgets, in the suite. Nothing here
+  measured latency before this; every claim that the dashboard stays responsive was
+  an impression. With 50 workspaces: `GET /api/workspaces` p50 8 ms, p95 14 ms, 20
+  concurrent mixed requests in 45 ms, no 5xx, and reads proven not to write the
+  audit trail. Budgets are tunable (`PERF_P95_MS`, `PERF_WORKSPACES`).
+- **[docs/accessibility.md](docs/accessibility.md)** — what is verified and, at
+  more length, what is not: no browser-based DOM audit, no screen-reader pass, no
+  reflow or keyboard-only testing, no ACR. It replaces an unsupported claim.
+- `--into <checkout>` and `--message` on `kohlab merge`.
+
+### Fixed
+
+- **The roadmap cited evidence that does not exist.** An accessibility row claimed
+  "0 axe violations on 8 surfaces". There is no `axe` dependency and no axe-based
+  script anywhere in the repository: the run happened by hand in a browser session
+  and left nothing re-runnable behind, so the number cannot be reproduced and is no
+  longer counted. The row now states what the suite actually runs, and the gaps in
+  `docs/accessibility.md`.
+
+### Changed
+
+- The `gate()` predicate replaces eleven hand-written gate sites, so a route with
+  no credentials is told 401 rather than 403 (see 1.14.0) and five routes assert it.
+- `bun run check` is now 18 checks, covering the merge last mile (23 assertions,
+  most of them about what it must *not* do), the accessibility scan with its
+  self-test, and the performance budgets.
+- `ROADMAP.md`'s coverage matrix is brought back in line with the repository: rows
+  closed by 1.14 to 1.16 now say so, and what remains open is narrowed to what is
+  actually left.
+
 ## [1.15.0] - 2026-09-20
 
 Durability and operations: the state file is versioned, the daemon's health is

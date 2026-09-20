@@ -1629,6 +1629,100 @@ export async function commitWorkspace(id: string, message: string) {
   });
 }
 
+/**
+ * Bring an accepted workspace's branch into a checkout of your own.
+ *
+ * Accepting a workspace commits on `kohlab/<id>`, in the workspace's own tree.
+ * Until this existed, the last mile was a paragraph of git commands: the work was
+ * safe and reviewed, and still not in anybody's branch.
+ *
+ * This mutates a repository the user cares about, so every guard is load-bearing:
+ * it refuses a dirty working tree rather than stashing it (their uncommitted work
+ * is not ours to move), refuses to merge a branch into itself, aborts cleanly on
+ * conflict so the target is left exactly as it was found, and prints the sha to
+ * reset to if the result is not wanted.
+ */
+export async function mergeWorkspace(
+  id: string,
+  opts: { into?: string; message?: string; noCommit?: boolean } = {},
+): Promise<{ repo: string; branch: string; from: string; to: string; previous: string; commit: string }> {
+  const ws = await getWorkspace(id);
+  const branch = `kohlab/${ws.id}`;
+  const tree = worktreePath(ws);
+
+  const branchHead = await runOut(tree, "git", ["rev-parse", "--verify", branch], [1, 128]);
+  if (branchHead.code !== 0 || !branchHead.stdout.trim()) {
+    throw new Error(`workspace '${id}' has no branch ${branch} yet`);
+  }
+  const commit = branchHead.stdout.trim();
+
+  const repo = opts.into ?? ws.repo;
+  const bare = await runOut(repo, "git", ["rev-parse", "--is-bare-repository"], [1, 128]);
+  if (bare.code !== 0) throw new Error(`${repo} is not a git repository`);
+  if (bare.stdout.trim() === "true") {
+    throw new Error(
+      `${repo} is a bare clone, so there is no branch of yours to merge into — ` +
+        `pass --into <your checkout>, or fetch ${branch} from it`,
+    );
+  }
+
+  const status = await runOut(repo, "git", ["status", "--porcelain"]);
+  if (status.stdout.trim()) {
+    const lines = status.stdout.trim().split("\n").length;
+    throw new Error(
+      `${repo} has ${lines} uncommitted change${lines === 1 ? "" : "s"} — commit or stash them first. ` +
+        `Merging would put your work in progress in the middle of someone else's.`,
+    );
+  }
+
+  const current = (await runOut(repo, "git", ["rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim();
+  if (current === branch) throw new Error(`${repo} is already on ${branch}`);
+
+  // A worktree's branch exists from the moment it is created — it points at the
+  // commit it was cut from. So "the branch is there" says nothing; what matters is
+  // whether it has a commit the target does not have.
+  const ahead = await runOut(repo, "git", ["rev-list", "--count", `${current}..${branch}`], [1, 128]);
+  if (ahead.code !== 0 || Number(ahead.stdout.trim() || 0) === 0) {
+    throw new Error(
+      `${branch} has no commits beyond ${current} — there is nothing to merge yet. ` +
+        `Accept the workspace first: kohlab commit ${id}`,
+    );
+  }
+
+  // Captured before the merge: a repository whose HEAD is its root commit has no
+  // HEAD^ to ask about afterwards.
+  const previous = (await runOut(repo, "git", ["rev-parse", "HEAD"])).stdout.trim();
+
+  const args = ["merge", "--no-ff", branch];
+  if (opts.noCommit) args.splice(1, 1); // --no-commit for a review-then-commit flow
+  args.push("-m", opts.message ?? `Merge ${id}: ${ws.task}`);
+  const merged = await runOut(repo, "git", args, [0, 1]);
+
+  if (merged.code !== 0) {
+    // Leave no half-merged state behind: a repository stuck in a conflicted merge
+    // is worse than a merge that did not happen.
+    const abort = await runOut(repo, "git", ["merge", "--abort"], [0, 1]);
+    const conflicted = /CONFLICT|conflict/i.test(merged.stdout + merged.stderr);
+    throw new Error(
+      conflicted
+        ? `merge conflict — nothing was changed, ${repo} is back where it was. ` +
+          `Resolve it yourself with: git -C ${repo} merge ${branch}`
+        : `merge failed: ${(merged.stderr || merged.stdout).trim() || merged.code}` +
+          (abort.code === 0 ? " (aborted; the repository is unchanged)" : ""),
+    );
+  }
+
+  await audit("cli", "merge", id, `${branch} -> ${current} in ${repo} (${commit.slice(0, 8)})`);
+  return {
+    repo,
+    branch,
+    from: current,
+    to: (await runOut(repo, "git", ["rev-parse", "HEAD"])).stdout.trim(),
+    previous,
+    commit,
+  };
+}
+
 // --- process helpers -----------------------------------------------------
 
 function run(cwdArg: string, cmd: string, args: string[]): Promise<void> {
@@ -1642,8 +1736,14 @@ function run(cwdArg: string, cmd: string, args: string[]): Promise<void> {
   return promise;
 }
 
-function runOut(cwdArg: string, cmd: string, args: string[], allowExit: number[] = []): Promise<{ stdout: string; stderr: string }> {
-  const { promise, resolve, reject } = Promise.withResolvers<{ stdout: string; stderr: string }>();
+function runOut(
+  cwdArg: string,
+  cmd: string,
+  args: string[],
+  allowExit: number[] = [],
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const { promise, resolve, reject } =
+    Promise.withResolvers<{ stdout: string; stderr: string; code: number | null }>();
   const p = spawn(cmd, args, { cwd: cwdArg, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   let err = "";
@@ -1651,7 +1751,9 @@ function runOut(cwdArg: string, cmd: string, args: string[], allowExit: number[]
   p.stderr.on("data", (d) => (err += d));
   p.on("error", reject);
   p.on("close", (code) => {
-    if (code === 0 || (code !== null && allowExit.includes(code))) resolve({ stdout: out, stderr: err });
+    // The code comes back even when the exit is allowed: a caller that permits
+    // exit 1 to read git's message still needs to know it was an exit 1.
+    if (code === 0 || (code !== null && allowExit.includes(code))) resolve({ stdout: out, stderr: err, code });
     else reject(new Error(`${cmd} ${args.join(" ")} exited ${code}\n${err}`));
   });
   return promise;

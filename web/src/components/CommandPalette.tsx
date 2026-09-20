@@ -257,8 +257,11 @@ export default function CommandPalette() {
 
           <div className="max-h-[60vh] overflow-y-auto p-1.5">
             {/* `option` has no native element outside <select>, so the listbox and
-                its options are ARIA roles on plain elements. They are deliberately
-                not focusable: focus stays on the combobox input above. */}
+                its options are ARIA roles on plain elements.
+                a11y-ok: they are deliberately NOT focusable — in the ARIA combobox
+                pattern focus stays on the input above and movement is announced via
+                aria-activedescendant. Giving the options tabIndex would add a stop
+                for every result and break that pattern. */}
             <div role="listbox" id={listId} aria-label="Search results">
               {sections.map((section) => (
                 <div key={section.group} role="group" aria-labelledby={`${uid}-group-${section.group}`} className="py-1">

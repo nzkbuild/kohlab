@@ -127,13 +127,33 @@ Not gaps in features — gaps in *shape*. Each has a smallest fix.
 | **Events** | Completion is a 2-second poll; session death has no path to the user at all | One outbound event seam (the push channel already exists) that both completion and death go through |
 | **The owner's own tenancy** | A member is isolated by uid; the *owner* is the server user, which is root on a default install | The installer's unprivileged service user (in the plan), so "every agent runs as someone, never root" is true for the first person too |
 
-## What the roadmap adds to this picture
+## What the seams became
 
-- **Standalone terminals** (v1.15): a session that belongs to a *person* rather
-  than a repository. The daemon already keys sessions by `(id, terminalId)` and
-  does not care what the id means, so this is mostly a model and UI change — a
-  good sign the session primitive is in the right place.
-- **Durability** (v1.16): `schemaVersion` in the state file, so an incompatible
-  change is detected rather than discovered as corrupt data.
-- **Evidence** (v1.17): an automated accessibility audit and a load test, so the
-  two claims nothing currently measures start being measured.
+Each of the thin seams above now has its smallest fix attached, or a check that
+measures it:
+
+- **Supervision** — a liveness probe (`GET /api/health`, `kohlab health`), the
+  daemon's death pushed to every open dashboard the moment its socket closes, the
+  death recorded in the audit trail, and `lastDaemonDeath` reported even after a
+  probe has brought a new daemon up. Still no supervisor: the daemon is not
+  restarted by systemd, only by the next operation that needs it.
+- **Storage** — `schemaVersion`, with a file from a newer build refused rather
+  than half-read, and a versionless file loaded, stamped and kept. Single JSON
+  file still; the read path is the seam to change when it stops being enough.
+- **Authorization** — one `gate()` predicate, so 401 precedes 403 structurally
+  instead of by convention, plus a throttle on the auth path.
+- **Events** — one outbound path: completion and daemon death both go through the
+  push channel and the audit trail.
+- **Evidence** — 18 checks, including a static accessibility scan that verifies
+  itself, performance budgets, and a backup/restore round trip.
+
+## What the roadmap still adds to this picture
+
+- **Standalone terminals**: a session that belongs to a *person* rather than a
+  repository, several at once, with names. The daemon needs no change — it takes
+  an id, a cwd and a command, and does not care what the id means — so this is a
+  model and UI change in the server and the dashboard.
+- **A supervisor for the daemon** with `Restart=on-failure`, so a death is
+  repaired rather than merely reported.
+- **A browser-based accessibility audit** (`axe-core` against the real DOM). The
+  current scan is a source scan and says so; see docs/accessibility.md.
