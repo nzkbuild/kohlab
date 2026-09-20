@@ -46,39 +46,51 @@ kohlab open
 
 Anyone who runs AI coding agents — developers, indie hackers, small teams — who wants their agents to run longer, run in parallel, and survive a flaky connection.
 
-## Get started
+## Install
 
 ```bash
-# 1. Install the CLI (requires bun + git on your server)
-curl -fsSL https://bun.sh/install | bash
-sudo apt-get install -y git
-
-# 2. Clone and run
-git clone https://github.com/nzkbuild/kohlab.git
-cd kohlab
-bun link              # puts `kohlab` on your PATH
-kohlab                # prints the dashboard URL, then opens it
-
-# 3. Keep it running across reboots (see docs/systemd.md)
+curl -fsSL https://raw.githubusercontent.com/nzkbuild/kohlab/main/install.sh | bash
 ```
+
+That installs bun and git if they are missing, checks the repo out, builds the
+dashboard, puts `kohlab` on your PATH, and creates + starts a systemd service.
+Then:
+
+```bash
+kohlab status       # what is installed and what is running
+kohlab open         # the dashboard URL for this machine
+kohlab doctor       # dependencies, service, and the two things that break them
+```
+
+Options: `--no-systemd`, `--no-command`, `--key <secret>`, and the environment
+variables listed by `bash install.sh --help`. Re-running it updates the checkout
+and leaves your service, key and unit file alone.
 
 ## Daily use
 
-Five commands, and they work from any directory:
+`kohlab <command>`. Everything, on one screen, from any directory:
 
 ```bash
-kohlab                          # where is my dashboard, and where is my state
-kohlab new ~/my-project "fix the billing bug" claude
-kohlab ls                       # what is running
-kohlab open                     # the dashboard URL, for this laptop or phone
-kohlab update                   # update kohlab — running agents keep running
+kohlab                                          # the command list
+kohlab status                                   # installed, running, up to date?
+kohlab create ~/my-project "fix the billing bug" claude
+kohlab list                                     # what is running
+kohlab start | stop | restart <id>
+kohlab logs <id>                                # what the agent printed
+kohlab diff <id>                                # review before you merge
+kohlab commit <id> "message"
+kohlab remove <id>
+kohlab open                                     # the dashboard URL
+kohlab update                                   # update kohlab — agents keep running
 ```
+
+Names are standard, and the old ones still work as aliases:
+`ls`=`list`, `new`=`create`, `rm`=`delete`=`remove`, `log`=`logs`,
+`server`=`serve`, `install`=`doctor`.
 
 `kohlab update` saves your uncommitted work to the stash first, and rolls the
 checkout back if the new version fails to come up. Details:
 [docs/upgrade.md](docs/upgrade.md).
-
-`kohlab help` lists everything else.
 
 ## Releasing an update
 

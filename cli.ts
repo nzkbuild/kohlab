@@ -2,7 +2,9 @@
 // kohlab — PTY-backed coding-agent workspace CLI
 
 import { spawn, spawnSync } from "child_process";
+import { accessSync, constants, readFileSync } from "fs";
 import { hostname, networkInterfaces, userInfo } from "os";
+import { join } from "path";
 import {
   createWorkspace,
   deleteWorkspace,
@@ -20,15 +22,20 @@ import {
   removeUser,
   readAudit,
   ptyDisconnect,
+  getWorkspace,
+  ptyLog,
+  sessionId,
+  checkRelease,
 } from "./lib";
 
 const [cmd, ...args] = process.argv.slice(2);
 
 async function main() {
   switch (cmd) {
+    case "create":
     case "new": {
       const [repo, task, agent = "sh"] = args;
-      if (!repo || !task) usage("new <repo> <task> [agent] [--branch b] [--payload '...'] [--timeout sec] [--max-mem mb] [--max-procs n]");
+      if (!repo || !task) usage("create <repo> <task> [agent] [--branch b] [--payload '...'] [--timeout sec] [--max-mem mb] [--max-procs n]");
       const branch = flag(args, "--branch");
       const payload = flag(args, "--payload");
       const timeoutSec = flag(args, "--timeout");
@@ -46,10 +53,11 @@ async function main() {
       console.log(`start it: kohlab start ${ws.id}`);
       break;
     }
+    case "list":
     case "ls": {
       const list = await listWorkspaces();
       if (list.length === 0) {
-        console.log("no workspaces. create one: kohlab new <repo> <task> [agent]");
+        console.log("no workspaces. create one: kohlab create <repo> <task> [agent]");
         break;
       }
       for (const w of list) {
@@ -68,8 +76,10 @@ async function main() {
       console.log(`${cmd}: ${ws.id} ${ws.running ? "running" : "stopped"}`);
       break;
     }
+    case "remove":
+    case "rm":
     case "delete": {
-      if (!args[0]) usage("delete <id>");
+      if (!args[0]) usage("remove <id>");
       await deleteWorkspace(args[0]);
       console.log(`deleted ${args[0]}`);
       break;
@@ -107,6 +117,35 @@ async function main() {
       p.on("exit", (code) => process.exit(code ?? 1));
       break;
     }
+    case "logs":
+    case "log": {
+      if (!args[0]) usage("logs <id>");
+      const ws = await getWorkspace(args[0]);
+      const log = await ptyLog(sessionId(ws.id));
+      if (!log) {
+        console.log(`no output from ${ws.id} yet — start it: kohlab start ${ws.id}`);
+        break;
+      }
+      process.stdout.write(log.endsWith("\n") ? log : log + "\n");
+      break;
+    }
+    case "version":
+    case "--version":
+    case "-V":
+    case "-v": {
+      printVersion();
+      break;
+    }
+    case "status": {
+      await printStatus();
+      break;
+    }
+    case "doctor":
+    case "install": {
+      await doctor();
+      break;
+    }
+    case "serve":
     case "server": {
       const { spawn } = await import("child_process");
       const p = spawn("bun", ["run", "server.ts"], { stdio: "inherit", cwd: import.meta.dir });
@@ -115,22 +154,6 @@ async function main() {
     }
     case "open": {
       printDashboard();
-      break;
-    }
-    case "install": {
-      // report what's here / what's missing
-      for (const dep of ["git", "bun"]) {
-        const ok = spawnSync("which", [dep]).status === 0;
-        console.log(`${ok ? "✓" : "✗ missing"}  ${dep}`);
-      }
-      // generate + show an access key if none is set
-      if (!process.env.KOHLAB_KEY) {
-        const key = spawnSync("openssl", ["rand", "-hex", "24"]).stdout.toString().trim();
-        console.log(`\nno KOHLAB_KEY set. run the server with one:\n  KOHLAB_KEY=${key} bun run cli.ts server`);
-      }
-      console.log(`\nstart:  bun run cli.ts server`);
-      console.log(`tunnel: ssh -L 7676:localhost:7676 user@vps  →  http://localhost:7676`);
-      console.log(`auto-start on reboot: docs/systemd.md`);
       break;
     }
     case "user": {
@@ -177,12 +200,14 @@ async function main() {
       usage();
       break;
     case undefined:
-      // bare `kohlab` → open the dashboard (browser as the app)
-      await openDashboard();
+      // Standard CLI behaviour: no arguments prints the command list. Use
+      // `kohlab open` for the dashboard — a bare command that launches a
+      // browser is a surprise on a headless server.
+      usage();
       break;
     default:
       console.error(`unknown command: ${cmd}`);
-      usage();
+      usage(undefined, 1);
   }
 }
 
@@ -207,46 +232,185 @@ function printDashboard() {
 }
 
 /** Open the dashboard in the browser, or print the URL if headless. */
-async function openDashboard() {
-  const port = process.env.PORT ?? "7676";
-  const url = `http://localhost:${port}`;
-  printDashboard();
+
+
+
+/** kohlab's own version, from the checkout this command runs from. */
+function version(): { version: string; commit: string } {
+  let v = "0.0.0";
   try {
-    const { spawn } = await import("child_process");
-    spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
-    console.log("opened in browser — close the tab, agents keep running.");
+    v = JSON.parse(readFileSync(join(import.meta.dir, "package.json"), "utf8")).version;
   } catch {
-    console.log(`(headless? open one of the URLs above, or run: kohlab open)`);
+    /* not a checkout — report the placeholder rather than dying */
+  }
+  const commit = spawnSync("git", ["-C", import.meta.dir, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).stdout?.trim() ?? "";
+  return { version: v, commit };
+}
+
+function printVersion() {
+  const { version: v, commit } = version();
+  console.log(`kohlab ${v}${commit ? ` (${commit})` : ""}`);
+}
+
+const TICK = "\x1b[1;32m✓\x1b[0m";
+const NOTE = "\x1b[1;33m!\x1b[0m";
+const CROSS = "\x1b[1;31m✗\x1b[0m";
+const dim = (s: string) => (s ? `  \x1b[2m${s}\x1b[0m` : "");
+
+/** One screen: what is installed, what is running, what is new. */
+async function printStatus() {
+  const { version: v, commit } = version();
+  console.log(`kohlab ${v}${commit ? ` (${commit})` : ""}`);
+
+  const port = process.env.PORT ?? "7676";
+  const up = await probePort(port);
+
+  // the unit, when there is one — how the server is meant to stay up
+  const unit = systemctl(["is-active", "kohlab"]);
+  if (unit.available) {
+    const enabled = systemctl(["is-enabled", "kohlab"]).out;
+    const state = unit.out === "active" ? `${TICK} active` : `${NOTE} ${unit.out}`;
+    console.log(`  service     ${state}${dim(`kohlab.service, ${enabled || "not enabled"}`)}`);
+  }
+  console.log(`  server      ${up ? `${TICK} answering on :${port}` : `${NOTE} nothing on :${port}${dim("start it: kohlab serve")}`}`);
+  console.log(`  state       ${WORKS_DIR}`);
+
+  const ws = await listWorkspaces();
+  const running = ws.filter((w) => w.running).length;
+  console.log(`  workspaces  ${ws.length} total · ${running} running · ${ws.length - running} stopped`);
+
+  try {
+    const release = await checkRelease();
+    if (release.error) console.log(`  update      ${NOTE} could not check${dim(release.error)}`);
+    else if (release.available) console.log(`  update      ${NOTE} v${release.latest} available${dim(`${release.commits.length} commit(s) — kohlab update`)}`);
+    else console.log(`  update      ${TICK} up to date${dim(`v${release.current}`)}`);
+  } catch {
+    /* status must never fail on a network check */
   }
 }
 
+/** Deps, service and the two ways a deployment is quietly broken. Non-zero on a hard failure. */
+async function doctor() {
+  let failed = 0;
+  const ok = (label: string, detail = "") => console.log(`${TICK} ${label}${dim(detail)}`);
+  const warn = (label: string, detail = "") => console.log(`${NOTE} ${label}${dim(detail)}`);
+  const bad = (label: string, detail = "") => {
+    failed++;
+    console.log(`${CROSS} ${label}${dim(detail)}`);
+  };
+
+  for (const dep of ["git", "bun"]) {
+    const r = spawnSync(dep, ["--version"], { encoding: "utf8" });
+    if (r.status === 0) ok(dep, (r.stdout ?? "").trim().split("\n")[0]);
+    else bad(dep, "not on PATH — install it, then re-run");
+  }
+
+  const self = spawnSync("which", ["kohlab"], { encoding: "utf8" }).stdout?.trim();
+  if (self) ok("kohlab on PATH", self);
+  else warn("kohlab is not on PATH", "run the installer, or call it by absolute path");
+
+  console.log(`${TICK} state directory`, WORKS_DIR);
+  try {
+    accessSync(WORKS_DIR, constants.W_OK);
+  } catch {
+    warn("state directory is not writable", WORKS_DIR);
+  }
+
+  const active = systemctl(["is-active", "kohlab"]);
+  if (!active.available) {
+    warn("systemd not available", "run it in the foreground: kohlab serve");
+  } else if (active.out === "active") {
+    const enabled = systemctl(["is-enabled", "kohlab"]).out;
+    ok("kohlab.service", `active, ${enabled || "not enabled"}`);
+  } else {
+    warn("kohlab.service is not running", "start it: sudo systemctl enable --now kohlab");
+  }
+
+  // The one misconfiguration that silently costs you every live agent.
+  const killMode = systemctl(["show", "kohlab", "-p", "KillMode"]).out.replace(/^KillMode=/, "");
+  if (killMode === "process") ok("KillMode=process", "a restart keeps every live agent session");
+  else if (killMode) bad(`KillMode=${killMode}`, "a restart kills the PTY daemon and every live agent — see docs/systemd.md");
+
+  const port = process.env.PORT ?? "7676";
+  if (await probePort(port)) ok("dashboard", `http://localhost:${port}`);
+  else warn(`nothing answering on :${port}`, "start it: kohlab serve");
+
+  // The key lives in the unit, not in this process's environment — checking
+  // process.env alone reported a false alarm on every healthy deployment.
+  const unitEnv = systemctl(["show", "kohlab", "-p", "Environment"]).out;
+  if (process.env.KOHLAB_KEY || /KOHLAB_KEY=[^ ]/.test(unitEnv)) {
+    ok("access key set");
+  } else {
+    warn("no access key", "set KOHLAB_KEY in the unit, or the dashboard is open to anything that reaches the port");
+  }
+
+  console.log(failed ? `\n${failed} problem(s) found` : "\nno problems found");
+  process.exit(failed ? 1 : 0);
+}
+
+/** systemctl's answer, with "no systemd on this box" distinguishable from an empty one. */
+function systemctl(args: string[]): { available: boolean; out: string } {
+  const r = spawnSync("systemctl", args, { encoding: "utf8" });
+  return { available: !r.error, out: (r.stdout ?? "").trim() };
+}
+
+/** Is the dashboard answering? Never throws, never hangs. */
+async function probePort(port: string): Promise<boolean> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/`, { redirect: "manual", signal: AbortSignal.timeout(1500) });
+    return r.status < 400;
+  } catch {
+    return false;
+  }
+}
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
-function usage(extra?: string) {
+function usage(extra?: string, code = extra ? 1 : 0) {
   if (extra) console.error(`usage: kohlab ${extra}\n`);
-  console.log(`kohlab — coding-agent workspaces
-  kohlab new <repo> <task> [agent] [--branch b] [--payload '...'] [--timeout s] [--max-mem mb] [--max-procs n]  create a worktree workspace
-  kohlab ls                                                         list workspaces
-  kohlab start|stop|restart <id>                                    control a workspace
-  kohlab diff <id>                                                  show uncommitted diff
-  kohlab commit <id> [message]                                      commit workspace changes
-  kohlab delete <id>                                                remove workspace + worktree
-  kohlab agents [add <name> <cmd>]                                  list / add agent launchers
-  kohlab server                                                     run the web dashboard server
-  kohlab open                                                       print dashboard URL + tunnel
-  kohlab install                                                    check deps + show setup steps
-  kohlab update [--check] [--force]                                  save your work, pull, install, build, reload
-  kohlab user add <id> [--name 'N'] [--role R]                       add a team member (owner|member|viewer)
-  kohlab user rm <id>                                                revoke a teammate
-  kohlab user                                                        list users
-  kohlab audit                                                       show the mutation audit trail
-  kohlab help                                                        this list
+  console.log(`kohlab — run AI coding agents in parallel, persistently, from any device
+
+usage: kohlab <command> [options]
+
+basic
+  help                                       this list
+  version                                    print the version
+  status                                     what is installed and what is running
+  doctor                                     check dependencies, service and config
+
+workspaces
+  list                                       list workspaces
+  create <repo> <task> [agent]               start an agent in its own worktree
+         [--branch b] [--payload '...'] [--timeout s] [--max-mem mb] [--max-procs n]
+  start <id>                                 start its session
+  stop <id>                                  stop it
+  restart <id>                               start it again
+  logs <id>                                  what the agent has printed
+  diff <id>                                  uncommitted changes
+  commit <id> [message]                      commit them in the workspace
+  remove <id>                                delete the workspace and its worktree
+
+server
+  serve                                      run the dashboard server (foreground)
+  open                                       print the dashboard URLs
+  update [--check] [--force]                 update kohlab; running agents keep running
+
+access
+  users                                      list team members
+  user add <id> [--name 'N'] [--role R]      add one (owner|member|viewer)
+  user rm <id>                               revoke one
+  audit                                      the mutation audit trail
+
+agents
+  agents                                     list agent launchers
+  agents add <name> <cmd>                    register one
+
+aliases: ls=list  new=create  rm=delete=remove  log=logs  server=serve  install=doctor
 state: ${WORKS_DIR}`);
-  process.exit(extra ? 1 : 0);
+  process.exit(code);
 }
 
 main()

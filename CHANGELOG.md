@@ -9,6 +9,55 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.13.0] - 2026-09-20
+
+### Added
+
+- **A standard command list.** `kohlab <command>`, one command per line on one
+  screen, grouped: basic (`help`, `version`, `status`, `doctor`), workspaces
+  (`list`, `create`, `start`, `stop`, `restart`, `logs`, `diff`, `commit`,
+  `remove`), server (`serve`, `open`, `update`), access (`users`, `audit`), and
+  agents. Every old name still works as an alias — `ls`, `new`, `rm`, `delete`,
+  `log`, `server`, `install` — so nothing anyone has learned breaks.
+- **`kohlab status`** — one screen: the version and commit, whether the unit is
+  active and enabled, whether the port answers, the state directory, workspace
+  counts, and whether a newer release is published.
+- **`kohlab doctor`** — dependencies, the command on PATH, the state directory,
+  the service, the port, and the access key, each with a remedy. Non-zero exit
+  when something is actually wrong, so it works in a provisioning script. It is
+  deliberately picky about the two failures that are otherwise silent: a
+  `KillMode` that would cost you every live agent session on restart, and a
+  missing access key.
+- **`kohlab logs <id>`** — what the agent has printed, from the daemon's retained
+  screen.
+- **A real installer.** `install.sh` now installs bun if missing, checks the repo
+  out, builds the dashboard, puts `kohlab` on the PATH, and creates and starts the
+  systemd service with a generated access key and `KillMode=process`. It verifies
+  the command it just installed before declaring success. Flags: `--key`,
+  `--no-systemd`, `--no-command`, `--help`; `KOHLAB_HOME`, `KOHLAB_BIN_DIR`,
+  `KOHLAB_UNIT_DIR`, `KOHLAB_PORT`, `KOHLAB_REPO` override the defaults.
+  Re-running it updates the checkout and leaves an existing service, key and unit
+  alone.
+- **`scripts/check-cli.mjs`** — 48 assertions on the surface itself: the command
+  list, the grouping, that every standard command is documented, that each alias
+  resolves, and that an unknown command exits non-zero.
+
+### Fixed
+
+- **`kohlab` did not work outside an interactive shell.** `bun link` wrote a
+  symlink into `~/.bun/bin`, whose PATH export sits below the non-interactive
+  guard in `.bashrc` — so `ssh host kohlab ls`, cron and systemd could not see it,
+  and even the absolute path depended on `env bun` resolving. The installer now
+  writes a wrapper with an absolute interpreter path.
+- **`kohlab` with no arguments launched a browser.** It prints the command list
+  now, which is what a CLI on a headless server should do; `kohlab open` is the
+  dashboard.
+- **An unknown command exited 0.** `kohlab bogus || exit` could not tell that
+  nothing had run.
+- **`kohlab doctor` reported a false alarm on every healthy deployment** — it
+  looked for the access key in its own environment instead of the unit's, where
+  the key actually lives.
+
 ## [1.12.1] - 2026-09-20
 
 ### Fixed
