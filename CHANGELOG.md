@@ -9,6 +9,83 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.12.0] - 2026-09-20
+
+### Added
+
+- **OTA updates.** A release is published by pushing to the repo a server runs
+  from. Settings → Updates then shows the published version, the changelog for
+  exactly the gap being closed (everything above its own version's heading in
+  `CHANGELOG.md`), and one button to take it. `GET /api/release` is the data;
+  `POST /api/release/update` is the action — owner only, audited, 401 without
+  credentials and 403 with the wrong role. Running agents are not interrupted.
+- **An update run that survives its own restart.** The reload kills the server
+  that started the update, so the outcome cannot live in memory: the script
+  writes `started <epoch> pid <pid>` and `finished <epoch> exit <code>` markers
+  into `$WORKS_DIR/update.log`, and the dashboard reads them back. A run that
+  stops without a finish marker — killed, or never started — is reported as
+  unfinished with its log, instead of silently showing nothing.
+- **`scripts/check-release.ts`** — 25 assertions: the pushed commit is seen, both
+  versions are named, the notes are the new release and not the old one's, and
+  every state of an update run (never run / running / finished / orphaned /
+  never-started).
+
+### Fixed
+
+- **`POST /api/release/update` answered 403 to an unauthenticated request.** No
+  credentials is a 401; credentials without the owner role is a 403. The
+  `canMutate` pattern the sibling routes use collapses the two.
+
+## [1.11.0] - 2026-09-17
+
+- **`kohlab update`** — a safe self-updater: save → check → download → install →
+  build → reload. Uncommitted changes go to the stash before anything is
+  downloaded (HEAD never moves, because a new workspace is branched from wherever
+  HEAD points), commits that were never pushed are pushed, and a failed install,
+  build or reload rolls the checkout back, rebuilds it *and reloads it* — files
+  on disk are not a rollback if the unit is still serving the new build. What
+  counts as an update is commits behind upstream, never a version string, so a
+  lower upstream version cannot silently rewind unpushed work. It refuses a
+  reload when the unit's `KillMode` would kill the detached PTY daemon, and
+  `--check` reports without changing anything.
+- **A health gate on reload.** `systemctl is-active` is not evidence that the new
+  build works: the unit is `Type=simple`, so systemd calls it active the moment
+  the process forks, and `Restart=always` keeps it active through a crash loop.
+  The updater now polls `http://127.0.0.1:$PORT/` until it answers, and rolls
+  back when it does not.
+- **`scripts/check-update.mjs`** — 47 assertions against a real fixture (a bare
+  origin, two clones, a real HTTP server on a port, fake `bun`/`systemctl`): the
+  stash, HEAD staying put, the push, the fast-forward, the install, the health
+  gate, the rollback after a failed install, the rollback-and-reload after a
+  build that never serves, the two refusals, `--check`, the OTA markers, and a
+  tripwire that fails if the check ever touches the checkout it lives in.
+
+### Fixed
+
+- **Every CLI command that touched the daemon hung forever.** `ptyConnect()`
+  caches a module-level socket and nothing closed it, so `kohlab ls`, `start`,
+  `stop`, `diff` and `commit` printed their answer and then never exited — a 45s
+  timeout was not enough. `kohlab ls` now returns in ~0.15s. Fixed at the root
+  (`ptyDisconnect()`, called when the CLI finishes) rather than with
+  `process.exit()`, which truncates stdout when the output is a pipe — exactly
+  the `kohlab ls | grep` case. The daemon treats the close as a subscriber
+  detaching and keeps every session alive.
+- **The CLI read a different state directory than the service.** With no
+  `WORKS_DIR`, `lib.ts` defaulted to `./.works`, so a CLI run next to a service
+  serving `/root/.kohlab` reported an empty fleet. The CLI now reads `WORKS_DIR`
+  from the systemd unit before falling back. The server keeps the old default, so
+  a local dev run still gets a throwaway `.works/`.
+- **`kohlab help` opened the dashboard instead of printing help.**
+- **`kohlab open` printed a placeholder** (`http://<vps-ip>:7676`) instead of the
+  addresses this box actually has — now loopback, every non-internal IPv4
+  (Tailscale included), the SSH tunnel command, and the state directory in use.
+- **`docs/upgrade.md` and `docs/systemd.md` gave a `WORKS_DIR` snippet that
+  returned nothing.** `systemctl show -p Environment` emits every variable on one
+  merged line (`Environment=WORKS_DIR=… PORT=…`), so `tr ' ' '\n' |
+  sed -n 's/^WORKS_DIR=//p'` never matched the first variable — and the `tar` that
+  followed silently backed up the wrong path. Both docs now use a pattern that
+  matches anywhere on the line, and `kohlab update` uses the same one.
+
 ## [1.11.0] - 2026-09-17
 
 Reattaching to a running agent now shows its screen, not a truncated byte

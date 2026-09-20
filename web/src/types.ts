@@ -26,6 +26,26 @@ export interface DiffFile {
 
 export type AgentStatus = Record<string, boolean>;
 
+/** What `/api/release` reports: the published version, and any update in flight. */
+export interface ReleaseStatus {
+  current: string;
+  latest: string;
+  available: boolean;
+  commits: string[];
+  notes: string;
+  upstream: string | null;
+  head: string;
+  checkedAt: number;
+  error: string | null;
+  running: boolean;
+  startedAt: number | null;
+  finishedAt: number | null;
+  exit: number | null;
+  /** stopped without writing its finish marker: killed, or it never started */
+  unfinished: boolean;
+  log: string;
+}
+
 export interface AgentInfo {
   name: string;
   installed?: boolean;

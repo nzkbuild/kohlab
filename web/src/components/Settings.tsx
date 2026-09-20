@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Bell, BellRinging, Cpu, HardDrives, SpeakerHigh, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, Cpu, HardDrives, SpeakerHigh, WarningCircle } from "@phosphor-icons/react";
 import { useApp } from "../store";
 import { announce, setAnnouncementsPaused } from "../lib/announce";
 import { cn } from "../lib/utils";
 import AgentInstaller from "./AgentInstaller";
 import Team from "./Team";
+import UpdatePanel from "./UpdatePanel";
 import { Button, Chip, Panel, PanelHead } from "./ui";
 
 const PAUSE_KEY = "kohlab_announce_paused";
@@ -104,6 +105,15 @@ export default function Settings() {
               </tr>
             </tbody>
           </table>
+        </Panel>
+
+        <Panel className="mt-4">
+          <PanelHead
+            title="Updates"
+            icon={<ArrowsClockwise size={15} aria-hidden="true" />}
+            meta="published by pushing to this server's repo"
+          />
+          <UpdatePanel />
         </Panel>
 
         <Panel className="mt-4">

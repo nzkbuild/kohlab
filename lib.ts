@@ -9,7 +9,33 @@ import { basename, join } from "path";
 import { spawn, spawnSync } from "child_process";
 import { cwd } from "process";
 
-const WORKS_DIR = process.env.WORKS_DIR ?? join(cwd(), ".works");
+/**
+ * Where state lives. An explicit `WORKS_DIR` always wins.
+ *
+ * Without one, the two entrypoints want opposite things. The server keeps the
+ * historical default — a `.works/` directory beside the code — so a local dev
+ * run never silently adopts a deployment's state. A one-shot CLI must not: with
+ * no `WORKS_DIR` it used to report an empty fleet against a service serving
+ * `/root/.kohlab`, which is worse than useless. So the CLI asks the systemd unit
+ * first, and only then falls back.
+ */
+function resolveWorksDir(): string {
+  if (process.env.WORKS_DIR) return process.env.WORKS_DIR;
+  const serverProcess = /(^|\/)server\.ts$/.test(process.argv[1] ?? "");
+  if (!serverProcess) {
+    try {
+      const unit = process.env.KOHLAB_UNIT ?? "kohlab";
+      const out = spawnSync("systemctl", ["show", unit, "-p", "Environment"], { encoding: "utf8" });
+      // systemd merges every Environment= line into ONE line, so WORKS_DIR can
+      // sit anywhere on it — matching only at the start finds nothing.
+      const m = /.*WORKS_DIR=([^ ]+)/.exec(out.stdout ?? "");
+      if (m) return m[1];
+    } catch {}
+  }
+  return join(cwd(), ".works");
+}
+
+const WORKS_DIR = resolveWorksDir();
 const STATE_FILE = join(WORKS_DIR, "state.json");
 const USERS_FILE = join(WORKS_DIR, "users.json");
 const AUDIT_FILE = join(WORKS_DIR, "audit.log");
@@ -334,6 +360,166 @@ export async function readAudit(limit = 200): Promise<{ t: number; user: string;
     .reverse();
 }
 
+// --- releases (OTA updates) -------------------------------------------------
+
+/** The checkout this code runs from — the thing an update updates. */
+const REPO_ROOT = import.meta.dir;
+
+export type ReleaseCheck = {
+  current: string;
+  latest: string;
+  available: boolean;
+  commits: string[];
+  notes: string;
+  upstream: string | null;
+  head: string;
+  checkedAt: number;
+  error: string | null;
+};
+
+export type UpdateRun = {
+  running: boolean;
+  startedAt: number | null;
+  finishedAt: number | null;
+  exit: number | null;
+  /**
+   * A run that stopped without writing its finish marker: killed mid-flight, or
+   * it never got as far as starting. Without this the panel had nothing to
+   * report — a log existed, but no exit code, so it showed nothing at all.
+   */
+  unfinished: boolean;
+  log: string;
+};
+
+const RELEASE_TTL = Number(process.env.RELEASE_CHECK_TTL ?? 300_000);
+// Keyed by repo path, which is only known at runtime (the server checks its own
+// checkout; the check suite points the same function at a fixture).
+const releaseCache = new Map<string, { at: number; value: ReleaseCheck }>();
+
+/** Both markers are written by scripts/update.sh when the OTA endpoint runs it. */
+const UPDATE_LOG = join(WORKS_DIR, "update.log");
+
+/** The version a `## [1.2.3] - 2026-01-01` heading names, or null. */
+function headingVersion(line: string): string | null {
+  const m = /^##\s+\[?([0-9][^\s\]]*)\]?/.exec(line);
+  return m ? m[1] : null;
+}
+
+/**
+ * What changed since `version`: the changelog from the top of the file down to,
+ * but not including, that version's own heading. The file is newest-first, so
+ * this needs no version comparison — "newer than mine" is exactly what sits
+ * above my heading.
+ */
+export function releaseNotes(changelog: string, version: string): string {
+  const lines = changelog.split("\n");
+  const cut = lines.findIndex((l) => headingVersion(l) === version);
+  if (cut <= 0) return "";
+  return lines.slice(0, cut).join("\n").trim();
+}
+
+/**
+ * What the upstream repo publishes, and what is new since this checkout.
+ *
+ * `git fetch` is the only network call, and it is what makes "someone pushed a
+ * release" visible here — so it is cached (RELEASE_CHECK_TTL, default 5 min)
+ * rather than run on every dashboard poll. `force` skips the cache.
+ */
+export async function checkRelease(repo: string = REPO_ROOT, opts: { force?: boolean } = {}): Promise<ReleaseCheck> {
+  const cached = releaseCache.get(repo);
+  if (!opts.force && cached && Date.now() - cached.at < RELEASE_TTL) return cached.value;
+
+  const value: ReleaseCheck = {
+    current: "",
+    latest: "",
+    available: false,
+    commits: [],
+    notes: "",
+    upstream: null,
+    head: "",
+    checkedAt: Date.now(),
+    error: null,
+  };
+  try {
+    value.head = (await runOut(repo, "git", ["rev-parse", "--short", "HEAD"])).stdout.trim();
+    value.current = JSON.parse(await readFile(join(repo, "package.json"), "utf8")).version;
+    value.latest = value.current;
+    const up = (
+      await runOut(repo, "git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], [1, 128])
+    ).stdout.trim();
+    value.upstream = up || null;
+    if (up) {
+      await runOut(repo, "git", ["fetch", "--quiet", "origin", up.replace(/^[^/]+\//, "")]);
+      value.latest = JSON.parse((await runOut(repo, "git", ["show", `${up}:package.json`])).stdout).version;
+      // Commits behind upstream decide this, never the version strings: a
+      // different version could be older, and "update" must not rewind.
+      value.available = Number((await runOut(repo, "git", ["rev-list", "--count", `HEAD..${up}`])).stdout.trim()) > 0;
+      if (value.available) {
+        value.commits = (await runOut(repo, "git", ["log", "--oneline", `HEAD..${up}`])).stdout.trim().split("\n").filter(Boolean);
+        const changelog = (await runOut(repo, "git", ["show", `${up}:CHANGELOG.md`], [1, 128])).stdout;
+        value.notes = releaseNotes(changelog, value.current);
+      }
+    }
+  } catch (e) {
+    value.error = String((e as Error).message ?? e).split("\n")[0];
+  }
+  // Never cache a failure — a fetch that failed because the network was down
+  // must not look like "up to date" for the next five minutes.
+  if (!value.error) releaseCache.set(repo, { at: Date.now(), value });
+  return value;
+}
+
+/**
+ * Is an update running, and how did the last one end?
+ *
+ * Read from the marker lines scripts/update.sh writes into the log, because the
+ * reload kills the process that started it: nothing in memory survives to
+ * report the outcome.
+ */
+export async function updateRunState(): Promise<UpdateRun> {
+  let text: string;
+  try {
+    text = await readFile(UPDATE_LOG, "utf8");
+  } catch {
+    return { running: false, startedAt: null, finishedAt: null, exit: null, unfinished: false, log: "" };
+  }
+  const started = /^# kohlab update started (\d+) pid (\d+)/m.exec(text);
+  const finished = /^# kohlab update finished (\d+) exit (-?\d+)/m.exec(text);
+  const log = text.length > 20_000 ? text.slice(-20_000) : text;
+  if (finished) {
+    return {
+      running: false,
+      startedAt: started ? Number(started[1]) : null,
+      finishedAt: Number(finished[1]),
+      exit: Number(finished[2]),
+      unfinished: false,
+      log,
+    };
+  }
+  let live = false;
+  if (started) {
+    try {
+      process.kill(Number(started[2]), 0);
+      live = true;
+    } catch {
+      live = false;
+    }
+  }
+  if (live) {
+    return { running: true, startedAt: Number(started![1]), finishedAt: null, exit: null, unfinished: false, log };
+  }
+  // No finish marker and no live process: it was killed, or it never started.
+  // The log is all there is to go on, so say so rather than saying nothing.
+  return {
+    running: false,
+    startedAt: started ? Number(started[1]) : null,
+    finishedAt: null,
+    exit: null,
+    unfinished: text.trim().length > 0,
+    log,
+  };
+}
+
 /** Completion callbacks (webhook + browser push). Set by the server. */
 type NotifyFn = (ws: Workspace) => void;
 let notifyDone: NotifyFn[] = [];
@@ -469,6 +655,27 @@ export async function ptyRequest<T extends Record<string, unknown>>(
 function removeDaemonHandler(fn: DaemonHandler) {
   const i = daemonHandlers.indexOf(fn);
   if (i >= 0) daemonHandlers.splice(i, 1);
+}
+
+/**
+ * Drop the shared daemon connection.
+ *
+ * The long-lived server keeps it open on purpose. A one-shot CLI must close it:
+ * an open socket holds the event loop, so every command that touched the daemon
+ * — `kohlab ls`, `start`, `diff`, `commit` — printed its answer and then hung
+ * forever instead of exiting. Closing is also what lets stdout flush, which a
+ * `process.exit()` would truncate when the output is a pipe.
+ *
+ * The daemon treats this as a subscriber detaching and keeps every session
+ * alive (pty-daemon.cjs, `sock.on("close")`).
+ */
+export function ptyDisconnect() {
+  const sock = ptySock;
+  ptySock = null;
+  ptyConnecting = null;
+  try {
+    sock?.end();
+  } catch {}
 }
 
 /** List live PTY sessions, or null when the daemon is unreachable. */

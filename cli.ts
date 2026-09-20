@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // kohlab — PTY-backed coding-agent workspace CLI
 
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
+import { hostname, networkInterfaces, userInfo } from "os";
 import {
   createWorkspace,
   deleteWorkspace,
@@ -18,6 +19,7 @@ import {
   addUser,
   removeUser,
   readAudit,
+  ptyDisconnect,
 } from "./lib";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -99,6 +101,12 @@ async function main() {
       }
       break;
     }
+    case "update": {
+      // save → check → download → install → build → reload, with rollback.
+      const p = spawn("bash", [`${import.meta.dir}/scripts/update.sh`, ...args], { stdio: "inherit", cwd: import.meta.dir });
+      p.on("exit", (code) => process.exit(code ?? 1));
+      break;
+    }
     case "server": {
       const { spawn } = await import("child_process");
       const p = spawn("bun", ["run", "server.ts"], { stdio: "inherit", cwd: import.meta.dir });
@@ -106,8 +114,7 @@ async function main() {
       break;
     }
     case "open": {
-      console.log(`dashboard: http://<vps-ip>:${process.env.PORT ?? 7676}`);
-      console.log(`tunnel:    ssh -L ${process.env.PORT ?? 7676}:localhost:${process.env.PORT ?? 7676} user@vps`);
+      printDashboard();
       break;
     }
     case "install": {
@@ -165,6 +172,10 @@ async function main() {
       break;
     }
     case "help":
+    case "--help":
+    case "-h":
+      usage();
+      break;
     case undefined:
       // bare `kohlab` → open the dashboard (browser as the app)
       await openDashboard();
@@ -175,17 +186,37 @@ async function main() {
   }
 }
 
+/**
+ * Where the dashboard actually is: loopback plus every non-internal IPv4 this
+ * box has (the Tailscale address shows up here), the SSH tunnel for anything
+ * else, and the state directory in use — so "which fleet am I looking at?" is
+ * never a guess.
+ */
+function printDashboard() {
+  const port = process.env.PORT ?? "7676";
+  const extra: string[] = [];
+  for (const [name, addrs] of Object.entries(networkInterfaces())) {
+    for (const a of addrs ?? []) {
+      if (a.family === "IPv4" && !a.internal) extra.push(`http://${a.address}:${port}   (${name})`);
+    }
+  }
+  console.log(`dashboard:  http://localhost:${port}`);
+  for (const u of extra) console.log(`            ${u}`);
+  console.log(`tunnel:     ssh -L ${port}:localhost:${port} ${userInfo().username}@${hostname()}`);
+  console.log(`state:      ${WORKS_DIR}`);
+}
+
 /** Open the dashboard in the browser, or print the URL if headless. */
 async function openDashboard() {
   const port = process.env.PORT ?? "7676";
   const url = `http://localhost:${port}`;
-  console.log(`kohlab dashboard: ${url}`);
+  printDashboard();
   try {
     const { spawn } = await import("child_process");
     spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
     console.log("opened in browser — close the tab, agents keep running.");
   } catch {
-    console.log(`(headless? open ${url} in any browser, or ssh -L ${port}:localhost:${port} user@vps)`);
+    console.log(`(headless? open one of the URLs above, or run: kohlab open)`);
   }
 }
 
@@ -208,15 +239,21 @@ function usage(extra?: string) {
   kohlab server                                                     run the web dashboard server
   kohlab open                                                       print dashboard URL + tunnel
   kohlab install                                                    check deps + show setup steps
+  kohlab update [--check] [--force]                                  save your work, pull, install, build, reload
   kohlab user add <id> [--name 'N'] [--role R]                       add a team member (owner|member|viewer)
   kohlab user rm <id>                                                revoke a teammate
   kohlab user                                                        list users
   kohlab audit                                                       show the mutation audit trail
+  kohlab help                                                        this list
 state: ${WORKS_DIR}`);
   process.exit(extra ? 1 : 0);
 }
 
-main().catch((e) => {
-  console.error(String(e?.message ?? e));
-  process.exit(1);
-});
+main()
+  // The daemon socket is a module-level singleton; without closing it a
+  // one-shot CLI never exits (see ptyDisconnect).
+  .then(() => ptyDisconnect())
+  .catch((e) => {
+    console.error(String(e?.message ?? e));
+    process.exit(1);
+  });

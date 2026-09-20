@@ -120,6 +120,29 @@ try {
   const gh = await req("/api/gh/repos");
   check("GET /api/gh/repos -> {ok,repos,authed}", gh.status === 200 && "ok" in gh.body && Array.isArray(gh.body.repos));
 
+  console.log("release / OTA");
+  const rel = await req("/api/release");
+  check(
+    "GET /api/release -> {current,latest,available,upstream}",
+    rel.status === 200 &&
+      typeof rel.body.current === "string" &&
+      typeof rel.body.latest === "string" &&
+      typeof rel.body.available === "boolean" &&
+      "upstream" in rel.body,
+  );
+  check("release reports the running commit", typeof rel.body.head === "string" && rel.body.head.length > 0);
+  check("release reports whether a run is in flight", typeof rel.body.running === "boolean" && "log" in rel.body);
+  if (KEY) {
+    // Only the refused paths are asserted here. POSTing with a key would really
+    // start an update of the checkout this suite is running from.
+    const anonRead = await fetch(`${BASE}/api/release`);
+    check("GET /api/release without a key -> 401", anonRead.status === 401, `got ${anonRead.status}`);
+    const anonUpdate = await fetch(`${BASE}/api/release/update`, { method: "POST" });
+    check("POST /api/release/update without a key -> 401", anonUpdate.status === 401, `got ${anonUpdate.status}`);
+    const wrongMethod = await req("/api/release/update");
+    check("GET /api/release/update -> 404/405", wrongMethod.status === 404 || wrongMethod.status === 405, `got ${wrongMethod.status}`);
+  }
+
   console.log("workspace lifecycle");
   const bad = await req("/api/workspaces/does-not-exist/log");
   check("unknown workspace -> error status", bad.status >= 400, `got ${bad.status}`);

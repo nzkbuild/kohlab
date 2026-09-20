@@ -1,4 +1,4 @@
-import type { AgentStatus, DiffFile, TreeNode, Workspace } from "./types";
+import type { AgentStatus, DiffFile, ReleaseStatus, TreeNode, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -81,6 +81,8 @@ export const api = {
   installAgent: (name: string, cmd: string) =>
     json<{ ok: boolean; output?: string }>("/api/agents/install", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, cmd }) }),
   ghRepos: () => json<{ ok: boolean; repos: string[]; authed: boolean }>("/api/gh/repos"),
+  release: (force = false) => json<ReleaseStatus>(`/api/release${force ? "?force=1" : ""}`),
+  applyUpdate: () => json<{ started?: boolean; log?: string }>("/api/release/update", { method: "POST" }),
   uploadImage: async (workspaceId: string, image: Blob): Promise<{ path: string; mimeType: string; bytes: number }> => {
     const res = await req(`/api/workspaces/${encodeURIComponent(workspaceId)}/image`, {
       method: "POST",

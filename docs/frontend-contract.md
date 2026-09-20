@@ -148,6 +148,8 @@ api.commit(id, message) api.share(id)   api.files(id)  api.file(id, path)  api.l
 api.users() api.addUser({id,name,role}) api.removeUser(id) api.audit()
 api.agentsStatus() api.installAgent(name, cmd) api.ghRepos()
 api.uploadImage(workspaceId, blob)
+api.release(force?)     // ReleaseStatus — published version, changelog, last run
+api.applyUpdate()       // POST — owner only; starts the update, returns at once
 ```
 
 `lib/actions.ts` still exports `withToast(label, fn)` and `toastAction(id, action)`.

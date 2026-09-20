@@ -3,7 +3,7 @@
 import { serve } from "bun";
 import type { ServerWebSocket } from "bun";
 import { spawn } from "child_process";
-import { mkdir, readdir, readFile } from "fs/promises";
+import { mkdir, open, readdir, readFile } from "fs/promises";
 import { isAbsolute, join, relative, resolve } from "path";
 import {
   createWorkspace,
@@ -41,6 +41,8 @@ import {
   ptyLog,
   onDaemonMessage,
   sessionId,
+  checkRelease,
+  updateRunState,
 } from "./lib";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -446,6 +448,34 @@ async function handleGhRepos(): Promise<Response> {
   return promise.then((result) => json(result));
 }
 
+/**
+ * Start the update script and return immediately.
+ *
+ * Detached, with stdout and stderr going to $WORKS_DIR/update.log. The reload
+ * restarts this server before the script is finished, so that file — and the
+ * marker lines the script writes into it — is the only surviving record of how
+ * the update went. `KOHLAB_OTA=1` is what tells the script it is being recorded.
+ */
+async function handleReleaseUpdate(): Promise<Response> {
+  const logPath = join(WORKS_DIR, "update.log");
+  try {
+    await mkdir(WORKS_DIR, { recursive: true });
+    const fd = await open(logPath, "w");
+    const child = spawn("bash", [join(import.meta.dir, "scripts", "update.sh")], {
+      cwd: import.meta.dir,
+      env: { ...process.env, KOHLAB_OTA: "1" },
+      stdio: ["ignore", fd.fd, fd.fd],
+      detached: true,
+    });
+    child.unref();
+    // the child has its own descriptor now
+    await fd.close().catch(() => {});
+    return json({ started: true, log: logPath });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 500);
+  }
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -662,6 +692,22 @@ serve({
     if (path === "/api/gh/repos") {
       if (denied) return json({ error: "unauthorized" }, 401);
       return handleGhRepos();
+    }
+    // OTA: what the pushed upstream publishes, and — owner only — apply it.
+    if (path === "/api/release") {
+      if (denied) return json({ error: "unauthorized" }, 401);
+      const force = url.searchParams.get("force") === "1";
+      return json({ ...(await checkRelease(undefined, { force })), ...(await updateRunState()) });
+    }
+    if (path === "/api/release/update" && req.method === "POST") {
+      // Updating rewrites the checkout and restarts the service, so it is an
+      // owner action, never a member/viewer one, and never a share token.
+      // No credentials is 401; credentials without the role is 403.
+      if (denied) return json({ error: "unauthorized" }, 401);
+      if (!isOwner) return json({ error: "forbidden — only an owner can update the server" }, 403);
+      if ((await updateRunState()).running) return json({ error: "an update is already running" }, 409);
+      containFailure(audit(actor, "update", undefined, "OTA"), "audit");
+      return handleReleaseUpdate();
     }
     if (path === "/api/clone" && req.method === "POST") {
       if (!canMutate) return json({ error: "forbidden" }, 403);

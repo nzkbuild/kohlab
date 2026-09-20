@@ -9,7 +9,7 @@
  * full output rather than just its tail on failure.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -41,6 +41,29 @@ function run(name, cmd, args, cwd = ROOT) {
   return ok;
 }
 
+/**
+ * Kill the detached PTY daemon this run spawned.
+ *
+ * The server spawns it detached so it outlives the server — that is the
+ * product's promise, not a bug. In a throwaway run it simply leaks: one daemon
+ * per check run stays behind, holding memory and a stale socket, and the
+ * documented way to end agents (`pkill -f pty-daemon.cjs`) would then take out
+ * the live deployment's daemon too. Match on our own PTY_SOCKET so only this
+ * run's daemon dies.
+ */
+function killDaemon(socketPath) {
+  for (const pid of readdirSync("/proc")) {
+    if (!/^\d+$/.test(pid)) continue;
+    try {
+      if (!readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("pty-daemon.cjs")) continue;
+      if (!readFileSync(`/proc/${pid}/environ`, "utf8").includes(`PTY_SOCKET=${socketPath}`)) continue;
+      process.kill(Number(pid), "SIGTERM");
+    } catch {
+      /* gone, or not readable — either way not ours */
+    }
+  }
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const tmp = mkdtempSync(join(tmpdir(), "kohlab-checkall-"));
@@ -55,6 +78,8 @@ try {
   run("token contrast (WCAG 2.2 AA)", "node", ["scripts/check-contrast.mjs"]);
   run("screen model", "node", ["scripts/check-screen.mjs"]);
   run("corruption handling", "node", ["scripts/check-corruption.mjs"]);
+  run("safe update (save → install → reload)", "node", ["scripts/check-update.mjs"]);
+  run("release checking (OTA)", "bun", ["scripts/check-release.ts"]);
   run("backend types", join(ROOT, "node_modules/.bin/tsc"), ["--noEmit"]);
   run("frontend types", join(ROOT, "web/node_modules/.bin/tsc"), ["--noEmit"], join(ROOT, "web"));
 
@@ -99,6 +124,12 @@ try {
     server?.kill("SIGKILL");
   } catch {
     /* gone */
+  }
+  // the daemon is detached, so killing the server does not take it with us
+  try {
+    killDaemon(join(works, "pty.sock"));
+  } catch {
+    /* nothing to do */
   }
   try {
     rmSync(tmp, { recursive: true, force: true });

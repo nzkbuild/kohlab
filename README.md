@@ -56,12 +56,43 @@ sudo apt-get install -y git
 # 2. Clone and run
 git clone https://github.com/nzkbuild/kohlab.git
 cd kohlab
-bun run cli.ts server
+bun link              # puts `kohlab` on your PATH
+kohlab                # prints the dashboard URL, then opens it
 
-# 3. Open the dashboard from your laptop
-ssh -L 7676:localhost:7676 user@your-server
-# → http://localhost:7676
+# 3. Keep it running across reboots (see docs/systemd.md)
 ```
+
+## Daily use
+
+Five commands, and they work from any directory:
+
+```bash
+kohlab                          # where is my dashboard, and where is my state
+kohlab new ~/my-project "fix the billing bug" claude
+kohlab ls                       # what is running
+kohlab open                     # the dashboard URL, for this laptop or phone
+kohlab update                   # update kohlab — running agents keep running
+```
+
+`kohlab update` saves your uncommitted work to the stash first, and rolls the
+checkout back if the new version fails to come up. Details:
+[docs/upgrade.md](docs/upgrade.md).
+
+`kohlab help` lists everything else.
+
+## Releasing an update
+
+Pushing is the release. There is no registry, no CI and no webhook:
+
+```bash
+# bump `version` in package.json, add the section to CHANGELOG.md, then:
+git push origin main
+```
+
+Every instance running this repo then offers the update in **Settings → Updates**,
+with the changelog above its own version as the release notes and one button to
+take it. Agents keep running, and a release that fails to come up is rolled back
+automatically. [docs/upgrade.md](docs/upgrade.md) has the details.
 
 Full setup, systemd (auto-start on reboot), and every command are in docs/.
 
