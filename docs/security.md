@@ -13,7 +13,7 @@ it runs.
   always sets a key. This is the one dangerous combination, and it is made
   impossible rather than documented.
 - **Losing the key is not losing the box.** `kohlab key` prints it, from the
-  environment, from the unit, or from the generated file, and says which ,
+  environment, from the unit, or from the generated file, and says which,
   and `kohlab key rotate` issues a new one. Both run on the machine only, so
   neither can be reached over the network.
 - **`KOHLAB_KEY`** is the single-operator key. When set, every `/api/*` route and

@@ -504,7 +504,7 @@ const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
  *
  *  - **No shell.** This used to be `exec(cmd)`, i.e. `/bin/sh -c`, behind a
  *    `cmd.startsWith("npm i -g")` "whitelist". `npm i -g x; cp -r
- *    /home/koh-alice /tmp/loot` passed that check and ran as the server user ,
+ *    /home/koh-alice /tmp/loot` passed that check and ran as the server user,
  *    root. Since any *member* may call this route, it was a member-to-root
  *    escalation that made the v1.8 per-OS-user isolation decorative: Bob did not
  *    need to read Alice's home himself, he could ask the server to. `execFile`

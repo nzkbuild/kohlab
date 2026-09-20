@@ -21,7 +21,7 @@ import { Button, SkeletonRows } from "./ui";
  * release notes for exactly the gap being closed.
  *
  * While an update runs the server restarts underneath the page, so the panel
- * polls rather than streams, and the outcome is read back from the run's log ,
+ * polls rather than streams, and the outcome is read back from the run's log,
  * nothing in memory on either side survives the restart.
  */
 export default function UpdatePanel() {

@@ -136,7 +136,7 @@ the pointer.
 **Notifications.** Request permission only from a user gesture in Settings, one
 notification per transition, always with a `tag` so repeats replace rather than stack, and
 only when `document.hidden`. In-app alerts use `role="alert"` and never auto-dismiss.
-Announcements are coalesced through one `role="status"` announcer, never one per log line ,
+Announcements are coalesced through one `role="status"` announcer, never one per log line,
 with a pause control.
 
 **React.** Error boundaries at root, per panel, and around every lazy region; pass
@@ -250,7 +250,7 @@ Verified against your live deployment after the restart:
 | WebSocket upgrade **with** key | rejected | **accepted** |
 | WebSocket upgrade without key | rejected | rejected (correct) |
 
-Note your unit sets `KOHLAB_KEY`, so **this was exactly the deployment B3 broke** ,
+Note your unit sets `KOHLAB_KEY`, so **this was exactly the deployment B3 broke**,
 the terminal and the done-ping were both dead here, and now are not.
 
 Two corrections to statements I made earlier in this session, since both were wrong:
@@ -305,13 +305,13 @@ I deliberately did not edit `/etc` for you.
   headless terminal per session and replays the screen rather than a rolling byte
   window, so reattaching reproduces a TUI exactly and a finished agent's final
   screen survives. What remains bounded: retained screens are in the daemon's
-  memory, so they are lost if the daemon restarts (a live session is unaffected ,
+  memory, so they are lost if the daemon restarts (a live session is unaffected,
   that is the model, not a cache). Persisting them beside the workspace would
   close it.
 - **The log tail of a TUI is mostly whitespace.** The `/log` endpoint returns the
   raw PTY buffer; after ANSI stripping, a redrawing UI produces many blank rows.
   The terminal tab is the right surface for those agents.
-- **A reboot or daemon crash ends every running agent.** Not a stale flag ,
+- **A reboot or daemon crash ends every running agent.** Not a stale flag,
   `running` is derived live from the daemon's `list` (`isRunning` →
   `ptyList`), and `state.json` never stores it, so the UI cannot lie about it.
   But when a session dies the record keeps `stopped === null`, so the workspace

@@ -81,7 +81,7 @@ did not write it.
 - **`GET /api/health`**, the same shape `kohlab health` reads. Without credentials
   it answers liveness and nothing else, because a probe usually runs unkeyed and a
   health endpoint should not be reconnaissance. With credentials it reports the
-  version, schema, uptime, the state directory, whether a key is required, and ,
+  version, schema, uptime, the state directory, whether a key is required, and,
   from the daemon, which is the only thing that actually knows, how many agent
   sessions are live.
 - **`kohlab health`.** Answers locally, so it works when the server is the thing
@@ -519,7 +519,7 @@ in `docs/research/`.
   `modified={diff}` showed raw `@@` hunks as file content against a blank pane.
   Diffs are now split into two real documents.
 - **Opening a finished workspace relaunched its agent.** The attach path spawned
-  unconditionally, so merely looking at a stopped workspace started a new run ,
+  unconditionally, so merely looking at a stopped workspace started a new run,
   and when that run ended it put the workspace straight back into the review
   queue, which meant accepting it never stuck. The attach now declines to
   *resurrect an ended run*; a workspace that has never run is still started by

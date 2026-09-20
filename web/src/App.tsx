@@ -17,7 +17,7 @@ import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 import { Announcer, Button, SkeletonRows } from "./components/ui";
 
-// xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch* ,
+// xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch*,
 // a static import would pull them into the entry chunk and block first paint.
 const WorkspaceDetail = lazy(() => import("./components/WorkspaceDetail"));
 

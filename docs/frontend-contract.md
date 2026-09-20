@@ -143,7 +143,7 @@ AGENT_CATALOG: AgentInfo[]
 api.authRequired()      api.testKey(key)
 api.workspaces()        api.create({task,repo?,agent,branch?,limits?})   api.clone({url,task,agent,limits?})
 api.action(id, "start"|"stop"|"restart"|"delete")
-api.diff(id)            // DiffFile[] , now includes NEW untracked files
+api.diff(id)            // DiffFile[], now includes NEW untracked files
 api.commit(id, message) api.share(id)   api.files(id)  api.file(id, path)  api.log(id)
 api.users() api.addUser({id,name,role}) api.removeUser(id) api.audit()
 api.agentsStatus() api.installAgent(name, cmd) api.ghRepos()

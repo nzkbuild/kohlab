@@ -131,7 +131,7 @@ back `contextApplied: false`, the file fixes that for future work).
 
 ### 8. Agent installer: Bash Tool (serafimcloud) + Todo Tool (serafimcloud)
 
-- **Bash Tool** → state-driven card (idle/running) with approval footer ,
+- **Bash Tool** → state-driven card (idle/running) with approval footer,
   exactly the agent-install state machine.
 - **Todo Tool** → shimmer "installing…" streaming state + per-item status
   icons for install progress. Same author → consistent card grammar.

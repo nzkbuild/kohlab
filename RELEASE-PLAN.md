@@ -16,7 +16,7 @@ anonymous read-only share links. That's fine for a solo dev, but a small team
   stop, commit, and delete every workspace.
 - **No idea who did what.** There's no record of who stopped an agent, who
   committed a diff, or who deleted a workspace.
-- **Reviewers can't be restricted.** The only read path is a public share token ,
+- **Reviewers can't be restricted.** The only read path is a public share token,
   anonymous, so you can't tell *who* looked, and it can't be revoked per-person.
 
 v1.6.0 fixes all three while preserving Kohlab's identity: **JSON files, no

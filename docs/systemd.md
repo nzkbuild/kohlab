@@ -67,7 +67,7 @@ journalctl -u kohlab -f
   `PORT`, and `WORKS_DIR`. They otherwise share `/tmp/kohlab-pty.sock` and will
   fight over the same daemon.
 - Workspace state lives wherever `WORKS_DIR` points, **not** necessarily
-  `.works/` next to the code. Read it from the unit rather than assuming ,
+  `.works/` next to the code. Read it from the unit rather than assuming,
   systemd merges every `Environment=` line into one, so match `WORKS_DIR=`
   anywhere on that line:
   ```bash

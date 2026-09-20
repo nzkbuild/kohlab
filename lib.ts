@@ -232,7 +232,7 @@ export function authRequired(): boolean {
   // Read FIRST, so corruption latches before the decision is made. Checking the
   // flag before reading left a one-request window: the flag was set *during*
   // usersExist(), too late for the check that had already passed, so the first
-  // request after a users.json was damaged was still admitted as anonymous ,
+  // request after a users.json was damaged was still admitted as anonymous,
   // and a mutating one would have been allowed through.
   const users = readUsers();
   if (usersFileCorrupt) return true;
@@ -1054,7 +1054,7 @@ export async function markStarted(id: string): Promise<Workspace> {
 interface State {
   /**
    * Bumped only for a change that older code cannot read. Every file written
-   * before this field existed has no version, which is what version 0 means ,
+   * before this field existed has no version, which is what version 0 means,
    * so the migration path for "an install that predates versioning" is the same
    * code path as any future one, and is exercised by a check.
    */
@@ -1128,7 +1128,7 @@ async function migrateState(s: State, file: string): Promise<State> {
   if (found < SCHEMA_VERSION) {
     s.schemaVersion = SCHEMA_VERSION;
     // Awaited, deliberately. This is a read that writes, and an unawaited write
-    // here is a write that can land after somebody else has replaced the file ,
+    // here is a write that can land after somebody else has replaced the file,
     // an operator restoring a backup, or a test that writes a deliberately
     // corrupt one: silently clobbering it with what we happened to read a
     // moment earlier. Finishing before we return means "the file is now what we

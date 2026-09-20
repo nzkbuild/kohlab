@@ -10,7 +10,7 @@
  *      made authRequired() false and let anonymous requests mutate.
  *   3. Both survive a RESTART. An earlier fix quarantined the damaged file by
  *      renaming it aside; the "we are damaged" signal was module state, so a
- *      restart cleared it and the renamed-away file simply read as absent ,
+ *      restart cleared it and the renamed-away file simply read as absent,
  *      re-opening anonymous access, and turning a corrupt state file into a
  *      working-looking empty fleet. The file is now left in place.
  */

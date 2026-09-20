@@ -7,8 +7,8 @@
    only for code and measurement.
 
    Two tiers, and only two:
-     1. PRIMITIVE , raw OKLCH ramps. The ONLY place a colour literal exists.
-     2. SEMANTIC  , what a thing IS (surface-raised, text-muted, status-running).
+     1. PRIMITIVE: raw OKLCH ramps. The ONLY place a colour literal exists.
+     2. SEMANTIC: what a thing IS (surface-raised, text-muted, status-running).
    Components consume the semantic tier. No component holds a hex literal or a
    primitive name.
 
@@ -609,6 +609,34 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Collapsed rail: the brand block yields to the one control that matters in this
+   state. The rail is 60px wide, so its header has a 36px content box. A 28px
+   brand mark, a spacer and a 28px toggle cannot share that row, and because the
+   rail sets overflow:hidden the toggle used to lay out past its right edge and
+   be clipped away entirely: collapse worked, expand was impossible with a
+   pointer, and the state persisted in localStorage, so the rail could never be
+   reopened. Focus made it worse, since the unreachable control was still in the
+   tab order and focusing it scrolled the clipped container sideways.
+   Hiding the brand keeps the toggle inside the rail, in the position the brand
+   mark occupied when expanded. */
+.sidebar[data-collapsed="true"] .sidebar-head {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-brand,
+.sidebar[data-collapsed="true"] .sidebar-head-fill {
+  display: none;
+}
+
+/* In the collapsed rail the toggle is the only thing up there, so give it the
+   full 36px content box rather than leaving a 28px square floating in it. */
+.sidebar[data-collapsed="true"] .sidebar-toggle {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
 }
 
 /* Collapsed rail: labels are hidden from layout AND from assistive tech only

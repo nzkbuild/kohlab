@@ -8,7 +8,7 @@ import { Button } from "./ui";
 /**
  * Redeeming an invitation.
  *
- * Rendered before the key gate, because whoever opens this link has no key yet ,
+ * Rendered before the key gate, because whoever opens this link has no key yet,
  * that is what the link is for. The token arrives in the URL fragment, which is
  * never sent to the server, so it cannot appear in an access log.
  *

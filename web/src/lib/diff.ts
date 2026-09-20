@@ -19,7 +19,7 @@ const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
  * Rebuild the original and modified documents from a unified diff.
  *
  * Only hunk contents are recoverable from a patch (the surrounding unchanged
- * file is not in it), so the result is the changed regions with their context ,
+ * file is not in it), so the result is the changed regions with their context,
  * which is exactly what a patch review shows. Context lines are copied to both
  * sides, `-` lines only to the original, `+` lines only to the modified, so the
  * two documents stay line-aligned.

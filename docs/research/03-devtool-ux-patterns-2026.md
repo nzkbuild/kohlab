@@ -275,7 +275,7 @@ contained, Escape closes (<https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal
     position and accumulate an "N new lines ↓" affordance; auto-follow only when already pinned to
     the bottom. Never clear or reflow the buffer on reconnect.
 11. **[MUST]** Connection state is explicit: a status chip with three states (live / reconnecting /
-    offline) plus a last-updated timestamp, driven by SSE/WS state (`onerror`, server `retry`) ,
+    offline) plus a last-updated timestamp, driven by SSE/WS state (`onerror`, server `retry`),
     **not** by `navigator.onLine`, which MDN warns is not a reachability signal.
 12. **[SHOULD]** Live updates preserve scan position: fixed row heights, stable keys, no re-sorting
     of the visible list while the pointer is in it; new rows land behind a "N new" control. Only

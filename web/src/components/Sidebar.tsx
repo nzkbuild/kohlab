@@ -65,18 +65,20 @@ export default function Sidebar({ open, onClose }: Props) {
       data-collapsed={collapsed}
       aria-label="Primary navigation"
     >
-      <div className="flex min-h-13 items-center gap-2.5 border-b border-line-subtle px-3">
-        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
+      <div className="sidebar-head flex min-h-13 items-center gap-2.5 border-b border-line-subtle px-3">
+        <span className="sidebar-brand grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
           <TerminalWindow size={15} weight="bold" />
         </span>
         <span className="sidebar-label text-base font-semibold tracking-tight">kohlab</span>
-        <div className="flex-1" />
-        {/* Desktop: collapse the rail. Mobile: dismiss the drawer. */}
+        <div className="sidebar-head-fill flex-1" />
+        {/* Desktop: collapse the rail. Mobile: dismiss the drawer. The collapsed
+            rail has room for one control, so this one is the survivor: see
+            .sidebar[data-collapsed="true"] .sidebar-head in index.css. */}
         <Button
           variant="quiet"
           iconOnly
           size="sm"
-          className="hidden shell:inline-flex"
+          className="sidebar-toggle hidden shell:inline-flex"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((v) => !v)}

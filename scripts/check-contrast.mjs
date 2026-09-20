@@ -127,7 +127,7 @@ function chipTintPercent(chipName) {
  *   L = 0.2126R + 0.7152G + 0.0722B
  * where each channel is first linearised:
  *   c <= 0.04045 ? c/12.92 : ((c + 0.055)/1.055) ^ 2.4
- * `resolve()` returns GAMMA-ENCODED sRGB, so the transform below is required ,
+ * `resolve()` returns GAMMA-ENCODED sRGB, so the transform below is required,
  * skipping it overstates contrast badly near black.
  */
 const linearise = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
@@ -199,7 +199,7 @@ for (const [label, fgTok, bgTok, min, why, chipName, chipTint] of CHECKS) {
   const ok = ratio >= min;
   if (!ok) failures++;
   console.log(
-    `  ${ok ? "ok  " : "FAIL"} ${label.padEnd(26)} ${ratio.toFixed(2).padStart(6)}:1  (min ${min})  ${hex(fg)} on ${hex(bg)} , ${why}`,
+    `  ${ok ? "ok  " : "FAIL"} ${label.padEnd(26)} ${ratio.toFixed(2).padStart(6)}:1  (min ${min})  ${hex(fg)} on ${hex(bg)}, ${why}`,
   );
 }
 

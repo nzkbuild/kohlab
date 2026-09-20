@@ -127,7 +127,7 @@ export default function Onboarding() {
                   its diff, so you read the change before anything else happens to it.
                 </li>
                 <li>
-                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically ,
+                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically,
                   you write the message and press commit.
                 </li>
               </ul>

@@ -71,7 +71,7 @@ an owner minting one.
 ## Locked out after too many wrong keys
 
 Wait a minute. Twenty refused attempts from one address in a minute trip the
-throttle, and it clears itself. A correct key still works during the window ,
+throttle, and it clears itself. A correct key still works during the window,
 that is deliberate, so one address behind a shared NAT cannot lock out the others.
 
 ## "written by a newer kohlab"

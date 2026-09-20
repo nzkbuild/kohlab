@@ -31,7 +31,7 @@ completes the loop they serve.
 ## 2. The usage model
 
 > **Kohlab runs tasks.** You post a goal, an agent works in an isolated
-> clone, you watch it from the browser, you *review the diff*, you commit ,
+> clone, you watch it from the browser, you *review the diff*, you commit,
 > done. The terminal is the window you watch; the diff is the moment of truth.
 
 ### The lifecycle (replaces running/done/stopped)

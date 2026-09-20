@@ -346,7 +346,7 @@ export default function DiffView({ workspaceId }: Props) {
                         </span>
                       ) : (
                         <span className="shrink-0 text-2xs text-text-faint" title="no line stats">
-                          ,
+                          n/a
                         </span>
                       )}
                     </li>
@@ -389,7 +389,7 @@ export default function DiffView({ workspaceId }: Props) {
                       options={{
                         readOnly: true,
                         minimap: { enabled: false },
-                        // Side-by-side on a wide pane, inline when it narrows ,
+                        // Side-by-side on a wide pane, inline when it narrows,
                         // Monaco decides, so there is no breakpoint to maintain.
                         renderSideBySide: true,
                         useInlineViewWhenSpaceIsLimited: true,

@@ -6,7 +6,7 @@
  *
  * v1.8 promised that "Bob cannot read Alice's files or signal her processes"
  * because each member is a real OS account and their agents run as that account.
- * It was true, documented, and its definition-of-done was ticked **by hand** ,
+ * It was true, documented, and its definition-of-done was ticked **by hand**,
  * which is to say the most important claim in the product was asserted by
  * nothing. This asserts it.
  *
