@@ -344,10 +344,106 @@ export async function addUser(opts: { id: string; name: string; role: Role }): P
   return { user, key };
 }
 
+/** How long an invitation link stays valid. */
+const INVITE_TTL_MS = Number(process.env.KOHLAB_INVITE_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
+
+/** Can this server give a member their own OS account? */
+export function canProvisionOsUsers(): boolean {
+  return isRoot();
+}
+
+/** Owners remaining if `id` were removed, or had `role` applied. */
+function ownersLeft(users: User[], id: string, role?: Role): number {
+  return users.filter((u) => (u.id === id ? (role ?? u.role) === "owner" : u.role === "owner")).length;
+}
+
+/**
+ * Refuse anything that would leave the box with nobody who can administer it.
+ *
+ * With no `KOHLAB_KEY` the named owners are the only way in, so removing or
+ * demoting the last one is a lockout with no way back short of editing
+ * users.json by hand. With a key configured it is recoverable, so it is allowed.
+ */
+function assertNotLastOwner(users: User[], id: string, role?: Role, action = "remove") {
+  if (ownersLeft(users, id, role) > 0 || ACCESS_KEY) return;
+  throw new Error(`that would ${action} the last owner, leaving nobody who can manage this server`);
+}
+
+/**
+ * Invite someone: a single-use link they open to get their own key.
+ *
+ * The record is created now and the OS account at acceptance, so an invitation
+ * nobody accepts leaves no account behind. Whether accounts *can* be created is
+ * checked here rather than discovered at acceptance: a server that cannot
+ * provision must refuse the invitation and say what to do, not quietly put the
+ * new member inside the owner's account.
+ */
+export async function createInvite(opts: { id: string; name: string; role: Role; invitedBy?: string }): Promise<{ token: string; expires: number }> {
+  const id = opts.id.trim();
+  if (!id) throw new Error("a user id is required");
+  if (!canProvisionOsUsers()) {
+    throw new Error(
+      "this server cannot create member accounts, so an invited member would share the server's own account instead of getting their own. Run kohlab as root (or install it with the service unit) and invite again.",
+    );
+  }
+  const users = readUsers();
+  const existing = users.find((u) => u.id === id);
+  if (existing?.key) throw new Error(`'${id}' is already a member — rotate their key or remove them instead`);
+
+  const token = randomBytes(32).toString("hex");
+  const expires = Date.now() + INVITE_TTL_MS;
+  const invite = { token: await hashKey(token), expires, invitedBy: opts.invitedBy };
+  if (existing) {
+    Object.assign(existing, { name: opts.name, role: opts.role, invite, osUser: undefined, uid: undefined, gid: undefined, home: undefined });
+  } else {
+    users.push({ id, name: opts.name, role: opts.role, invite });
+  }
+  await writeUsers(users);
+  await audit("system", "invite", id, `${opts.role}, expires ${new Date(expires).toISOString()}`);
+  return { token, expires };
+}
+
+/** Redeem an invitation: issue that member's key and give them their account. */
+export async function acceptInvite(token: string): Promise<{ id: string; name: string; role: Role; key: string }> {
+  const wanted = await hashKey(token);
+  const users = readUsers();
+  const found = users.find((u) => u.invite && u.invite.token === wanted);
+  if (!found?.invite) throw new Error("this invitation is not valid — ask for a new link");
+  if (found.invite.expires < Date.now()) throw new Error("this invitation has expired — ask for a new link");
+
+  const key = randomBytes(24).toString("hex");
+  try {
+    const os = await provisionOsUser(found);
+    Object.assign(found, os);
+  } catch (e) {
+    // Not fatal to the invitation: they can still sign in, but without their own
+    // account. Say so rather than pretending they are isolated.
+    console.warn(`[kohlab] invited member '${found.id}' has no OS account: ${(e as Error).message}`);
+  }
+  found.key = await hashKey(key);
+  delete found.invite;
+  await writeUsers(users);
+  await audit("system", "invite.accept", found.id, found.osUser ? "os-user provisioned" : "no OS account");
+  return { id: found.id, name: found.name, role: found.role, key };
+}
+
+/** Change a role, refusing the one change that locks everyone out. */
+export async function setUserRole(id: string, role: Role): Promise<User> {
+  const users = readUsers();
+  const user = users.find((u) => u.id === id);
+  if (!user) throw new Error(`no user '${id}'`);
+  assertNotLastOwner(users, id, role, "demote");
+  user.role = role;
+  await writeUsers(users);
+  await audit("system", "user.role", id, role);
+  return user;
+}
+
 /** Remove a user (revoke): drop the record and its OS account + home. */
 export async function removeUser(id: string): Promise<{ removed: boolean; warning?: string }> {
   const target = readUsers().find((u) => u.id === id);
   const users = readUsers().filter((u) => u.id !== id);
+  assertNotLastOwner(users.concat(target ? [target] : []), id, undefined, "remove");
   await writeUsers(users);
   let outcome = { removed: true as boolean, warning: undefined as string | undefined };
   if (target?.osUser) {
@@ -378,7 +474,9 @@ export async function authenticate(req: { headers: Headers; url: string }): Prom
   const key = extractKey(req);
   if (key) {
     for (const u of readUsers()) {
-      if (await keyMatches(key, u.key)) return { kind: "user", id: u.id, role: u.role };
+      // an invited member has no key until they accept — `keyMatches` would be
+      // handed undefined, and a user without a key must never authenticate
+      if (u.key && (await keyMatches(key, u.key))) return { kind: "user", id: u.id, role: u.role };
     }
   }
   // 2. legacy KOHLAB_KEY

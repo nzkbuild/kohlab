@@ -43,6 +43,10 @@ import {
   sessionId,
   checkRelease,
   updateRunState,
+  createInvite,
+  acceptInvite,
+  setUserRole,
+  canProvisionOsUsers,
 } from "./lib";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -292,7 +296,13 @@ async function walkDir(dir: string, depth: number): Promise<{ name: string; type
 
 /** List users (keys never exposed), owner-only. */
 async function handleUsersList(): Promise<Response> {
-  return json({ users: listUsers().map((u) => ({ id: u.id, name: u.name, role: u.role })) });
+  return json({
+    // `pending` is an invitation nobody has accepted yet; `canInvite` says whether
+    // this server can give a new member their own account, so the panel can say
+    // so before someone is invited into the owner's account by mistake.
+    users: listUsers().map((u) => ({ id: u.id, name: u.name, role: u.role, pending: !u.key })),
+    canInvite: canProvisionOsUsers(),
+  });
 }
 
 /** Create a user; the plaintext key is returned exactly once. owner-only. */
@@ -311,7 +321,53 @@ async function handleUserAdd(req: Request): Promise<Response> {
   }
 }
 
-/** Revoke a user. owner-only. */
+/**
+ * Create an invitation and return the link once.
+ *
+ * The link's fragment carries the token, never a query string: a fragment is not
+ * sent to the server, so the token cannot land in an access log, and it does not
+ * travel in a Referer header if the page loads anything from elsewhere.
+ */
+async function handleInviteCreate(req: Request, actor: string): Promise<Response> {
+  const body = (await req.json()) as { id?: string; name?: string; role?: string };
+  const id = (body.id ?? "").trim();
+  const name = (body.name ?? "").trim() || id;
+  const role = (body.role ?? "member") as "owner" | "member" | "viewer";
+  if (!id) return json({ error: "id is required" }, 400);
+  if (!["owner", "member", "viewer"].includes(role)) return json({ error: "role must be owner|member|viewer" }, 400);
+  try {
+    const { token, expires } = await createInvite({ id, name, role, invitedBy: actor });
+    return json({ id, role, expires, path: `/join#${token}` });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** Redeem an invitation. The only route reachable without a key. */
+async function handleJoin(req: Request): Promise<Response> {
+  const body = (await req.json()) as { token?: string };
+  const token = (body.token ?? "").trim();
+  if (!token) return json({ error: "token is required" }, 400);
+  try {
+    const { id, name, role, key } = await acceptInvite(token);
+    return json({ user: { id, name, role }, key });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+async function handleUserRole(id: string, req: Request): Promise<Response> {
+  const body = (await req.json()) as { role?: string };
+  const role = body.role as "owner" | "member" | "viewer";
+  if (!["owner", "member", "viewer"].includes(role)) return json({ error: "role must be owner|member|viewer" }, 400);
+  try {
+    const user = await setUserRole(id, role);
+    return json({ user: { id: user.id, name: user.name, role: user.role } });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
 async function handleUserRemove(id: string): Promise<Response> {
   try {
     const { warning } = await removeUser(id);
@@ -701,6 +757,23 @@ serve({
       if (denied) return json({ error: "unauthorized" }, 401);
       if (!isOwner) return json({ error: "forbidden — only an owner can add members" }, 403);
       return handleUserAdd(req);
+    }
+    // Inviting, and redeeming an invitation. `/api/join` is the one route that
+    // must work without credentials: the token *is* the credential, it is
+    // single-use and it expires. Inviting is an owner action.
+    if (path === "/api/invites" && req.method === "POST") {
+      if (denied) return json({ error: "unauthorized" }, 401);
+      if (!isOwner) return json({ error: "forbidden — only an owner can invite" }, 403);
+      return handleInviteCreate(req, actor);
+    }
+    if (path === "/api/join" && req.method === "POST") {
+      return handleJoin(req);
+    }
+    if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "PATCH") {
+      if (denied) return json({ error: "unauthorized" }, 401);
+      if (!isOwner) return json({ error: "forbidden — only an owner can change roles" }, 403);
+      const uid = decodeURIComponent(path.split("/").pop() ?? "");
+      return handleUserRole(uid, req);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
       if (!isOwner) return json({ error: "forbidden" }, 403);
