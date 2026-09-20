@@ -537,9 +537,100 @@ export async function audit(user: string, action: string, id?: string, detail?: 
     await mkdir(WORKS_DIR, { recursive: true });
     const line = JSON.stringify({ t: Date.now(), user, action, id, detail });
     await appendFile(AUDIT_FILE, line + "\n");
+    await rotateAuditIfNeeded();
   } catch {
     /* audit is best-effort; never break the mutation over it */
   }
+}
+
+/** 8 MiB, roughly 40k events. */
+const AUDIT_MAX_BYTES = Number(process.env.AUDIT_MAX_BYTES ?? 8 * 1024 * 1024);
+/** How many rolled files to keep: `.1` is the newest. */
+const AUDIT_KEEP = Number(process.env.AUDIT_KEEP ?? 3);
+let auditCheckedAt = 0;
+
+/**
+ * Roll the audit log when it gets large, keeping the recent past.
+ *
+ * An agent workspace that runs all day writes continuously, and an unbounded log
+ * on a small VPS is a slow outage. Best-effort like the write itself: if rotating
+ * fails, keep appending — losing history is bad, refusing to record it is worse.
+ * Called on a timer because a size check on every single append is a stat per
+ * event for no benefit.
+ */
+async function rotateAuditIfNeeded(): Promise<void> {
+  if (Date.now() - auditCheckedAt < 60_000) return;
+  auditCheckedAt = Date.now();
+  try {
+    const { size } = await stat(AUDIT_FILE);
+    if (size < AUDIT_MAX_BYTES) return;
+    for (let i = AUDIT_KEEP - 1; i >= 1; i--) {
+      const from = `${AUDIT_FILE}.${i}`;
+      const to = `${AUDIT_FILE}.${i + 1}`;
+      if (existsSync(from)) await rename(from, to);
+    }
+    await rename(AUDIT_FILE, `${AUDIT_FILE}.1`);
+    await audit("system", "audit.rotated", undefined, `${Math.round(size / 1024)} KiB -> .1, keeping ${AUDIT_KEEP}`);
+    auditCheckedAt = Date.now();
+  } catch {
+    /* no log yet, or a read-only directory */
+  }
+}
+
+/** Run tar in the state directory. Relative paths only — see restoreFrom. */
+function tar(args: string[]): { status: number | null; stdout: string; stderr: string } {
+  const res = spawnSync("tar", args, { cwd: WORKS_DIR, encoding: "utf8" });
+  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+}
+
+/**
+ * Everything worth keeping in one archive: the state file, the member records,
+ * the audit log, and every workspace's metadata (but not its work — that is git's
+ * job, and it is in the repo the workspace was cloned from).
+ *
+ * Written with tar, and only the paths that exist, so a fresh install still
+ * produces a valid archive.
+ */
+export async function backupTo(target: string): Promise<{ path: string; bytes: number; entries: string[] }> {
+  await mkdir(WORKS_DIR, { recursive: true });
+  const entries = [STATE_FILE, USERS_FILE, AUDIT_FILE, KEY_FILE].filter((f) => existsSync(f));
+  if (!entries.length) throw new Error(`nothing to back up in ${WORKS_DIR}`);
+  const res = tar(["czf", target, "--", ...entries.map((f) => f.slice(WORKS_DIR.length + 1))]);
+  if (res.status !== 0) throw new Error(`tar failed: ${res.stderr.trim() || res.status}`);
+  const { size } = await stat(target);
+  await audit("cli", "backup", undefined, `${target} (${entries.length} files, ${Math.round(size / 1024)} KiB)`);
+  return { path: target, bytes: size, entries };
+}
+
+/**
+ * Restore an archive over the current state directory.
+ *
+ * The current files are moved aside rather than deleted, so a wrong archive is
+ * recoverable. There is no merge: a restore is a replacement, which is what the
+ * word means.
+ */
+export async function restoreFrom(archive: string): Promise<{ restored: string[]; movedAside: string[] }> {
+  if (!existsSync(archive)) throw new Error(`no such archive: ${archive}`);
+  const listing = tar(["tzf", archive]);
+  if (listing.status !== 0) throw new Error(`not a readable archive: ${listing.stderr.trim() || listing.status}`);
+  const members = listing.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  await mkdir(WORKS_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const movedAside: string[] = [];
+  for (const name of members) {
+    // Only flat names ever go in; refuse anything with a path in it.
+    if (name.includes("/") || name === "..") throw new Error(`refusing an archive with a path in it: ${name}`);
+    const target = join(WORKS_DIR, name);
+    if (existsSync(target)) {
+      await rename(target, `${target}.before-restore-${stamp}`);
+      movedAside.push(`${name}.before-restore-${stamp}`);
+    }
+  }
+  const res = tar(["xzf", archive]);
+  if (res.status !== 0) throw new Error(`extract failed: ${res.stderr.trim() || res.status}`);
+  await audit("cli", "restore", undefined, `${archive} (replaced ${movedAside.length} files)`);
+  return { restored: members, movedAside };
 }
 
 /** Read the audit log (newest first, capped). */
@@ -747,6 +838,29 @@ export function onDaemonMessage(fn: DaemonHandler) {
   daemonHandlers.push(fn);
 }
 
+/** Called when the daemon connection goes up or down. Set by the server. */
+type DaemonStateFn = (up: boolean) => void;
+const daemonStateHandlers: DaemonStateFn[] = [];
+export function onDaemonState(fn: DaemonStateFn) {
+  daemonStateHandlers.push(fn);
+}
+
+/**
+ * Whether the daemon is reachable right now.
+ *
+ * Deliberately "is the socket up", not "does it answer": a health endpoint that
+ * blocks on a round trip is a health endpoint that hangs when the thing it
+ * checks is ill, which is precisely when it is being called.
+ */
+export function daemonAlive(): boolean {
+  return !!ptySock && !ptySock.destroyed && ptySock.readyState === "open";
+}
+
+/** Announce that the connection came up, once it has. */
+function markDaemonUp() {
+  daemonStateHandlers.forEach((h) => h(true));
+}
+
 /**
  * Start a daemon — called ONLY after a connection attempt has failed, so a
  * live daemon is never orphaned.
@@ -798,8 +912,20 @@ function ptyConnect(): Promise<import("net").Socket> {
             } catch {}
           }
         });
-        sock.on("close", () => { ptySock = null; ptyConnecting = null; });
-        sock.on("error", () => { ptySock = null; ptyConnecting = null; });
+        sock.on("close", () => {
+          ptySock = null;
+          ptyConnecting = null;
+          // Losing this socket means every live session is gone with it: the
+          // daemon owns the PTYs, so there is no reconnecting to them. Say so
+          // rather than letting the dashboard keep showing "running".
+          daemonStateHandlers.forEach((h) => h(false));
+        });
+        sock.on("error", () => {
+          ptySock = null;
+          ptyConnecting = null;
+          daemonStateHandlers.forEach((h) => h(false));
+        });
+        markDaemonUp();
         resolve(sock);
       });
       sock.once("error", (e: Error) => {
@@ -926,9 +1052,19 @@ export async function markStarted(id: string): Promise<Workspace> {
 
 
 interface State {
+  /**
+   * Bumped only for a change that older code cannot read. Every file written
+   * before this field existed has no version, which is what version 0 means —
+   * so the migration path for "an install that predates versioning" is the same
+   * code path as any future one, and is exercised by a check.
+   */
+  schemaVersion?: number;
   workspaces: Workspace[];
   agents: Record<string, string>;
 }
+
+/** The shape this build writes. See migrateState(). */
+export const SCHEMA_VERSION = 1;
 
 const DEFAULT_AGENTS: Record<string, string> = {
   omp: "omp",
@@ -940,7 +1076,9 @@ const DEFAULT_AGENTS: Record<string, string> = {
 async function loadState(): Promise<State> {
   await mkdir(WORKS_DIR, { recursive: true });
   if (!existsSync(STATE_FILE)) {
-    const s: State = { workspaces: [], agents: { ...DEFAULT_AGENTS } };
+    // Stamped from the first write, so a fresh install does not need the
+    // migrate-and-save pass below on its very next read.
+    const s: State = { schemaVersion: SCHEMA_VERSION, workspaces: [], agents: { ...DEFAULT_AGENTS } };
     await saveState(s);
     return s;
   }
@@ -958,7 +1096,49 @@ async function loadState(): Promise<State> {
     );
     throw new Error(`${STATE_FILE} is corrupt — see the message above, then restart`);
   }
+  return await migrateState(s, STATE_FILE);
+}
+
+/**
+ * Bring a loaded state file up to this build's shape, or refuse it loudly.
+ *
+ * A file *newer* than this server is refused rather than read. Reading it would
+ * mean working with fields this build does not know about, and then writing the
+ * file back without them — a downgrade that silently destroys data. Refusing to
+ * start is recoverable; writing over it is not.
+ *
+ * An older (or versionless) file is stamped and kept. There are no migrations
+ * yet, so the only real work is the stamp — but the versionless path is the one
+ * every existing install takes, which is exactly why it is tested.
+ */
+async function migrateState(s: State, file: string): Promise<State> {
+  const found = typeof s.schemaVersion === "number" ? s.schemaVersion : 0;
+  if (found > SCHEMA_VERSION) {
+    const error = new Error(
+      `${file} was written by a newer kohlab (schema ${found}; this build reads ${SCHEMA_VERSION}).`,
+    );
+    reportCorrupt(
+      file,
+      error,
+      "left untouched — update kohlab, or move the file aside to start with no workspaces",
+    );
+    throw error;
+  }
   if (!s.agents) s.agents = { ...DEFAULT_AGENTS };
+  if (found < SCHEMA_VERSION) {
+    s.schemaVersion = SCHEMA_VERSION;
+    // Awaited, deliberately. This is a read that writes, and an unawaited write
+    // here is a write that can land after somebody else has replaced the file —
+    // an operator restoring a backup, or a test that writes a deliberately
+    // corrupt one — silently clobbering it with what we happened to read a
+    // moment earlier. Finishing before we return means "the file is now what we
+    // read" is true by the time the caller sees anything.
+    try {
+      await saveState(s);
+    } catch {
+      /* a read-only state directory must not stop the server serving */
+    }
+  }
   return s;
 }
 

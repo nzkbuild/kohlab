@@ -34,6 +34,9 @@ import {
   addUser,
   removeUser,
   rotateOwnKey,
+  ptyList,
+  onDaemonState,
+  SCHEMA_VERSION,
   extractKey,
   KEY_PROTOCOL,
   audit,
@@ -57,6 +60,15 @@ const PORT = Number(process.env.PORT ?? 7676);
  *  tailnet or the LAN, which is why a keyless server there generates one. */
 const HOST = process.env.HOST ?? "0.0.0.0";
 const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+/** Reported by /api/health. Read once; the file does not change under a running server. */
+const VERSION = (() => {
+  try {
+    return JSON.parse(require("fs").readFileSync(join(import.meta.dir, "package.json"), "utf8")).version as string;
+  } catch {
+    return "unknown";
+  }
+})();
 
 /** Browser push subscribers (dashboard pages). */
 const pushClients = new Set<ServerWebSocket>();
@@ -102,6 +114,25 @@ onWorkspaceDone((ws) => {
     if (c.readyState === WebSocket.OPEN) c.send(msg);
   }
   containFailure(notifyWebhook(ws), "notify webhook");
+});
+
+/**
+ * The daemon owns every PTY. When its socket closes, every live session is gone
+ * — there is nothing to reconnect to — so the dashboard is told, loudly, instead
+ * of continuing to show "running" for work that is no longer happening.
+ */
+// Kept as "the last time it went down", not cleared when it comes back: a
+// health probe starts a fresh daemon, so a monitor would otherwise see nothing
+// but green through an outage that killed every live session. The timestamp is
+// what makes flapping visible.
+let daemonDownAt: number | null = null;
+onDaemonState((up) => {
+  if (!up) daemonDownAt = Date.now();
+  const msg = JSON.stringify({ type: "daemon", up });
+  for (const c of pushClients) {
+    if (c.readyState === WebSocket.OPEN) c.send(msg);
+  }
+  void audit("system", up ? "daemon.up" : "daemon.down", undefined, up ? undefined : "every live session ended with it");
 });
 
 // poll for finished agents
@@ -839,6 +870,43 @@ serve({
 
     if (path === "/api/auth/required") {
       return json({ required: authRequired() });
+    }
+    /**
+     * Health, for a monitor and for `kohlab doctor`.
+     *
+     * Unauthenticated callers get liveness only — "the process answers" — with no
+     * counts and no paths, because a probe usually runs without a key and a
+     * health endpoint should not be a reconnaissance surface. With credentials it
+     * reports the detail an operator wants at 3am.
+     */
+    if (path === "/api/health" && req.method === "GET") {
+      const state = await loadState();
+      // Without credentials, answer "the process is alive" and nothing else. No
+      // probe, because probing here would start a daemon on behalf of a stranger,
+      // and no counts, because that is reconnaissance.
+      if (denied) return json({ ok: true });
+
+      // With credentials, ask the daemon — the only thing that actually knows what
+      // is running. `daemonAlive()` alone is not enough: it reports whether *this
+      // process* has an open socket, which on a fresh server is false until
+      // something touches a PTY. The probe establishes that, adopting a live
+      // daemon or starting one, exactly as `kohlab health` does.
+      const sessions = await ptyList();
+      const up = sessions !== null;
+      const ids = new Set(state.workspaces.map((w) => sessionId(w.id)));
+      const running = (sessions ?? []).filter((s) => !s.exited && ids.has(s.id)).length;
+      return json({
+        ok: true,
+        version: VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        uptimeSec: Math.round(process.uptime()),
+        daemon: up,
+        daemonDownSince: up ? null : daemonDownAt,
+        lastDaemonDeath: daemonDownAt,
+        workspaces: { total: state.workspaces.length, running },
+        dir: WORKS_DIR,
+        keyRequired: authRequired(),
+      });
     }
     if (path === "/api/account" && req.method === "GET") {
       if (!auth) return json({ error: "unauthorized" }, 401);

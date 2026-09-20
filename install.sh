@@ -8,6 +8,7 @@
 #   --key <secret>    access key for the dashboard (generated when omitted)
 #   --no-systemd      install and build, but do not create or start a service
 #   --no-command      do not put `kohlab` on the PATH
+#   --uninstall       stop the service and remove the unit, keeping your data
 #   -h, --help        this text
 #
 # Environment
@@ -31,6 +32,7 @@ PORT="${KOHLAB_PORT:-7676}"
 KEY="${KOHLAB_KEY:-}"
 WITH_SYSTEMD=1
 WITH_COMMAND=1
+UNINSTALL=0
 UNIT=kohlab.service
 
 log()  { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
@@ -49,10 +51,55 @@ while [ $# -gt 0 ]; do
     --key) KEY="${2:-}"; [ -n "$KEY" ] || die "--key needs a value"; shift 2 ;;
     --no-systemd) WITH_SYSTEMD=0; shift ;;
     --no-command) WITH_COMMAND=0; shift ;;
-    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | cut -c3-; exit 0 ;;
+    -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | cut -c3-; exit 0 ;;
+    --uninstall) UNINSTALL=1; shift ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
 done
+
+# ── uninstall ────────────────────────────────────────────────────────────────
+# Handled before anything else, because uninstalling must not require bun, git,
+# or a checkout to still be there. Deliberately non-destructive: stopping the
+# service and deleting somebody's workspaces are different requests, and only one
+# of them is usually what was meant.
+if [ "$UNINSTALL" -eq 1 ]; then
+  step "uninstall — service only; your data is left alone"
+  echo "This stops kohlab and removes $KOHLAB_UNIT_DIR/$UNIT."
+  echo "Your checkout ($KOHLAB_HOME) and state directory are NOT touched."
+  printf 'Continue? [y/N] '
+  read -r reply
+  case "$reply" in
+    [yY]|[yY][eE][sS]) ;;
+    *) echo "cancelled — nothing changed"; exit 0 ;;
+  esac
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl list-unit-files "$UNIT" >/dev/null 2>&1 && systemctl is-enabled "$UNIT" >/dev/null 2>&1; then
+      as_root systemctl disable --now "$UNIT" || warn "could not stop $UNIT — stop it by hand"
+      log "service stopped and disabled"
+    else
+      warn "$UNIT was not installed as a service"
+    fi
+  fi
+  if [ -f "$KOHLAB_UNIT_DIR/$UNIT" ]; then
+    as_root rm -f "$KOHLAB_UNIT_DIR/$UNIT"
+    as_root systemctl daemon-reload 2>/dev/null || true
+    log "unit file removed"
+  fi
+  if [ "$WITH_COMMAND" -eq 1 ] && [ -e "$KOHLAB_BIN_DIR/kohlab" ]; then
+    as_root rm -f "$KOHLAB_BIN_DIR/kohlab"
+    log "the kohlab command was removed from $KOHLAB_BIN_DIR"
+  fi
+  # Nothing supervises the daemon, so nothing else would ever stop it. It is
+  # holding agent PTYs; leaving it running after an uninstall is a surprise.
+  if pkill -f 'pty-daemon.cjs' 2>/dev/null; then
+    log "the pty daemon was stopped (any live agent sessions went with it)"
+  fi
+  echo
+  echo "Kept: $KOHLAB_HOME"
+  echo "Kept: your state directory — find it with 'kohlab status', or see docs/uninstall.md"
+  echo "To remove everything: rm -rf $KOHLAB_HOME \$WORKS_DIR"
+  exit 0
+fi
 
 [ "$(uname -s)" = "Linux" ] || warn "this installer targets Linux; on macOS, run the steps by hand (docs/install.md)"
 

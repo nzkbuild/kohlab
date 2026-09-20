@@ -4,6 +4,7 @@
 // the HTTP/WS layer rather than of a function.
 import { spawn } from "child_process";
 import { mkdtempSync, rmSync } from "fs";
+import { spawnSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -18,14 +19,41 @@ function check(name, got, want) {
   console.log(`${ok ? "ok  " : "FAIL"}  ${name}${ok ? "" : `  (got ${got}, wanted ${want})`}`);
 }
 
+// Its own socket, so this never adopts (or disturbs) a real instance's daemon.
+const SOCKET = join(tmpdir(), `kohlab-auth-${process.pid}.sock`);
 const server = spawn("bun", ["run", "server.ts"], {
   cwd: process.cwd(),
-  env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1", KOHLAB_KEY: KEY, WORKS_DIR: dir },
+  env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1", KOHLAB_KEY: KEY, WORKS_DIR: dir, PTY_SOCKET: SOCKET },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let log = "";
 server.stdout.on("data", (b) => (log += b));
 server.stderr.on("data", (b) => (log += b));
+
+
+/**
+ * The pid bound to a unix socket.
+ *
+ * A daemon is spawned detached and deliberately outlives its server, so a check
+ * that starts a server leaks a daemon per run unless it ends the one it caused —
+ * and `pkill -f pty-daemon.cjs` would also kill the daemon of a real kohlab
+ * instance on this machine, ending live agent sessions.
+ */
+function pidOnSocket(path) {
+  const out = spawnSync(
+    "sh",
+    ["-c", `ss -xlp 2>/dev/null | grep -F '${path}' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2`],
+    { encoding: "utf8" },
+  ).stdout.trim();
+  return out || null;
+}
+
+/** End the daemon bound to a socket, if one is there. */
+function killDaemonOn(path) {
+  const pid = pidOnSocket(path);
+  if (pid) spawnSync("kill", ["-9", pid], { encoding: "utf8" });
+  rmSync(path, { force: true });
+}
 
 const base = `http://127.0.0.1:${PORT}`;
 const owner = { authorization: `Bearer ${KEY}` };
@@ -110,6 +138,7 @@ try {
     (await fetch(`${base}/api/users`, { headers: owner })).status, 200);
 } finally {
   server.kill("SIGKILL");
+  killDaemonOn(SOCKET);
   rmSync(dir, { recursive: true, force: true });
 }
 

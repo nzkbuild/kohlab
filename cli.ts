@@ -7,6 +7,10 @@ import { hostname, networkInterfaces, userInfo } from "os";
 import { randomBytes } from "crypto";
 import { join } from "path";
 import {
+  backupTo,
+  ptyList,
+  restoreFrom,
+  SCHEMA_VERSION,
   createWorkspace,
   deleteWorkspace,
   getDiff,
@@ -215,6 +219,45 @@ async function main() {
       const users = listUsers();
       if (users.length === 0) console.log("no users yet. add one: kohlab user add <id>");
       for (const u of users) console.log(`${u.id.padEnd(16)} ${u.role.padEnd(8)} ${u.name}`);
+      break;
+    }
+    case "backup": {
+      const target = args[0] ?? `kohlab-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+      try {
+        const r = await backupTo(target);
+        console.log(`backed up ${r.entries.length} files to ${r.path} (${Math.round(r.bytes / 1024)} KiB)`);
+        for (const e of r.entries) console.log(`  ${e}`);
+      } catch (e) {
+        console.error(`backup failed: ${(e as Error).message}`);
+        process.exit(1);
+      }
+      break;
+    }
+    case "restore": {
+      if (!args[0]) usage("restore <archive.tar.gz>");
+      try {
+        const r = await restoreFrom(args[0]);
+        console.log(`restored ${r.restored.length} files from ${args[0]}`);
+        for (const m of r.movedAside) console.log(`  replaced: ${m}`);
+        if (r.movedAside.length) console.log("the previous files are still there, with a .before-restore-<time> suffix");
+        console.log("restart the server for a restored state.json to take effect");
+      } catch (e) {
+        console.error(`restore failed: ${(e as Error).message}`);
+        process.exit(1);
+      }
+      break;
+    }
+    case "health": {
+      // Answers locally, so it works when the *server* is the thing that is
+      // broken — which is when someone runs it. It probes rather than reading a
+      // flag: this process has no daemon socket of its own, so a "is the socket
+      // open" check here would report DOWN every time.
+      const sessions = await ptyList();
+      console.log(`daemon:    ${sessions ? `up (${sessions.length} session${sessions.length === 1 ? "" : "s"})` : "DOWN — every live session is gone with it"}`);
+      console.log(`socket:    ${process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock"}`);
+      console.log(`state dir: ${WORKS_DIR}`);
+      console.log(`schema:    ${SCHEMA_VERSION}`);
+      if (!sessions) process.exit(1);
       break;
     }
     case "audit": {
@@ -453,6 +496,9 @@ access
   user add <id> [--name 'N'] [--role R]      add one (owner|member|viewer)
   user rm <id>                               revoke one
   audit                                      the mutation audit trail
+  backup [file.tar.gz]                       state, users, audit trail -> one archive
+  restore <file.tar.gz>                      put an archive back (previous files are kept)
+  health                                     is the daemon up? (answers locally)
   key                                        print the access key (from this box)
   key rotate                                 issue a new one and say how to apply it
 

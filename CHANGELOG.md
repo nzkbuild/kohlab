@@ -9,6 +9,78 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.15.0] - 2026-09-20
+
+Durability and operations: the state file is versioned, the daemon's health is
+observable, and the box can be backed up, restored and uninstalled by someone who
+did not write it.
+
+### Added
+
+- **`schemaVersion` in `state.json`.** A file written by a *newer* kohlab is
+  refused rather than read: reading it would mean working with fields this build
+  does not know about and then writing the file back without them, which turns a
+  downgrade into silent data loss. Refusing to start is recoverable; writing over
+  it is not. A versionless file — every install predating this release — is loaded
+  as version 0, stamped, and kept. Both paths are exercised by a check, and the
+  versionless one is the path every existing install takes.
+- **`GET /api/health`**, the same shape `kohlab health` reads. Without credentials
+  it answers liveness and nothing else, because a probe usually runs unkeyed and a
+  health endpoint should not be reconnaissance. With credentials it reports the
+  version, schema, uptime, the state directory, whether a key is required, and —
+  from the daemon, which is the only thing that actually knows — how many agent
+  sessions are live.
+- **`kohlab health`.** Answers locally, so it works when the server is the thing
+  that is broken. It probes the daemon rather than reading a flag: a one-shot CLI
+  has no daemon socket of its own, so a "is the socket open" check there would
+  report DOWN every single time. Exits non-zero when the daemon is gone, so it is
+  usable from a monitoring script.
+- **The dashboard is told the moment the daemon dies.** It owns every PTY, so its
+  death ends every live session at once; the chips used to keep reading "running"
+  for work that was no longer happening. The death is pushed to every open
+  dashboard and written to the audit trail, and `/api/health` keeps reporting
+  `lastDaemonDeath` after a probe has brought a new daemon up — otherwise an
+  outage that killed every session would leave no trace anywhere a monitor looks.
+- **`kohlab backup [file]`** and **`kohlab restore <file>`** — state, members,
+  audit trail and generated key in one tar. A restore moves the files it replaces
+  aside rather than deleting them, and refuses an archive containing a path.
+  [docs/backup.md](docs/backup.md) says what a backup does and does not contain.
+- **Audit log rotation.** Rolls at 8 MiB (`AUDIT_MAX_BYTES`), keeping three files
+  (`AUDIT_KEEP`), and records the roll in the new log. Best-effort throughout:
+  losing old history is bad, refusing to record new events is worse.
+- **`bash install.sh --uninstall`** and [docs/uninstall.md](docs/uninstall.md).
+  Deliberately non-destructive — it stops the service and removes the unit, the
+  command and the embedded daemon, and leaves every workspace, member and audit
+  event exactly where they were. Stopping a service and deleting somebody's work
+  are different requests, and only one of them is usually what was meant.
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** — the failures with a
+  known answer, including what a dead daemon costs you.
+
+### Fixed
+
+- **A read that writes, writing at the wrong time.** Stamping `schemaVersion` on
+  first load was an unawaited background write, so it could land *after* another
+  writer had replaced the file — a restore in progress, or anything else touching
+  `state.json` — silently clobbering it with what had been read a moment earlier.
+  `loadState` now finishes the write before it returns. The existing corruption
+  check caught this, which is the whole argument for having one.
+- **`kohlab health` reported the daemon as down when it was up**, and the health
+  endpoint read the connection state before anything had connected to it.
+
+### Changed
+
+- Fresh `state.json` files are written already stamped, so a new install no longer
+  reads, migrates and rewrites its state file on the second request.
+- `bun run check` is now 15 checks. The new durability check covers the versionless
+  file, the refusal of a newer one (including that the file is left byte-identical),
+  a backup → wipe → restore round trip, refusal of a path-carrying archive, audit
+  rotation, and a daemon killed mid-run reported as dead.
+- The checks give every throwaway server its own `PTY_SOCKET`, and the durability
+  check kills the daemon bound to *its* socket by pid. It previously used
+  `pkill -f pty-daemon.cjs`, which would also kill the daemon of a real kohlab
+  instance on the same machine — ending live agent sessions. A check that damages
+  the thing it checks is worse than no check.
+
 ## [1.14.0] - 2026-09-20
 
 The access story, finished — and three of the structural seams the roadmap called
