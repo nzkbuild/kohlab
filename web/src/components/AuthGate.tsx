@@ -51,6 +51,11 @@ export default function AuthGate() {
               id={KEY_FIELD}
               className="field-input"
               type="password"
+              // SC 3.3.8 (Accessible Authentication): a long random key must not
+              // have to be remembered or retyped. current-password is what lets a
+              // password manager hold it; without it the field is a transcription
+              // task, which is the thing the criterion exists to prevent.
+              autoComplete="current-password"
               autoFocus
               value={value}
               onChange={(e) => setValue(e.target.value)}

@@ -9,7 +9,7 @@
  * Exits non-zero on the first failed assertion. No test framework on purpose.
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -80,6 +80,10 @@ execFileSync("git", ["add", "-A"], { cwd: repoDir });
 execFileSync("git", ["commit", "-qm", "init"], { cwd: repoDir });
 
 let createdId = null;
+/** The throwaway viewer this run creates to prove the role gates. Deleted in the
+ *  finally block; on a root box creating it also provisions an OS account, which
+ *  the delete removes again. */
+let roleTestUser = null;
 
 try {
   console.log(`\nkohlab backend smoke -> ${BASE}\n`);
@@ -119,6 +123,109 @@ try {
   check("GET /api/agents-status -> record", agents.status === 200 && agents.body && typeof agents.body === "object");
   const gh = await req("/api/gh/repos");
   check("GET /api/gh/repos -> {ok,repos,authed}", gh.status === 200 && "ok" in gh.body && Array.isArray(gh.body.repos));
+
+  // The install route takes user text and runs a process. These attempt the
+  // exploit with a harmless canary: if the fix ever regresses, the canary file
+  // appears and this fails loudly — instead of the box quietly being rootable
+  // by any member.
+  console.log("agent install hardening");
+  const canary = join(repoDir, "pwned");
+  const inject = await post("/api/agents/install", { name: "x", cmd: `npm i -g left-pad; touch ${canary}` });
+  check("shell injection is rejected", inject.status === 400, `got ${inject.status} ${JSON.stringify(inject.body)}`);
+  check("the injected command did not run", !existsSync(canary), canary);
+  const ssrf = await post("/api/agents/install", { name: "x", cmd: "curl -fsSL http://169.254.169.254/latest/meta-data/" });
+  check("curl is not an install command (SSRF)", ssrf.status === 400, `got ${ssrf.status}`);
+  const flag = await post("/api/agents/install", { name: "x", cmd: "npm i -g --prefix /etc left-pad" });
+  check("flags are not smuggled through", flag.status === 400, `got ${flag.status}`);
+  const extra = await post("/api/agents/install", { name: "x", cmd: "npm i -g left-pad extra-arg" });
+  check("extra arguments are rejected", extra.status === 400, `got ${extra.status}`);
+  // positive control: a catalogue-shaped command passes validation and only then
+  // fails on npm's own terms (an unreachable package), never "not allowed"
+  const allowed = await post("/api/agents/install", { name: "x", cmd: "npm i -g kohlab-no-such-package-xyz" });
+  check(
+    "a well-formed install still reaches npm",
+    !JSON.stringify(allowed.body).includes("only global package installs"),
+    JSON.stringify(allowed.body).slice(0, 120),
+  );
+
+  // The role model, tested as a *set* rather than route by route.
+  //
+  // This is how two holes survived: `POST /api/users` had no gate at all (a
+  // viewer could mint an owner) and `POST /api/agents` had only `denied`. Each
+  // route was individually plausible; only the comparison showed them. No
+  // handler checks roles itself — the route table is the single place
+  // authorization happens — so a missing gate has no second line of defence.
+  //
+  // Bodies are empty on purpose: if a gate ever goes missing, the handler answers
+  // 400 and this fails, without performing the mutation it was asked to.
+  console.log("role gates (every mutating route)");
+  const MUTATING = [
+    ["POST", "/api/users"],
+    ["DELETE", "/api/users/definitely-not-a-user"],
+    ["POST", "/api/agents"],
+    ["POST", "/api/agents/install"],
+    ["POST", "/api/clone"],
+    ["POST", "/api/workspaces"],
+    ["POST", "/api/workspaces/nope/start"],
+    ["POST", "/api/workspaces/nope/stop"],
+    ["POST", "/api/workspaces/nope/restart"],
+    ["POST", "/api/workspaces/nope/delete"],
+    ["POST", "/api/workspaces/nope/commit"],
+    ["POST", "/api/workspaces/nope/share"],
+  ];
+  const PRIVILEGED_READS = [
+    ["GET", "/api/users"],
+    ["GET", "/api/audit"],
+  ];
+
+  const viewerId = `smoke-viewer-${Date.now()}`;
+  const made = await post("/api/users", { id: viewerId, name: "Smoke Viewer", role: "viewer" });
+  if (made.status === 200 && made.body?.key) {
+    roleTestUser = viewerId;
+    const vkey = made.body.key;
+    const asViewer = (method, path) =>
+      fetch(`${BASE}${path}${path.includes("?") ? "&" : "?"}key=${encodeURIComponent(vkey)}`, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: method === "POST" ? "{}" : undefined,
+      }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+    for (const [method, path] of MUTATING) {
+      const r = await asViewer(method, path);
+      check(`viewer is refused: ${method} ${path}`, r.status === 403, `got ${r.status} ${JSON.stringify(r.body)}`);
+    }
+    for (const [method, path] of PRIVILEGED_READS) {
+      const r = await asViewer(method, path);
+      check(`viewer is refused: ${method} ${path}`, r.status === 403, `got ${r.status}`);
+    }
+    const readOnly = await asViewer("GET", "/api/workspaces");
+    check("viewer can still read workspaces", readOnly.status === 200, `got ${readOnly.status}`);
+
+    // Not in the loop above: an ungated update would run the real updater.
+    const update = await asViewer("POST", "/api/release/update");
+    check("viewer is refused: POST /api/release/update", update.status === 403, `got ${update.status}`);
+
+    // Nor this one: it is the injection canary, tested below with real payloads.
+    const launcher = await asViewer("POST", "/api/agents");
+    check("viewer is refused a real launcher payload", launcher.status === 403, `got ${launcher.status}`);
+
+    if (KEY) {
+      const anonPosts = await Promise.all(
+        MUTATING.map(([method, path]) =>
+          fetch(`${BASE}${path}`, { method, headers: { "content-type": "application/json" }, body: method === "POST" ? "{}" : undefined })
+            .then((r) => ({ path, status: r.status })),
+        ),
+      );
+      // Refused is the property that matters. 401 is the correct status for "no
+      // credentials at all", but ten routes answer 403 because they test the role
+      // first — which also refuses. That inconsistency is recorded in ROADMAP.md
+      // rather than churned here; what must never happen is a 2xx.
+      const leaked = anonPosts.filter((r) => r.status !== 401 && r.status !== 403);
+      check("no mutating route accepts an anonymous caller", leaked.length === 0, JSON.stringify(leaked));
+    }
+  } else {
+    check("the suite can create a viewer to test with", false, `got ${made.status} ${JSON.stringify(made.body)}`);
+  }
 
   console.log("release / OTA");
   const rel = await req("/api/release");
@@ -330,6 +437,16 @@ try {
   failures.push(`threw: ${err.message}`);
   console.log(`  FAIL unexpected error: ${err.stack}`);
 } finally {
+  if (roleTestUser) {
+    try {
+      const gone = await fetch(`${BASE}/api/users/${encodeURIComponent(roleTestUser)}${KEY ? `?key=${encodeURIComponent(KEY)}` : ""}`, {
+        method: "DELETE",
+      });
+      check("the throwaway viewer is removed", gone.status === 200, `got ${gone.status}`);
+    } catch (err) {
+      failures.push(`could not remove the test viewer ${roleTestUser}: ${err.message}`);
+    }
+  }
   if (createdId) {
     try {
       await post(`/api/workspaces/${createdId}/delete`);

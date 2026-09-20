@@ -1,33 +1,57 @@
 # Security model
 
-Kohlab is a self-hosted tool for your own server. Its security posture follows
-from where it runs.
+Kohlab is a self-hosted tool for your own server. Its posture follows from where
+it runs.
 
 ## Trust boundary
 
-- **By default the server is open** — anyone who can reach port 7676 controls
-  workspaces. This is fine for `localhost` and SSH-tunnel use.
-- **`KOHLAB_KEY`** turns on auth. When set, every `/api/*` route and the
-  terminal WebSocket require `?key=<key>` or `Authorization: Bearer <key>`.
-  The key comparison is constant-time.
-- **Share links** (`?share=<token>`) stay public-read by design: they expose a
-  read-only terminal view + diff + log, never start/stop/commit.
+- **An unclaimed server is open.** With no access key and no named users, anyone
+  who can reach port 7676 controls workspaces — anonymous requests count as the
+  owner. Claim the server, or set `KOHLAB_KEY`; the installer generates one for
+  you. (A claim flow is designed in ROADMAP.md, not built.)
+- **`KOHLAB_KEY`** is the single-operator key. When set, every `/api/*` route and
+  the terminal WebSocket require `?key=<key>` or `Authorization: Bearer <key>`.
+  Comparison is constant-time. It is treated as an **owner**, so single-user
+  installs keep working unchanged.
+- **Named users** (`kohlab user add <id> [--role owner|member|viewer]`) each get
+  their own key — shown once, stored only as a hash. Roles gate the API: viewers
+  read, members act on their own workspaces, owners run the box (members, updates,
+  settings).
+- **Per-member isolation.** Every member maps to an OS account (`koh-<user>`, uid
+  10000+). Their agent sessions drop to that uid/gid with `$HOME` set, and their
+  worktrees live under a `0700` home. A member reads and writes their own work and
+  nothing else — enforced by the kernel, not by the role check. See
+  [isolation.md](isolation.md).
+- **Share links** (`?share=<token>`) are public-read by design: one workspace's
+  terminal, diff and log. They can never start, stop, commit or delete.
+- **Over-the-air updates** (`POST /api/release/update`) are owner-only and
+  audited: 401 without credentials, 403 with the wrong role.
 
 ## What you must do
 
-1. Set `KOHLAB_KEY` to a long random secret.
-2. Never bind the dashboard to `0.0.0.0` without a reverse proxy (TLS).
-3. Prefer SSH tunneling or a private network (tailscale) over public exposure.
+1. Claim the server, or set `KOHLAB_KEY` to a long random secret.
+2. Never bind the dashboard to `0.0.0.0` without a reverse proxy (TLS). Prefer SSH
+   tunneling or a private network such as Tailscale.
+3. Give teammates their own accounts instead of sharing the owner key — separate
+   accounts are what make the isolation real.
 
 ## Known limits
 
-- **No per-user accounts.** One key = one trust domain. Teams that need
-  per-member roles + audit see the roadmap (named users are planned, not
-  shipped).
-- **Agents run as the server's user** with full access to that user's files and
-  git repos. Isolate Kohlab under a dedicated OS user for anything you don't
-  fully trust.
-- **Agent installs** are whitelisted (`npm i -g` / `curl -fsSL` prefixes only)
-  — arbitrary shell on the host is rejected.
-- **Image uploads** are MIME-sniffed and capped at 20 MiB; paths are
-  resolve-contained so a crafted name can't escape its directory.
+- **No namespaces.** Agents run without `bwrap` or containers, so an agent can
+  `ps` the whole host and see that other members' processes exist. It cannot read
+  their files or signal their processes. `bwrap` per session is the next rung.
+- **Provisioning needs root.** Without it, members get a key and a role but no OS
+  account: their sessions run as the server user and only the role check separates
+  them. The server logs `not root; skipping OS-user provisioning for '<id>'`.
+- **One shared state file and audit log.** Data isolation is per-home, not
+  per-namespace: the server still manages a single `state.json`, `users.json` and
+  `audit.log` for the whole box.
+- **The commit gate is a workflow, not a sandbox.** In a legacy (path-repository)
+  workspace the agent shares the server's git object store and runs as the server
+  user, so with credentials present it could push or rewrite branches. Isolation
+  comes from a member's own OS account, not from the review step. Treat
+  agent-authored commits as untrusted input — which is why review exists.
+- **Agent installs** are whitelisted (`npm i -g` / `curl -fsSL` prefixes only);
+  arbitrary shell on the host is rejected.
+- **Image uploads** are MIME-sniffed, capped at 20 MiB, and path-contained so a
+  crafted name cannot escape its directory.

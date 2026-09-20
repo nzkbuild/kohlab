@@ -9,6 +9,61 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
 
+## [1.13.1] - 2026-09-20
+
+Security release: a route-table audit found two gates that were not what their
+neighbours were, and one command path that turned a member into root.
+
+### Security
+
+- **A viewer could mint themselves an owner.** `POST /api/users` had **no gate at
+  all** — not even an authentication check — while the two routes beside it
+  (`GET /api/users`, `DELETE /api/users/:id`) both required an owner. Any
+  authenticated caller, including a read-only viewer, could create a user with
+  `role: "owner"` and take the box; on a keyless server an anonymous caller could.
+  It now answers 401 without credentials and 403 with the wrong role, and the
+  suite proves it with a real viewer it creates and removes.
+- **Command injection in the agent installer (member → root).**
+  `POST /api/agents/install` ran its input through `/bin/sh` behind a
+  `startsWith("npm i -g")` "whitelist", so `npm i -g x; <anything>` executed as
+  the server user — root — with stdout returned to the caller. That made the v1.8
+  per-OS-user isolation decorative: a member did not need to read another
+  member's home, they could ask the server to. It also allowed
+  `curl http://169.254.169.254/…`, a credential-theft primitive on a VPS with a
+  metadata service. Now `execFile` with argv, allowlisted to
+  `<manager> <verb> -g <package>`: no shell, no flags, no URLs, no extra
+  arguments.
+- **`POST /api/agents` was gated on authentication only**, so a viewer could
+  register an agent launcher — a command that later runs inside someone's
+  workspace. Owner or member now.
+
+Both gate holes survived because the route table had never been read **as a set**:
+each route was individually reasonable, and only the comparison exposed them.
+
+### Fixed
+
+- **The installer generated the access key and never showed it.** The person who
+  had just installed the server had to read a systemd unit to log in. It prints
+  the key once now, and on a re-run says where to find it.
+
+### Accessibility
+
+- **The access-key field had no `autocomplete`**, so a password manager had to
+  guess — and a 48-character random key is exactly the transcription task SC 3.3.8
+  exists to prevent. It is `current-password` now.
+- **The terminal's screen-reader description said output is not announced and
+  stopped there.** It now points at the Log tab, which has the same output as text.
+
+### Docs
+
+- **`docs/security.md` was understating the product.** It claimed "no per-user
+  accounts… named users are planned, not shipped" — while v1.6 shipped roles and
+  v1.8 shipped kernel-enforced per-user isolation. The real limits are stated
+  plainly now, including that the commit gate is a workflow, not a sandbox.
+- `PRODUCT.md` now says what the product is for, against what: sessions that
+  outlive the connection, a review gate rather than a shell, and a team on one box
+  without containers.
+
 ## [1.13.0] - 2026-09-20
 
 ### Added

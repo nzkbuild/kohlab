@@ -132,6 +132,7 @@ if [ "$WITH_SYSTEMD" -eq 0 ]; then
 else
   if [ -f "$KOHLAB_UNIT_DIR/$UNIT" ]; then
     log "keeping the existing $KOHLAB_UNIT_DIR/$UNIT"
+    warn "the access key for that server is in $KOHLAB_UNIT_DIR/$UNIT (KOHLAB_KEY=)"
   else
     if [ -z "$KEY" ]; then
       if command -v openssl >/dev/null 2>&1; then
@@ -167,6 +168,17 @@ User=$(id -un)
 WantedBy=multi-user.target
 EOF
     log "wrote $KOHLAB_UNIT_DIR/$UNIT"
+    # Shown once, on purpose. Without this the person who just installed the
+    # server has to go read the unit file to log in — the initiator is the one
+    # person who must never be locked out of the box they just built.
+    cat <<EOF
+
+  Access key — shown once, also stored in $KOHLAB_UNIT_DIR/$UNIT:
+
+      $KEY
+
+  Save it now. The dashboard asks for it the first time you open it.
+EOF
   fi
 
   if [ "$KOHLAB_UNIT_DIR" = "/etc/systemd/system" ] && command -v systemctl >/dev/null 2>&1; then

@@ -2,7 +2,7 @@
 
 import { serve } from "bun";
 import type { ServerWebSocket } from "bun";
-import { spawn } from "child_process";
+import { execFile, spawn } from "child_process";
 import { mkdir, open, readdir, readFile } from "fs/promises";
 import { isAbsolute, join, relative, resolve } from "path";
 import {
@@ -344,21 +344,44 @@ async function handleAgentsStatus(): Promise<Response> {
   return json(status);
 }
 
-/** Install an agent CLI on the host (runs the npm global install). */
+/** A package name: `thing` or `@scope/thing`. Nothing else — no flags, no
+ *  paths, no shell metacharacters, no URLs. */
+const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+
+/**
+ * Install an agent globally.
+ *
+ * The input is user-supplied text that becomes a process, so both halves are
+ * load-bearing:
+ *
+ *  - **No shell.** This used to be `exec(cmd)`, i.e. `/bin/sh -c`, behind a
+ *    `cmd.startsWith("npm i -g")` "whitelist". `npm i -g x; cp -r
+ *    /home/koh-alice /tmp/loot` passed that check and ran as the server user —
+ *    root. Since any *member* may call this route, it was a member-to-root
+ *    escalation that made the v1.8 per-OS-user isolation decorative: Bob did not
+ *    need to read Alice's home himself, he could ask the server to. `execFile`
+ *    takes argv, so there is no shell to inject into.
+ *  - **Argv allowlisted.** Only the package managers the UI installs from, and
+ *    exactly `<manager> [i|install|add] -g <package>`. That rejects flags
+ *    (`--prefix /etc`), extra arguments, and `curl http://169.254.169.254/...`,
+ *    which is a credential-theft primitive on a VPS with a metadata service.
+ */
 async function handleAgentInstall(req: Request): Promise<Response> {
   const body = (await req.json()) as { name?: string; cmd?: string };
   const name = (body.name ?? "").trim();
   const cmd = (body.cmd ?? "").trim();
   if (!name || !cmd) return json({ error: "name and cmd are required" }, 400);
-  // whitelist: only known package installs, never arbitrary shell
-  const allowed = ["npm i -g", "npm install -g", "bun add -g", "curl -fsSL"];
-  if (!allowed.some((p) => cmd.startsWith(p))) {
-    return json({ error: "command not allowed" }, 400);
+
+  const argv = cmd.split(/\s+/);
+  const [bin, verb, globalFlag, pkg, ...rest] = argv;
+  const verbOk = (bin === "npm" && (verb === "i" || verb === "install")) || (bin === "bun" && verb === "add");
+  if (!verbOk || globalFlag !== "-g" || !pkg || rest.length > 0 || !PACKAGE_NAME.test(pkg)) {
+    return json({ error: "only global package installs are allowed, as: npm i -g <package>" }, 400);
   }
-  const { exec } = await import("child_process");
+
   const { promise, resolve, reject } = Promise.withResolvers<{ ok: boolean; output: string }>();
-  exec(cmd, { timeout: 300000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err) reject(new Error(stderr.trim() || err.message));
+  execFile(bin, argv.slice(1), { timeout: 300000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    if (err) reject(new Error((stderr || err.message).trim()));
     else resolve({ ok: true, output: stdout.slice(0, 2000) });
   });
   return promise.then(json).catch((e) => json({ error: (e as Error).message }, 400));
@@ -662,6 +685,12 @@ serve({
       return handleUsersList();
     }
     if (path === "/api/users" && req.method === "POST") {
+      // GET and DELETE next to this both require isOwner. This had no check at
+      // all — not even `denied` — so any authenticated caller could POST
+      // {role: "owner"} and mint themselves an owner key. A viewer escalating to
+      // owner is the whole box, and it provisions an OS account while it does it.
+      if (denied) return json({ error: "unauthorized" }, 401);
+      if (!isOwner) return json({ error: "forbidden — only an owner can add members" }, 403);
       return handleUserAdd(req);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
@@ -677,6 +706,9 @@ serve({
     }
     if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) {
       if (denied) return json({ error: "unauthorized" }, 401);
+      // A launcher is a command that later runs in someone's workspace, and
+      // adding one writes state. Viewers read; this is not a read.
+      if (req.method === "POST" && !canMutate) return json({ error: "forbidden — viewer cannot add agents" }, 403);
       if (req.method === "POST") containFailure(audit(actor, "agent.add"), "audit");
       return handleAgents(req);
     }
