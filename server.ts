@@ -314,8 +314,10 @@ async function handleUserAdd(req: Request): Promise<Response> {
 /** Revoke a user. owner-only. */
 async function handleUserRemove(id: string): Promise<Response> {
   try {
-    await removeUser(id);
-    return json({ ok: true });
+    const { warning } = await removeUser(id);
+    // The revoke succeeded as far as the API goes, but if their OS account
+    // survived, the caller has to hear it rather than assume they are gone.
+    return json(warning ? { ok: true, warning } : { ok: true });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }

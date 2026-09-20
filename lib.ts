@@ -162,16 +162,32 @@ export async function provisionOsUser(u: User): Promise<{ osUser: string; uid?: 
 }
 
 /** Remove a member's OS account and its home tree. Best-effort, safe for dev. */
-export async function deprovisionOsUser(osUser: string): Promise<void> {
+export async function deprovisionOsUser(osUser: string): Promise<{ removed: boolean; detail?: string }> {
   if (!isRoot()) {
     console.warn(`not root; skipping OS-user removal for '${osUser}'`);
-    return;
+    return { removed: false, detail: "not root — the OS account is still there" };
   }
-  if (!lookupUser(osUser)) return;
+  if (!lookupUser(osUser)) return { removed: true };
+  // `userdel` refuses while any process still owns the account, which is exactly
+  // the situation when the member's agent is running — the moment you most mean
+  // it. Revocation stops them first, then removes the account: a revoked member
+  // whose agent keeps running, keeps its home and keeps its uid is not revoked.
+  try {
+    runCmd("pkill", ["-u", osUser]);
+    // let the kills land before userdel looks for survivors
+    const paused = Promise.withResolvers<void>();
+    setTimeout(paused.resolve, 300);
+    await paused.promise;
+  } catch {
+    /* nothing of theirs was running, which is fine */
+  }
   try {
     runCmd("userdel", ["-r", osUser]);
+    return { removed: true };
   } catch (e) {
-    console.warn(`userdel ${osUser} failed: ${(e as Error).message}`);
+    const detail = (e as Error).message;
+    console.warn(`userdel ${osUser} failed: ${detail}`);
+    return { removed: false, detail };
   }
 }
 
@@ -329,12 +345,22 @@ export async function addUser(opts: { id: string; name: string; role: Role }): P
 }
 
 /** Remove a user (revoke): drop the record and its OS account + home. */
-export async function removeUser(id: string): Promise<void> {
+export async function removeUser(id: string): Promise<{ removed: boolean; warning?: string }> {
   const target = readUsers().find((u) => u.id === id);
   const users = readUsers().filter((u) => u.id !== id);
   await writeUsers(users);
-  if (target?.osUser) await deprovisionOsUser(target.osUser);
-  await audit("system", "user.rm", id);
+  let outcome = { removed: true as boolean, warning: undefined as string | undefined };
+  if (target?.osUser) {
+    const os = await deprovisionOsUser(target.osUser);
+    if (!os.removed) {
+      // The account is still on the box: the key is dead but their files and
+      // processes are not. Silence here would let an operator believe a member
+      // was fully removed when they were not.
+      outcome = { removed: false, warning: `the kohlab user is gone, but the OS account ${target.osUser} remains (${os.detail ?? "unknown reason"})` };
+    }
+  }
+  await audit("system", "user.rm", id, outcome.warning ? `incomplete: ${outcome.warning}` : "os-user removed");
+  return outcome;
 }
 
 /**
