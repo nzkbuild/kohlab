@@ -1630,6 +1630,35 @@ export async function commitWorkspace(id: string, message: string) {
 }
 
 /**
+ * Reject an agent's work without deleting the workspace.
+ *
+ * The product promises that a finished workspace is something you "accept or
+ * discard". Only accept existed: the sole way to say no was to delete the
+ * workspace, its worktree and its branch, so rejecting an attempt cost far more
+ * than accepting one. Discard is the other half. It throws away what the agent
+ * did, returns the tree to whatever its branch already holds, and leaves the
+ * workspace able to run again.
+ *
+ * It refuses while the workspace is running. A `git reset --hard` under an agent
+ * that is still writing would race, and the result would be neither the agent's
+ * work nor the branch's, which is the one outcome worse than either.
+ *
+ * `git clean -fd`, not `-fdx`. Ignored paths are the environment (installed
+ * dependencies, build output), not the agent's work, and wiping them would make
+ * the next run pay to rebuild something discard had no business touching.
+ */
+export async function discardWorkspace(id: string): Promise<{ ok: true }> {
+  const ws = await getWorkspace(id);
+  // Ask the daemon, not a stored flag: the flag can be stale after a crash, and
+  // a reset under a live agent is the one outcome worse than either choice.
+  if (await isRunning(ws)) throw new Error("stop the workspace before discarding, its agent is still running");
+  const tree = worktreePath(ws);
+  await run(tree, "git", ["reset", "--hard", "HEAD"]);
+  await run(tree, "git", ["clean", "-fd"]);
+  return { ok: true };
+}
+
+/**
  * Bring an accepted workspace's branch into a checkout of your own.
  *
  * Accepting a workspace commits on `kohlab/<id>`, in the workspace's own tree.

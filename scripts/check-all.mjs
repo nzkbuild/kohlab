@@ -85,6 +85,7 @@ try {
   run("auth hardening (gate, throttle, rotation, socket key)", "node", ["scripts/check-auth-hardening.mjs"]);
   run("durability (schema, backup, rotation, daemon health)", "node", ["scripts/check-durability.mjs"]);
   run("merge last mile", "node", ["scripts/check-merge.mjs"]);
+  run("review gate (accept and discard)", "node", ["scripts/check-review-gate.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again: it

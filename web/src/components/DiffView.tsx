@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import {
+  ArrowUUpLeft,
   ArrowsClockwise,
   CheckSquare,
   Files,
@@ -16,6 +17,7 @@ import { workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
 import type { DiffFile } from "../types";
 import { Button, EmptyState, Skeleton, SkeletonRows } from "./ui";
+import ConfirmDialog from "./ConfirmDialog";
 
 interface Props {
   workspaceId: string;
@@ -71,6 +73,9 @@ export default function DiffView({ workspaceId }: Props) {
   const [draft, setDraft] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
+  const [discarding, setDiscarding] = useState(false);
+  /** Which irreversible action the confirm dialog is currently asking about. */
+  const [confirming, setConfirming] = useState<null | "commit" | "discard">(null);
 
   const load = async () => {
     setLoading(true);
@@ -134,6 +139,12 @@ export default function DiffView({ workspaceId }: Props) {
   const canCommit = files.length > 0 && message.trim().length > 0 && !committing;
   const firstRun = !loading && files.length === 0 && !error;
   /**
+   * Discard is offered whenever there is something to throw away, and withheld
+   * while the workspace is running: the server refuses a reset under a live
+   * agent, so offering it there would only produce an error.
+   */
+  const canDiscard = files.length > 0 && !committing && !discarding && !workspace?.running;
+  /**
    * Accepting is the exit from the review queue, so it must only be offered to a
    * workspace that is actually in it. An empty diff is not enough: a workspace
    * that has never run, or one already committed, also has no changes: and
@@ -154,7 +165,7 @@ export default function DiffView({ workspaceId }: Props) {
       setReviewed(new Set());
       await Promise.all([load(), refresh()]);
     } catch (e) {
-      setCommitError((e as Error).message);
+      setCommitError(`commit failed: ${(e as Error).message}`);
     } finally {
       setCommitting(false);
     }
@@ -169,6 +180,32 @@ export default function DiffView({ workspaceId }: Props) {
   const accept = () => {
     if (!canAccept) return;
     return runCommit(defaultMessage, "accepted");
+  };
+
+  /**
+   * Rejecting an agent's work, keeping the workspace.
+   *
+   * The product promises a workspace is something you "accept or discard", and
+   * only accept existed: the sole way to say no was to delete the workspace and
+   * its worktree. Like commit, this is never optimistic, so the file list only
+   * changes once the server has confirmed the reset.
+   */
+  const discard = async () => {
+    if (!canDiscard) return;
+    setDiscarding(true);
+    setCommitError(null);
+    try {
+      await api.action(workspaceId, "discard");
+      announce(`discarded ${workspaceId}`);
+      setReviewed(new Set());
+      setDraft(null);
+      await Promise.all([load(), refresh()]);
+    } catch (e) {
+      setCommitError(`discard failed: ${(e as Error).message}`);
+    } finally {
+      setDiscarding(false);
+      setConfirming(null);
+    }
   };
 
   return (
@@ -195,11 +232,11 @@ export default function DiffView({ workspaceId }: Props) {
           variant="quiet"
           size="sm"
           iconOnly
-          aria-label="Refresh diff"
+          aria-label="refresh diff"
           disabled={loading}
           onClick={() => void load()}
         >
-          <ArrowsClockwise size={15} />
+          <ArrowsClockwise size={13} />
         </Button>
       </header>
 
@@ -245,7 +282,7 @@ export default function DiffView({ workspaceId }: Props) {
                     aria-busy={committing}
                     onClick={() => void accept()}
                   >
-                    <GitCommit size={15} weight="bold" aria-hidden="true" />
+                    <GitCommit size={13} weight="bold" aria-hidden="true" />
                     {committing ? "accepting…" : "accept"}
                   </Button>
                 ) : null}
@@ -430,29 +467,65 @@ export default function DiffView({ workspaceId }: Props) {
             className="field-input min-w-48 flex-1"
             value={message}
             placeholder={defaultMessage}
-            disabled={files.length === 0 || committing}
+            disabled={files.length === 0 || committing || discarding}
             onChange={(e) => setDraft(e.target.value)}
           />
+          {/* The two halves of the review decision, side by side. Discard used
+              to not exist, so the only way to reject an agent's work was to
+              delete the workspace and its worktree. */}
+          <Button variant="secondary" disabled={!canDiscard} onClick={() => setConfirming("discard")}>
+            <ArrowUUpLeft size={14} weight="bold" aria-hidden="true" />
+            {discarding ? "discarding…" : "discard"}
+          </Button>
           <Button
             variant="primary"
             disabled={!canCommit}
             aria-busy={committing}
-            onClick={() => void commit()}
+            onClick={() => setConfirming("commit")}
           >
-            <GitCommit size={15} weight="bold" aria-hidden="true" />
+            <GitCommit size={14} weight="bold" aria-hidden="true" />
             {committing ? "committing…" : "commit"}
           </Button>
         </div>
-        <p className="mt-1.5 text-2xs leading-relaxed text-text-muted">
+        {/* Load-bearing sentence: the only place the app says the commit cannot
+            be taken back. It used to be the faintest thing on the pane, sitting
+            under the loudest. */}
+        <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
           Commit stages every file in this workspace (<span className="mono">git add -A</span>) and is
-          final, Kohlab cannot undo, amend or un-commit it.
+          final, Kohlab cannot undo, amend or un-commit it. Discard throws the changes away and keeps
+          the workspace.
         </p>
         {commitError ? (
           <p role="alert" className="mt-1.5 break-words text-2xs text-status-danger">
-            commit failed: {commitError}
+            {commitError}
           </p>
         ) : null}
       </footer>
+
+      {/* Irreversible is irreversible. Commit is at least as consequential as
+          delete, and delete already asked first. */}
+      <ConfirmDialog
+        open={confirming === "commit"}
+        onOpenChange={(v) => {
+          if (!v) setConfirming(null);
+        }}
+        title="accept this work?"
+        description={`This stages and commits every changed file in ${workspaceId} on its own branch, kohlab/${workspaceId}. Kohlab cannot undo, amend or un-commit it.`}
+        confirmLabel="commit"
+        busy={committing}
+        onConfirm={() => void commit()}
+      />
+      <ConfirmDialog
+        open={confirming === "discard"}
+        onOpenChange={(v) => {
+          if (!v) setConfirming(null);
+        }}
+        title="discard this work?"
+        description={`This throws away every uncommitted change in ${workspaceId}${files.length ? `, ${files.length} file${files.length === 1 ? "" : "s"} in all` : ""}. The workspace stays and can run again. The agent's work does not come back.`}
+        confirmLabel="discard"
+        busy={discarding}
+        onConfirm={() => void discard()}
+      />
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   startWorkspace,
   stopWorkspace,
   commitWorkspace,
+  discardWorkspace,
   worktreePath,
   imagesDir,
   spawnAgentSession,
@@ -300,6 +301,16 @@ async function handleCommit(id: string, req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { message?: string };
     const res = await commitWorkspace(id, body.message ?? "");
+    return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** The other half of the review gate. See discardWorkspace in lib.ts. */
+async function handleDiscard(id: string): Promise<Response> {
+  try {
+    const res = await discardWorkspace(id);
     return json(res);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -764,7 +775,7 @@ serve({
   fetch: async (req, server) => {
     const url = new URL(req.url);
     const path = url.pathname;
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|files|file|image|share|log)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|discard|files|file|image|share|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -856,6 +867,7 @@ serve({
         case "restart": containFailure(audit(actor, "restart", id), "audit"); return handleRestart(id);
         case "delete": containFailure(audit(actor, "delete", id), "audit"); return handleDelete(id);
         case "commit": containFailure(audit(actor, "commit", id), "audit"); return handleCommit(id, req);
+        case "discard": containFailure(audit(actor, "discard", id), "audit"); return handleDiscard(id);
         case "diff": return handleDiff(id);
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
