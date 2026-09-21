@@ -1,11 +1,34 @@
-# Frontend contract (frozen): read before writing any component
+# Frontend contract: read before writing any component
 
-The design-system foundation is already written and **must not be modified**. This
-document is the complete vocabulary available to surface components.
+This document is the design system's contract. It is a living document, not a
+freeze. The rules in section 1 are binding and enforced by the checks in section 9.
+The token, primitive and API inventories in sections 2 to 8 are the vocabulary:
+use them rather than re-deriving the same layout in utilities.
 
-**Frozen, do not edit:** `web/src/index.css`, `web/src/components/ui.tsx`,
-`web/src/store.ts`, `web/src/App.tsx`, `web/src/components/Sidebar.tsx`,
-`web/src/lib/*`, `web/src/api.ts`, `web/src/types.ts`, `server.ts`, `lib.ts`.
+## 0. A note on the earlier freeze, and why it was lifted
+
+Earlier revisions of this file declared `index.css`, `ui.tsx`, `App.tsx`,
+`Sidebar.tsx`, `store.ts`, `lib/*`, `api.ts` and `types.ts` frozen, and told the
+reader not to run `tsc` or `vite build` because "files outside your ownership are
+mid-rewrite".
+
+That text was written for a parallel, multi-agent build of the v1.10 frontend. It
+described a transient state that has not been true for several releases, and it
+caused two concrete harms:
+
+1. A defect that lived *inside* the frozen set (the collapsed sidebar could not be
+   reopened, because its toggle was clipped by the rail's own `overflow: hidden`)
+   could not be fixed without violating the document. The rule protected the bug.
+2. It told contributors not to verify. The failure mode here is a plausible small
+   diff that was never typechecked.
+
+The freeze is therefore lifted. What replaces it is stricter, not looser: **the
+foundation may be edited, and any edit must keep every check in section 9 green.**
+A change to a token, a primitive or the shell is a change to every surface that
+consumes it, so it carries the burden of proving it did not regress the rest.
+
+If you are changing the foundation, say so in the commit message and name which
+surfaces you re-verified.
 
 ---
 
@@ -14,10 +37,18 @@ document is the complete vocabulary available to surface components.
 1. **No colour literals.** Never write `#0a0a0a`, `bg-[#111113]`, `text-zinc-400`,
    `bg-emerald-400`, `border-[#27272a]`. Every colour comes from a semantic token
    (Tailwind utility or one of the `.panel` / `.btn` / `.chip` classes below).
+   A utility that resolves to no token produces no CSS and fails silently: that is
+   how `text-danger-strong` rendered an error in the body text colour for several
+   releases. If you invent a colour utility, confirm it compiles.
 2. **No interpolated class names.** `` className={`text-status-${x}`} `` produces no
    CSS, Tailwind cannot see it. Use the static maps in `lib/status.ts`.
 3. **Animate only** `transform`, `opacity`, `background-color`, `color`,
-   `border-color`. Never `width`, `height`, `top`, `left`, `margin`.
+   `border-color`. Never `width`, `height`, `top`, `left`, `margin`. The one
+   surviving exception is `.sidebar`, which animates `width` and `flex-basis`;
+   `.app-shell` is a flex row, so collapsing the rail reflows the terminal pane on
+   every frame. Making the shell a grid and transitioning `grid-template-columns`,
+   or overlaying the rail and animating `transform`, is the fix when someone owns
+   the time.
 4. **Borders, not shadows, for anything load-bearing** (`box-shadow` is deleted
    under `forced-colors`). Radix dialogs may use a shadow purely as depth.
 5. **Never `height` on a text-bearing container**, use `min-height` + padding, so
@@ -28,6 +59,45 @@ document is the complete vocabulary available to surface components.
    ungated animations.
 9. Use real elements (`<button>`, `<input>`, `<table>`), never `<div role="button">`.
 10. No new dependencies. No `useEffect` for anything derivable during render.
+11. **A control must be clickable in every state it renders in.** If a container
+    sets `overflow: hidden`, assert that its content fits at the narrowest width
+    the state produces. The collapsed sidebar shipped a control at x=60..88 inside
+    a rail that ended at x=60, so it was painted nowhere and hit-tested nowhere,
+    and the state persisted in localStorage. Anything focusable must also be
+    visible: a control that is in the tab order but clipped is a WCAG 2.2 AA 2.4.11
+    failure.
+12. **One `h1` per route.** Surfaces render their own heading; the shell does not.
+
+### Label casing
+
+Two systems, and they are deliberate:
+
+- **Destinations and group headings are Title Case**: `Command center`,
+  `Workspaces`, `Settings`, the palette's `Views` / `Actions` groups.
+- **Actions are lowercase sentence fragments**: `new workspace`, `commit`,
+  `discard`, `retry`, `clear filters`, `copy link`, and busy states
+  (`committing…`, `discarding…`).
+
+Proper nouns keep their case either way. Before this rule the app had both systems
+applied to actions at random, including within a single panel.
+
+### Icon sizes
+
+Icon size follows the control, not the taste of the call site:
+
+| Context | Size |
+|---|---|
+| `Button size="sm"` (28px tall), including `iconOnly` | 13px |
+| `Button` at default size (34px tall), including `iconOnly` | 14px |
+| Pane-header glyph, status glyph, inline label | 15 or 16px |
+| Nav rail row | 17 or 18px |
+| Empty-state / display | 18 to 20px |
+
+This exists because the same `+` glyph shipped at 16px, 15px and 13px in three
+files, and a 28px button carried a 15px icon in one place and a 12px one in
+another.
+
+---
 
 ## 2. Semantic tokens (Tailwind utilities)
 
@@ -65,7 +135,11 @@ Component classes (from `index.css`): `.panel` `.panel-head` `.panel-title` `.bt
 `.log-time` `.log-text` `.skeleton` `.dialog-overlay` `.dialog-content`
 `.palette-item` `.split-view` `.file-row` `.row-actions` `.scrim` `.sidebar*`
 
-Prefer these classes over re-deriving the same layout in utilities.
+Prefer these classes over re-deriving the same layout in utilities. In particular
+`.cockpit-head` is the pane-header primitive: do not hand-roll
+`flex min-h-10 items-center gap-2 border-b border-line-subtle px-3` again.
+
+---
 
 ## 3. Primitives: `web/src/components/ui.tsx`
 
@@ -86,6 +160,13 @@ Prefer these classes over re-deriving the same layout in utilities.
 <Kbd>⌘K</Kbd>
 <Announcer />                                                // mounted once in App
 ```
+
+`ConfirmDialog` (`web/src/components/ConfirmDialog.tsx`) is the destructive-action
+confirm. Every irreversible action uses it: `delete workspace`, `revoke`, `commit`
+and `discard`. Name the specific object in `description` (workspace id, branch,
+file count), never "this item".
+
+---
 
 ## 4. State: `web/src/store.ts`
 
@@ -109,9 +190,12 @@ type Route =
   | { kind: "dashboard" }
   | { kind: "workspaces" }
   | { kind: "workspace"; id: string }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  | { kind: "join" }
 navigate({ kind: "workspace", id })
 ```
+
+---
 
 ## 5. Helpers
 
@@ -137,13 +221,15 @@ DiffFile { name, diff }
 AGENT_CATALOG: AgentInfo[]
 ```
 
-## 6. Backend API: `web/src/api.ts` (do not edit; use as-is)
+---
+
+## 6. Backend API: `web/src/api.ts`
 
 ```
 api.authRequired()      api.testKey(key)
 api.workspaces()        api.create({task,repo?,agent,branch?,limits?})   api.clone({url,task,agent,limits?})
-api.action(id, "start"|"stop"|"restart"|"delete")
-api.diff(id)            // DiffFile[], now includes NEW untracked files
+api.action(id, "start"|"stop"|"restart"|"delete"|"discard")   // POST /api/workspaces/:id/:action
+api.diff(id)            // DiffFile[], includes NEW untracked files
 api.commit(id, message) api.share(id)   api.files(id)  api.file(id, path)  api.log(id)
 api.users() api.addUser({id,name,role}) api.removeUser(id) api.audit()
 api.agentsStatus() api.installAgent(name, cmd) api.ghRepos()
@@ -152,14 +238,34 @@ api.release(force?)     // ReleaseStatus, published version, changelog, last run
 api.applyUpdate()       // POST, owner only; starts the update, returns at once
 ```
 
-`lib/actions.ts` still exports `withToast(label, fn)` and `toastAction(id, action)`.
-Prefer optimistic UI only for bounded single-object mutations; **never** for commit.
+`lib/actions.ts` exports `withToast(label, fn)` and `toastAction(id, action)`.
+Prefer optimistic UI only for bounded single-object mutations; **never** for commit
+or discard.
+
+### The review gate
+
+`commit` and `discard` are the two halves of the review decision and they are
+mirrored on purpose:
+
+- **commit** stages everything (`git add -A`) and commits it on the workspace's own
+  branch `kohlab/<id>`. It is final: Kohlab cannot undo, amend or un-commit it.
+  It is therefore behind a `ConfirmDialog`.
+- **discard** is its inverse (`git reset --hard` plus `git clean -fd`, never `-fdx`,
+  because ignored paths are the environment rather than the agent's work). It keeps
+  the workspace, throws the changes away, and refuses while the agent is running,
+  checked against the PTY daemon rather than a stored flag.
+
+Both are never optimistic: the file list changes only after the server confirms.
+
+---
 
 ## 7. Required states on every async surface
 
 first-run empty ≠ filtered empty (only first-run may offer creation) · loading uses
 `SkeletonRows` matching final geometry · error is a visible message with a retry ·
 per-row hover actions must also appear on `:focus-within` (use `.row-actions`).
+
+---
 
 ## 8. Accessibility specifics
 
@@ -173,8 +279,26 @@ per-row hover actions must also appear on `:focus-within` (use `.row-actions`).
 - Do NOT mark a terminal or log tail as a live region.
 - The terminal/log must never yank the viewport: auto-follow only when already
   pinned to the bottom; otherwise show an "N new lines" affordance.
+- Nothing may be focusable while clipped or off screen. This covers the mobile
+  drawer (removed from the tab order with `visibility: hidden`) and any narrow
+  layout that could push a control past an `overflow: hidden` ancestor.
+
+---
 
 ## 9. Verification
 
-Do **not** run `tsc` or `vite build`, the integration pass runs centrally and
-files outside your ownership are mid-rewrite. Match the signatures above exactly.
+Run these before calling frontend work done. They are fast, and they are the reason
+the rules above are enforceable rather than aspirational.
+
+```bash
+bun run check                              # all checks, including backend contract
+node scripts/check-a11y-static.mjs         # static markup accessibility scan
+node scripts/check-contrast.mjs            # parses index.css tokens, checks WCAG ratios
+node scripts/check-corruption.mjs          # the canary: corrupt state must fail loudly
+cd web && npx tsc --noEmit                 # frontend types
+```
+
+`check-contrast.mjs` reads the token layer in `index.css`, and
+`check-a11y-static.mjs` reads it for the focus rules, so a token or focus change is
+verified by the suite rather than by eye. Neither check inspects rendered output:
+reflow, focus visibility and clipping still need a browser.
