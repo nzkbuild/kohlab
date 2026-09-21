@@ -263,8 +263,13 @@ export default function WorkspacesView() {
       "needs-review": 0,
       committed: 0,
       stopped: 0,
+      discarded: 0,
     };
     for (const w of workspaces) by[workspaceStatus(w)] += 1;
+    // Discarded is shown under `stopped` (it is stopped: not running, not waiting
+    // on anyone, and its row carries its own chip), so the number beside that
+    // filter has to include it or it would undercount what it shows.
+    by.stopped += by.discarded;
     return by;
   }, [workspaces]);
 
@@ -272,7 +277,13 @@ export default function WorkspacesView() {
   const visible = useMemo(
     () =>
       workspaces
-        .filter((w) => (filter === "all" || workspaceStatus(w) === filter) && matches(w, trimmedQuery))
+        // Discarded counts as stopped here: without this it would match no filter
+        // except "all", which is a dead end for the state a reject produces.
+        .filter((w) => {
+          const st = workspaceStatus(w);
+          const inFilter = filter === "all" || st === filter || (filter === "stopped" && st === "discarded");
+          return inFilter && matches(w, trimmedQuery);
+        })
         .sort(byReviewFirst),
     [workspaces, filter, trimmedQuery],
   );

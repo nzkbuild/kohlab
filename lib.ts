@@ -1655,7 +1655,17 @@ export async function discardWorkspace(id: string): Promise<{ ok: true }> {
   const tree = worktreePath(ws);
   await run(tree, "git", ["reset", "--hard", "HEAD"]);
   await run(tree, "git", ["clean", "-fd"]);
-  return { ok: true };
+  // Record the decision. Without this the workspace keeps claiming it needs
+  // review, with an empty diff and nothing left to review, because the review
+  // queue is derived from lastCommitAt and a discard sets no commit. Setting
+  // lastCommitAt instead would be worse: it would report the work as committed,
+  // which is the opposite of what happened.
+  return mutateState(async (st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) throw new Error(`no workspace '${id}'`);
+    w.discardedAt = Date.now();
+    return { ok: true };
+  });
 }
 
 /**

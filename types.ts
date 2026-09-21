@@ -8,6 +8,10 @@ export interface Workspace {
   stopped: number | null;
   /** timestamp of the last commit (set on commit; undefined = never committed) */
   lastCommitAt?: number;
+  /** timestamp of the last discard (set on discard; undefined = never discarded).
+   *  A decision field, like lastCommitAt: it is what lets a workspace leave the
+   *  review queue without claiming its work was accepted. */
+  discardedAt?: number;
   /** json payload given to the agent CLI at launch (may be absent) */
   payload?: string;
   /** owner's workspace root under their home; legacy records omit it and live

@@ -81,8 +81,18 @@ export default function Dashboard() {
   const navigate = useApp((s) => s.navigate);
 
   const counts = useMemo(() => {
-    const by: Record<WorkspaceStatus, number> = { running: 0, "needs-review": 0, committed: 0, stopped: 0 };
+    const by: Record<WorkspaceStatus, number> = {
+      running: 0,
+      "needs-review": 0,
+      committed: 0,
+      stopped: 0,
+      discarded: 0,
+    };
     for (const w of workspaces) by[workspaceStatus(w)] += 1;
+    // Discarded shows under `stopped`, so that tab's count has to include it.
+    // TABS deliberately lists only four destinations: a sixth for a rare terminal
+    // state would cost more attention than it returns.
+    by.stopped += by.discarded;
     return by;
   }, [workspaces]);
 
@@ -99,7 +109,15 @@ export default function Dashboard() {
   const tab = picked ?? TABS.find((status) => counts[status] > 0) ?? "needs-review";
 
   const rows = useMemo(
-    () => workspaces.filter((w) => workspaceStatus(w) === tab).sort(byReviewFirst),
+    () =>
+      workspaces
+        // Discarded counts as stopped here, mirroring the filter on the
+        // workspaces route, so a rejected workspace is still reachable.
+        .filter((w) => {
+          const st = workspaceStatus(w);
+          return st === tab || (tab === "stopped" && st === "discarded");
+        })
+        .sort(byReviewFirst),
     [workspaces, tab],
   );
 

@@ -168,6 +168,10 @@ export default function DiffView({ workspaceId }: Props) {
       setCommitError(`commit failed: ${(e as Error).message}`);
     } finally {
       setCommitting(false);
+      // Close in both outcomes, mirroring discard. On success the dialog would
+      // otherwise sit over an already-committed, now-empty diff; on failure it
+      // would cover the footer's role="alert", which is where the reason is.
+      setConfirming(null);
     }
   };
 

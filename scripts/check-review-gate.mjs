@@ -148,6 +148,13 @@ try {
   );
   const clean = gitSync(tree, ["status", "--porcelain"]).trim();
   check("and the tree is clean afterwards", clean, "");
+  // Remember what the accept recorded, so the discard can be shown not to
+  // rewrite it.
+  const afterAccept = await api("/api/workspaces", { headers: auth });
+  const committedAtBeforeDiscard = Array.isArray(afterAccept.body)
+    ? afterAccept.body.find((w) => w.id === id)?.lastCommitAt
+    : undefined;
+  check("the accept set a commit timestamp", typeof committedAtBeforeDiscard, "number");
 
   // ── discard: the half that did not exist ─────────────────────────────────
   writeFileSync(join(tree, "readme.md"), "a second attempt\n");
@@ -171,10 +178,26 @@ try {
   check("the tree is clean after discard", gitSync(tree, ["status", "--porcelain"]).trim(), "");
 
   const list = await api("/api/workspaces", { headers: auth });
+  const survivor = Array.isArray(list.body) ? list.body.find((w) => w.id === id) : null;
   check(
     "the workspace itself survives, which is the whole point",
-    Array.isArray(list.body) && list.body.some((w) => w.id === id),
+    Boolean(survivor),
     true,
+  );
+  // The decision has to be recorded, or the workspace keeps claiming it needs
+  // review with nothing left to review, and the review count stays wrong.
+  check(
+    "the discard is recorded as a decision, not as a commit",
+    typeof survivor?.discardedAt === "number" && survivor.discardedAt > 0,
+    true,
+  );
+  // And it must not write lastCommitAt, which is what would report rejected work
+  // as accepted. This run commits before it discards, so lastCommitAt already
+  // holds the earlier accept: the invariant is that discard left it alone.
+  check(
+    "and it did not touch the commit timestamp",
+    survivor?.lastCommitAt,
+    committedAtBeforeDiscard,
   );
   check(
     "its branch is still there, so it can run again",
