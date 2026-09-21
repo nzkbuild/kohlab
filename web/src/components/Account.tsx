@@ -63,7 +63,7 @@ export default function Account() {
       />
       <div className="space-y-4 p-4">
         {error ? (
-          <p className="text-xs text-danger-strong" role="alert">
+          <p className="text-xs text-status-danger" role="alert">
             {error}
           </p>
         ) : null}
@@ -82,11 +82,11 @@ export default function Account() {
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={rotate} disabled={busy || !isNamed} variant="secondary">
             <Key size={14} aria-hidden="true" />
-            {busy ? "Rotating…" : "Rotate my key"}
+            {busy ? "rotating…" : "rotate my key"}
           </Button>
           <Button onClick={signOut} variant="quiet">
             <SignOut size={14} aria-hidden="true" />
-            Sign out
+            sign out
           </Button>
         </div>
 

@@ -281,7 +281,11 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-8 items-center gap-2 border-b border-line-subtle px-3 text-2xs text-text-muted">
+      {/* Same pane-header geometry as the other panes: a 2rem-min row with 11px
+          text read as a different component. No h2 title: this pane's identity
+          is the tab and the instance strip rendered directly above it by
+          WorkspaceDetail, and the chip plus this line already carry its state. */}
+      <header className="cockpit-head text-2xs text-text-muted">
         <span className={cn("chip", SOCKET_CHIP[socket])}>
           <span className="chip-dot" aria-hidden="true" />
           {SOCKET_LABEL[socket]}
@@ -295,7 +299,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
             reconnect now
           </Button>
         ) : null}
-      </div>
+      </header>
 
       {/* Not a live region: a screen reader would read every line the agent
           prints. The connection chip above carries the state that matters. */}
@@ -304,7 +308,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           ref={containerRef}
           data-terminal-root=""
           role="group"
-          aria-label={`Terminal ${terminalId} for ${workspaceId}`}
+          aria-label={`terminal ${terminalId} for ${workspaceId}`}
           aria-describedby={descId}
           className="terminal-wrap"
         />

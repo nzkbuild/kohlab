@@ -14,7 +14,7 @@ import { announce } from "../lib/announce";
 import { clockTime } from "../lib/format";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
-import { Button, Field, Panel, PanelHead, SkeletonRows } from "./ui";
+import { Button, EmptyState, Field, Panel, PanelHead, SkeletonRows } from "./ui";
 
 /** Static dot colour per audit action, Tailwind cannot read an interpolated class. */
 const ACTION_DOT: Record<string, string> = {
@@ -197,10 +197,14 @@ export default function Team() {
             {canManage ? (
               <div className="flex flex-col gap-3">
                 {users.length === 0 ? (
-                  <p className="text-xs leading-relaxed text-text-muted">
-                    It is just you. Invite someone and they get their own account on this box, you
-                    never see their files, and they never see yours.
-                  </p>
+                  /* An ad-hoc paragraph in the slot the member table occupies.
+                     Same copy, rendered with the shared empty state so "nothing
+                     here yet" looks the same everywhere. */
+                  <EmptyState
+                    icon={<Users size={18} />}
+                    title="It is just you"
+                    description="Invite someone and they get their own account on this box, you never see their files, and they never see yours."
+                  />
                 ) : (
                   <table className="data-table w-full">
                     <caption className="sr-only">Members of this server</caption>
@@ -250,8 +254,8 @@ export default function Team() {
                               variant="danger"
                               size="sm"
                               iconOnly
-                              aria-label={`Revoke ${u.name} (${u.id})`}
-                              title={`Revoke ${u.id}`}
+                              aria-label={`revoke ${u.name} (${u.id})`}
+                              title={`revoke ${u.id}`}
                               onClick={() => {
                                 setRevokeError(null);
                                 setRevoking(u);
@@ -311,7 +315,7 @@ export default function Team() {
                     type="submit"
                     disabled={adding || !canInvite || !id.trim() || !name.trim()}
                   >
-                    <UserPlus size={15} weight="bold" aria-hidden="true" />
+                    <UserPlus size={14} weight="bold" aria-hidden="true" />
                     {adding ? "creating…" : "create invitation"}
                   </Button>
                 </form>
@@ -357,17 +361,20 @@ export default function Team() {
             {/* ---- audit tail: owner + member --------------------------- */}
             <div className="border-t border-line-subtle pt-3">
               <div className="flex items-center gap-2">
-                <h3 className="eyebrow">Recent activity</h3>
+                {/* h2, not h3: the app's outline is h1 for the route and h2 for
+                    every panel-level section, and this one had no h2 above it
+                    to sit under. */}
+                <h2 className="eyebrow">Recent activity</h2>
                 <div className="flex-1" />
                 <Button
                   variant="quiet"
                   size="sm"
                   iconOnly
-                  aria-label="Refresh team and activity"
+                  aria-label="refresh team and activity"
                   disabled={loading}
                   onClick={() => void load()}
                 >
-                  <ArrowsClockwise size={14} />
+                  <ArrowsClockwise size={13} />
                 </Button>
               </div>
 
@@ -431,7 +438,7 @@ export default function Team() {
             ) : null}
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => void copyLink()}>
-                <Copy size={14} aria-hidden="true" />
+                <Copy size={13} aria-hidden="true" />
                 {copied ? "copied" : "copy link"}
               </Button>
               <Dialog.Close asChild>

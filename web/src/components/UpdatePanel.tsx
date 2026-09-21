@@ -155,19 +155,19 @@ export default function UpdatePanel() {
           <Button variant="primary" size="sm" disabled={busy || status?.running} onClick={() => void apply()}>
             {status?.running ? (
               <>
-                <CircleNotch size={14} className="animate-spin" aria-hidden="true" />
+                <CircleNotch size={13} className="animate-spin" aria-hidden="true" />
                 updating…
               </>
             ) : (
               <>
-                <DownloadSimple size={14} aria-hidden="true" />
+                <DownloadSimple size={13} aria-hidden="true" />
                 {failed ? "retry update" : `update to v${status?.latest}`}
               </>
             )}
           </Button>
         ) : (
           <Button variant="secondary" size="sm" disabled={busy} onClick={() => void load(true)}>
-            <ArrowsClockwise size={14} aria-hidden="true" />
+            <ArrowsClockwise size={13} aria-hidden="true" />
             check again
           </Button>
         )}

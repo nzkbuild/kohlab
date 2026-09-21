@@ -71,7 +71,7 @@ export default function AuthGate() {
             className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent"
             aria-hidden="true"
           >
-            <TerminalWindow size={17} weight="bold" />
+            <TerminalWindow size={18} weight="bold" />
           </span>
           <div className="min-w-0">
             <h1 className="text-lg font-semibold leading-none tracking-tight">kohlab</h1>
@@ -127,14 +127,14 @@ export default function AuthGate() {
                 size="sm"
                 iconOnly
                 className="absolute right-1.5 top-1/2 -translate-y-1/2"
-                aria-label={reveal ? "Hide the key" : "Show the key"}
+                aria-label={reveal ? "hide the key" : "show the key"}
                 aria-pressed={reveal}
                 onClick={() => {
                   setReveal((v) => !v);
                   input.current?.focus();
                 }}
               >
-                {reveal ? <EyeSlash size={15} /> : <Eye size={15} />}
+                {reveal ? <EyeSlash size={13} /> : <Eye size={13} />}
               </Button>
             </div>
           </Field>

@@ -158,7 +158,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
               placeholder="/srv/repos/app or https://github.com/owner/name"
             />
             <Button onClick={() => void loadRepos()} disabled={reposBusy}>
-              <GithubLogo size={15} />
+              <GithubLogo size={14} />
               {reposBusy ? "loading…" : "github"}
             </Button>
           </div>
@@ -167,7 +167,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         {repos && repos.length > 0 ? (
           <select
             className="field-select"
-            aria-label="Pick a GitHub repository"
+            aria-label="pick a GitHub repository"
             value=""
             onChange={(e) => {
               if (e.target.value) setRepo(asCloneUrl(e.target.value));
@@ -233,7 +233,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
             </Button>
           ) : null}
           <Button type="submit" variant="primary" disabled={busy || !task.trim() || !chosenAgent}>
-            <Rocket size={15} weight="fill" />
+            <Rocket size={14} weight="fill" />
             {busy ? "creating…" : "create & start"}
           </Button>
         </div>
@@ -357,7 +357,7 @@ export default function WorkspacesView() {
             aria-controls="new-workspace"
             onClick={() => setCreating((v) => !v)}
           >
-            <Plus size={15} weight="bold" />
+            <Plus size={14} weight="bold" />
             new workspace
           </Button>
         </div>
@@ -372,7 +372,7 @@ export default function WorkspacesView() {
             <input
               type="search"
               className="field-input pl-8"
-              aria-label="Search workspaces by id, task or agent"
+              aria-label="search workspaces by id, task or agent"
               placeholder="search id, task or agent"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -383,7 +383,7 @@ export default function WorkspacesView() {
           </span>
         </div>
 
-        <div className="tabstrip mt-3" role="tablist" aria-label="Filter workspaces by status">
+        <div className="tabstrip mt-3" role="tablist" aria-label="filter workspaces by status">
           {FILTERS.map((option, index) => (
             <button
               key={option}
@@ -441,13 +441,13 @@ export default function WorkspacesView() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th scope="col">Workspace</th>
-                      <th scope="col">Task</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Agent</th>
-                      <th scope="col">Age</th>
+                      <th scope="col">workspace</th>
+                      <th scope="col">task</th>
+                      <th scope="col">status</th>
+                      <th scope="col">agent</th>
+                      <th scope="col">age</th>
                       <th scope="col">
-                        <span className="sr-only">Actions</span>
+                        <span className="sr-only">actions</span>
                       </th>
                     </tr>
                   </thead>
@@ -457,7 +457,19 @@ export default function WorkspacesView() {
                       return (
                         <tr key={w.id}>
                           <th scope="row" className="normal-case tracking-normal">
-                            <span className="mono text-sm font-medium text-text-primary">{w.id}</span>
+                            {/* The id is the row's way in. The icon actions are
+                                opacity 0 until hover, so on their own they
+                                leave the list with no visible target: someone
+                                scanning for what needs review sees nothing to
+                                press. This target needs no hover, so it also
+                                works wherever hover does not exist. */}
+                            <button
+                              type="button"
+                              className="row-link mono text-sm font-medium"
+                              onClick={() => navigate({ kind: "workspace", id: w.id })}
+                            >
+                              {w.id}
+                            </button>
                           </th>
                           <td className="max-w-md truncate text-text-secondary">{w.task}</td>
                           <td>
@@ -471,19 +483,10 @@ export default function WorkspacesView() {
                                 variant="quiet"
                                 iconOnly
                                 size="sm"
-                                aria-label={`open ${w.id}`}
-                                onClick={() => navigate({ kind: "workspace", id: w.id })}
-                              >
-                                <ArrowSquareOut size={14} />
-                              </Button>
-                              <Button
-                                variant="quiet"
-                                iconOnly
-                                size="sm"
                                 aria-label={`${w.running ? "stop" : "start"} ${w.id}`}
                                 onClick={() => void toggle(w)}
                               >
-                                {w.running ? <Stop size={14} /> : <Play size={14} />}
+                                {w.running ? <Stop size={13} /> : <Play size={13} />}
                               </Button>
                               <Button
                                 variant="quiet"
@@ -492,7 +495,7 @@ export default function WorkspacesView() {
                                 aria-label={`copy share link for ${w.id}`}
                                 onClick={() => void share(w)}
                               >
-                                <LinkSimple size={14} />
+                                <LinkSimple size={13} />
                               </Button>
                               <Button
                                 variant="quiet"
@@ -501,7 +504,7 @@ export default function WorkspacesView() {
                                 aria-label={`delete ${w.id}`}
                                 onClick={() => setPendingDelete(w)}
                               >
-                                <Trash size={14} />
+                                <Trash size={13} />
                               </Button>
                             </div>
                           </td>
@@ -533,7 +536,7 @@ export default function WorkspacesView() {
                       className="mt-3 w-full"
                       onClick={() => navigate({ kind: "workspace", id: w.id })}
                     >
-                      <ArrowSquareOut size={14} />
+                      <ArrowSquareOut size={13} />
                       open
                     </Button>
                   </li>

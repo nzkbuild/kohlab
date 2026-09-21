@@ -264,25 +264,31 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+        {/* No shrink-0 here. The five actions need 388px of max-content, more
+            than the 288px a 320px viewport leaves inside this header, and an
+            item that refuses to shrink keeps that width: it overhangs
+            .app-content, whose overflow:hidden then clips delete off screen
+            while it stays focusable (SC 2.4.11). Letting it shrink hands the
+            wrap back to this row, which already has flex-wrap. */}
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button size="sm" variant="primary" disabled={running} onClick={() => run("start")}>
-            <Play size={12} weight="fill" aria-hidden="true" />
+            <Play size={13} weight="fill" aria-hidden="true" />
             start
           </Button>
           <Button size="sm" variant="secondary" disabled={!running} onClick={() => run("stop")}>
-            <Stop size={12} weight="fill" aria-hidden="true" />
+            <Stop size={13} weight="fill" aria-hidden="true" />
             stop
           </Button>
           <Button size="sm" variant="secondary" onClick={() => run("restart")}>
-            <ArrowsClockwise size={12} aria-hidden="true" />
+            <ArrowsClockwise size={13} aria-hidden="true" />
             restart
           </Button>
           <Button size="sm" variant="secondary" onClick={() => void share()}>
-            <ShareNetwork size={12} aria-hidden="true" />
+            <ShareNetwork size={13} aria-hidden="true" />
             share
           </Button>
           <Button size="sm" variant="danger" onClick={() => setConfirming(true)}>
-            <Trash size={12} aria-hidden="true" />
+            <Trash size={13} aria-hidden="true" />
             delete
           </Button>
         </div>
@@ -350,7 +356,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                     aria-label={`Close terminal ${term.label}`}
                     onClick={() => closeTerminal(term.id)}
                   >
-                    <X size={11} />
+                    <X size={13} />
                   </Button>
                 ) : null}
               </span>

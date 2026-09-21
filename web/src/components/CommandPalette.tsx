@@ -143,16 +143,19 @@ export default function CommandPalette() {
     }),
     {
       id: "action-new",
-      label: "New workspace",
+      label: "new workspace",
       group: "Actions",
       icon: <PlusCircle size={16} />,
       keywords: ["create", "launch", "start", "task", "clone"],
-      // Creation is the command center's first-run affordance.
-      onAction: () => navigate({ kind: "dashboard" }),
+      // The Workspaces route is where creation lives. This used to navigate to
+      // the dashboard, which only offers a create button when the server has no
+      // workspaces at all, so the palette's most direct command landed on a page
+      // where the action did not exist.
+      onAction: () => navigate({ kind: "workspaces" }),
     },
     {
       id: "action-refresh",
-      label: "Refresh workspaces",
+      label: "refresh workspaces",
       group: "Actions",
       icon: <ArrowsClockwise size={16} />,
       keywords: ["reload", "sync", "update"],
@@ -244,13 +247,13 @@ export default function CommandPalette() {
               aria-expanded={open}
               aria-controls={listId}
               aria-activedescendant={activeOptionId}
-              placeholder="Search workspaces or run a command…"
+              placeholder="search workspaces, or run a command…"
               className="min-w-0 flex-1 bg-transparent py-3 text-sm text-text-primary outline-none placeholder:text-text-faint"
             />
             <Kbd>⌘K</Kbd>
             <Dialog.Close asChild>
-              <Button variant="quiet" iconOnly size="sm" aria-label="Close command palette">
-                <X size={15} />
+              <Button variant="quiet" iconOnly size="sm" aria-label="close command palette">
+                <X size={13} />
               </Button>
             </Dialog.Close>
           </div>

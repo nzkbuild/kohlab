@@ -171,7 +171,7 @@ export default function Settings() {
                 <span className="min-w-0">
                   <span className="flex items-center gap-1.5 text-xs text-text-primary">
                     <SpeakerHigh size={14} className="text-text-muted" aria-hidden="true" />
-                    Pause screen-reader announcements
+                    pause screen-reader announcements
                   </span>
                   <span className="mt-0.5 block text-2xs leading-relaxed text-text-muted">
                     Stops the live region from announcing workspace state changes (finished, needs

@@ -128,11 +128,13 @@ export default function LogView({ workspaceId }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-10 flex-wrap items-center gap-2 border-b border-line-subtle px-3 py-1.5">
+      {/* One pane-header treatment for the whole cockpit: .cockpit-head, titled
+          with the same h2 the other pane headers use. This pane carried no
+          title at all, which is a third treatment on its own. */}
+      <header className="cockpit-head flex-wrap">
+        <h2 className="text-sm font-semibold text-text-primary">Session log</h2>
         <StatusChip status={workspace ? workspaceStatus(workspace) : "stopped"} />
-        <span className="text-2xs text-text-muted">
-          {running ? "session log · tailing every 3s" : "session log · not running"}
-        </span>
+        <span className="text-2xs text-text-muted">{running ? "tailing every 3s" : "not running"}</span>
         <div className="flex-1" />
         <Button
           size="sm"
@@ -140,10 +142,10 @@ export default function LogView({ workspaceId }: Props) {
           aria-pressed={follow}
           onClick={() => (follow ? setFollow(false) : scrollToBottom())}
         >
-          {follow ? <Pause size={12} aria-hidden="true" /> : <Play size={12} aria-hidden="true" />}
+          {follow ? <Pause size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
           {follow ? "following" : "paused"}
         </Button>
-      </div>
+      </header>
 
       {error ? (
         <div role="alert" className="flex items-center gap-2 border-b border-line-subtle px-3 py-1.5 text-xs text-status-danger">
@@ -161,7 +163,7 @@ export default function LogView({ workspaceId }: Props) {
           ref={scrollRef}
           onScroll={onScroll}
           tabIndex={0}
-          aria-label={`Session log for ${workspaceId}`}
+          aria-label={`session log for ${workspaceId}`}
           className="h-full overflow-auto"
         >
           {lines.length === 0 ? (
@@ -193,7 +195,7 @@ export default function LogView({ workspaceId }: Props) {
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
             <Button size="sm" variant="primary" className="pointer-events-auto" onClick={scrollToBottom}>
               {pending} new {pending === 1 ? "line" : "lines"}
-              <ArrowDown size={12} aria-hidden="true" />
+              <ArrowDown size={13} aria-hidden="true" />
             </Button>
           </div>
         ) : null}

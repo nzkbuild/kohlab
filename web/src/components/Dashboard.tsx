@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   ArrowRight,
+  ArrowSquareOut,
   CheckCircle,
   Clock,
   Cpu,
@@ -250,38 +251,68 @@ export default function Dashboard() {
                   Nothing is {STATUS_LABEL[tab]} right now.
                 </p>
               ) : (
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Workspace</th>
-                      <th scope="col">Task</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Agent</th>
-                      <th scope="col">Age</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((w) => (
-                      <tr key={w.id}>
-                        <th scope="row" className="normal-case tracking-normal">
-                          <button
-                            type="button"
-                            onClick={() => navigate({ kind: "workspace", id: w.id })}
-                            className="mono inline-flex min-h-6 items-center text-sm font-medium text-text-primary transition-colors hover:text-accent"
-                          >
-                            {w.id}
-                          </button>
-                        </th>
-                        <td className="max-w-md truncate text-text-secondary">{w.task}</td>
-                        <td>
-                          <StatusChip status={workspaceStatus(w)} />
-                        </td>
-                        <td className="mono text-xs text-text-muted">{w.agent}</td>
-                        <td className="tnum text-xs text-text-muted">{relativeTime(w.created)}</td>
+                <>
+                  {/* A five-column table cannot hold a 320px viewport, and
+                      a sideways scroller would only hide the overflow.
+                      Below the shell breakpoint the rows render as cards
+                      with one primary action, the reflow WorkspacesView
+                      already uses. */}
+                  <table className="data-table hidden shell:table">
+                    <thead>
+                      <tr>
+                        <th scope="col">workspace</th>
+                        <th scope="col">task</th>
+                        <th scope="col">status</th>
+                        <th scope="col">agent</th>
+                        <th scope="col">age</th>
                       </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((w) => (
+                        <tr key={w.id}>
+                          <th scope="row" className="normal-case tracking-normal">
+                            <button
+                              type="button"
+                              onClick={() => navigate({ kind: "workspace", id: w.id })}
+                              className="mono inline-flex min-h-6 items-center text-sm font-medium text-text-primary transition-colors hover:text-accent"
+                            >
+                              {w.id}
+                            </button>
+                          </th>
+                          <td className="max-w-md truncate text-text-secondary">{w.task}</td>
+                          <td>
+                            <StatusChip status={workspaceStatus(w)} />
+                          </td>
+                          <td className="mono text-xs text-text-muted">{w.agent}</td>
+                          <td className="tnum text-xs text-text-muted">{relativeTime(w.created)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <ul className="flex flex-col gap-2 p-3 shell:hidden">
+                    {rows.map((w) => (
+                      <li key={w.id} className="panel p-3">
+                        <div className="flex items-center gap-2">
+                          <span className="mono text-sm font-medium text-text-primary">{w.id}</span>
+                          <StatusChip status={workspaceStatus(w)} />
+                          <div className="flex-1" />
+                          <span className="tnum text-2xs text-text-faint">{relativeTime(w.created)}</span>
+                        </div>
+                        <p className="mt-1.5 line-clamp-2 text-sm text-text-secondary">{w.task}</p>
+                        <p className="mono mt-1 truncate text-2xs text-text-muted">{w.agent}</p>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="mt-3 w-full"
+                          onClick={() => navigate({ kind: "workspace", id: w.id })}
+                        >
+                          <ArrowSquareOut size={13} />
+                          open
+                        </Button>
+                      </li>
                     ))}
-                  </tbody>
-                </table>
+                  </ul>
+                </>
               )}
             </div>
           </Panel>

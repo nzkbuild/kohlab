@@ -79,21 +79,21 @@ export default function Sidebar({ open, onClose }: Props) {
           iconOnly
           size="sm"
           className="sidebar-toggle hidden shell:inline-flex"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "expand sidebar" : "collapse sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((v) => !v)}
         >
-          {collapsed ? <CaretDoubleRight size={15} /> : <CaretDoubleLeft size={15} />}
+          {collapsed ? <CaretDoubleRight size={13} /> : <CaretDoubleLeft size={13} />}
         </Button>
         <Button
           variant="quiet"
           iconOnly
           size="sm"
           className="shell:hidden"
-          aria-label="Close navigation"
+          aria-label="close navigation"
           onClick={onClose}
         >
-          <X size={15} />
+          <X size={13} />
         </Button>
       </div>
 
@@ -101,10 +101,10 @@ export default function Sidebar({ open, onClose }: Props) {
         <Button
           variant="primary"
           className={cn("w-full", collapsed && "shell:px-0")}
-          aria-label="New workspace"
+          aria-label="new workspace"
           onClick={() => navigate({ kind: "workspaces" })}
         >
-          <Plus size={16} weight="bold" />
+          <Plus size={14} weight="bold" />
           <span className="sidebar-label">new workspace</span>
         </Button>
       </div>

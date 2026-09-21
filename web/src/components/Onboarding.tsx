@@ -79,7 +79,7 @@ export default function Onboarding() {
                 aria-controls="onboarding-steps"
                 onClick={() => setGuide(true)}
               >
-                <Rocket size={15} weight="fill" />
+                <Rocket size={14} weight="fill" />
                 get started
               </Button>
               <Button variant="quiet" onClick={skip}>
