@@ -326,16 +326,43 @@ async function main() {
  */
 function printDashboard() {
   const port = process.env.PORT ?? "7676";
+  // The address worth bookmarking: a `tailscale serve` route to this port, if
+  // there is one (fixed name, real TLS, tailnet only).
+  let serveUrl: string | undefined;
+  try {
+    const web = JSON.parse(spawnSync("tailscale", ["serve", "status", "--json"], { encoding: "utf8" }).stdout || "{}").Web ?? {};
+    for (const [hostPort, cfg] of Object.entries<any>(web)) {
+      const proxies = Object.values<any>(cfg?.Handlers ?? {}).map((h) => String(h?.Proxy ?? ""));
+      if (proxies.some((p) => new RegExp(`^https?://(127\\.0\\.0\\.1|localhost):${port}/?$`).test(p))) {
+        serveUrl = `https://${hostPort.replace(/:443$/, "")}`;
+        break;
+      }
+    }
+  } catch {
+    /* no tailscale: fine */
+  }
+  // Only print other addresses when the server actually listens on them. Bound
+  // to loopback (the default when exposed through a proxy), they would be dead links.
+  const listen = spawnSync("ss", ["-ltnH", `sport = :${port}`], { encoding: "utf8" }).stdout ?? "";
+  // Column 4 is the local address; column 5 (the peer, "0.0.0.0:*") must not count.
+  const locals = listen.trim().split("\n").filter(Boolean).map((l) => l.trim().split(/\s+/)[3] ?? "");
+  const loopbackOnly = locals.length > 0 && locals.every((a) => /^(127\.|\[::1\]|localhost)/.test(a));
   const extra: string[] = [];
-  for (const [name, addrs] of Object.entries(networkInterfaces())) {
-    for (const a of addrs ?? []) {
-      if (a.family === "IPv4" && !a.internal) extra.push(`http://${a.address}:${port}   (${name})`);
+  if (!loopbackOnly) {
+    for (const [name, addrs] of Object.entries(networkInterfaces())) {
+      for (const a of addrs ?? []) {
+        if (a.family === "IPv4" && !a.internal) extra.push(`http://${a.address}:${port}   (${name})`);
+      }
     }
   }
-  console.log(`dashboard:  http://localhost:${port}`);
+  if (serveUrl) console.log(`dashboard:  ${serveUrl}   (bookmark this; tailnet devices only)`);
+  console.log(`${serveUrl ? "on the box:" : "dashboard: "} http://localhost:${port}`);
   for (const u of extra) console.log(`            ${u}`);
-  console.log(`tunnel:     ssh -L ${port}:localhost:${port} ${userInfo().username}@${hostname()}`);
-  console.log(`state:      ${WORKS_DIR}`);
+  if (!serveUrl && loopbackOnly) {
+    console.log(`tunnel:     ssh -L ${port}:localhost:${port} ${userInfo().username}@${hostname()}`);
+    console.log(`            or a fixed private link: tailscale serve --bg --https=8444 http://127.0.0.1:${port}`);
+  }
+  console.log(`first time on a device? run: kohlab key   (or kohlab pair, for a phone)`);
 }
 
 /** Open the dashboard in the browser, or print the URL if headless. */
