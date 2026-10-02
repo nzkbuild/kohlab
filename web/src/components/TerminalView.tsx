@@ -187,6 +187,13 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
     // agent; Ctrl+Shift+C always copies, as in desktop terminals. keydown only:
     // the handler sees keyup and keypress too.
     term.attachCustomKeyEventHandler((e) => {
+      // Ctrl/Cmd+V must stay a browser paste. xterm would otherwise send a raw
+      // ^V to the pty and cancel the key, so the browser never fires "paste"
+      // and a screenshot on the clipboard never reaches the page (the agent
+      // then looks at the server's own, empty, clipboard). Returning false
+      // without preventDefault lets the native paste run; onPaste takes files
+      // and xterm takes text.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "v") return false;
       if (e.type !== "keydown" || !(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "c") return true;
       if (!e.shiftKey && !term.hasSelection()) return true;
       e.preventDefault();
@@ -204,12 +211,38 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         .filter((f): f is File => !!f);
       return fromItems.length ? fromItems : Array.from(data?.files ?? []);
     };
+    // Some pastes arrive without the image: Ctrl+Shift+V is "paste as plain
+    // text" and strips it. When a paste carries neither files nor text, ask the
+    // async clipboard for an image (Chrome asks the user once for permission).
+    const imagesFromClipboard = async (): Promise<File[]> => {
+      if (!navigator.clipboard?.read) return [];
+      try {
+        const out: File[] = [];
+        for (const item of await navigator.clipboard.read()) {
+          const type = item.types.find((t) => t.startsWith("image/"));
+          if (type) out.push(new File([await item.getType(type)], `pasted.${type.slice(6)}`, { type }));
+        }
+        return out;
+      } catch {
+        return [];
+      }
+    };
     const onPaste = (e: ClipboardEvent) => {
       const files = filesOf(e.clipboardData);
-      if (files.length === 0) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      void sendFiles(files);
+      if (files.length > 0) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        void sendFiles(files);
+        return;
+      }
+      if (!e.clipboardData?.getData("text/plain")) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        void imagesFromClipboard().then((found) => {
+          if (found.length) void sendFiles(found);
+          else toast("nothing to paste: copy text or a screenshot first, or use attach");
+        });
+      }
     };
     // Typed input goes out as a bare string: the same frame shape as paste. The
     // subscription is per-mount and must be released, because the terminal it
