@@ -227,6 +227,44 @@ try {
   await api(`/api/workspaces/${id}/stop`, { method: "POST", headers: jsonAuth });
   await wait(500);
 
+  // ── where a workspace starts: branch, new project, URL guard ─────────────
+  gitSync(repo, ["branch", "feature-x"]);
+  gitSync(repo, ["-c", "user.email=t@kohlab.local", "-c", "user.name=test", "commit", "--quiet", "--allow-empty", "-m", "main moves on"]);
+  const branches = await api(`/api/branches?source=${encodeURIComponent(repo)}`, { headers: auth });
+  check("branches of a server repo are listed", Array.isArray(branches.body?.branches) && branches.body.branches.includes("feature-x"), true);
+  const onBranch = await api("/api/workspaces", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "branch base", repo, agent: "sh", branch: "feature-x" }),
+  });
+  check("a workspace can start from a chosen branch", onBranch.status, 200);
+  const featureHead = gitSync(repo, ["rev-parse", "feature-x"]).trim();
+  check("its branch starts at that branch's commit", gitSync(repo, ["rev-parse", `kohlab/${onBranch.body?.id}`]).trim(), featureHead);
+  const badBranch = await api("/api/workspaces", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "bad branch", repo, agent: "sh", branch: "--upload-pack=x" }),
+  });
+  check("an option-shaped branch name is refused", badBranch.status, 400);
+  const fresh = await api("/api/workspaces", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "from scratch", agent: "sh", newProject: "Hello World", payload: "echo started" }),
+  });
+  check("a new empty project can be started", fresh.status, 200);
+  check("it lives under projects/", typeof fresh.body?.path === "string" && existsSync(join(dir, "projects", "hello-world", ".git")), true);
+  const dupe = await api("/api/workspaces", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "again", agent: "sh", newProject: "hello world" }),
+  });
+  check("a second project with the same name is refused", dupe.status, 400);
+  const localUrl = await api("/api/clone", { method: "POST", headers: jsonAuth, body: JSON.stringify({ url: repo, task: "x", agent: "sh" }) });
+  check("clone refuses a local path posing as a URL", localUrl.status, 400);
+  const extUrl = await api("/api/clone", { method: "POST", headers: jsonAuth, body: JSON.stringify({ url: "ext::sh -c touch% /tmp/pwned", task: "x", agent: "sh" }) });
+  check("clone refuses ext:: transport", extUrl.status, 400);
+  for (const extra of [onBranch.body?.id, fresh.body?.id]) if (extra) await api(`/api/workspaces/${extra}/delete`, { method: "POST", headers: jsonAuth });
+
   // ── continue: a follow-up task in the same worktree and branch ───────────
   const cont = await api(`/api/workspaces/${id}/continue`, {
     method: "POST",

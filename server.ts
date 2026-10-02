@@ -13,6 +13,10 @@ import {
   listWorkspaces,
   restartWorkspace,
   continueWorkspace,
+  cloneOrReuse,
+  newProject,
+  listBranches,
+  validGitUrl,
   startWorkspace,
   stopWorkspace,
   commitWorkspace,
@@ -165,25 +169,21 @@ startWatcher();
 
 async function handleClone(req: Request, actorUserId?: string): Promise<Response> {
   try {
-    const body = (await req.json()) as { url?: string; task?: string; agent?: string; payload?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } };
+    const body = (await req.json()) as { url?: string; task?: string; agent?: string; branch?: string; payload?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } };
     const url = (body.url ?? "").trim();
     const task = (body.task ?? "work on " + url).trim();
     if (!url) return json({ error: "url is required" }, 400);
+    if (!validGitUrl(url)) return json({ error: "use an https://, ssh:// or git@ URL" }, 400);
+    const branch = body.branch?.trim() || undefined;
     if (actorUserId) {
       // a named member clones into their own isolated workspace (server does
       // the git work as root, then hands the tree to the member's OS user)
-      const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits, ownerId: actorUserId });
+      const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, ownerId: actorUserId });
       return json(ws);
     }
-    // legacy/anonymous path: clone into a fresh dir under WORKS_DIR
-    const dest = `${WORKS_DIR}/clones/${Date.now()}`;
-    await mkdir(`${WORKS_DIR}/clones`, { recursive: true });
-    await new Promise<void>((resolve, reject) => {
-      const p = spawn("git", ["clone", "--quiet", url, dest]);
-      p.on("error", reject);
-      p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git clone failed (${code})`))));
-    });
-    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits });
+    // owner/legacy path: one clone per URL under WORKS_DIR/clones, reused
+    const dest = await cloneOrReuse(url);
+    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits });
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -218,10 +218,22 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
     agent?: string;
     branch?: string;
     payload?: string;
+    /** Start a brand-new repository with this name instead of an existing one. */
+    newProject?: string;
     limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number };
   };
   const task = (body.task ?? "").trim();
   if (!task) return json({ error: "task is required" }, 400);
+  if (body.newProject !== undefined) {
+    // A new project is a host path; members work from URLs only.
+    if (actorUserId) return json({ error: "members start from a git URL" }, 403);
+    try {
+      const repo = await newProject(body.newProject);
+      return json(await createWorkspace({ repo, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits }));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }
   // `cwd()` was never imported here, so creating a workspace without an
   // explicit repo threw ReferenceError and killed the server.
   const repo = (body.repo ?? process.cwd()).trim();
@@ -236,7 +248,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
       url,
       task,
       agent: body.agent ?? "sh",
-      branch: body.branch,
+      branch: body.branch?.trim() || undefined,
       payload: body.payload,
       limits: body.limits,
       ownerId: actorUserId,
@@ -1098,6 +1110,17 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
       if (refused) return refused;
       containFailure(audit(actor, "clone", undefined), "audit");
       return handleClone(req, actorUserId);
+    }
+    if (path === "/api/branches" && req.method === "GET") {
+      if (denied) return json({ error: "unauthorized" }, 401);
+      const source = (url.searchParams.get("source") ?? "").trim();
+      // Members never see host paths, only remote URLs.
+      if (actorUserId && !validGitUrl(source)) return json({ error: "members list branches of a git URL" }, 403);
+      try {
+        return json({ branches: await listBranches(source) });
+      } catch (e) {
+        return json({ error: (e as Error).message }, 400);
+      }
     }
     if (path === "/api/workspaces" && req.method === "GET") {
       const wantsShare = url.searchParams.has("share");
