@@ -489,8 +489,15 @@ export default function DiffView({ workspaceId }: Props) {
                       modified={split.modified}
                       beforeMount={defineKohlabTheme}
                       theme={MONACO_THEME}
+                      onMount={(editor) =>
+                        editor.getOriginalEditor().updateOptions({ ariaLabel: `original version of ${current.name}` })
+                      }
                       options={{
                         ...baseOptions(),
+                        // Monaco's hidden textareas are the screen-reader entry
+                        // point; unnamed they fail SC 4.1.2.
+                        ariaLabel: `changed version of ${current.name}`,
+                        originalAriaLabel: `original version of ${current.name}`,
                         // Side-by-side on a wide pane, inline when it narrows,
                         // Monaco decides, so there is no breakpoint to maintain.
                         renderSideBySide: true,

@@ -101,6 +101,17 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // xterm measures the cell from the font that is loaded at open time. Geist
+  // Mono is a webfont, so re-measure once it lands or the grid stays sized for
+  // the fallback face.
+  void document.fonts.load(`13px ${monoFont(el)}`).then(() => {
+    term.options.fontFamily = monoFont(el);
+    try {
+      fit.fit();
+    } catch {
+      /* not attached yet */
+    }
+  });
   // Agent TUIs (Claude Code among them) select with the mouse themselves and
   // hand the text to the terminal as an OSC 52 escape. Writes go to the real
   // clipboard; reads are refused, so an agent can never pull what you copied
@@ -309,8 +320,8 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Same pane-header geometry as the other panes: a 2rem-min row with 11px
-          text read as a different component. No h2 title: this pane's identity
+      {/* Same pane-header geometry as the other panes: a 2rem-min row with 12px
+          text, like every pane header. No h2 title: this pane's identity
           is the tab and the instance strip rendered directly above it by
           WorkspaceDetail, and the chip plus this line already carry its state. */}
       <header className="cockpit-head text-2xs text-text-muted">

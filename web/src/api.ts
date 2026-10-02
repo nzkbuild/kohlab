@@ -78,6 +78,9 @@ export const api = {
     json<Workspace>("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   clone: (body: { url: string; task: string; agent: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  /** Same worktree and branch, new task: the agent restarts on it. */
+  continue: (id: string, task: string) =>
+    json<Workspace>(`/api/workspaces/${id}/continue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task }) }),
   action: (id: string, action: string) =>
     json<Workspace>(`/api/workspaces/${id}/${action}`, { method: "POST" }),
   share: (id: string) =>

@@ -12,6 +12,7 @@ import {
   getWorkspace,
   listWorkspaces,
   restartWorkspace,
+  continueWorkspace,
   startWorkspace,
   stopWorkspace,
   commitWorkspace,
@@ -815,7 +816,7 @@ async function ensurePtySession(id: string, terminalId = "main") {
 async function handle(req: Request, server: Server<any>): Promise<Response | undefined> {
     const url = new URL(req.url);
     const path = url.pathname;
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|merge|discard|files|file|image|share|log)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|image|share|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -905,6 +906,16 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
         case "start": containFailure(audit(actor, "start", id), "audit"); return handleStart(id);
         case "stop": containFailure(audit(actor, "stop", id), "audit"); return handleStop(id);
         case "restart": containFailure(audit(actor, "restart", id), "audit"); return handleRestart(id);
+        case "continue": {
+          if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+          containFailure(audit(actor, "continue", id), "audit");
+          try {
+            const body = (await req.json()) as { task?: string; payload?: string };
+            return json(await continueWorkspace(id, body.task ?? "", body.payload));
+          } catch (e) {
+            return json({ error: (e as Error).message }, 400);
+          }
+        }
         case "delete": containFailure(audit(actor, "delete", id), "audit"); return handleDelete(id);
         case "commit": containFailure(audit(actor, "commit", id), "audit"); return handleCommit(id, req);
         case "merge": return handleMerge(id, req, actor);

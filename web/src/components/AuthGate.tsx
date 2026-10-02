@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Eye, EyeSlash } from "@phosphor-icons/react";
 import { api, hasKey, setKey } from "../api";
 import { useApp } from "../store";
-import { Button, Field, BrandMark } from "./ui";
+import { Button, Field, BrandMark, Wordmark } from "./ui";
 
 const KEY_FIELD = "access-key";
 /** Password managers key off `name` as much as `id`, so both are set on purpose. */
@@ -96,7 +96,9 @@ export default function AuthGate() {
             <BrandMark size={18} />
           </span>
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold leading-none tracking-tight">kohlab</h1>
+            <h1 className="m-0 leading-none text-text-primary">
+              <Wordmark height={18} />
+            </h1>
             <p className="mt-1.5 flex items-baseline gap-1.5 text-xs text-text-muted">
               <span>agent workspaces</span>
               <span aria-hidden="true" className="text-text-faint">

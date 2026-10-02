@@ -227,6 +227,26 @@ try {
   await api(`/api/workspaces/${id}/stop`, { method: "POST", headers: jsonAuth });
   await wait(500);
 
+  // ── continue: a follow-up task in the same worktree and branch ───────────
+  const cont = await api(`/api/workspaces/${id}/continue`, {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "follow-up task" }),
+  });
+  check("continue returns ok", cont.status, 200);
+  check("continue keeps the workspace id", cont.body?.id, id);
+  check("continue sets the new task", cont.body?.task, "follow-up task");
+  check("continue restarts the agent", cont.body?.running, true);
+  check("continue reuses the same worktree", existsSync(tree), true);
+  const emptyCont = await api(`/api/workspaces/${id}/continue`, {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "  " }),
+  });
+  check("continue without a task is refused", emptyCont.status, 400);
+  await api(`/api/workspaces/${id}/stop`, { method: "POST", headers: jsonAuth });
+  await wait(500);
+
   // ── it is auditable, because it destroys work ────────────────────────────
   const audit = await api("/api/audit", { headers: auth });
   const events = Array.isArray(audit.body?.events) ? audit.body.events : [];
