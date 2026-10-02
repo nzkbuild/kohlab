@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { api, socketProtocol } from "../api";
 import { cn } from "../lib/utils";
 import { Button } from "./ui";
+import { Copy, Monitor } from "@phosphor-icons/react";
 import { cacheTerminal, termCache } from "./terminalCache";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
 import "@xterm/xterm/css/xterm.css";
 import { monoFont, tokenColor } from "../lib/tokenColor";
 import { copyText } from "../lib/clipboard";
@@ -43,6 +45,31 @@ const MAX_RETRY_MS = 10000;
 /** Past this many consecutive failures the pane reports itself offline. */
 const OFFLINE_AFTER_ATTEMPTS = 4;
 
+/** Copy and say so: a silent copy reads as a broken one. */
+function copyWithFeedback(text: string, what = "copied"): Promise<void> {
+  if (!text) return Promise.resolve();
+  const n = text.length;
+  return copyText(text).then(
+    () => {
+      toast.success(`${what}, ${n} character${n === 1 ? "" : "s"}`);
+      announce(what);
+    },
+    () => {
+      toast.error("could not copy, select the text and use the browser's copy menu");
+    },
+  );
+}
+
+/** What is on screen now, as plain text: the touch-friendly way out. */
+function screenText(term: Terminal): string {
+  const buf = term.buffer.active;
+  const lines: string[] = [];
+  for (let y = buf.viewportY; y < buf.viewportY + term.rows; y++) {
+    lines.push(buf.getLine(y)?.translateToString(true) ?? "");
+  }
+  return lines.join("\n").replace(/\s+$/, "");
+}
+
 function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAddon } {
   const cached = termCache.get(key);
   if (cached && cached.term.element) {
@@ -58,7 +85,6 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
     cursorBlink: true,
     fontFamily: monoFont(el),
     lineHeight: 1.45,
-    rightClickSelectsWord: true,
     // Agent TUIs turn on mouse tracking, which swallows a plain drag. Shift+drag
     // still selects everywhere; on macOS the convention is Option+click.
     macOptionClickForcesSelection: true,
@@ -75,6 +101,16 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // Agent TUIs (Claude Code among them) select with the mouse themselves and
+  // hand the text to the terminal as an OSC 52 escape. Writes go to the real
+  // clipboard; reads are refused, so an agent can never pull what you copied
+  // elsewhere.
+  term.loadAddon(
+    new ClipboardAddon(undefined, {
+      readText: () => "",
+      writeText: (_selection, text) => copyWithFeedback(text, "copied from the agent"),
+    }),
+  );
   term.loadAddon(new ImageAddon({ sixelSupport: true, iipSupport: true, storageLimit: 64, pixelLimit: 8388608 }));
   term.open(el);
   try {
@@ -93,6 +129,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
   const mountedRef = useRef(true);
   /** Set inside the effect; the reconnect control calls it. */
   const reconnectRef = useRef<() => void>(() => {});
+  const termRef = useRef<Terminal | null>(null);
   const [socket, setSocket] = useState<SocketState>("connecting");
 
   useEffect(() => {
@@ -106,15 +143,9 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
     const { term, fit } = getTerminal(key, el);
 
     // copy/paste
-    const copySel = () => {
-      const sel = term.getSelection();
-      if (!sel) return;
-      copyText(sel).then(
-        () => announce("copied"),
-        () => toast.error("could not copy, use the browser's copy menu instead"),
-      );
-      term.clearSelection();
-    };
+    termRef.current = term;
+    // The selection stays after copying so you can see what was taken.
+    const copySel = () => void copyWithFeedback(term.getSelection());
     const sendInput = (value: string) => {
       if (value && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) wsRef.current.send(value);
     };
@@ -288,9 +319,35 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           {SOCKET_LABEL[socket]}
         </span>
         <span className="truncate">
-          {socket === "live" ? "attached to the agent's pty · shift+drag to select, ctrl+c to copy" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
+          {socket === "live" ? "attached to the agent's pty · shift+drag to select" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
         </span>
         <div className="flex-1" />
+        <Button
+          variant="quiet"
+          size="sm"
+          className="shrink-0"
+          title="copy the selection (ctrl+shift+c)"
+          onClick={() => {
+            const term = termRef.current;
+            if (!term?.hasSelection()) {
+              toast("select text first: shift+drag, or use copy screen");
+              return;
+            }
+            void copyWithFeedback(term.getSelection());
+          }}
+        >
+          <Copy size={13} aria-hidden="true" />
+          copy
+        </Button>
+        <Button
+          variant="quiet"
+          size="sm"
+          className="shrink-0"
+          onClick={() => termRef.current && void copyWithFeedback(screenText(termRef.current), "screen copied")}
+        >
+          <Monitor size={13} aria-hidden="true" />
+          copy screen
+        </Button>
         {reconnecting ? (
           <Button variant="quiet" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => reconnectRef.current()} aria-describedby={descId}>
             reconnect now
