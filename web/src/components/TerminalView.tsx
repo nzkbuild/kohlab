@@ -277,7 +277,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         </span>
         <div className="flex-1" />
         {reconnecting ? (
-          <Button variant="quiet" size="sm" onClick={() => reconnectRef.current()} aria-describedby={descId}>
+          <Button variant="quiet" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => reconnectRef.current()} aria-describedby={descId}>
             reconnect now
           </Button>
         ) : null}

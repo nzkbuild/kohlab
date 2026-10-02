@@ -1,26 +1,45 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   ArrowSquareOut,
+  CaretDown,
+  DotsThree,
   GitDiff,
   GithubLogo,
   LinkSimple,
   MagnifyingGlass,
   Play,
   Plus,
+  Robot,
   Rocket,
   Stop,
+  TerminalWindow,
   Trash,
 } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
-import { withToast } from "../lib/actions";
+import { toastAction, withToast } from "../lib/actions";
 import { relativeTime } from "../lib/format";
 import { STATUS_LABEL, STATUS_TEXT, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
 import { AGENT_CATALOG } from "../types";
 import type { Workspace } from "../types";
-import { Button, EmptyState, Field, Panel, PanelHead, StatusChip } from "./ui";
+import {
+  Button,
+  EmptyState,
+  Field,
+  Menu,
+  MenuItem,
+  MenuSub,
+  PageHeader,
+  Panel,
+  PanelHead,
+  StatusChip,
+  Tab,
+  TabList,
+  TabPanel,
+  Tabs,
+} from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
 import { cn } from "../lib/utils";
 
@@ -31,8 +50,6 @@ type Filter = WorkspaceStatus | "all";
 const FILTERS: Filter[] = ["all", "needs-review", "running", "committed", "stopped"];
 
 const FILTER_LABEL: Record<Filter, string> = { all: "all", ...STATUS_LABEL };
-
-const TABLE_PANEL_ID = "workspaces-table";
 
 /** A GitHub pick returns either "owner/name" or a full URL; clone needs the URL. */
 function asCloneUrl(repo: string): string {
@@ -294,6 +311,71 @@ function ReviewQueue({ items }: { items: Workspace[] }) {
  * showed the same workspaces as KPI cards, a second tabbed table and an
  * activity feed: three readings of one list, none of which acted on it.
  */
+/* --------------------------------------------------------------- open menu -- */
+
+/**
+ * The page-level way back into existing work: a fresh shell or a relaunched
+ * agent in any workspace. Creating a workspace belongs to the sidebar.
+ */
+function OpenMenu({ workspaces }: { workspaces: Workspace[] }) {
+  const navigate = useApp((s) => s.navigate);
+  const refresh = useApp((s) => s.refresh);
+  const setOpenShell = useApp((s) => s.setOpenShell);
+  // Most recently touched first: that is the one you are coming back to.
+  const recent = useMemo(
+    () => [...workspaces].sort((a, b) => (b.stopped ?? b.started ?? b.created) - (a.stopped ?? a.started ?? a.created)),
+    [workspaces],
+  );
+
+  const openTerminal = (id: string) => {
+    setOpenShell(id);
+    navigate({ kind: "workspace", id, tab: "terminal" });
+  };
+
+  const runAgent = async (w: Workspace) => {
+    const action = w.running ? "restart" : "start";
+    try {
+      await toastAction(w.id, action);
+      await refresh();
+      announce(`${w.id} agent ${action === "start" ? "starting" : "restarting"}`);
+      navigate({ kind: "workspace", id: w.id, tab: "terminal" });
+    } catch {
+      /* toastAction already reported the reason */
+    }
+  };
+
+  return (
+    <Menu
+      label="open a terminal or agent"
+      trigger={
+        <Button variant="primary">
+          <TerminalWindow size={14} weight="bold" />
+          open…
+          <CaretDown size={12} weight="bold" />
+        </Button>
+      }
+    >
+      <MenuSub label="Terminal in" icon={<TerminalWindow size={14} />}>
+        {recent.map((w) => (
+          <MenuItem key={w.id} onSelect={() => openTerminal(w.id)}>
+            <span className="mono">{w.id}</span>
+          </MenuItem>
+        ))}
+      </MenuSub>
+      <MenuSub label="Agent in" icon={<Robot size={14} />}>
+        {recent.map((w) => (
+          <MenuItem key={w.id} onSelect={() => void runAgent(w)}>
+            <span className="mono flex-1">{w.id}</span>
+            <span className="text-xs text-text-faint">{w.running ? "restart" : w.agent}</span>
+          </MenuItem>
+        ))}
+      </MenuSub>
+    </Menu>
+  );
+}
+
+/* -------------------------------------------------------------- the view -- */
+
 export default function WorkspacesView() {
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
@@ -357,16 +439,6 @@ export default function WorkspacesView() {
     [workspaces, filter, trimmedQuery],
   );
 
-  const filterRefs = useRef<Partial<Record<Filter, HTMLButtonElement | null>>>({});
-  const onFilterKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    if (step === 0) return;
-    event.preventDefault();
-    const next = FILTERS[(index + step + FILTERS.length) % FILTERS.length];
-    setFilter(next);
-    filterRefs.current[next]?.focus();
-  };
-
   const clearFilters = () => {
     setQuery("");
     setFilter("all");
@@ -424,27 +496,16 @@ export default function WorkspacesView() {
   return (
     <div className="surface">
       <div className="surface-inner">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="surface-title">Workspaces</h1>
-            <p className="surface-description">
-              {queue.length > 0
-                ? `${queue.length} waiting for you. Everything an agent has been given on this server is below.`
-                : "Nothing is waiting for review. Everything an agent has been given on this server is below."}
-            </p>
-          </div>
-          {can.mutate ? (
-            <Button
-              variant={queue.length > 0 ? "secondary" : "primary"}
-              aria-expanded={creating}
-              aria-controls="new-workspace"
-              onClick={() => (creating ? closeForm() : setCreating(true))}
-            >
-              <Plus size={14} />
-              new workspace
-            </Button>
-          ) : null}
-        </div>
+        {/* Creating lives in the sidebar; the page action re-enters existing work. */}
+        <PageHeader
+          title="Workspaces"
+          description={
+            queue.length > 0
+              ? `${queue.length} waiting for you. Everything an agent has been given on this server is below.`
+              : "Nothing is waiting for review. Everything an agent has been given on this server is below."
+          }
+          actions={can.mutate && workspaces.length > 0 ? <OpenMenu workspaces={workspaces} /> : undefined}
+        />
 
         {/* The form sits directly under the button that opened it, not between
             the filter tabs and the list they control. */}
@@ -479,30 +540,17 @@ export default function WorkspacesView() {
           </span>
         </div>
 
-        <div className="tabstrip mt-3" role="tablist" aria-label="filter workspaces by status">
-          {FILTERS.map((option, index) => (
-            <button
-              key={option}
-              type="button"
-              role="tab"
-              id={`workspaces-tab-${option}`}
-              ref={(el) => {
-                filterRefs.current[option] = el;
-              }}
-              aria-selected={filter === option}
-              aria-controls={TABLE_PANEL_ID}
-              tabIndex={filter === option ? 0 : -1}
-              className="tab"
-              onClick={() => setFilter(option)}
-              onKeyDown={(event) => onFilterKey(event, index)}
-            >
+        <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+        <TabList label="filter workspaces by status" className="mt-3">
+          {FILTERS.map((option) => (
+            <Tab key={option} value={option}>
               {FILTER_LABEL[option]}
               <span className="tnum text-2xs text-text-muted">{counts[option]}</span>
-            </button>
+            </Tab>
           ))}
-        </div>
+        </TabList>
 
-        <div id={TABLE_PANEL_ID} role="tabpanel" aria-labelledby={`workspaces-tab-${filter}`} className="mt-3">
+        <TabPanel value={filter} className="mt-3" tabIndex={-1}>
           {workspaces.length === 0 ? (
             <Panel>
               <EmptyState
@@ -626,21 +674,47 @@ export default function WorkspacesView() {
                     <p className="mono mt-1 truncate text-2xs text-text-muted" title={w.repo}>
                       {w.agent} · {w.repo}
                     </p>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="mt-3 w-full"
-                      onClick={() => navigate({ kind: "workspace", id: w.id })}
-                    >
-                      <ArrowSquareOut size={13} />
-                      open
-                    </Button>
+                    <div className="mt-3 flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => navigate({ kind: "workspace", id: w.id })}
+                      >
+                        <ArrowSquareOut size={13} />
+                        open
+                      </Button>
+                      {can.mutate ? (
+                        <Menu
+                          label={`more actions for ${w.id}`}
+                          trigger={
+                            <Button variant="secondary" size="sm" iconOnly>
+                              <DotsThree size={16} weight="bold" />
+                            </Button>
+                          }
+                        >
+                          <MenuItem onSelect={() => void toggle(w)}>
+                            {w.running ? <Stop size={14} /> : <Play size={14} />}
+                            {w.running ? "stop" : "start"}
+                          </MenuItem>
+                          <MenuItem onSelect={() => void share(w)}>
+                            <LinkSimple size={14} />
+                            copy share link
+                          </MenuItem>
+                          <MenuItem tone="danger" onSelect={() => setPendingDelete(w)}>
+                            <Trash size={14} />
+                            delete
+                          </MenuItem>
+                        </Menu>
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>
             </>
           )}
-        </div>
+        </TabPanel>
+        </Tabs>
       </div>
 
       <ConfirmDialog

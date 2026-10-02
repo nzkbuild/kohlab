@@ -14,7 +14,7 @@ import CommandPalette from "./components/CommandPalette";
 import WorkspacesView from "./components/WorkspacesView";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
-import { Announcer, Button, SkeletonRows } from "./components/ui";
+import { Announcer, Button, SkeletonRows, TooltipProvider } from "./components/ui";
 
 // xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch*,
 // a static import would pull them into the entry chunk and block first paint.
@@ -73,7 +73,7 @@ export default function App() {
   if (!isAuthed) return <AuthGate />;
 
   return (
-    <>
+    <TooltipProvider delayDuration={300}>
       <CommandPalette />
       <Announcer />
       <Toaster
@@ -162,6 +162,6 @@ export default function App() {
           </div>
         </main>
       </div>
-    </>
+    </TooltipProvider>
   );
 }

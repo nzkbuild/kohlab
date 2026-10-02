@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Rocket, Terminal } from "@phosphor-icons/react";
 import { useApp, useCan } from "../store";
-import { Button, EmptyState, Panel } from "./ui";
+import { Button, EmptyState, PageHeader, Panel } from "./ui";
 import AgentInstaller from "./AgentInstaller";
 import { NewWorkspaceForm } from "./WorkspacesView";
 
@@ -64,12 +64,10 @@ export default function Onboarding() {
       <div className="surface-inner">
         {/* A route must expose exactly one <h1>; with no workspaces the surface
             below is an empty state, so the heading lives here. */}
-        <header className="mb-4">
-          <h1 className="surface-title">Workspaces</h1>
-          <p className="surface-description">
-            One task, one repository, one agent, each in its own isolated worktree.
-          </p>
-        </header>
+        <PageHeader
+          title="Workspaces"
+          description="One task, one repository, one agent, each in its own isolated worktree."
+        />
 
         <EmptyState
           icon={<Terminal size={18} />}

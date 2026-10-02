@@ -10,7 +10,7 @@ import {
 import { useApp, useCan, type Connection } from "../store";
 import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import { Button, BrandMark } from "./ui";
+import { Button, BrandMark, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -111,19 +111,19 @@ export default function Sidebar({ open, onClose }: Props) {
 
       <nav className="flex flex-col gap-0.5 p-2.5" aria-label="Views">
         {nav.map(({ kind, label, icon: Icon, badge }) => (
+          <Tooltip key={kind} content={badge > 0 ? `${label}, ${badge} waiting for review` : label} disabled={!collapsed}>
           <button
-            key={kind}
             type="button"
             className="sidebar-row"
             aria-current={activeKind === kind ? "page" : undefined}
             aria-label={badge > 0 ? `${label}, ${badge} waiting for review` : label}
-            title={label}
             onClick={() => navigate({ kind })}
           >
             <Icon size={17} className="shrink-0" weight={activeKind === kind ? "fill" : "regular"} />
             <span className="sidebar-label flex-1">{label}</span>
             {badge > 0 ? <span className="sidebar-badge chip chip-review tnum" aria-hidden="true">{badge}</span> : null}
           </button>
+          </Tooltip>
         ))}
       </nav>
 
@@ -142,14 +142,13 @@ export default function Sidebar({ open, onClose }: Props) {
             const status = workspaceStatus(workspace);
             const selected = route.kind === "workspace" && route.id === workspace.id;
             return (
+              <Tooltip key={workspace.id} content={`${workspace.id}, ${STATUS_LABEL[status]}`} disabled={!collapsed}>
               <button
-                key={workspace.id}
                 type="button"
                 className="sidebar-row"
                 data-selected={selected}
                 aria-current={selected ? "page" : undefined}
                 aria-label={`${workspace.id}, ${STATUS_LABEL[status]}`}
-                title={`${workspace.id}, ${STATUS_LABEL[status]}`}
                 onClick={() => navigate({ kind: "workspace", id: workspace.id })}
               >
                 <span
@@ -161,6 +160,7 @@ export default function Sidebar({ open, onClose }: Props) {
                   <span className="mono block truncate text-2xs text-text-muted">{workspace.agent}</span>
                 </span>
               </button>
+              </Tooltip>
             );
           })
         )}

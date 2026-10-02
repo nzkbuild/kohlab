@@ -7,7 +7,7 @@ import Account from "./Account";
 import AgentInstaller from "./AgentInstaller";
 import Team from "./Team";
 import UpdatePanel from "./UpdatePanel";
-import { Button, Chip, Panel, PanelHead } from "./ui";
+import { Button, Chip, PageHeader, Panel, PanelHead } from "./ui";
 
 const PAUSE_KEY = "kohlab_announce_paused";
 
@@ -66,17 +66,12 @@ export default function Settings() {
   return (
     <div className="surface">
       <div className="surface-inner max-w-3xl">
-        <header className="mb-5">
-          <h1 className="surface-title flex items-center gap-2">
-            <HardDrives size={20} className="text-text-muted" aria-hidden="true" />
-            Settings
-          </h1>
-          <p className="surface-description">
-            Everything here is stored on this server; nothing is sent anywhere else.
-          </p>
-        </header>
+        <PageHeader
+          title="Settings"
+          description="Everything here is stored on this server; nothing is sent anywhere else."
+        />
 
-        <Panel>
+        <Panel className="mt-5">
           <PanelHead title="Agents" icon={<Cpu size={15} aria-hidden="true" />} meta="coding agents available to workspaces" />
           <div className="p-2">
             <AgentInstaller />

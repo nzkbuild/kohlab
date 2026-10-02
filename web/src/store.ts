@@ -25,7 +25,10 @@ export interface AppState {
   /** null until /api/account answers. Treated as permissive meanwhile: hiding
    *  controls for a beat on every load would flicker for the common case. */
   me: Me | null;
+  /** Workspace that should open a fresh shell tab on arrival (Home's Open menu). */
+  openShell: string | null;
 
+  setOpenShell: (id: string | null) => void;
   setAuthed: (value: boolean) => void;
   setConnection: (value: Connection) => void;
   refresh: () => Promise<void>;
@@ -45,7 +48,9 @@ export const useApp = create<AppState>((set) => ({
   lastUpdated: null,
   connection: "connecting",
   me: null,
+  openShell: null,
 
+  setOpenShell: (id) => set({ openShell: id }),
   setAuthed: (value) => set({ authed: value }),
   setConnection: (value) => set({ connection: value }),
 
