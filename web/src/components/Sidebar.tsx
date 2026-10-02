@@ -10,7 +10,7 @@ import {
 import { useApp, useCan, type Connection } from "../store";
 import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import { Button, BrandMark, Tooltip, Wordmark } from "./ui";
+import { Button, BrandMark, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -67,7 +67,7 @@ export default function Sidebar({ open, onClose }: Props) {
         <span className="sidebar-brand grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
           <BrandMark size={16} />
         </span>
-        <Wordmark height={15} className="sidebar-label text-text-primary" />
+        <span className="sidebar-label text-base font-semibold tracking-tight text-text-primary">kohlab</span>
         <div className="sidebar-head-fill flex-1" />
         {/* Desktop: collapse the rail. Mobile: dismiss the drawer. The collapsed
             rail has room for one control, so this one is the survivor: see
@@ -128,10 +128,9 @@ export default function Sidebar({ open, onClose }: Props) {
       </nav>
 
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
-        <p className="sidebar-section-title section-label mb-2 px-2">
-          Workspaces
-          {reviewCount > 0 ? <span className="text-status-review"> · {reviewCount} to review</span> : null}
-        </p>
+        {/* The list is the Workspaces view in short; the nav row above already
+            names it and carries the review count, so no second heading. */}
+        <div className="sidebar-divider mb-2" aria-hidden="true" />
 
         {ordered.length === 0 ? (
           <p className="sidebar-label px-2 text-xs leading-relaxed text-text-muted">
@@ -156,8 +155,10 @@ export default function Sidebar({ open, onClose }: Props) {
                   aria-hidden="true"
                 />
                 <span className="sidebar-label flex-1">
-                  <span className="block truncate text-xs font-medium text-text-primary">{workspace.id}</span>
-                  <span className="mono block truncate text-2xs text-text-muted">{workspace.agent}</span>
+                  <span className="mono block truncate text-xs text-text-primary">{workspace.id}</span>
+                  <span className="block truncate text-xs text-text-muted">
+                    {workspace.agent} · {STATUS_LABEL[status]}
+                  </span>
                 </span>
               </button>
               </Tooltip>
@@ -167,10 +168,13 @@ export default function Sidebar({ open, onClose }: Props) {
       </nav>
 
       <div className="flex min-h-11 items-center gap-2 border-t border-line-subtle px-3">
-        <span className={cn("chip", CONNECTION_CHIP[connection])}>
-          <span className="chip-dot" aria-hidden="true" />
-          {CONNECTION_LABEL[connection]}
-        </span>
+        <Tooltip content={`connection ${CONNECTION_LABEL[connection]}`} disabled={!collapsed}>
+          <span className={cn("chip sidebar-conn", CONNECTION_CHIP[connection])} role="status">
+            <span className="chip-dot" aria-hidden="true" />
+            <span className="sidebar-label">{CONNECTION_LABEL[connection]}</span>
+            {collapsed ? <span className="sr-only">connection {CONNECTION_LABEL[connection]}</span> : null}
+          </span>
+        </Tooltip>
         <span className="sidebar-label text-xs text-text-faint">sessions persist</span>
       </div>
     </aside>

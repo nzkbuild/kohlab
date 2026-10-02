@@ -340,32 +340,6 @@ export function BrandMark({ size = 16 }: { size?: number }) {
   );
 }
 
-/** brand/kohlab-wordmark.svg: stroke lowercase plus the detached session dot. */
-export function Wordmark({ height = 14, className }: { height?: number; className?: string }) {
-  return (
-    <svg
-      height={height}
-      viewBox="0 0 168 32"
-      fill="none"
-      role="img"
-      aria-label="kohlab"
-      className={className}
-      style={{ width: "auto" }}
-    >
-      <g stroke="currentColor" strokeWidth="4.2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M6 5v19M6 16.5 15.5 10M6 16.5 14.5 24" />
-        <ellipse cx="27.5" cy="17" rx="6.5" ry="7" />
-        <path d="M41 5v19M41 17.5c0-5 10-5 10 0v6.5M60 5v19" />
-        <ellipse cx="74.5" cy="17.5" rx="6" ry="6.5" />
-        <path d="M81.5 11v13M91 5v19" />
-        <ellipse cx="99" cy="17.5" rx="6" ry="6.5" />
-        <path d="M113 17.5h32" />
-      </g>
-      <circle cx="158" cy="24.5" r="3.4" fill="currentColor" />
-    </svg>
-  );
-}
-
 /** brand/kohlab-empty.svg: a hairline terminal frame waiting on the session dot. */
 export function EmptyArt({ className }: { className?: string }) {
   return (

@@ -619,6 +619,17 @@ button:disabled {
   color: var(--text-primary);
 }
 
+.sidebar-divider {
+  height: 1px;
+  margin-inline: 0.5rem;
+  background: var(--line-subtle);
+}
+
+/* Collapsed rail: the connection pill shrinks to its dot (label in tooltip). */
+.sidebar[data-collapsed="true"] .sidebar-conn {
+  padding: 0.375rem;
+}
+
 .sidebar-label {
   min-width: 0;
   overflow: hidden;
