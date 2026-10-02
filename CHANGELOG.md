@@ -9,6 +9,40 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.18.0] - 2026-10-02
+
+Instrument: the console gets its own voice, review becomes an inbox, and
+starting an agent is one focused sheet.
+
+### Added
+
+- **Continue an existing workspace.** A follow-up task reuses the workspace's
+  worktree and branch instead of creating a new one; the agent restarts on the
+  new task and its work still lands in review (`POST /api/workspaces/<id>/continue`).
+- **Launch sheet at `/new`.** The task first, as a large field; repositories this
+  server already uses (plus GitHub) offered as you type; the agent as one
+  choice; limits folded away, in minutes and MB; errors stay next to the
+  button instead of vanishing in a toast.
+- **Inbox home.** "Waiting for you" cards show the diff size and one
+  "review diff" action; "Running" shows each agent's last line of output.
+- **Copy from the terminal:** agent TUIs such as Claude Code copy through
+  OSC 52 (reads are refused), plus copy and copy screen buttons (1.17 hotfix).
+
+### Changed
+
+- **Brand wired in.** The `brand/` kit: zinc neutrals, a white primary action,
+  the stroke wordmark and the session-dot mark, the empty-state art. Lime now
+  means one thing only: an agent is alive.
+- **Typography.** Geist and Geist Mono, self-hosted (no third-party request).
+  12px is the smallest text anywhere; headings step 16, 20, 28.
+- Table headers are sentence case; the sidebar no longer animates its width.
+
+### Fixed
+
+- The diff editor's text areas have accessible names (axe, WCAG 2.2 AA: no
+  violations on home, launch sheet, workspace, empty state and sign-in, at
+  1440px and 390px).
+
 ## [1.17.0] - 2026-10-02
 
 Review comes first, a new device signs in without the key, and the key stops

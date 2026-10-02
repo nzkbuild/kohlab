@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { Rocket, Terminal } from "@phosphor-icons/react";
+import { Rocket } from "@phosphor-icons/react";
 import { useApp, useCan } from "../store";
-import { Button, EmptyState, PageHeader, Panel } from "./ui";
+import { Button, EmptyArt, EmptyState, PageHeader, Panel } from "./ui";
 import AgentInstaller from "./AgentInstaller";
 import { NewWorkspaceForm } from "./WorkspacesView";
 
@@ -69,8 +69,8 @@ export default function Onboarding() {
           description="One task, one repository, one agent, each in its own isolated worktree."
         />
 
+        <EmptyArt className="mx-auto mt-10 block h-28 text-text-primary" />
         <EmptyState
-          icon={<Terminal size={18} />}
           title="No workspaces yet"
           description={
             can.mutate

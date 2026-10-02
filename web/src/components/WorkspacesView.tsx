@@ -4,7 +4,6 @@ import {
   ArrowSquareOut,
   CaretDown,
   DotsThree,
-  GitDiff,
   GithubLogo,
   LinkSimple,
   MagnifyingGlass,
@@ -15,17 +14,19 @@ import {
   Stop,
   TerminalWindow,
   Trash,
+  X,
 } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { toastAction, withToast } from "../lib/actions";
 import { relativeTime } from "../lib/format";
-import { STATUS_LABEL, STATUS_TEXT, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
+import { STATUS_LABEL, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
 import { AGENT_CATALOG } from "../types";
 import type { Workspace } from "../types";
 import {
   Button,
+  Dialog,
   EmptyState,
   Field,
   Menu,
@@ -33,7 +34,6 @@ import {
   MenuSub,
   PageHeader,
   Panel,
-  PanelHead,
   StatusChip,
   Tab,
   TabList,
@@ -41,7 +41,6 @@ import {
   Tabs,
 } from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
-import { cn } from "../lib/utils";
 import { copyText } from "../lib/clipboard";
 
 /* --------------------------------------------------------------- constants -- */
@@ -93,173 +92,243 @@ function useAgentOptions(): { names: string[]; reported: boolean } {
 export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
+  const workspaces = useApp((s) => s.workspaces);
   const { names: agentNames, reported } = useAgentOptions();
 
+  const [mode, setMode] = useState<"new" | "continue">("new");
   const [task, setTask] = useState("");
   const [repo, setRepo] = useState("");
   const [agent, setAgent] = useState("");
-  const [timeoutSec, setTimeoutSec] = useState("");
+  const [target, setTarget] = useState("");
+  const [timeoutMin, setTimeoutMin] = useState("");
   const [memoryMb, setMemoryMb] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [repos, setRepos] = useState<string[] | null>(null);
-  const [reposBusy, setReposBusy] = useState(false);
-  const [reposError, setReposError] = useState<string | null>(null);
+  const [ghRepos, setGhRepos] = useState<string[]>([]);
+  const [ghNote, setGhNote] = useState<string | null>(null);
+  const [ghBusy, setGhBusy] = useState(false);
 
   // The server list may land after first paint; fall back rather than sit empty.
   const chosenAgent = agent || agentNames[0] || "";
+  // Recognition over recall: every repo this server already works in, newest first.
+  const recentRepos = useMemo(() => {
+    const seen = new Set<string>();
+    for (const w of [...workspaces].sort((a, b) => b.created - a.created)) if (w.repo) seen.add(w.repo);
+    return [...seen];
+  }, [workspaces]);
+  const continuable = useMemo(
+    () => [...workspaces].sort((a, b) => (b.stopped ?? b.started ?? b.created) - (a.stopped ?? a.started ?? a.created)),
+    [workspaces],
+  );
+  const chosenTarget = target || continuable[0]?.id || "";
 
-  const loadRepos = async () => {
-    setReposBusy(true);
-    setReposError(null);
+  const loadGithub = async () => {
+    setGhBusy(true);
+    setGhNote(null);
     try {
       const res = await api.ghRepos();
-      setRepos(res.repos);
-      if (!res.authed) setReposError("GitHub is not authenticated on this server, paste a path or URL instead.");
-      else if (res.repos.length === 0) setReposError("GitHub returned no repositories for this account.");
+      setGhRepos(res.repos.map(asCloneUrl));
+      if (!res.authed) setGhNote("GitHub is not signed in on this server. Type a path or URL instead.");
+      else setGhNote(res.repos.length ? `${res.repos.length} GitHub repositories added to the list.` : "GitHub returned no repositories.");
     } catch (e) {
-      setRepos([]);
-      setReposError((e as Error).message);
+      setGhNote((e as Error).message);
     }
-    setReposBusy(false);
+    setGhBusy(false);
   };
+
+  const missing = !task.trim() ? "Describe the task first." : mode === "new" && !chosenAgent ? "No agent available." : mode === "continue" && !chosenTarget ? "There is no workspace to continue." : null;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy || !task.trim() || !chosenAgent) return;
-    const trimmed = repo.trim();
-    const limits =
-      timeoutSec || memoryMb
-        ? {
-            timeoutSec: timeoutSec ? Number(timeoutSec) : undefined,
-            maxMemoryMb: memoryMb ? Number(memoryMb) : undefined,
-          }
-        : undefined;
+    if (busy || missing) return;
     setBusy(true);
+    setError(null);
     try {
-      const created = await withToast("Creating workspace", () =>
-        /^https?:\/\//.test(trimmed)
-          ? api.clone({ url: trimmed, task: task.trim(), agent: chosenAgent, limits })
-          : api.create({ task: task.trim(), repo: trimmed || undefined, agent: chosenAgent, limits }),
-      );
-      await refresh();
-      announce(`${created.id} created, the agent is starting`);
-      navigate({ kind: "workspace", id: created.id });
-    } catch {
-      /* withToast already reported the reason */
+      if (mode === "continue") {
+        await api.continue(chosenTarget, task.trim());
+        await refresh();
+        announce(`${chosenTarget} continues with the new task`);
+        navigate({ kind: "workspace", id: chosenTarget, tab: "terminal" });
+      } else {
+        const trimmed = repo.trim();
+        const limits =
+          timeoutMin || memoryMb
+            ? {
+                timeoutSec: timeoutMin ? Math.round(Number(timeoutMin) * 60) : undefined,
+                maxMemoryMb: memoryMb ? Number(memoryMb) : undefined,
+              }
+            : undefined;
+        const created = /^https?:\/\//.test(trimmed)
+          ? await api.clone({ url: trimmed, task: task.trim(), agent: chosenAgent, limits })
+          : await api.create({ task: task.trim(), repo: trimmed || undefined, agent: chosenAgent, limits });
+        await refresh();
+        announce(`${created.id} created, the agent is starting`);
+        navigate({ kind: "workspace", id: created.id });
+      }
+    } catch (e) {
+      // Kept next to the button, not in a toast that vanishes before it is read.
+      setError((e as Error).message);
     }
     setBusy(false);
   };
 
   return (
-    <Panel className="p-4">
-      <form className="flex flex-col gap-3" onSubmit={submit}>
-        <Field label="Task" htmlFor="new-workspace-task" help="What the agent should do. One workspace is one task.">
-          <input
-            id="new-workspace-task"
-            className="field-input"
-            value={task}
-            onChange={(e) => setTask(e.target.value)}
-            placeholder="fix the billing rounding bug"
-            autoFocus
-          />
-        </Field>
+    <form className="launch-form" onSubmit={submit} aria-describedby={error ? "launch-error" : undefined}>
+      {continuable.length > 0 ? (
+        <fieldset className="segmented" aria-label="where the agent works">
+          <label>
+            <input type="radio" name="launch-mode" checked={mode === "new"} onChange={() => setMode("new")} />
+            <span>New workspace</span>
+          </label>
+          <label>
+            <input type="radio" name="launch-mode" checked={mode === "continue"} onChange={() => setMode("continue")} />
+            <span>Continue existing</span>
+          </label>
+        </fieldset>
+      ) : null}
 
+      <Field label="What should the agent do?" htmlFor="launch-task">
+        <textarea
+          id="launch-task"
+          className="field-textarea launch-task"
+          rows={4}
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          placeholder={mode === "continue" ? "now add tests for the retry path" : "fix the billing rounding bug"}
+          autoFocus
+        />
+      </Field>
+
+      {mode === "continue" ? (
         <Field
-          label="Repository"
-          htmlFor="new-workspace-repo"
-          help={reposError ?? "A path on the server, or a GitHub URL (cloned into a new workspace)."}
+          label="Workspace"
+          htmlFor="launch-target"
+          help="Same worktree and branch. The agent restarts on the new task, and its work still lands in review."
         >
-          <div className="flex gap-2">
-            <input
-              id="new-workspace-repo"
-              className="field-input"
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              placeholder="/srv/repos/app or https://github.com/owner/name"
-            />
-            <Button onClick={() => void loadRepos()} disabled={reposBusy}>
-              <GithubLogo size={14} />
-              {reposBusy ? "loading…" : "github"}
-            </Button>
-          </div>
-        </Field>
-
-        {repos && repos.length > 0 ? (
-          <select
-            className="field-select"
-            aria-label="pick a GitHub repository"
-            value=""
-            onChange={(e) => {
-              if (e.target.value) setRepo(asCloneUrl(e.target.value));
-            }}
-          >
-            <option value="">pick a repository…</option>
-            {repos.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        ) : null}
-
-        <Field
-          label="Agent"
-          htmlFor="new-workspace-agent"
-          help={reported ? "Reported as installed by this server." : "This server reports none installed, showing every known agent."}
-        >
-          <select
-            id="new-workspace-agent"
-            className="field-select"
-            value={chosenAgent}
-            onChange={(e) => setAgent(e.target.value)}
-          >
-            {agentNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
+          <select id="launch-target" className="field-select" value={chosenTarget} onChange={(e) => setTarget(e.target.value)}>
+            {continuable.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.id}, {w.task}
               </option>
             ))}
           </select>
         </Field>
-
-        <div className="grid gap-3 shell:grid-cols-2">
-          <Field label="Timeout" htmlFor="new-workspace-timeout" help="Optional cap in seconds.">
-            <input
-              id="new-workspace-timeout"
-              type="number"
-              inputMode="numeric"
-              className="field-input"
-              value={timeoutSec}
-              onChange={(e) => setTimeoutSec(e.target.value)}
-              placeholder="no limit"
-            />
+      ) : (
+        <>
+          <Field
+            label="Repository"
+            htmlFor="launch-repo"
+            help={ghNote ?? "A path on this server or a git URL. Leave empty to use the server's own directory."}
+          >
+            <div className="flex gap-2">
+              <input
+                id="launch-repo"
+                className="field-input mono"
+                list="launch-repo-options"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                placeholder={recentRepos[0] ?? "/srv/repos/app or https://github.com/owner/name"}
+                autoComplete="off"
+              />
+              <datalist id="launch-repo-options">
+                {[...recentRepos, ...ghRepos].map((r) => (
+                  <option key={r} value={r} />
+                ))}
+              </datalist>
+              <Button onClick={() => void loadGithub()} disabled={ghBusy} aria-label="add GitHub repositories to the list">
+                <GithubLogo size={14} />
+                {ghBusy ? "loading…" : "GitHub"}
+              </Button>
+            </div>
           </Field>
-          <Field label="Memory cap" htmlFor="new-workspace-memory" help="Optional cap in MB.">
-            <input
-              id="new-workspace-memory"
-              type="number"
-              inputMode="numeric"
-              className="field-input"
-              value={memoryMb}
-              onChange={(e) => setMemoryMb(e.target.value)}
-              placeholder="no limit"
-            />
-          </Field>
-        </div>
 
-        <div className="flex items-center justify-end gap-2">
-          {onCancel ? (
-            <Button variant="quiet" onClick={onCancel}>
-              cancel
-            </Button>
-          ) : null}
-          <Button type="submit" variant="primary" disabled={busy || !task.trim() || !chosenAgent}>
-            <Rocket size={14} weight="fill" />
-            {busy ? "creating…" : "create & start"}
+          <fieldset className="field">
+            <legend className="field-label">Agent</legend>
+            <div className="segmented mt-1.5">
+              {agentNames.map((name) => (
+                <label key={name}>
+                  <input type="radio" name="launch-agent" value={name} checked={chosenAgent === name} onChange={() => setAgent(name)} />
+                  <span className="mono">{name}</span>
+                </label>
+              ))}
+            </div>
+            <p className="field-help">{reported ? "Installed on this server." : "None reported as installed, showing every known agent."}</p>
+          </fieldset>
+
+          <details className="launch-limits">
+            <summary>Limits</summary>
+            <div className="mt-3 grid gap-3 shell:grid-cols-2">
+              <Field label="Time limit (minutes)" htmlFor="launch-timeout">
+                <input
+                  id="launch-timeout"
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  className="field-input"
+                  value={timeoutMin}
+                  onChange={(e) => setTimeoutMin(e.target.value)}
+                  placeholder="no limit"
+                />
+              </Field>
+              <Field label="Memory limit (MB)" htmlFor="launch-memory">
+                <input
+                  id="launch-memory"
+                  type="number"
+                  min={64}
+                  inputMode="numeric"
+                  className="field-input"
+                  value={memoryMb}
+                  onChange={(e) => setMemoryMb(e.target.value)}
+                  placeholder="no limit"
+                />
+              </Field>
+            </div>
+          </details>
+        </>
+      )}
+
+      {error ? (
+        <p id="launch-error" role="alert" className="text-sm text-status-danger">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="launch-actions">
+        {missing && !busy ? <span className="mr-auto text-xs text-text-muted">{missing}</span> : null}
+        {onCancel ? (
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
           </Button>
-        </div>
-      </form>
-    </Panel>
+        ) : null}
+        <Button type="submit" variant="primary" disabled={busy || !!missing}>
+          <Rocket size={14} weight="fill" />
+          {busy ? "Starting…" : mode === "continue" ? "Continue" : "Start agent"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** /new: a side sheet on desktop, full screen on phones. */
+export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => (o ? null : onClose())}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="sheet" aria-describedby={undefined}>
+          <header className="sheet-head">
+            <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">Start an agent</Dialog.Title>
+            <Dialog.Close asChild>
+              <Button variant="quiet" iconOnly aria-label="close">
+                <X size={16} />
+              </Button>
+            </Dialog.Close>
+          </header>
+          <NewWorkspaceForm onCancel={onClose} />
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -270,39 +339,140 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
  * unreviewed, the further its branch has drifted. Only rendered when non-empty,
  * so an empty queue costs no space.
  */
-function ReviewQueue({ items }: { items: Workspace[] }) {
+/** +/- line counts across a workspace's diff; null until it loads. */
+function useDiffStats(id: string): { files: number; add: number; del: number } | null {
+  const [stats, setStats] = useState<{ files: number; add: number; del: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .diff(id)
+      .then((files) => {
+        let add = 0;
+        let del = 0;
+        for (const f of files) {
+          for (const line of f.diff.split("\n")) {
+            if (line.startsWith("+") && !line.startsWith("+++")) add++;
+            else if (line.startsWith("-") && !line.startsWith("---")) del++;
+          }
+        }
+        if (alive) setStats({ files: files.length, add, del });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+  return stats;
+}
+
+function ReviewCard({ w }: { w: Workspace }) {
   const navigate = useApp((s) => s.navigate);
+  const stats = useDiffStats(w.id);
+  const open = () => navigate({ kind: "workspace", id: w.id, tab: "review" });
   return (
-    <Panel className="mt-5">
-      <PanelHead
-        title="Waiting for review"
-        icon={<GitDiff size={15} />}
-        meta={<span className="tnum">{items.length}</span>}
-      />
-      <ul className="p-1.5">
+    <li className="inbox-card">
+      <div className="flex min-w-0 items-baseline gap-3">
+        <StatusChip status="needs-review" />
+        <span className="mono truncate text-sm font-medium text-text-primary">{w.id}</span>
+        <span className="tnum ml-auto shrink-0 text-xs text-text-muted" title="waiting since">
+          {relativeTime(w.stopped ?? w.created)}
+        </span>
+      </div>
+      <p className="mt-2 line-clamp-2 text-base text-text-primary">{w.task}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="mono text-xs text-text-muted">{w.agent}</span>
+        {stats ? (
+          <span className="mono tnum text-xs text-text-muted">
+            <span className="text-text-primary">+{stats.add}</span> −{stats.del}
+            {" · "}
+            {stats.files} file{stats.files === 1 ? "" : "s"}
+          </span>
+        ) : null}
+        <Button variant="primary" size="sm" className="ml-auto" onClick={open}>
+          review diff
+          <ArrowRight size={13} aria-hidden="true" />
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/** The inbox: finished work waiting on a decision, oldest first. */
+function ReviewQueue({ items }: { items: Workspace[] }) {
+  return (
+    <section className="mt-6" aria-labelledby="inbox-title">
+      <h2 id="inbox-title" className="section-title">
+        Waiting for you <span className="tnum text-text-muted">{items.length}</span>
+      </h2>
+      <ul className="mt-3 grid gap-3 lg:grid-cols-2">
         {items.map((w) => (
-          <li key={w.id}>
-            <button
-              type="button"
-              onClick={() => navigate({ kind: "workspace", id: w.id, tab: "review" })}
-              className="group flex min-h-11 w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
-            >
-              <span className={cn("chip-dot shrink-0", STATUS_TEXT["needs-review"])} aria-hidden="true" />
-              <span className="mono shrink-0 text-sm font-medium text-text-primary">{w.id}</span>
-              <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">{w.task}</span>
-              <span className="mono hidden shrink-0 text-xs text-text-faint shell:inline">{w.agent}</span>
-              <span className="tnum shrink-0 text-xs text-text-muted" title="waiting since">
-                {relativeTime(w.stopped ?? w.created)}
-              </span>
-              <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-status-review">
-                review
-                <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-              </span>
-            </button>
-          </li>
+          <ReviewCard key={w.id} w={w} />
         ))}
       </ul>
-    </Panel>
+    </section>
+  );
+}
+
+/** Last non-empty line an agent printed: proof of life without opening it. */
+function useLastLine(id: string): string | null {
+  const [line, setLine] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api
+        .log(id)
+        .then(({ log }) => {
+          // Strip ANSI so a colour code never reads as text.
+          const clean = log.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\r/g, "");
+          const last = clean.split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? null;
+          if (alive) setLine(last);
+        })
+        .catch(() => {});
+    void load();
+    const t = window.setInterval(load, 10_000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [id]);
+  return line;
+}
+
+function RunningRow({ w }: { w: Workspace }) {
+  const navigate = useApp((s) => s.navigate);
+  const last = useLastLine(w.id);
+  return (
+    <li>
+      <button
+        type="button"
+        className="running-row"
+        onClick={() => navigate({ kind: "workspace", id: w.id, tab: "terminal" })}
+      >
+        <span className="chip-dot live-dot shrink-0 text-status-running" aria-hidden="true" />
+        <span className="mono w-28 shrink-0 truncate text-sm text-text-primary shell:w-44">{w.id}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-text-secondary">{w.task}</span>
+          <span className="mono block truncate text-xs text-text-faint">{last ?? "waiting for output"}</span>
+        </span>
+        <span className="mono hidden shrink-0 text-xs text-text-muted shell:inline">{w.agent}</span>
+        <span className="tnum shrink-0 text-xs text-text-muted">{relativeTime(w.started ?? w.created)}</span>
+      </button>
+    </li>
+  );
+}
+
+function RunningList({ items }: { items: Workspace[] }) {
+  return (
+    <section className="mt-8" aria-labelledby="running-title">
+      <h2 id="running-title" className="section-title">
+        Running <span className="tnum text-text-muted">{items.length}</span>
+      </h2>
+      <ul className="panel mt-3 divide-y divide-line-subtle overflow-hidden">
+        {items.map((w) => (
+          <RunningRow key={w.id} w={w} />
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -405,6 +575,7 @@ export default function WorkspacesView() {
         .sort((a, b) => (a.stopped ?? a.created) - (b.stopped ?? b.created)),
     [workspaces],
   );
+  const running = useMemo(() => workspaces.filter((w) => w.running), [workspaces]);
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -509,15 +680,14 @@ export default function WorkspacesView() {
 
         {/* The form sits directly under the button that opened it, not between
             the filter tabs and the list they control. */}
-        <div id="new-workspace">
-          {creating && can.mutate ? (
-            <div className="mt-4">
-              <NewWorkspaceForm onCancel={closeForm} />
-            </div>
-          ) : null}
-        </div>
+        <LaunchSheet open={creating && can.mutate} onClose={closeForm} />
 
         {queue.length > 0 ? <ReviewQueue items={queue} /> : null}
+        {running.length > 0 ? <RunningList items={running} /> : null}
+
+        <div className="mt-10">
+          <h2 className="section-title">All workspaces</h2>
+        </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <div className="relative min-w-0 flex-1 basis-56">

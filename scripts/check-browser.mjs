@@ -140,9 +140,10 @@ try {
           overflow: document.scrollingElement.scrollWidth - innerWidth,
           surfaceOverflow: [...document.querySelectorAll(".surface")].reduce((n, s) => Math.max(n, s.scrollWidth - s.clientWidth), 0),
           small,
-          form: !!document.querySelector("#new-workspace-task"),
-          queue: [...document.querySelectorAll("h2")].some((h) => /Waiting for review/.test(h.textContent)),
-          tab: document.querySelector("[role=tab][aria-selected=true]")?.id ?? null,
+          form: !!document.querySelector("#launch-task"),
+          queue: [...document.querySelectorAll("h2")].some((h) => /Waiting for you/.test(h.textContent)),
+          // Radix generates the trigger id; the pane name is its suffix.
+          tab: document.querySelector("[role=tab][aria-selected=true]")?.id.replace(/^.*-trigger-/, "tab-") ?? null,
         };
       });
       const at = `${name} @${width}`;

@@ -1613,6 +1613,23 @@ export async function deleteWorkspace(id: string) {
   });
 }
 
+/**
+ * Give an existing workspace a follow-up task: same worktree, same branch, same
+ * history, so the agent continues where it left off instead of starting a
+ * fresh tree. The review gate is unchanged: the next stop is still a review.
+ */
+export async function continueWorkspace(id: string, task: string, payload?: string) {
+  const text = task.trim();
+  if (!text) throw new Error("task is required");
+  await mutateState(async (s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    ws.task = text;
+    ws.payload = payload;
+  });
+  return restartWorkspace(id);
+}
+
 export async function restartWorkspace(id: string) {
   await stopWorkspace(id);
   return startWorkspace(id);

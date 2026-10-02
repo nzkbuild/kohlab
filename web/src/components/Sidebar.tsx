@@ -10,7 +10,7 @@ import {
 import { useApp, useCan, type Connection } from "../store";
 import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import { Button, BrandMark, Tooltip } from "./ui";
+import { Button, BrandMark, Tooltip, Wordmark } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -67,7 +67,7 @@ export default function Sidebar({ open, onClose }: Props) {
         <span className="sidebar-brand grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
           <BrandMark size={16} />
         </span>
-        <span className="sidebar-label text-base font-semibold tracking-tight">kohlab</span>
+        <Wordmark height={15} className="sidebar-label text-text-primary" />
         <div className="sidebar-head-fill flex-1" />
         {/* Desktop: collapse the rail. Mobile: dismiss the drawer. The collapsed
             rail has room for one control, so this one is the survivor: see
@@ -171,7 +171,7 @@ export default function Sidebar({ open, onClose }: Props) {
           <span className="chip-dot" aria-hidden="true" />
           {CONNECTION_LABEL[connection]}
         </span>
-        <span className="sidebar-label text-xs text-text-faint">persists on this server</span>
+        <span className="sidebar-label text-xs text-text-faint">sessions persist</span>
       </div>
     </aside>
   );

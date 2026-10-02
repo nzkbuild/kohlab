@@ -3,7 +3,7 @@
 /* ============================================================================
    Kohlab design tokens
    ----------------------------------------------------------------------------
-   Direction: graphite planes, acid-lime live state, compact sans for UI, mono
+   Direction: zinc planes, white primary, lime only for live agents, Geist for UI, mono
    only for code and measurement.
 
    Two tiers, and only two:
@@ -20,62 +20,62 @@
 :root {
   color-scheme: dark;
 
-  /* --- primitive: graphite neutrals (hue 265, very low chroma) ------------- */
-  --graphite-1000: oklch(0.145 0.005 265);
-  --graphite-950: oklch(0.175 0.006 265);
-  --graphite-900: oklch(0.205 0.007 265);
-  --graphite-800: oklch(0.255 0.008 265);
-  --graphite-700: oklch(0.315 0.009 265);
-  --graphite-600: oklch(0.53 0.012 265);
-  --graphite-500: oklch(0.64 0.011 265);
-  --graphite-400: oklch(0.72 0.011 265);
-  --graphite-300: oklch(0.81 0.008 265);
-  --graphite-100: oklch(0.95 0.004 265);
+  /* --- primitive: zinc neutrals (brand/kohlab-mono-tokens.css) ----------- */
+  /* Hue 286 at trace chroma: neutral under any white balance. Equal-L steps
+     read as equal weight, which is why the scale is OKLCH. */
+  --neutral-1000: oklch(0.145 0.002 286);
+  --neutral-950: oklch(0.175 0.002 286);
+  --neutral-900: oklch(0.205 0.003 286);
+  --neutral-800: oklch(0.255 0.003 286);
+  --neutral-700: oklch(0.315 0.004 286);
+  --neutral-600: oklch(0.53 0.005 286);
+  --neutral-500: oklch(0.64 0.005 286);
+  --neutral-400: oklch(0.72 0.005 286);
+  --neutral-300: oklch(0.81 0.004 286);
+  --neutral-100: oklch(0.97 0.001 286);
 
-  /* --- primitive: accents ------------------------------------------------- */
-  --lime-400: oklch(0.88 0.19 124);
+  /* --- primitive: signal colours ------------------------------------------ */
+  /* Lime means exactly one thing: an agent is alive right now. Red means
+     destructive. Everything else is monochrome; status is carried by glyph and
+     label (SC 1.4.1), so it survives without hue. */
   --lime-500: oklch(0.84 0.21 124);
-  --lime-600: oklch(0.72 0.19 124);
-  --amber-400: oklch(0.83 0.16 78);
-  --amber-500: oklch(0.78 0.16 72);
-  --red-400: oklch(0.72 0.19 25);
   --red-500: oklch(0.65 0.21 25);
-  --cyan-400: oklch(0.82 0.11 205);
 
   /* --- semantic: surfaces (distinct planes, never one flat black) ---------- */
-  --surface-base: var(--graphite-1000);      /* app canvas */
-  --surface-sunken: oklch(0.125 0.005 265);  /* terminal, code, log */
-  --surface-raised: var(--graphite-950);     /* panels, cards, sidebar */
-  --surface-overlay: var(--graphite-900);    /* dialogs, palette, popovers */
-  --surface-hover: var(--graphite-900);
-  --surface-active: var(--graphite-800);
+  --surface-base: var(--neutral-1000);      /* app canvas */
+  --surface-sunken: oklch(0.125 0.002 286);  /* terminal, code, log */
+  --surface-raised: var(--neutral-950);     /* panels, cards, sidebar */
+  --surface-overlay: var(--neutral-900);    /* dialogs, palette, popovers */
+  --surface-hover: var(--neutral-900);
+  --surface-active: var(--neutral-800);
 
   /* --- semantic: text ----------------------------------------------------- */
-  --text-primary: var(--graphite-100);
-  --text-secondary: var(--graphite-300);
-  --text-muted: var(--graphite-400);
-  --text-faint: var(--graphite-500);
-  --text-on-accent: oklch(0.20 0.06 124);
+  --text-primary: var(--neutral-100);
+  --text-secondary: var(--neutral-300);
+  --text-muted: var(--neutral-400);
+  --text-faint: var(--neutral-500);
+  --text-on-accent: oklch(0.18 0.002 286);
 
   /* --- semantic: lines (borders only, forced-colors deletes box-shadow) --- */
-  --line-subtle: var(--graphite-800);
+  --line-subtle: var(--neutral-800);
   /* Control boundaries must clear 3:1 against their own surface (SC 1.4.11),
      so this is a full step lighter than the decorative divider. */
-  --line-strong: var(--graphite-600);
-  --line-accent: var(--lime-500);
+  --line-strong: var(--neutral-600);
+  --line-accent: var(--neutral-100);
 
   /* --- semantic: status lifecycle ---------------------------------------- */
   /* One tone per status, chosen so the chip LABEL passes 4.5:1 against the
      chip's own tinted background, the token is used for dot, border and text
      alike, so it must be legible as text, not merely vivid as a dot. */
   --status-running: oklch(0.9 0.17 124);
-  --status-review: oklch(0.89 0.13 80);
-  --status-committed: oklch(0.89 0.09 205);
-  --status-stopped: var(--graphite-500);
+  --status-review: var(--neutral-100);
+  --status-committed: var(--neutral-400);
+  --status-stopped: var(--neutral-500);
   --status-danger: oklch(0.82 0.14 25);
-  --accent: var(--lime-500);
-  --accent-hover: var(--lime-400);
-  --accent-press: var(--lime-600);
+  /* The primary action is a white fill (brand rule); lime stays a status. */
+  --accent: var(--neutral-100);
+  --accent-hover: oklch(1 0 0);
+  --accent-press: var(--neutral-300);
 
   /* --- motion ------------------------------------------------------------ */
   /* Declared here as well as in @theme: author CSS references var(--ease-*) in
@@ -91,12 +91,10 @@
   --duration-moderate-02: 240ms;
 
   /* --- type -------------------------------------------------------------- */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    "Noto Sans", Arial, sans-serif;
-  /* No webfont: zero bytes, no FOUT. Metric differences across platforms are
-     the accepted trade for a self-hosted console. */
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
+  --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Self-hosted Geist (bundled, no third-party request): one face on every
+     platform is what gives the console a voice. */
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
@@ -159,8 +157,8 @@
   --radius-lg: var(--radius-lg);
 
   /* rem-based type scale (Resize Text / SC 1.4.4, never px, never clamp()). */
-  --text-2xs: 0.6875rem;
-  --text-2xs--line-height: 1rem;
+  --text-2xs: 0.75rem;
+  --text-2xs--line-height: 1.0625rem;
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.0625rem;
   --text-sm: 0.8125rem;
@@ -171,8 +169,8 @@
   --text-lg--line-height: 1.5rem;
   --text-xl: 1.25rem;
   --text-xl--line-height: 1.75rem;
-  --text-2xl: 1.5625rem;
-  --text-2xl--line-height: 2rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.25rem;
 
   --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
   --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9);
@@ -240,7 +238,7 @@ button:disabled {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--graphite-700) transparent;
+  scrollbar-color: var(--neutral-700) transparent;
 }
 
 /* Only transform/opacity/colour-ish properties may animate. */
@@ -333,7 +331,7 @@ button:disabled {
     color: var(--text-primary);
   }
   .btn-secondary:hover:not(:disabled) {
-    border-color: var(--graphite-600);
+    border-color: var(--neutral-600);
     background: var(--surface-active);
   }
 
@@ -407,7 +405,7 @@ button:disabled {
     border: 1px solid var(--line-strong);
     border-radius: 999px;
     padding: 0.1875rem 0.5rem;
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 500;
     line-height: 1.25;
     white-space: nowrap;
@@ -463,7 +461,7 @@ button:disabled {
     background: var(--surface-hover);
     padding: 0.0625rem 0.3125rem;
     font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
   }
 
@@ -488,7 +486,7 @@ button:disabled {
     position: fixed;
     inset: 0;
     z-index: var(--z-scrim);
-    background: oklch(0.1 0.005 265 / 0.66);
+    background: oklch(0.1 0.002 286 / 0.66);
   }
 }
 
@@ -585,8 +583,8 @@ button:disabled {
   overflow: hidden;
   border-inline-end: 1px solid var(--line-subtle);
   background: var(--surface-raised);
-  transition: width var(--duration-moderate-01) var(--ease-standard),
-    flex-basis var(--duration-moderate-01) var(--ease-standard);
+  /* No width transition: animating layout reflows the whole shell every frame.
+     The rail snaps; its labels are what change. */
 }
 
 .sidebar[data-collapsed="true"] {
@@ -747,8 +745,8 @@ button:disabled {
   background: var(--surface-raised);
   box-shadow:
     inset 0 1px 0 0 color-mix(in oklch, var(--text-primary) 9%, transparent),
-    0 1px 2px -1px oklch(0.1 0.005 265 / 0.6),
-    0 1.5rem 3rem -1rem oklch(0.1 0.005 265 / 0.7);
+    0 1px 2px -1px oklch(0.1 0.002 286 / 0.6),
+    0 1.5rem 3rem -1rem oklch(0.1 0.002 286 / 0.7);
 }
 
 /* The key is a machine fact, so it is set in mono like every other machine fact
@@ -795,7 +793,7 @@ button:disabled {
 
 .surface-title {
   margin: 0;
-  font-size: 1.5625rem;
+  font-size: 1.75rem;
   font-weight: 620;
   letter-spacing: -0.022em;
 }
@@ -818,7 +816,7 @@ button:disabled {
     padding: 1.25rem 1rem 2.5rem;
   }
   .surface-title {
-    font-size: 1.3125rem;
+    font-size: 1.375rem;
   }
 }
 
@@ -831,10 +829,8 @@ button:disabled {
 /* Header cells only: row-header <th> in tbody keep body type. */
 .data-table thead th {
   padding: 0.5rem 0.875rem;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   text-align: start;
   color: var(--text-muted);
   white-space: nowrap;
@@ -988,7 +984,7 @@ button:disabled {
   inset: 0;
   z-index: var(--z-overlay);
   /* Radix sets this; we only supply colour. */
-  background: oklch(0.1 0.005 265 / 0.7);
+  background: oklch(0.1 0.002 286 / 0.7);
 }
 
 .dialog-content {
@@ -1001,7 +997,158 @@ button:disabled {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--surface-overlay);
-  box-shadow: 0 1.5rem 4rem oklch(0.08 0.005 265 / 0.55);
+  box-shadow: 0 1.5rem 4rem oklch(0.08 0.002 286 / 0.55);
+}
+
+/* --- launch sheet ----------------------------------------------------------- */
+.sheet {
+  position: fixed;
+  z-index: var(--z-dialog);
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  width: min(34rem, 100%);
+  flex-direction: column;
+  overflow-y: auto;
+  border-inline-start: 1px solid var(--line-strong);
+  background: var(--surface-overlay);
+  padding: 1.25rem 1.5rem max(1.5rem, env(safe-area-inset-bottom));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sheet[data-state="open"] {
+    animation: kohlab-sheet-in var(--duration-moderate-02) var(--ease-entrance);
+  }
+}
+@keyframes kohlab-sheet-in {
+  from {
+    transform: translateX(2rem);
+    opacity: 0;
+  }
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.launch-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.launch-task {
+  min-height: 7rem;
+  resize: vertical;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* Native radios restyled as one control: keyboard, grouping and the accessible
+   name come from the platform. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  padding: 0.25rem;
+  margin: 0;
+}
+.segmented label {
+  position: relative;
+  display: inline-flex;
+}
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.segmented span {
+  display: inline-flex;
+  min-height: var(--control-h-sm);
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+.segmented input:checked + span {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: 550;
+}
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--line-accent);
+  outline-offset: 2px;
+}
+
+.launch-limits summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.launch-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: auto;
+  border-top: 1px solid var(--line-subtle);
+  padding-top: 1rem;
+}
+
+@media (forced-colors: active) {
+  .segmented input:checked + span {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* --- home: inbox and running ---------------------------------------------- */
+.section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+/* The review card is the loudest object on Home: a full-strength border and a
+   raised plane, because a decision waiting on you outranks everything alive. */
+.inbox-card {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  padding: 1rem 1.125rem;
+}
+
+.running-row {
+  display: flex;
+  width: 100%;
+  min-height: 3.5rem;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.5rem 1rem;
+  text-align: start;
+  transition: background-color var(--duration-fast-02) var(--ease-standard);
+}
+.running-row:hover {
+  background: var(--surface-hover);
+}
+
+/* Alive, not decorative: the same three pulses as the running chip. */
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot {
+    animation: kohlab-pulse 1.6s var(--ease-standard) 3;
+  }
 }
 
 /* --- menu + tooltip (Radix) --------------------------------------------- */
@@ -1012,7 +1159,7 @@ button:disabled {
   border-radius: var(--radius-md);
   background: var(--surface-overlay);
   padding: 0.25rem;
-  box-shadow: 0 0.75rem 2rem oklch(0.08 0.005 265 / 0.5);
+  box-shadow: 0 0.75rem 2rem oklch(0.08 0.002 286 / 0.5);
 }
 
 .menu-item {

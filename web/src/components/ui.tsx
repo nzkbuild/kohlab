@@ -339,3 +339,45 @@ export function BrandMark({ size = 16 }: { size?: number }) {
     </svg>
   );
 }
+
+/** brand/kohlab-wordmark.svg: stroke lowercase plus the detached session dot. */
+export function Wordmark({ height = 14, className }: { height?: number; className?: string }) {
+  return (
+    <svg
+      height={height}
+      viewBox="0 0 168 32"
+      fill="none"
+      role="img"
+      aria-label="kohlab"
+      className={className}
+      style={{ width: "auto" }}
+    >
+      <g stroke="currentColor" strokeWidth="4.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 5v19M6 16.5 15.5 10M6 16.5 14.5 24" />
+        <ellipse cx="27.5" cy="17" rx="6.5" ry="7" />
+        <path d="M41 5v19M41 17.5c0-5 10-5 10 0v6.5M60 5v19" />
+        <ellipse cx="74.5" cy="17.5" rx="6" ry="6.5" />
+        <path d="M81.5 11v13M91 5v19" />
+        <ellipse cx="99" cy="17.5" rx="6" ry="6.5" />
+        <path d="M113 17.5h32" />
+      </g>
+      <circle cx="158" cy="24.5" r="3.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** brand/kohlab-empty.svg: a hairline terminal frame waiting on the session dot. */
+export function EmptyArt({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 240 120" fill="none" aria-hidden="true" className={className}>
+      <rect x="48.5" y="16.5" width="143" height="88" rx="10" stroke="currentColor" strokeOpacity="0.28" strokeWidth="1.5" />
+      <line x1="48.5" y1="40.5" x2="191.5" y2="40.5" stroke="currentColor" strokeOpacity="0.28" strokeWidth="1.5" />
+      <circle cx="64" cy="28.5" r="3" fill="currentColor" fillOpacity="0.32" />
+      <circle cx="77" cy="28.5" r="3" fill="currentColor" fillOpacity="0.32" />
+      <circle cx="90" cy="28.5" r="3" fill="currentColor" fillOpacity="0.32" />
+      <rect x="106" y="54" width="7" height="34" rx="2" fill="currentColor" />
+      <path d="M118.4 71.2 134 55.4M118.4 71.2 127.4 80.2" stroke="currentColor" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="140.5" cy="85.5" r="4.4" fill="currentColor" />
+    </svg>
+  );
+}
