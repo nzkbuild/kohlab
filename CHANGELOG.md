@@ -9,6 +9,28 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.19.0] - 2026-10-02
+
+Starting an agent: four clear starting points instead of one text box.
+
+### Added
+
+- **Start from** cards in the launch sheet: *This server* (repos kohlab already
+  uses, or a path), *Clone* (search your GitHub repositories, or paste any git
+  URL), *New project* (an empty git repository, created and named for you),
+  *Continue* (a follow-up task in an existing workspace).
+- **Clones are reused.** A URL cloned before is fetched and reset to its
+  default branch instead of downloaded again.
+- **Start from a branch**, listed from the repository (`GET /api/branches`).
+- **First message to the agent**, typed in when it starts so it begins working.
+- Terminal: paste (Ctrl+V), drop or attach screenshots and files; no flicker on
+  sidebar toggle; tidier sidebar (1.18 hotfixes).
+
+### Security
+
+- Clone accepts only `https://`, `ssh://` and `git@` URLs (no local paths, no
+  `ext::`), and branch names must pass `git check-ref-format`.
+
 ## [1.18.0] - 2026-10-02
 
 Instrument: the console gets its own voice, review becomes an inbox, and

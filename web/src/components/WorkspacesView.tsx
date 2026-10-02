@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowRight,
+  ArrowBendDownRight,
   ArrowSquareOut,
   CaretDown,
   DotsThree,
   GithubLogo,
+  HardDrives,
   LinkSimple,
   MagnifyingGlass,
   Play,
   Plus,
   Robot,
   Rocket,
+  Sparkle,
   Stop,
   TerminalWindow,
   Trash,
@@ -89,27 +92,46 @@ function useAgentOptions(): { names: string[]; reported: boolean } {
  * The one create form in the product. Onboarding renders it as its second step
  * rather than keeping a second copy that drifts.
  */
+type Source = "server" | "clone" | "new" | "continue";
+
+const SOURCES: { id: Source; title: string; hint: string; icon: typeof Rocket }[] = [
+  { id: "server", title: "This server", hint: "a repository already here", icon: HardDrives },
+  { id: "clone", title: "Clone", hint: "GitHub or any git URL", icon: GithubLogo },
+  { id: "new", title: "New project", hint: "an empty repository", icon: Sparkle },
+  { id: "continue", title: "Continue", hint: "a workspace you already have", icon: ArrowBendDownRight },
+];
+
 export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
   const workspaces = useApp((s) => s.workspaces);
+  const can = useCan();
   const { names: agentNames, reported } = useAgentOptions();
 
-  const [mode, setMode] = useState<"new" | "continue">("new");
+  // Members work only from URLs (their agent runs in their own home), so host
+  // paths and new projects are owner choices.
+  const sources = SOURCES.filter((src) => (src.id === "server" || src.id === "new" ? can.own : src.id === "continue" ? workspaces.length > 0 : true));
+  const [source, setSource] = useState<Source>(sources[0]?.id ?? "clone");
+
   const [task, setTask] = useState("");
   const [repo, setRepo] = useState("");
+  const [url, setUrl] = useState("");
+  const [projectName, setProjectName] = useState("");
   const [agent, setAgent] = useState("");
   const [target, setTarget] = useState("");
+  const [branch, setBranch] = useState("");
+  const [branches, setBranches] = useState<string[] | null>(null);
+  const [branchNote, setBranchNote] = useState<string | null>(null);
+  const [payload, setPayload] = useState("");
   const [timeoutMin, setTimeoutMin] = useState("");
   const [memoryMb, setMemoryMb] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [ghRepos, setGhRepos] = useState<string[]>([]);
+  const [ghRepos, setGhRepos] = useState<string[] | null>(null);
+  const [ghQuery, setGhQuery] = useState("");
   const [ghNote, setGhNote] = useState<string | null>(null);
-  const [ghBusy, setGhBusy] = useState(false);
 
-  // The server list may land after first paint; fall back rather than sit empty.
   const chosenAgent = agent || agentNames[0] || "";
   // Recognition over recall: every repo this server already works in, newest first.
   const recentRepos = useMemo(() => {
@@ -122,22 +144,55 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
     [workspaces],
   );
   const chosenTarget = target || continuable[0]?.id || "";
+  const chosenRepo = repo || recentRepos[0] || "";
 
-  const loadGithub = async () => {
-    setGhBusy(true);
-    setGhNote(null);
+  // GitHub list loads when Clone is first opened; it is a pick list, not a step.
+  useEffect(() => {
+    if (source !== "clone" || ghRepos !== null) return;
+    setGhRepos([]);
+    api
+      .ghRepos()
+      .then((res) => {
+        setGhRepos(res.repos);
+        if (!res.authed) setGhNote("GitHub is not signed in on this server (run gh auth login there). Paste a URL instead.");
+      })
+      .catch(() => setGhNote("Could not list GitHub repositories. Paste a URL instead."));
+  }, [source, ghRepos]);
+  const ghMatches = useMemo(() => {
+    const q = ghQuery.trim().toLowerCase();
+    return (ghRepos ?? []).filter((r) => !q || r.toLowerCase().includes(q)).slice(0, 8);
+  }, [ghRepos, ghQuery]);
+
+  // Branches for whatever the workspace will start from; empty means "default".
+  const branchSource = source === "server" ? chosenRepo : source === "clone" ? url.trim() : "";
+  const loadBranches = async () => {
+    if (!branchSource) return;
+    setBranchNote("loading branches…");
     try {
-      const res = await api.ghRepos();
-      setGhRepos(res.repos.map(asCloneUrl));
-      if (!res.authed) setGhNote("GitHub is not signed in on this server. Type a path or URL instead.");
-      else setGhNote(res.repos.length ? `${res.repos.length} GitHub repositories added to the list.` : "GitHub returned no repositories.");
+      const res = await api.branches(branchSource);
+      setBranches(res.branches);
+      setBranchNote(res.branches.length ? null : "No branches found.");
     } catch (e) {
-      setGhNote((e as Error).message);
+      setBranchNote((e as Error).message);
     }
-    setGhBusy(false);
   };
+  useEffect(() => {
+    setBranches(null);
+    setBranch("");
+    setBranchNote(null);
+  }, [branchSource]);
 
-  const missing = !task.trim() ? "Describe the task first." : mode === "new" && !chosenAgent ? "No agent available." : mode === "continue" && !chosenTarget ? "There is no workspace to continue." : null;
+  const missing = !task.trim()
+    ? "Describe the task first."
+    : source === "clone" && !url.trim()
+      ? "Pick a repository or paste a URL."
+      : source === "new" && !projectName.trim()
+        ? "Name the project."
+        : source === "continue" && !chosenTarget
+          ? "There is no workspace to continue."
+          : source !== "continue" && !chosenAgent
+            ? "No agent available."
+            : null;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -145,13 +200,12 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      if (mode === "continue") {
+      if (source === "continue") {
         await api.continue(chosenTarget, task.trim());
         await refresh();
         announce(`${chosenTarget} continues with the new task`);
         navigate({ kind: "workspace", id: chosenTarget, tab: "terminal" });
       } else {
-        const trimmed = repo.trim();
         const limits =
           timeoutMin || memoryMb
             ? {
@@ -159,9 +213,13 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
                 maxMemoryMb: memoryMb ? Number(memoryMb) : undefined,
               }
             : undefined;
-        const created = /^https?:\/\//.test(trimmed)
-          ? await api.clone({ url: trimmed, task: task.trim(), agent: chosenAgent, limits })
-          : await api.create({ task: task.trim(), repo: trimmed || undefined, agent: chosenAgent, limits });
+        const common = { task: task.trim(), agent: chosenAgent, limits, payload: payload.trim() || undefined, branch: branch || undefined };
+        const created =
+          source === "clone"
+            ? await api.clone({ url: url.trim(), ...common })
+            : source === "new"
+              ? await api.create({ ...common, branch: undefined, newProject: projectName.trim() })
+              : await api.create({ ...common, repo: chosenRepo || undefined });
         await refresh();
         announce(`${created.id} created, the agent is starting`);
         navigate({ kind: "workspace", id: created.id });
@@ -175,32 +233,103 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
 
   return (
     <form className="launch-form" onSubmit={submit} aria-describedby={error ? "launch-error" : undefined}>
-      {continuable.length > 0 ? (
-        <fieldset className="segmented" aria-label="where the agent works">
-          <label>
-            <input type="radio" name="launch-mode" checked={mode === "new"} onChange={() => setMode("new")} />
-            <span>New workspace</span>
+      <fieldset className="source-grid">
+        <legend className="field-label mb-2">Start from</legend>
+        {sources.map(({ id, title, hint, icon: Icon }) => (
+          <label key={id} className="source-card">
+            <input type="radio" name="launch-source" value={id} checked={source === id} onChange={() => setSource(id)} />
+            <span className="source-card-body">
+              <Icon size={18} aria-hidden="true" />
+              <span className="text-sm font-semibold text-text-primary">{title}</span>
+              <span className="text-xs text-text-muted">{hint}</span>
+            </span>
           </label>
-          <label>
-            <input type="radio" name="launch-mode" checked={mode === "continue"} onChange={() => setMode("continue")} />
-            <span>Continue existing</span>
-          </label>
-        </fieldset>
+        ))}
+      </fieldset>
+
+      {source === "server" ? (
+        <Field label="Repository" htmlFor="launch-repo" help="A path on this server. Repositories kohlab already uses are suggested.">
+          <input
+            id="launch-repo"
+            className="field-input mono"
+            list="launch-repo-options"
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+            placeholder={recentRepos[0] ?? "/srv/repos/app"}
+            autoComplete="off"
+          />
+          <datalist id="launch-repo-options">
+            {recentRepos.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
+        </Field>
       ) : null}
 
-      <Field label="What should the agent do?" htmlFor="launch-task">
-        <textarea
-          id="launch-task"
-          className="field-textarea launch-task"
-          rows={4}
-          value={task}
-          onChange={(e) => setTask(e.target.value)}
-          placeholder={mode === "continue" ? "now add tests for the retry path" : "fix the billing rounding bug"}
-          autoFocus
-        />
-      </Field>
+      {source === "clone" ? (
+        <div className="field">
+          <label className="field-label" htmlFor="launch-gh">
+            Repository
+          </label>
+          {ghRepos && ghRepos.length > 0 ? (
+            <>
+              <input
+                id="launch-gh"
+                type="search"
+                className="field-input"
+                value={ghQuery}
+                onChange={(e) => setGhQuery(e.target.value)}
+                placeholder="search your GitHub repositories"
+                autoComplete="off"
+              />
+              <ul className="gh-list" aria-label="GitHub repositories">
+                {ghMatches.map((name) => {
+                  const cloneUrl = asCloneUrl(name);
+                  return (
+                    <li key={name}>
+                      <button
+                        type="button"
+                        className="gh-item"
+                        aria-pressed={url === cloneUrl}
+                        onClick={() => setUrl(cloneUrl)}
+                      >
+                        <GithubLogo size={14} aria-hidden="true" />
+                        <span className="mono truncate">{name}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : null}
+          <input
+            aria-label="git URL"
+            className="field-input mono"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://github.com/owner/name or git@host:owner/name.git"
+            autoComplete="off"
+          />
+          <p className="field-help">
+            {ghNote ?? (ghRepos === null || (ghRepos.length === 0 && !ghNote) ? "Loading your GitHub repositories… or paste any git URL." : "Pick one, or paste any git URL. A repository cloned before is reused, not downloaded again.")}
+          </p>
+        </div>
+      ) : null}
 
-      {mode === "continue" ? (
+      {source === "new" ? (
+        <Field label="Project name" htmlFor="launch-project" help="An empty git repository is created on this server, then the agent starts in it.">
+          <input
+            id="launch-project"
+            className="field-input"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            placeholder="invoice-parser"
+            autoComplete="off"
+          />
+        </Field>
+      ) : null}
+
+      {source === "continue" ? (
         <Field
           label="Workspace"
           htmlFor="launch-target"
@@ -214,51 +343,74 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
             ))}
           </select>
         </Field>
-      ) : (
-        <>
-          <Field
-            label="Repository"
-            htmlFor="launch-repo"
-            help={ghNote ?? "A path on this server or a git URL. Leave empty to use the server's own directory."}
-          >
-            <div className="flex gap-2">
-              <input
-                id="launch-repo"
-                className="field-input mono"
-                list="launch-repo-options"
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                placeholder={recentRepos[0] ?? "/srv/repos/app or https://github.com/owner/name"}
-                autoComplete="off"
+      ) : null}
+
+      <Field label="What should the agent do?" htmlFor="launch-task">
+        <textarea
+          id="launch-task"
+          className="field-textarea launch-task"
+          rows={3}
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          placeholder={source === "continue" ? "now add tests for the retry path" : source === "new" ? "scaffold a CLI that parses invoices" : "fix the billing rounding bug"}
+        />
+      </Field>
+
+      {source !== "continue" ? (
+        <fieldset className="field">
+          <legend className="field-label">Agent</legend>
+          <div className="segmented mt-1.5">
+            {agentNames.map((name) => (
+              <label key={name}>
+                <input type="radio" name="launch-agent" value={name} checked={chosenAgent === name} onChange={() => setAgent(name)} />
+                <span className="mono">{name}</span>
+              </label>
+            ))}
+          </div>
+          <p className="field-help">{reported ? "Installed on this server." : "None reported as installed, showing every known agent."}</p>
+        </fieldset>
+      ) : null}
+
+      {source !== "continue" ? (
+        <details className="launch-limits">
+          <summary>More: branch, first message, limits</summary>
+          <div className="mt-3 flex flex-col gap-4">
+            {source !== "new" ? (
+              <Field label="Start from branch" htmlFor="launch-branch" help={branchNote ?? "Leave empty for the default branch."}>
+                <div className="flex gap-2">
+                  <input
+                    id="launch-branch"
+                    className="field-input mono"
+                    list="launch-branch-options"
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    onFocus={() => branches === null && void loadBranches()}
+                    placeholder="default branch"
+                    autoComplete="off"
+                  />
+                  <datalist id="launch-branch-options">
+                    {(branches ?? []).map((b) => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                </div>
+              </Field>
+            ) : null}
+            <Field
+              label="First message to the agent"
+              htmlFor="launch-payload"
+              help="Typed into the agent when it starts, so it gets to work without you. Leave empty to start it idle."
+            >
+              <textarea
+                id="launch-payload"
+                className="field-textarea"
+                rows={2}
+                value={payload}
+                onChange={(e) => setPayload(e.target.value)}
+                placeholder={task.trim() || "read the README and fix the failing test"}
               />
-              <datalist id="launch-repo-options">
-                {[...recentRepos, ...ghRepos].map((r) => (
-                  <option key={r} value={r} />
-                ))}
-              </datalist>
-              <Button onClick={() => void loadGithub()} disabled={ghBusy} aria-label="add GitHub repositories to the list">
-                <GithubLogo size={14} />
-                {ghBusy ? "loading…" : "GitHub"}
-              </Button>
-            </div>
-          </Field>
-
-          <fieldset className="field">
-            <legend className="field-label">Agent</legend>
-            <div className="segmented mt-1.5">
-              {agentNames.map((name) => (
-                <label key={name}>
-                  <input type="radio" name="launch-agent" value={name} checked={chosenAgent === name} onChange={() => setAgent(name)} />
-                  <span className="mono">{name}</span>
-                </label>
-              ))}
-            </div>
-            <p className="field-help">{reported ? "Installed on this server." : "None reported as installed, showing every known agent."}</p>
-          </fieldset>
-
-          <details className="launch-limits">
-            <summary>Limits</summary>
-            <div className="mt-3 grid gap-3 shell:grid-cols-2">
+            </Field>
+            <div className="grid gap-3 shell:grid-cols-2">
               <Field label="Time limit (minutes)" htmlFor="launch-timeout">
                 <input
                   id="launch-timeout"
@@ -284,9 +436,9 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
                 />
               </Field>
             </div>
-          </details>
-        </>
-      )}
+          </div>
+        </details>
+      ) : null}
 
       {error ? (
         <p id="launch-error" role="alert" className="text-sm text-status-danger">
@@ -303,7 +455,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         ) : null}
         <Button type="submit" variant="primary" disabled={busy || !!missing}>
           <Rocket size={14} weight="fill" />
-          {busy ? "Starting…" : mode === "continue" ? "Continue" : "Start agent"}
+          {busy ? (source === "clone" ? "Cloning…" : "Starting…") : source === "continue" ? "Continue" : "Start agent"}
         </Button>
       </div>
     </form>

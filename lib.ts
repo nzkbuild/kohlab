@@ -4,7 +4,7 @@
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
+import { appendFile, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "fs/promises";
 import { basename, join } from "path";
 import { randomBytes } from "crypto";
 import { spawn, spawnSync } from "child_process";
@@ -1458,6 +1458,7 @@ export async function createWorkspace(opts: {
   ownerId?: string;
   url?: string;
 }): Promise<Workspace & { running: boolean; path: string }> {
+  if (opts.branch !== undefined && !(await validBranch(opts.branch))) throw new Error(`not a valid branch name: ${opts.branch}`);
   const ownerId = opts.ownerId ?? "";
   const ownerUser = ownerId ? readUsers().find((u) => u.id === ownerId) : undefined;
   if (ownerId && !ownerUser) throw new Error(`no such user '${ownerId}'`);
@@ -1508,7 +1509,7 @@ export async function createWorkspace(opts: {
     // clone without checkout, then check out the default branch.
     await run("", "git", ["clone", "--quiet", "--no-checkout", "--no-local", admin, tree]);
     const defaultBranch = (await runOut(admin, "git", ["symbolic-ref", "--short", "HEAD"])).stdout.trim();
-    await run(tree, "git", ["checkout", "-b", `kohlab/${ws.id}`, defaultBranch]);
+    await run(tree, "git", ["checkout", "-b", `kohlab/${ws.id}`, opts.branch ? `origin/${opts.branch}` : defaultBranch]);
     await run(tree, "git", ["config", "user.name", ownerUser!.name]);
     await run(tree, "git", ["config", "user.email", `${ownerUser!.osUser}@kohlab.local`]);
     await run("", "chown", ["-R", ownerUser!.osUser!, dir]);
@@ -1516,7 +1517,16 @@ export async function createWorkspace(opts: {
   } else {
     // legacy path-repo workspace (repo outside the tree, admin-owned):
     // worktree-add into the store exactly as before.
-    await run(repo!, "git", ["worktree", "add", "--quiet", "-b", `kohlab/${ws.id}`, tree]);
+    // Base: the chosen branch (local, else its origin/ twin), else HEAD.
+    let base: string[] = [];
+    if (opts.branch) {
+      const local = await runOut(repo!, "git", ["rev-parse", "--verify", "--quiet", `refs/heads/${opts.branch}`], [1]);
+      const remote = await runOut(repo!, "git", ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${opts.branch}`], [1]);
+      if (local.code === 0) base = [opts.branch];
+      else if (remote.code === 0) base = [`origin/${opts.branch}`];
+      else throw new Error(`no branch '${opts.branch}' in ${repo}`);
+    }
+    await run(repo!, "git", ["worktree", "add", "--quiet", "-b", `kohlab/${ws.id}`, tree, ...base]);
     const gitDir = join(tree, ".git");
     if (existsSync(gitDir) && !(await stat(gitDir)).isDirectory()) {
       await run(repo!, "git", ["worktree", "repair", tree]);
@@ -1524,6 +1534,70 @@ export async function createWorkspace(opts: {
   }
 
   return { ...ws, running: false, path: tree };
+}
+
+// --- where a workspace starts ---------------------------------------------
+
+/** git's own rule for a branch name, so a name can never smuggle an option. */
+async function validBranch(name: string): Promise<boolean> {
+  if (!name || name.startsWith("-")) return false;
+  return (await runOut("", "git", ["check-ref-format", "--branch", name], [1, 128])).code === 0;
+}
+
+/** Remote URLs kohlab will hand to git: no local paths, no `ext::`, no options. */
+export function validGitUrl(url: string): boolean {
+  return /^(https?:\/\/|ssh:\/\/|git@)[^\s]+$/.test(url) && !url.startsWith("-");
+}
+
+/**
+ * Clone a URL once and reuse it: every earlier clone lives under clones/, so a
+ * second workspace on the same repo fetches instead of downloading it again.
+ */
+export async function cloneOrReuse(url: string): Promise<string> {
+  if (!validGitUrl(url)) throw new Error("use an https://, ssh:// or git@ URL");
+  const root = join(WORKS_DIR, "clones");
+  await mkdir(root, { recursive: true });
+  for (const name of await readdir(root).catch(() => [] as string[])) {
+    const dir = join(root, name);
+    const origin = await runOut(dir, "git", ["config", "--get", "remote.origin.url"], [1, 128]).catch(() => null);
+    if (origin?.stdout.trim() === url) {
+      await run(dir, "git", ["fetch", "--quiet", "origin"]);
+      // Move the clone's own HEAD to the fetched default branch so a new
+      // workspace without a chosen branch starts from today's code.
+      const head = (await runOut(dir, "git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], [1, 128])).stdout.trim();
+      if (head) await run(dir, "git", ["reset", "--quiet", "--hard", head]);
+      return dir;
+    }
+  }
+  const dest = join(root, String(Date.now()));
+  await run("", "git", ["clone", "--quiet", "--", url, dest]);
+  return dest;
+}
+
+/** A brand-new repository with one empty commit, so a worktree can branch off it. */
+export async function newProject(name: string): Promise<string> {
+  const slug = slugify(name);
+  if (!slug) throw new Error("name the project");
+  const dir = join(WORKS_DIR, "projects", slug);
+  if (existsSync(dir)) throw new Error(`a project named '${slug}' already exists, pick another name or start from it`);
+  await mkdir(dir, { recursive: true });
+  await run(dir, "git", ["init", "--quiet", "-b", "main"]);
+  await run(dir, "git", ["-c", "user.name=kohlab", "-c", "user.email=kohlab@local", "commit", "--quiet", "--allow-empty", "-m", "start"]);
+  return dir;
+}
+
+/** Branches a new workspace could start from, for a server path or a URL. */
+export async function listBranches(source: string): Promise<string[]> {
+  if (/^[a-z]+:\/\/|^git@/.test(source)) {
+    if (!validGitUrl(source)) throw new Error("use an https://, ssh:// or git@ URL");
+    const out = await runOut("", "git", ["ls-remote", "--heads", "--", source]);
+    return out.stdout.split("\n").map((l) => l.split("refs/heads/")[1]).filter(Boolean).sort();
+  }
+  const repo = await findRepoRoot(source);
+  if (!repo) throw new Error(`not a git repo: ${source}`);
+  const out = await runOut(repo, "git", ["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin"]);
+  const names = out.stdout.split("\n").map((l) => l.replace(/^origin\//, "").trim()).filter((l) => l && l !== "HEAD" && l !== "origin");
+  return [...new Set(names)].sort();
 }
 
 // --- sharing -------------------------------------------------------------
