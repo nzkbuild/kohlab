@@ -5,6 +5,7 @@ import { ArrowLeft, Copy } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { Button, SkeletonRows } from "./ui";
+import { copyText } from "../lib/clipboard";
 
 interface Props {
   workspaceId: string;
@@ -52,7 +53,7 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
 
   const copy = async (value: string, what: string) => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       toast.success(`${what} copied`);
     } catch {
       toast.error(`could not copy the ${what}`);

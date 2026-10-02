@@ -13,6 +13,7 @@ import { announce } from "../lib/announce";
 import { cn } from "../lib/utils";
 import { AGENT_CATALOG, type AgentInfo } from "../types";
 import { Button, SkeletonRows } from "./ui";
+import { copyText } from "../lib/clipboard";
 
 interface AgentCard extends AgentInfo {
   installed: boolean;
@@ -77,7 +78,7 @@ export default function AgentInstaller() {
 
   const copy = async (agent: AgentCard, cmd: string) => {
     try {
-      await navigator.clipboard.writeText(cmd);
+      await copyText(cmd);
       setCopied(agent.name);
       window.clearTimeout(copyTimer.current);
       copyTimer.current = window.setTimeout(() => setCopied(null), 2000);

@@ -28,6 +28,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import LogView from "./LogView";
 import { disposeWorkspaceTerminals } from "./terminalCache";
 import { Button, EmptyState, Menu, MenuItem, SkeletonRows, StatusChip, Tab, TabList, TabPanel, Tabs } from "./ui";
+import { copyText } from "../lib/clipboard";
 
 // xterm (~390 KB) and Monaco must not load before the cockpit does: only an
 // import through lazy() defers the fetch. A static import here: even one that
@@ -115,7 +116,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     try {
       const s = await api.share(workspaceId);
       const link = `${location.origin}/?share=${s.share}`;
-      await navigator.clipboard.writeText(link);
+      await copyText(link);
       toast.success("share link copied");
       announce(`share link copied for ${workspaceId}`);
     } catch (e) {

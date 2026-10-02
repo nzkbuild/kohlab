@@ -8,6 +8,9 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import "@xterm/xterm/css/xterm.css";
 import { monoFont, tokenColor } from "../lib/tokenColor";
+import { copyText } from "../lib/clipboard";
+import { announce } from "../lib/announce";
+import { toast } from "sonner";
 
 interface Props {
   workspaceId: string;
@@ -56,6 +59,9 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
     fontFamily: monoFont(el),
     lineHeight: 1.45,
     rightClickSelectsWord: true,
+    // Agent TUIs turn on mouse tracking, which swallows a plain drag. Shift+drag
+    // still selects everywhere; on macOS the convention is Option+click.
+    macOptionClickForcesSelection: true,
     scrollback: 10000,
     theme: {
       background: tokenColor(el, "--surface-sunken"),
@@ -102,10 +108,12 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
     // copy/paste
     const copySel = () => {
       const sel = term.getSelection();
-      if (!sel) return false;
-      navigator.clipboard.writeText(sel).catch(() => {});
+      if (!sel) return;
+      copyText(sel).then(
+        () => announce("copied"),
+        () => toast.error("could not copy, use the browser's copy menu instead"),
+      );
       term.clearSelection();
-      return true;
     };
     const sendInput = (value: string) => {
       if (value && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) wsRef.current.send(value);
@@ -119,9 +127,16 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         console.error("image upload failed", e);
       }
     };
+    // Returning false keeps a key from the pty. Ctrl/Cmd+C copies only when
+    // there is a selection, so with nothing selected it still interrupts the
+    // agent; Ctrl+Shift+C always copies, as in desktop terminals. keydown only:
+    // the handler sees keyup and keypress too.
     term.attachCustomKeyEventHandler((e) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "c") return copySel();
-      return true;
+      if (e.type !== "keydown" || !(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "c") return true;
+      if (!e.shiftKey && !term.hasSelection()) return true;
+      e.preventDefault();
+      copySel();
+      return false;
     });
     const onPaste = (e: ClipboardEvent) => {
       const imageItem = Array.from(e.clipboardData?.items ?? []).find((item) => item.type.startsWith("image/"));
@@ -273,7 +288,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           {SOCKET_LABEL[socket]}
         </span>
         <span className="truncate">
-          {socket === "live" ? "attached to the agent's pty" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
+          {socket === "live" ? "attached to the agent's pty · shift+drag to select, ctrl+c to copy" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
         </span>
         <div className="flex-1" />
         {reconnecting ? (
