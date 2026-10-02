@@ -72,7 +72,7 @@ export default function Account() {
           <div className="rounded-lg border border-line-subtle bg-surface-sunken p-3">
             <p className="text-xs font-medium text-text-primary">Your new key, shown once</p>
             <code className="mt-2 block break-all font-mono text-xs text-text-primary">{fresh}</code>
-            <p className="mt-2 text-2xs leading-relaxed text-text-muted">
+            <p className="mt-2 text-xs leading-relaxed text-text-muted">
               Saved in this browser. Any other device or script using the old key must be updated
               now, it has already stopped working.
             </p>
@@ -90,7 +90,7 @@ export default function Account() {
           </Button>
         </div>
 
-        <p className="text-2xs leading-relaxed text-text-muted">
+        <p className="text-xs leading-relaxed text-text-muted">
           {isNamed
             ? "Rotating replaces your key everywhere at once: the old one is dead the moment this finishes. You stay signed in here."
             : "This server authenticates with a single key set on the box, so there is nothing personal to rotate. Rotate it there with `kohlab key rotate`, then enter the new key. Signing out clears it from this browser."}

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
+import { Dialog } from "./ui";
 import {
   ArrowDown,
   ArrowElbowDownLeft,
@@ -262,7 +262,7 @@ export default function CommandPalette() {
             <div role="listbox" id={listId} aria-label="Search results">
               {sections.map((section) => (
                 <div key={section.group} role="group" aria-labelledby={`${uid}-group-${section.group}`} className="py-1">
-                  <div id={`${uid}-group-${section.group}`} className="eyebrow px-3 py-1 text-text-faint">
+                  <div id={`${uid}-group-${section.group}`} className="section-label px-3 py-1 text-text-faint">
                     {section.group}
                   </div>
                   {section.entries.map(({ entry, index }) => (
@@ -294,7 +294,7 @@ export default function CommandPalette() {
           </div>
 
           <div className="flex items-center gap-2 border-t border-line-subtle px-3 py-2 text-xs text-text-muted">
-            <span className="eyebrow">scope</span>
+            <span className="section-label">scope</span>
             <span className="mono text-2xs text-text-secondary">{scope}</span>
             <span className="ml-auto flex items-center gap-3">
               <span className="flex items-center gap-1">

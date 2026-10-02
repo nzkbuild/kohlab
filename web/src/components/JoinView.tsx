@@ -61,7 +61,7 @@ export default function JoinView() {
         {!token ? (
           <>
             <p className="mt-1 text-xs text-text-muted">nothing to accept</p>
-            <p className="mt-5 flex items-start gap-1.5 text-2xs text-status-danger">
+            <p className="mt-5 flex items-start gap-1.5 text-xs text-status-danger">
               <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
               This link is missing its invitation. It may have been truncated, ask the person who
               invited you to send it again, and open it exactly as it arrives.
@@ -70,12 +70,12 @@ export default function JoinView() {
         ) : (
           <>
             <p className="mt-1 text-xs text-text-muted">you have been invited</p>
-            <p className="mt-5 text-2xs leading-relaxed text-text-secondary">
+            <p className="mt-5 text-xs leading-relaxed text-text-secondary">
               Accepting gives you your own key and your own space on this server. The person who
               invited you will not see your work, and you will not see theirs.
             </p>
             {error ? (
-              <p className="mt-3 flex items-start gap-1.5 text-2xs text-status-danger">
+              <p className="mt-3 flex items-start gap-1.5 text-xs text-status-danger">
                 <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
                 {error}
               </p>

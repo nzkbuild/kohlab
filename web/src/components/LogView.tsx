@@ -134,7 +134,7 @@ export default function LogView({ workspaceId }: Props) {
       <header className="cockpit-head flex-wrap">
         <h2 className="text-sm font-semibold text-text-primary">Session log</h2>
         <StatusChip status={workspace ? workspaceStatus(workspace) : "stopped"} />
-        <span className="text-2xs text-text-muted">{running ? "tailing every 3s" : "not running"}</span>
+        <span className="text-xs text-text-muted">{running ? "tailing every 3s" : "not running"}</span>
         <div className="flex-1" />
         <Button
           size="sm"

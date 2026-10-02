@@ -1,7 +1,24 @@
 import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import * as RadixTabs from "@radix-ui/react-tabs";
+import * as RadixMenu from "@radix-ui/react-dropdown-menu";
+import * as RadixTooltip from "@radix-ui/react-tooltip";
+import { CaretRight, Check, Diamond, Play, Square, X } from "@phosphor-icons/react";
 import { cn } from "../lib/utils";
 import { subscribeAnnouncements } from "../lib/announce";
-import { STATUS_CHIP, STATUS_GLYPH, STATUS_LABEL, type WorkspaceStatus } from "../lib/status";
+import { STATUS_CHIP, STATUS_LABEL, type WorkspaceStatus } from "../lib/status";
+
+/** Dialog parts are styled by .dialog-overlay / .dialog-content; re-exported so
+ *  surfaces import every Radix primitive through this file. */
+export * as Dialog from "@radix-ui/react-dialog";
+
+/** Shape cue per status, drawn from the icon set rather than text glyphs. */
+const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
+  running: <Play size={9} weight="fill" />,
+  "needs-review": <Diamond size={9} weight="fill" />,
+  committed: <Check size={10} weight="bold" />,
+  discarded: <X size={10} weight="bold" />,
+  stopped: <Square size={8} weight="fill" />,
+};
 
 /* ------------------------------------------------------------------ button -- */
 
@@ -54,7 +71,7 @@ export function StatusChip({ status, showGlyph = true }: { status: WorkspaceStat
   return (
     <span className={cn("chip", STATUS_CHIP[status])}>
       {showGlyph ? (
-        <span aria-hidden="true">{STATUS_GLYPH[status]}</span>
+        <span className="inline-flex" aria-hidden="true">{STATUS_ICON[status]}</span>
       ) : (
         <span className="chip-dot" aria-hidden="true" />
       )}
@@ -82,6 +99,110 @@ export function PanelHead({ title, icon, meta }: { title: ReactNode; icon?: Reac
       </h2>
       {meta ? <span className="text-xs text-text-muted">{meta}</span> : null}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------- page header -- */
+
+/** The one <h1> a surface owns, its description, and the surface-level actions. */
+export function PageHeader({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }) {
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="surface-title">{title}</h1>
+        {description ? <p className="surface-description">{description}</p> : null}
+      </div>
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+    </header>
+  );
+}
+
+/* -------------------------------------------------------------------- tabs -- */
+
+/*
+ * Radix owns roving focus, arrow/Home/End keys and the tab/panel ARIA wiring.
+ * Components import these, never Radix directly, so the styling stays here.
+ */
+export const Tabs = RadixTabs.Root;
+
+export function TabList({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+  return (
+    <RadixTabs.List aria-label={label} className={cn("tabstrip", className)}>
+      {children}
+    </RadixTabs.List>
+  );
+}
+
+export function Tab({ className, ...rest }: RadixTabs.TabsTriggerProps) {
+  return <RadixTabs.Trigger className={cn("tab", className)} {...rest} />;
+}
+
+export const TabPanel = RadixTabs.Content;
+
+/* -------------------------------------------------------------------- menu -- */
+
+export function Menu({ trigger, label, children }: { trigger: ReactNode; label: string; children: ReactNode }) {
+  return (
+    <RadixMenu.Root>
+      <RadixMenu.Trigger asChild aria-label={label}>
+        {trigger}
+      </RadixMenu.Trigger>
+      <RadixMenu.Portal>
+        <RadixMenu.Content className="menu" align="end" sideOffset={4} collisionPadding={8}>
+          {children}
+        </RadixMenu.Content>
+      </RadixMenu.Portal>
+    </RadixMenu.Root>
+  );
+}
+
+export function MenuSub({ label, icon, children }: { label: string; icon?: ReactNode; children: ReactNode }) {
+  return (
+    <RadixMenu.Sub>
+      <RadixMenu.SubTrigger className="menu-item">
+        {icon}
+        <span className="flex-1">{label}</span>
+        <CaretRight size={12} className="text-text-faint" aria-hidden="true" />
+      </RadixMenu.SubTrigger>
+      <RadixMenu.Portal>
+        <RadixMenu.SubContent className="menu max-h-80 overflow-y-auto" sideOffset={4} collisionPadding={8}>
+          {children}
+        </RadixMenu.SubContent>
+      </RadixMenu.Portal>
+    </RadixMenu.Sub>
+  );
+}
+
+export function MenuItem({ tone, className, ...rest }: RadixMenu.DropdownMenuItemProps & { tone?: "danger" }) {
+  return <RadixMenu.Item className={cn("menu-item", tone === "danger" && "menu-item-danger", className)} {...rest} />;
+}
+
+/* ----------------------------------------------------------------- tooltip -- */
+
+export const TooltipProvider = RadixTooltip.Provider;
+
+/** Supplementary only: the trigger must carry its own accessible name. */
+export function Tooltip({
+  content,
+  side = "right",
+  disabled,
+  children,
+}: {
+  content: ReactNode;
+  side?: RadixTooltip.TooltipContentProps["side"];
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  if (disabled) return <>{children}</>;
+  return (
+    <RadixTooltip.Root>
+      <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
+      <RadixTooltip.Portal>
+        <RadixTooltip.Content className="tooltip" side={side} sideOffset={6} aria-hidden="true">
+          {content}
+        </RadixTooltip.Content>
+      </RadixTooltip.Portal>
+    </RadixTooltip.Root>
   );
 }
 

@@ -119,7 +119,7 @@ export default function UpdatePanel() {
           </span>
         )}
         {status?.upstream ? (
-          <span className="text-2xs text-text-muted">
+          <span className="text-xs text-text-muted">
             {status.upstream}
             {status.head ? ` · at ${status.head}` : ""}
             {status.checkedAt ? ` · checked ${relativeTime(status.checkedAt)}` : ""}
@@ -128,7 +128,7 @@ export default function UpdatePanel() {
       </div>
 
       {error ? (
-        <p className="flex items-start gap-1.5 text-2xs text-status-danger">
+        <p className="flex items-start gap-1.5 text-xs text-status-danger">
           <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
           {error}
         </p>
@@ -136,10 +136,10 @@ export default function UpdatePanel() {
 
       {status?.available && status.commits.length > 0 ? (
         <div>
-          <p className="eyebrow mb-1.5">Coming in v{status.latest}</p>
+          <p className="section-label mb-1.5">Coming in v{status.latest}</p>
           {status.notes ? (
             <div className="max-h-64 overflow-auto rounded-md border border-line-subtle bg-surface-sunken p-3">
-              <pre className="whitespace-pre-wrap text-2xs leading-relaxed text-text-secondary">
+              <pre className="whitespace-pre-wrap text-xs leading-relaxed text-text-secondary">
                 {status.notes}
               </pre>
             </div>
@@ -152,7 +152,7 @@ export default function UpdatePanel() {
             ))}
           </ul>
           {status.commits.length > 12 ? (
-            <p className="mt-1 text-2xs text-text-faint">+{status.commits.length - 12} more</p>
+            <p className="mt-1 text-xs text-text-faint">+{status.commits.length - 12} more</p>
           ) : null}
         </div>
       ) : null}
@@ -185,7 +185,7 @@ export default function UpdatePanel() {
         ) : null}
       </div>
 
-      <p className="text-2xs leading-relaxed text-text-muted">
+      <p className="text-xs leading-relaxed text-text-muted">
         Agents are not interrupted: this restarts the server only, and every running session
         survives. Your uncommitted changes are stashed first, and a release that fails to come up
         is rolled back automatically.
@@ -195,8 +195,8 @@ export default function UpdatePanel() {
         <p
           className={
             lastRun.danger
-              ? "flex items-center gap-1.5 text-2xs text-status-danger"
-              : "flex items-center gap-1.5 text-2xs text-text-muted"
+              ? "flex items-center gap-1.5 text-xs text-status-danger"
+              : "flex items-center gap-1.5 text-xs text-text-muted"
           }
         >
           {lastRun.danger ? <WarningCircle size={13} aria-hidden="true" /> : <CheckCircle size={13} aria-hidden="true" />}
@@ -206,9 +206,9 @@ export default function UpdatePanel() {
 
       {status?.log && (failed || status?.running) ? (
         <div>
-          <p className="eyebrow mb-1.5">Update log</p>
+          <p className="section-label mb-1.5">Update log</p>
           <div className="max-h-56 overflow-auto rounded-md border border-line-subtle bg-surface-sunken p-3">
-            <pre className="whitespace-pre-wrap text-2xs leading-relaxed text-text-muted">{status.log}</pre>
+            <pre className="whitespace-pre-wrap text-xs leading-relaxed text-text-muted">{status.log}</pre>
           </div>
         </div>
       ) : null}

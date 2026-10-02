@@ -20,7 +20,7 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* One pane-header treatment: .cockpit-head and the same h2 title used by
-          every other pane, rather than a hand-rolled row with an eyebrow. The
+          every other pane, rather than a hand-rolled row with an section-label. The
           breadcrumb is a path display, not a second title style. */}
       <header className="cockpit-head">
         <h2 className="shrink-0 text-sm font-semibold text-text-primary">Files</h2>

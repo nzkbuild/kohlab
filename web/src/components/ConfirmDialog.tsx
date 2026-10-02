@@ -1,4 +1,4 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import { Dialog } from "./ui";
 import { CheckCircle, Warning } from "@phosphor-icons/react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui";

@@ -100,7 +100,7 @@ export default function Settings() {
                 <td className="text-text-muted">Persistence</td>
                 <td>
                   <Chip>state on disk</Chip>
-                  <span className="ml-2 text-2xs text-text-muted">
+                  <span className="ml-2 text-xs text-text-muted">
                     workspaces, logs and keys survive a restart of this server
                   </span>
                 </td>
@@ -137,13 +137,13 @@ export default function Settings() {
                     {PERMISSION_LABEL[permission]}
                   </span>
                 </p>
-                <p className="mt-1 text-2xs leading-relaxed text-text-muted">
+                <p className="mt-1 text-xs leading-relaxed text-text-muted">
                   A ping when an agent finishes and its workspace needs review while this tab is
                   hidden. Nothing is sent while the tab is in front of you, that is what the
                   sidebar badge is for.
                 </p>
                 {permission === "denied" ? (
-                  <p className="mt-1.5 flex items-start gap-1.5 text-2xs text-status-danger">
+                  <p className="mt-1.5 flex items-start gap-1.5 text-xs text-status-danger">
                     <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
                     The browser will not ask again, allow notifications for this site in your browser
                     settings, then reload.
@@ -178,7 +178,7 @@ export default function Settings() {
                     <SpeakerHigh size={14} className="text-text-muted" aria-hidden="true" />
                     pause screen-reader announcements
                   </span>
-                  <span className="mt-0.5 block text-2xs leading-relaxed text-text-muted">
+                  <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
                     Stops the live region from announcing workspace state changes (finished, needs
                     review, committed). The status chips keep updating; only the speech stops. The
                     setting is remembered on this browser.

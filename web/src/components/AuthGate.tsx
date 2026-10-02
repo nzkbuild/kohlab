@@ -97,7 +97,7 @@ export default function AuthGate() {
           </span>
           <div className="min-w-0">
             <h1 className="text-lg font-semibold leading-none tracking-tight">kohlab</h1>
-            <p className="mt-1.5 flex items-baseline gap-1.5 text-2xs text-text-muted">
+            <p className="mt-1.5 flex items-baseline gap-1.5 text-xs text-text-muted">
               <span>agent workspaces</span>
               <span aria-hidden="true" className="text-text-faint">
                 /
@@ -195,7 +195,7 @@ export default function AuthGate() {
           </Button>
         </form>
 
-        <p className="mt-6 border-t border-line-subtle pt-4 text-2xs leading-relaxed text-text-muted">
+        <p className="mt-6 border-t border-line-subtle pt-4 text-xs leading-relaxed text-text-muted">
           {pairing ? (
             <>
               prefer the key?{" "}

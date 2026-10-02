@@ -128,7 +128,7 @@ export default function Sidebar({ open, onClose }: Props) {
       </nav>
 
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
-        <p className="sidebar-section-title mb-2 px-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">
+        <p className="sidebar-section-title section-label mb-2 px-2">
           Workspaces
           {reviewCount > 0 ? <span className="text-status-review"> · {reviewCount} to review</span> : null}
         </p>
@@ -171,7 +171,7 @@ export default function Sidebar({ open, onClose }: Props) {
           <span className="chip-dot" aria-hidden="true" />
           {CONNECTION_LABEL[connection]}
         </span>
-        <span className="sidebar-label text-2xs text-text-faint">persists on this server</span>
+        <span className="sidebar-label text-xs text-text-faint">persists on this server</span>
       </div>
     </aside>
   );

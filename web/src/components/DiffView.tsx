@@ -466,9 +466,9 @@ export default function DiffView({ workspaceId }: Props) {
                   {currentStats ? (
                     <Totals added={currentStats.added} removed={currentStats.removed} />
                   ) : (
-                    <span className="text-2xs text-text-muted">no line stats</span>
+                    <span className="text-xs text-text-muted">no line stats</span>
                   )}
-                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 py-1 text-2xs text-text-secondary">
+                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 py-1 text-xs text-text-secondary">
                     <input
                       type="checkbox"
                       className="size-3.5 accent-accent"
@@ -525,7 +525,7 @@ export default function DiffView({ workspaceId }: Props) {
           Your role can read this diff. An owner or member commits, discards or merges it.
         </footer>
       ) : (
-      <footer className="sticky bottom-0 z-10 border-t border-line-subtle bg-surface-raised px-3 py-2">
+      <footer className="sticky bottom-0 z-(--z-sticky) border-t border-line-subtle bg-surface-raised px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="commit-message">
             Commit message
@@ -572,12 +572,12 @@ export default function DiffView({ workspaceId }: Props) {
           the workspace.
         </p>
         {commitError ? (
-          <p role="alert" className="mt-1.5 break-words text-2xs text-status-danger">
+          <p role="alert" className="mt-1.5 break-words text-xs text-status-danger">
             {commitError}
           </p>
         ) : null}
         {mergeResult ? (
-          <p role="status" className="mt-1.5 break-words text-2xs text-text-secondary">
+          <p role="status" className="mt-1.5 break-words text-xs text-text-secondary">
             {mergeResult}
           </p>
         ) : null}

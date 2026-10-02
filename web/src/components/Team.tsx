@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
+import { Dialog } from "./ui";
 import {
   ArrowsClockwise,
   Copy,
@@ -271,7 +271,7 @@ export default function Team() {
                 )}
 
                 {!canInvite ? (
-                  <p className="text-2xs leading-relaxed text-status-review">
+                  <p className="text-xs leading-relaxed text-status-review">
                     This server cannot create member accounts, so an invited member would share the
                     server&apos;s own account instead of getting their own. Run kohlab as root (the
                     installer&apos;s service unit does) and reload to enable invitations.
@@ -321,17 +321,17 @@ export default function Team() {
                 </form>
 
                 {addError ? (
-                  <p role="alert" className="break-words text-2xs text-status-danger">
+                  <p role="alert" className="break-words text-xs text-status-danger">
                     could not invite: {addError}
                   </p>
                 ) : null}
                 {roleError ? (
-                  <p role="alert" className="break-words text-2xs text-status-danger">
+                  <p role="alert" className="break-words text-xs text-status-danger">
                     could not change the role: {roleError}
                   </p>
                 ) : null}
                 {revokeError ? (
-                  <p role="alert" className="break-words text-2xs text-status-danger">
+                  <p role="alert" className="break-words text-xs text-status-danger">
                     could not revoke: {revokeError}
                   </p>
                 ) : null}
@@ -364,7 +364,7 @@ export default function Team() {
                 {/* h2, not h3: the app's outline is h1 for the route and h2 for
                     every panel-level section, and this one had no h2 above it
                     to sit under. */}
-                <h2 className="eyebrow">Recent activity</h2>
+                <h2 className="section-label">Recent activity</h2>
                 <div className="flex-1" />
                 <Button
                   variant="quiet"
@@ -379,7 +379,7 @@ export default function Team() {
               </div>
 
               {auditError ? (
-                <p role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-2xs text-status-danger">
+                <p role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-status-danger">
                   {refusal(auditError)
                     ? "Your role cannot read the audit log."
                     : `Could not load activity: ${auditError}`}
@@ -432,7 +432,7 @@ export default function Team() {
               {freshLink?.url}
             </code>
             {copyError ? (
-              <p role="alert" className="mt-2 text-2xs text-status-danger">
+              <p role="alert" className="mt-2 text-xs text-status-danger">
                 copy failed: {copyError}
               </p>
             ) : null}
