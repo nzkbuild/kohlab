@@ -15,6 +15,7 @@ import { clockTime } from "../lib/format";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
 import { Button, EmptyState, Field, Panel, PanelHead, SkeletonRows } from "./ui";
+import { copyText } from "../lib/clipboard";
 
 /** Static dot colour per audit action, Tailwind cannot read an interpolated class. */
 const ACTION_DOT: Record<string, string> = {
@@ -172,7 +173,7 @@ export default function Team() {
     if (!freshLink) return;
     setCopyError(null);
     try {
-      await navigator.clipboard.writeText(freshLink.url);
+      await copyText(freshLink.url);
       setCopied(true);
       announce(`invitation link for ${freshLink.id} copied`);
     } catch (e) {

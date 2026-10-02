@@ -42,6 +42,7 @@ import {
 } from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
 import { cn } from "../lib/utils";
+import { copyText } from "../lib/clipboard";
 
 /* --------------------------------------------------------------- constants -- */
 
@@ -460,8 +461,7 @@ export default function WorkspacesView() {
       const copied = await withToast(`Share link for ${w.id}`, async () => {
         const res = await api.share(w.id);
         const url = `${location.origin}/?share=${res.share}`;
-        return navigator.clipboard
-          .writeText(url)
+        return copyText(url)
           .then(() => true)
           .catch(() => false);
       });
