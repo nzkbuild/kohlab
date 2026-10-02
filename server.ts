@@ -3,7 +3,7 @@
 import { serve } from "bun";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { execFile, spawn } from "child_process";
-import { mkdir, open, readdir, readFile } from "fs/promises";
+import { chown, mkdir, open, readdir, readFile } from "fs/promises";
 import { isAbsolute, join, relative, resolve } from "path";
 import {
   createWorkspace,
@@ -20,6 +20,7 @@ import {
   discardWorkspace,
   worktreePath,
   imagesDir,
+  readUsers,
   spawnAgentSession,
   // ensurePtySession() calls markStarted() to record a browser-attach as a real
   // run. The call existed but the import did not, so the first terminal attach
@@ -622,15 +623,30 @@ async function handleImageUpload(id: string, req: Request): Promise<Response> {
     if (bytes.length === 0) return json({ error: "image is empty" }, 400);
     if (bytes.length > MAX_IMAGE_UPLOAD_BYTES) return json({ error: "image exceeds 20 MiB limit" }, 413);
 
+    // Images are named by their sniffed type. Any other file (a PDF, a log, a
+    // CSV the agent should read) keeps a sanitised version of its own name, so
+    // the path the agent sees still says what it is.
     const mimeType = sniffImageMime(bytes);
-    if (!mimeType) return json({ error: "unsupported image; use PNG, JPEG, GIF, or WebP" }, 415);
+    const rawName = decodeURIComponent(req.headers.get("x-file-name") ?? "");
+    const safeName = rawName.replace(/^.*[\\/]/, "").replace(/[^\w.\-]+/g, "_").replace(/^\.+/, "").slice(0, 80);
+    if (!mimeType && !safeName) return json({ error: "unsupported image; use PNG, JPEG, GIF, or WebP" }, 415);
 
     const imageDir = imagesDir(workspace);
     await mkdir(imageDir, { recursive: true, mode: 0o700 });
-    const extension = mimeType === "image/jpeg" ? "jpg" : mimeType.slice("image/".length);
-    const imagePath = join(imageDir, `${Date.now()}-${crypto.randomUUID()}.${extension}`);
+    const stem = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    const fileName = mimeType
+      ? `${stem}.${mimeType === "image/jpeg" ? "jpg" : mimeType.slice("image/".length)}`
+      : `${stem}-${safeName}`;
+    const imagePath = join(imageDir, fileName);
     await Bun.write(imagePath, bytes);
-    return json({ path: imagePath, mimeType, bytes: bytes.length });
+    // A member's agent runs as their own OS user; a root-owned file in a 0700
+    // root-owned folder would be unreadable to it.
+    const owner = workspace.ownerId ? readUsers().find((u) => u.id === workspace.ownerId) : undefined;
+    if (owner?.uid !== undefined && owner.gid !== undefined) {
+      await chown(imageDir, owner.uid, owner.gid);
+      await chown(imagePath, owner.uid, owner.gid);
+    }
+    return json({ path: imagePath, mimeType: mimeType ?? "application/octet-stream", bytes: bytes.length });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
