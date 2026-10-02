@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowsClockwise, CaretRight, File, FolderOpen, FolderSimple } from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretRight, DownloadSimple, File, FilePlus, FolderOpen, FolderPlus, FolderSimple, UploadSimple } from "@phosphor-icons/react";
+import { toast } from "sonner";
+import { useCan } from "../store";
+import { announce } from "../lib/announce";
 import { api } from "../api";
 import type { TreeNode } from "../types";
 import { cn } from "../lib/utils";
@@ -42,6 +45,14 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set<string>());
   const [activePath, setActivePath] = useState<string | null>(null);
   const [focused, setFocused] = useState(0);
+  const [activeType, setActiveType] = useState<"dir" | "file" | null>(null);
+  const [creating, setCreating] = useState<"file" | "folder" | null>(null);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const can = useCan();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -76,7 +87,83 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
 
   const openFile = (path: string) => {
     setActivePath(path);
+    setActiveType("file");
     onOpenFile(path);
+  };
+
+  // New things land in the selected folder, or beside the selected file.
+  const targetDir = activePath ? (activeType === "dir" ? activePath : activePath.split("/").slice(0, -1).join("/")) : "";
+  const under = (name: string) => (targetDir ? `${targetDir}/${name}` : name);
+  const where = targetDir ? `${targetDir}/` : "the workspace root";
+
+  const reveal = (dir: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      const parts = dir.split("/").filter(Boolean);
+      for (let i = 1; i <= parts.length; i++) next.add(parts.slice(0, i).join("/"));
+      return next;
+    });
+
+  const create = async () => {
+    const name = newName.trim().replace(/^\/+/, "");
+    if (!name || !creating) return;
+    setBusy(true);
+    try {
+      const path = under(name);
+      await api.fsOp(workspaceId, creating === "folder" ? "mkdir" : "touch", path);
+      await load();
+      reveal(creating === "folder" ? path : targetDir);
+      announce(`${creating} ${path} created`);
+      if (creating === "file") openFile(path);
+      setCreating(null);
+      setNewName("");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+    setBusy(false);
+  };
+
+  const upload = async (files: File[]) => {
+    if (files.length === 0) return;
+    setBusy(true);
+    let done = 0;
+    for (const file of files) {
+      // A picked folder keeps its structure (webkitRelativePath).
+      const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      const path = under(rel);
+      try {
+        await api.putFile(workspaceId, path, file);
+        done++;
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (/already exists/.test(msg) && window.confirm(`${path} already exists. Replace it?`)) {
+          try {
+            await api.putFile(workspaceId, path, file, true);
+            done++;
+          } catch (e2) {
+            toast.error(`${path}: ${(e2 as Error).message}`);
+          }
+        } else if (!/already exists/.test(msg)) {
+          toast.error(`${path}: ${msg}`);
+        }
+      }
+    }
+    await load();
+    reveal(targetDir);
+    setBusy(false);
+    if (done) {
+      toast.success(`uploaded ${done} file${done === 1 ? "" : "s"} to ${where}`);
+      announce(`uploaded ${done} files`);
+    }
+  };
+
+  const download = async () => {
+    const path = activePath ?? "";
+    try {
+      await api.download(workspaceId, path);
+    } catch (e) {
+      toast.error(`could not download: ${(e as Error).message}`);
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -132,12 +219,92 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
           padding, border and title treatment. */}
       <header className="cockpit-head">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">Files</h2>
+        {can.mutate ? (
+          <>
+            <Button variant="quiet" size="sm" iconOnly aria-label="new file" title="new file" onClick={() => setCreating("file")}>
+              <FilePlus size={14} />
+            </Button>
+            <Button variant="quiet" size="sm" iconOnly aria-label="new folder" title="new folder" onClick={() => setCreating("folder")}>
+              <FolderPlus size={14} />
+            </Button>
+            <Button variant="quiet" size="sm" iconOnly aria-label="upload files" title="upload files (or drop them on the tree)" disabled={busy} onClick={() => fileInput.current?.click()}>
+              <UploadSimple size={14} />
+            </Button>
+            <Button variant="quiet" size="sm" iconOnly aria-label="upload a folder" title="upload a folder" disabled={busy} onClick={() => folderInput.current?.click()}>
+              <FolderOpen size={14} />
+            </Button>
+          </>
+        ) : null}
+        <Button
+          variant="quiet"
+          size="sm"
+          iconOnly
+          aria-label={activePath ? `download ${activePath}` : "download the whole workspace"}
+          title={activePath ? (activeType === "dir" ? `download ${activePath} as .tar.gz` : `download ${activePath}`) : "download the whole workspace as .tar.gz"}
+          onClick={() => void download()}
+        >
+          <DownloadSimple size={14} />
+        </Button>
         <Button variant="quiet" size="sm" iconOnly aria-label="refresh file tree" onClick={() => void load()}>
           <ArrowsClockwise size={13} />
         </Button>
+        <input ref={fileInput} type="file" multiple className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+        <input
+          ref={folderInput}
+          type="file"
+          multiple
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          {...({ webkitdirectory: "" } as Record<string, string>)}
+          onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = ""; }}
+        />
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto p-1.5">
+      {creating ? (
+        <form
+          className="flex items-center gap-1.5 border-b border-line-subtle px-2 py-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void create();
+          }}
+        >
+          <input
+            autoFocus
+            className="field-input mono min-h-(--control-h-sm) py-1 text-xs"
+            aria-label={`new ${creating} name, created in ${where}`}
+            placeholder={creating === "folder" ? "folder name" : "file name, e.g. notes.md"}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setCreating(null);
+                setNewName("");
+              }
+            }}
+          />
+          <Button type="submit" size="sm" variant="primary" disabled={busy || !newName.trim()}>
+            add
+          </Button>
+        </form>
+      ) : null}
+      {creating ? <p className="px-2 pt-1 text-xs text-text-muted">in {where}</p> : null}
+
+      <div
+        className={cn("min-h-0 flex-1 overflow-auto p-1.5", dropping && "tree-drop")}
+        onDragOver={(e) => {
+          if (!can.mutate || !Array.from(e.dataTransfer.items).some((i) => i.kind === "file")) return;
+          e.preventDefault();
+          setDropping(true);
+        }}
+        onDragLeave={() => setDropping(false)}
+        onDrop={(e) => {
+          if (!can.mutate) return;
+          e.preventDefault();
+          setDropping(false);
+          void upload(Array.from(e.dataTransfer.files));
+        }}
+      >
         {error ? (
           <div role="alert" className="p-2">
             <p className="text-xs text-status-danger">{error}</p>
@@ -168,8 +335,11 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
                   style={{ paddingLeft: `${row.depth * 12 + 6}px` }}
                   onClick={() => {
                     setFocused(index);
-                    if (dir) toggleDir(row.path);
-                    else openFile(row.path);
+                    if (dir) {
+                      toggleDir(row.path);
+                      setActivePath(row.path);
+                      setActiveType("dir");
+                    } else openFile(row.path);
                   }}
                   onKeyDown={(e) => onKeyDown(e, index)}
                 >

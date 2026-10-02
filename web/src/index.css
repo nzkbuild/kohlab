@@ -1351,6 +1351,12 @@ button:disabled {
   color: var(--text-secondary);
 }
 
+/* Files dragged over the tree: say where they will land. */
+.tree-drop {
+  outline: 2px dashed var(--line-accent);
+  outline-offset: -4px;
+}
+
 .file-row:hover {
   background: var(--surface-hover);
   color: var(--text-primary);

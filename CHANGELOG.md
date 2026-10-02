@@ -9,6 +9,25 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.20.0] - 2026-10-02
+
+The Files tab becomes a file manager, and new projects go where you want them.
+
+### Added
+
+- **Files tab:** new file, new folder, upload files or a whole folder (button,
+  or drop onto the tree), download a file, a folder (`.tar.gz`) or the whole
+  workspace. New things land in the selected folder. Overwriting asks first.
+- **New project → Create in:** any folder on the server (owners), defaulting
+  to kohlab's projects folder; the final path is previewed.
+
+### Security
+
+- Every Files path is resolved with symlinks followed and must stay inside the
+  workspace; `.git` is never writable from the browser; uploads cap at
+  100 MiB; member files are owned by the member. The existing file reader uses
+  the same check.
+
 ## [1.19.0] - 2026-10-02
 
 Starting an agent: four clear starting points instead of one text box.

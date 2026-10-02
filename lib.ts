@@ -1575,10 +1575,16 @@ export async function cloneOrReuse(url: string): Promise<string> {
 }
 
 /** A brand-new repository with one empty commit, so a worktree can branch off it. */
-export async function newProject(name: string): Promise<string> {
+export function projectsDir(): string {
+  return join(WORKS_DIR, "projects");
+}
+
+export async function newProject(name: string, parent?: string): Promise<string> {
   const slug = slugify(name);
   if (!slug) throw new Error("name the project");
-  const dir = join(WORKS_DIR, "projects", slug);
+  const where = parent?.trim() || projectsDir();
+  if (!where.startsWith("/")) throw new Error("the location must be an absolute path, like /srv/repos");
+  const dir = join(where, slug);
   if (existsSync(dir)) throw new Error(`a project named '${slug}' already exists, pick another name or start from it`);
   await mkdir(dir, { recursive: true });
   await run(dir, "git", ["init", "--quiet", "-b", "main"]);

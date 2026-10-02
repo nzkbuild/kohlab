@@ -298,6 +298,45 @@ try {
   const nameless = await fetch(`${base}/api/workspaces/${id}/image`, { method: "POST", headers: auth, body: "plain" });
   check("an unnamed non-image is still refused", nameless.status, 415);
 
+  // ── Files tab: create, upload, download, and nothing outside the tree ────
+  const fsOp = (op, path, body, extra = "") =>
+    fetch(`${base}/api/workspaces/${id}/fs?op=${op}&path=${encodeURIComponent(path)}${extra}`, { method: "POST", headers: auth, body });
+  check("a folder can be created", (await fsOp("mkdir", "docs/notes")).status, 200);
+  check("an empty file can be created", (await fsOp("touch", "docs/notes/todo.md")).status, 200);
+  check("it exists in the worktree", existsSync(join(tree, "docs/notes/todo.md")), true);
+  check("creating it twice is refused", (await fsOp("touch", "docs/notes/todo.md")).status, 409);
+  check("a file can be uploaded", (await fsOp("upload", "assets/logo.bin", "BYTES")).status, 200);
+  check("the upload's bytes land intact", readFileSync(join(tree, "assets/logo.bin"), "utf8"), "BYTES");
+  check("overwriting needs consent", (await fsOp("upload", "assets/logo.bin", "NEW")).status, 409);
+  check("with consent it overwrites", (await fsOp("upload", "assets/logo.bin", "NEW", "&overwrite=1")).status, 200);
+  check("../ cannot escape the tree", (await fsOp("touch", "../escape.txt")).status, 400);
+  check("an absolute path cannot escape either", existsSync("/tmp/kohlab-abs-escape") || (await fsOp("touch", "/tmp/kohlab-abs-escape")).status === 200 && existsSync(join(tree, "tmp/kohlab-abs-escape")), true);
+  check(".git is not writable", (await fsOp("touch", ".git/hooks/pre-commit")).status, 400);
+  spawnSync("ln", ["-s", "/etc", join(tree, "etc-link")]);
+  check("a symlink out of the tree cannot be written through", (await fsOp("touch", "etc-link/kohlab-pwned")).status, 400);
+  const rawLink = await fetch(`${base}/api/workspaces/${id}/raw?path=etc-link/hostname`, { headers: auth });
+  check("nor read through", rawLink.status, 400);
+  const raw = await fetch(`${base}/api/workspaces/${id}/raw?path=assets/logo.bin`, { headers: auth });
+  check("a file downloads with its bytes", raw.status === 200 && (await raw.text()) === "NEW", true);
+  check("as an attachment", /attachment; filename="logo.bin"/.test(raw.headers.get("content-disposition") ?? ""), true);
+  const tgz = await fetch(`${base}/api/workspaces/${id}/raw?path=docs`, { headers: auth });
+  const tgzBytes = new Uint8Array(await tgz.arrayBuffer());
+  check("a folder downloads as .tar.gz", tgz.status === 200 && tgzBytes[0] === 0x1f && tgzBytes[1] === 0x8b, true);
+  spawnSync("rm", ["-f", join(tree, "etc-link")]);
+  const located = await api("/api/workspaces", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "placed", agent: "sh", newProject: "placed one", location: join(dir, "elsewhere") }),
+  });
+  check("a new project can be created in a chosen folder", located.status === 200 && existsSync(join(dir, "elsewhere", "placed-one", ".git")), true);
+  const relLoc = await api("/api/workspaces", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ task: "rel", agent: "sh", newProject: "rel", location: "relative/dir" }),
+  });
+  check("a relative location is refused", relLoc.status, 400);
+  if (located.body?.id) await api(`/api/workspaces/${located.body.id}/delete`, { method: "POST", headers: jsonAuth });
+
   // ── it is auditable, because it destroys work ────────────────────────────
   const audit = await api("/api/audit", { headers: auth });
   const events = Array.isArray(audit.body?.events) ? audit.body.events : [];

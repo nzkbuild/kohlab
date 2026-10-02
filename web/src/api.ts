@@ -74,8 +74,33 @@ export const api = {
   },
   workspaces: () => json<Workspace[]>("/api/workspaces"),
   agentsStatus: () => json<AgentStatus>("/api/agents-status"),
-  create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
+  create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; location?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  paths: () => json<{ projects: string }>("/api/paths"),
+  /** Create a folder or an empty file in a workspace's tree. */
+  fsOp: (id: string, op: "mkdir" | "touch", path: string) =>
+    json<{ ok: boolean; path: string }>(`/api/workspaces/${encodeURIComponent(id)}/fs?op=${op}&path=${encodeURIComponent(path)}`, { method: "POST" }),
+  /** Upload one file into the tree at `path` (overwrite only when asked). */
+  putFile: (id: string, path: string, file: Blob, overwrite = false) =>
+    json<{ ok: boolean; path: string; bytes: number }>(
+      `/api/workspaces/${encodeURIComponent(id)}/fs?op=upload&path=${encodeURIComponent(path)}${overwrite ? "&overwrite=1" : ""}`,
+      { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file },
+    ),
+  /** Download a file, or a folder as .tar.gz, through the authenticated fetch. */
+  download: async (id: string, path: string): Promise<void> => {
+    const res = await req(`/api/workspaces/${encodeURIComponent(id)}/raw?path=${encodeURIComponent(path)}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || res.statusText);
+    }
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "download";
+    const href = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(href), 30_000);
+  },
   branches: (source: string) => json<{ branches: string[] }>(`/api/branches?source=${encodeURIComponent(source)}`),
   clone: (body: { url: string; task: string; agent: string; branch?: string; payload?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),

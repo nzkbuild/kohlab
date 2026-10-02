@@ -3,7 +3,8 @@
 import { serve } from "bun";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { execFile, spawn } from "child_process";
-import { chown, mkdir, open, readdir, readFile } from "fs/promises";
+import { chown, mkdir, open, readdir, readFile, realpath, stat, writeFile } from "fs/promises";
+import { dirname } from "path";
 import { isAbsolute, join, relative, resolve } from "path";
 import {
   createWorkspace,
@@ -15,6 +16,7 @@ import {
   continueWorkspace,
   cloneOrReuse,
   newProject,
+  projectsDir,
   listBranches,
   validGitUrl,
   startWorkspace,
@@ -220,6 +222,8 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
     payload?: string;
     /** Start a brand-new repository with this name instead of an existing one. */
     newProject?: string;
+    /** Folder the new project is created in; defaults to kohlab's projects folder. */
+    location?: string;
     limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number };
   };
   const task = (body.task ?? "").trim();
@@ -228,7 +232,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
     // A new project is a host path; members work from URLs only.
     if (actorUserId) return json({ error: "members start from a git URL" }, 403);
     try {
-      const repo = await newProject(body.newProject);
+      const repo = await newProject(body.newProject, body.location);
       return json(await createWorkspace({ repo, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits }));
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
@@ -614,11 +618,106 @@ async function handleFile(id: string, req: Request): Promise<Response> {
     const rel = url.searchParams.get("path") ?? "";
     const ws = await getWorkspace(id);
     const tree = worktreePath(ws);
-    const abs = resolve(tree, rel);
-    const relCheck = relative(tree, abs);
-    if (relCheck.startsWith("..") || isAbsolute(relCheck)) return json({ error: "invalid path" }, 400);
+    const abs = await insideTree(tree, rel, false);
     const buf = await readFile(abs, "utf8");
     return json({ path: rel, content: buf });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/**
+ * Resolve a path the browser sent against a workspace's tree, and refuse
+ * anything that lands outside it. Symlinks are followed (realpath) so a link
+ * inside the tree cannot point the server at /etc; for a path that does not
+ * exist yet, its nearest existing parent is what gets checked. `.git` is never
+ * writable from the browser.
+ */
+async function insideTree(tree: string, rel: string, forWrite: boolean): Promise<string> {
+  const root = await realpath(tree);
+  const abs = resolve(root, rel.replace(/^\/+/, ""));
+  let probe = abs;
+  for (;;) {
+    try {
+      probe = await realpath(probe);
+      break;
+    } catch {
+      const up = dirname(probe);
+      if (up === probe) throw new Error("invalid path");
+      probe = up;
+    }
+  }
+  const within = (p: string) => {
+    const r = relative(root, p);
+    return !r.startsWith("..") && !isAbsolute(r);
+  };
+  if (!within(probe) || !within(abs)) throw new Error("path is outside the workspace");
+  if (forWrite && relative(root, abs).split(/[\\/]/)[0] === ".git") throw new Error("the .git folder is not editable here");
+  return abs;
+}
+
+const MAX_FILE_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+/** A member's agent runs as their own OS user, so what the server writes is theirs. */
+async function giveToOwner(ownerId: string | undefined, ...paths: string[]) {
+  const owner = ownerId ? readUsers().find((u) => u.id === ownerId) : undefined;
+  if (owner?.uid === undefined || owner.gid === undefined) return;
+  for (const p of paths) await chown(p, owner.uid, owner.gid);
+}
+
+/** Download a file as bytes, or a folder as .tar.gz. */
+async function handleRaw(id: string, req: Request): Promise<Response> {
+  try {
+    const ws = await getWorkspace(id);
+    const rel = new URL(req.url).searchParams.get("path") ?? "";
+    const abs = await insideTree(worktreePath(ws), rel, false);
+    const info = await stat(abs);
+    const name = (rel.split("/").filter(Boolean).pop() ?? ws.id).replace(/"/g, "");
+    if (info.isDirectory()) {
+      const proc = Bun.spawn(["tar", "-czf", "-", "--exclude=.git", "-C", abs, "."], {
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      return new Response(proc.stdout, {
+        headers: { "content-type": "application/gzip", "content-disposition": `attachment; filename="${name}.tar.gz"` },
+      });
+    }
+    return new Response(Bun.file(abs), {
+      headers: { "content-type": "application/octet-stream", "content-disposition": `attachment; filename="${name}"` },
+    });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** Create a file or folder, or upload bytes into the tree (POST ?op=&path=). */
+async function handleFs(id: string, req: Request): Promise<Response> {
+  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+  try {
+    const ws = await getWorkspace(id);
+    const url = new URL(req.url);
+    const op = url.searchParams.get("op");
+    const rel = (url.searchParams.get("path") ?? "").trim();
+    if (!rel) return json({ error: "path is required" }, 400);
+    const abs = await insideTree(worktreePath(ws), rel, true);
+    const parent = dirname(abs);
+    if (op === "mkdir") {
+      await mkdir(abs, { recursive: true });
+      await giveToOwner(ws.ownerId, abs);
+      return json({ ok: true, path: rel });
+    }
+    if (op === "touch" || op === "upload") {
+      const exists = await stat(abs).then(() => true, () => false);
+      if (exists && url.searchParams.get("overwrite") !== "1") return json({ error: `${rel} already exists` }, 409);
+      if (Number(req.headers.get("content-length") ?? 0) > MAX_FILE_UPLOAD_BYTES) return json({ error: "file exceeds 100 MiB" }, 413);
+      const bytes = op === "upload" ? new Uint8Array(await req.arrayBuffer()) : new Uint8Array();
+      if (bytes.length > MAX_FILE_UPLOAD_BYTES) return json({ error: "file exceeds 100 MiB" }, 413);
+      await mkdir(parent, { recursive: true });
+      await writeFile(abs, bytes);
+      await giveToOwner(ws.ownerId, abs);
+      return json({ ok: true, path: rel, bytes: bytes.length });
+    }
+    return json({ error: "op must be mkdir, touch or upload" }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -844,7 +943,7 @@ async function ensurePtySession(id: string, terminalId = "main") {
 async function handle(req: Request, server: Server<any>): Promise<Response | undefined> {
     const url = new URL(req.url);
     const path = url.pathname;
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|image|share|log)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -907,20 +1006,21 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
 
     if (m) {
       const [, id, action] = m;
-      const shareReadOnly = action === "diff" || action === "files" || action === "file" || action === "log";
+      const shareReadOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "log";
       // share-token access to this workspace is read-only
       if (shareIdRes === id && shareReadOnly) {
         switch (action) {
           case "diff": return handleDiff(id);
           case "files": return handleFiles(id);
           case "file": return handleFile(id, req);
+          case "raw": return handleRaw(id, req);
           case "log": return handleLog(id);
         }
       }
       // v1.8 ownership: a named member/viewer may only touch their own
       // workspaces (share-token reads already returned above). Owners and
       // the legacy/anonymous single-user flows pass through.
-      const readOnly = action === "diff" || action === "files" || action === "file" || action === "log";
+      const readOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "log";
       if (!(await mayAccessWorkspace(auth, id))) {
         return json({ error: "forbidden, not your workspace" }, 403);
       }
@@ -951,6 +1051,8 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
         case "diff": return handleDiff(id);
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
+        case "raw": return handleRaw(id, req);
+        case "fs": containFailure(audit(actor, "fs", id, new URL(req.url).searchParams.get("op") ?? undefined), "audit"); return handleFs(id, req);
         case "log": return handleLog(id);
         case "image":
           if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
@@ -1110,6 +1212,12 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
       if (refused) return refused;
       containFailure(audit(actor, "clone", undefined), "audit");
       return handleClone(req, actorUserId);
+    }
+    if (path === "/api/paths" && req.method === "GET") {
+      if (denied) return json({ error: "unauthorized" }, 401);
+      // Host paths are owner knowledge; members work from URLs.
+      if (actorUserId) return json({ error: "forbidden" }, 403);
+      return json({ projects: projectsDir() });
     }
     if (path === "/api/branches" && req.method === "GET") {
       if (denied) return json({ error: "unauthorized" }, 401);

@@ -74,7 +74,7 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
             <EmptyState
               icon={<FileCode size={18} />}
               title="No file open"
-              description="Pick a file from the tree to read it here. Nothing is editable, this view is for reading the agent's changes."
+              description="Pick a file to read it here. The buttons above the tree add files and folders, upload from your computer (or drop files on the tree), and download a file, a folder, or the whole workspace."
             />
           )}
         </div>

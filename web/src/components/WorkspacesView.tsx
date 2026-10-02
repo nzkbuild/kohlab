@@ -117,6 +117,11 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const [repo, setRepo] = useState("");
   const [url, setUrl] = useState("");
   const [projectName, setProjectName] = useState("");
+  const [location, setLocation] = useState("");
+  const [projectsHome, setProjectsHome] = useState<string | null>(null);
+  useEffect(() => {
+    if (can.own) api.paths().then((p) => setProjectsHome(p.projects), () => {});
+  }, [can.own]);
   const [agent, setAgent] = useState("");
   const [target, setTarget] = useState("");
   const [branch, setBranch] = useState("");
@@ -218,7 +223,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
           source === "clone"
             ? await api.clone({ url: url.trim(), ...common })
             : source === "new"
-              ? await api.create({ ...common, branch: undefined, newProject: projectName.trim() })
+              ? await api.create({ ...common, branch: undefined, newProject: projectName.trim(), location: location.trim() || undefined })
               : await api.create({ ...common, repo: chosenRepo || undefined });
         await refresh();
         announce(`${created.id} created, the agent is starting`);
@@ -317,16 +322,38 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
       ) : null}
 
       {source === "new" ? (
-        <Field label="Project name" htmlFor="launch-project" help="An empty git repository is created on this server, then the agent starts in it.">
-          <input
-            id="launch-project"
-            className="field-input"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            placeholder="invoice-parser"
-            autoComplete="off"
-          />
-        </Field>
+        <>
+          <Field label="Project name" htmlFor="launch-project" help="A new folder with an empty git repository, then the agent starts in it.">
+            <input
+              id="launch-project"
+              className="field-input"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="invoice-parser"
+              autoComplete="off"
+            />
+          </Field>
+          <Field
+            label="Create in"
+            htmlFor="launch-location"
+            help={`Any folder on this server. Leave empty for ${projectsHome ?? "kohlab's projects folder"}.${projectName.trim() ? ` The project will be ${(location.trim() || projectsHome || "…").replace(/\/+$/, "")}/${projectName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}` : ""}`}
+          >
+            <input
+              id="launch-location"
+              className="field-input mono"
+              list="launch-location-options"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder={projectsHome ?? "/srv/repos"}
+              autoComplete="off"
+            />
+            <datalist id="launch-location-options">
+              {[...new Set(recentRepos.map((r) => r.replace(/\/[^/]+\/?$/, "")))].map((d) => (
+                <option key={d} value={d} />
+              ))}
+            </datalist>
+          </Field>
+        </>
       ) : null}
 
       {source === "continue" ? (
