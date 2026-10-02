@@ -17,7 +17,7 @@ interface Row {
   depth: number;
 }
 
-/** Visible rows in visual order — the order the arrow keys walk. */
+/** Visible rows in visual order, the order the arrow keys walk. */
 function flattenTree(nodes: TreeNode[], expanded: Set<string>, depth = 0, prefix = ""): Row[] {
   const rows: Row[] = [];
   for (const node of nodes) {
@@ -128,12 +128,14 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-10 items-center gap-2 border-b border-line-subtle px-3">
-        <span className="section-label flex-1 truncate">Files</span>
-        <Button variant="quiet" size="sm" iconOnly aria-label="Refresh file tree" onClick={() => void load()}>
+      {/* Sidebar-like pane, but the same pane header as the rest: same height,
+          padding, border and title treatment. */}
+      <header className="cockpit-head">
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">Files</h2>
+        <Button variant="quiet" size="sm" iconOnly aria-label="refresh file tree" onClick={() => void load()}>
           <ArrowsClockwise size={13} />
         </Button>
-      </div>
+      </header>
 
       <div className="min-h-0 flex-1 overflow-auto p-1.5">
         {error ? (
@@ -148,7 +150,7 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
         ) : rows.length === 0 ? (
           <p className="p-2 text-xs text-text-muted">No files in this workspace yet.</p>
         ) : (
-          <div ref={containerRef} role="tree" aria-label={`Files in ${workspaceId}`}>
+          <div ref={containerRef} role="tree" aria-label={`files in ${workspaceId}`}>
             {rows.map((row, index) => {
               const dir = row.type === "dir";
               const open = dir && expanded.has(row.path);
@@ -173,7 +175,7 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
                 >
                   {dir ? (
                     <CaretRight
-                      size={10}
+                      size={12}
                       aria-hidden="true"
                       className={cn("shrink-0 transition-transform", open && "rotate-90")}
                     />

@@ -16,7 +16,7 @@ import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 import { Announcer, Button, SkeletonRows, TooltipProvider } from "./components/ui";
 
-// xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch* —
+// xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch*,
 // a static import would pull them into the entry chunk and block first paint.
 const WorkspaceDetail = lazy(() => import("./components/WorkspaceDetail"));
 
@@ -27,10 +27,16 @@ export default function App() {
   const workspaces = useApp((s) => s.workspaces);
   const loading = useApp((s) => s.loading);
   const error = useApp((s) => s.error);
+  const loadMe = useApp((s) => s.loadMe);
 
   const [navOpen, setNavOpen] = useState(false);
 
   useSync();
+
+  // Role decides which controls render, so it is read once per sign-in.
+  useEffect(() => {
+    if (isAuthed) void loadMe();
+  }, [isAuthed, loadMe]);
 
   // Auth bootstrap: only prompt when the server actually requires a key.
   useEffect(() => {
@@ -51,7 +57,7 @@ export default function App() {
   // notification, so it carries the review count rather than a transient flash.
   useEffect(() => {
     const review = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
-    document.title = review > 0 ? `kohlab — ${review} ready for review` : "kohlab";
+    document.title = review > 0 ? `kohlab, ${review} ready for review` : "kohlab";
   }, [workspaces]);
 
   // The drawer is a mobile affordance; leaving it open across a route change
@@ -106,7 +112,7 @@ export default function App() {
 
             {/* No route label here: every surface renders its own <h1> directly
                 below, so a label in the bar reads as the title twice. On mobile
-                this bar is the app chrome — menu button and brand — and the page
+                this bar is the app chrome (menu button and brand) and the page
                 supplies the heading. */}
             <span className="text-base font-semibold tracking-tight">kohlab</span>
 
@@ -124,7 +130,7 @@ export default function App() {
 
             <ErrorBoundary label={ROUTE_LABEL[route.kind]}>
               {route.kind === "settings" ? <Settings /> : null}
-              {route.kind === "dashboard" ? (
+              {route.kind === "workspaces" ? (
                 loading ? (
                   <div className="surface">
                     <div className="surface-inner">

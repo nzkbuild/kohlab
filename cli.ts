@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// kohlab — PTY-backed coding-agent workspace CLI
+// kohlab: PTY-backed coding-agent workspace CLI
 
 import { spawn, spawnSync } from "child_process";
 import { accessSync, constants, readFileSync, writeFileSync } from "fs";
@@ -26,6 +26,8 @@ import {
   listUsers,
   addUser,
   removeUser,
+  createPair,
+  PAIR_TTL_MS,
   readAudit,
   ptyDisconnect,
   getWorkspace,
@@ -129,7 +131,7 @@ async function main() {
       const ws = await getWorkspace(args[0]);
       const log = await ptyLog(sessionId(ws.id));
       if (!log) {
-        console.log(`no output from ${ws.id} yet — start it: kohlab start ${ws.id}`);
+        console.log(`no output from ${ws.id} yet, start it: kohlab start ${ws.id}`);
         break;
       }
       process.stdout.write(log.endsWith("\n") ? log : log + "\n");
@@ -158,7 +160,7 @@ async function main() {
         console.log(`new key written to ${join(WORKS_DIR, "key")}\n`);
         console.log(next);
         console.log(`\nthe running server still uses the old one. to apply it:`);
-        console.log(`  1. if ${UNIT} sets KOHLAB_KEY, replace that value with the key above`);
+        console.log(`  1. put it in the unit's EnvironmentFile (KOHLAB_KEY=...), or wherever ${UNIT} sets KOHLAB_KEY`);
         console.log(`  2. sudo systemctl daemon-reload && sudo systemctl restart ${UNIT}`);
         console.log(`\nthe old key stops working the moment the server restarts.`);
         break;
@@ -171,6 +173,18 @@ async function main() {
       }
       console.log(found[1]);
       console.error(`(from ${found[0]})`);
+      break;
+    }
+    case "pair": {
+      // The device-grant bootstrap: mint a short code on the box that is
+      // already trusted, type it on the device that is not. The key itself
+      // still never leaves this shell — it travels only inside the claim
+      // response, over the same TLS the dashboard already uses.
+      const code = await createPair();
+      console.log(`pairing code:  ${code}`);
+      console.log(`\non the new device, open the dashboard and choose`);
+      console.log(`"got a pairing code?", then type the code in.`);
+      console.log(`one use, ${Math.round(PAIR_TTL_MS / 60000)} minutes, then run this again.`);
       break;
     }
     case "status": {
@@ -203,7 +217,7 @@ async function main() {
         try {
           const { key } = await addUser({ id, name, role: role as "owner" | "member" | "viewer" });
           console.log(`created user '${id}' (${role})`);
-          console.log(`key (shown once — store it now): ${key}`);
+          console.log(`key (shown once, store it now): ${key}`);
         } catch (e) {
           console.error((e as Error).message);
           process.exit(1);
@@ -267,11 +281,11 @@ async function main() {
     }
     case "health": {
       // Answers locally, so it works when the *server* is the thing that is
-      // broken — which is when someone runs it. It probes rather than reading a
+      // broken: which is when someone runs it. It probes rather than reading a
       // flag: this process has no daemon socket of its own, so a "is the socket
       // open" check here would report DOWN every time.
       const sessions = await ptyList();
-      console.log(`daemon:    ${sessions ? `up (${sessions.length} session${sessions.length === 1 ? "" : "s"})` : "DOWN — every live session is gone with it"}`);
+      console.log(`daemon:    ${sessions ? `up (${sessions.length} session${sessions.length === 1 ? "" : "s"})` : "DOWN, every live session is gone with it"}`);
       console.log(`socket:    ${process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock"}`);
       console.log(`state dir: ${WORKS_DIR}`);
       console.log(`schema:    ${SCHEMA_VERSION}`);
@@ -294,7 +308,7 @@ async function main() {
       break;
     case undefined:
       // Standard CLI behaviour: no arguments prints the command list. Use
-      // `kohlab open` for the dashboard — a bare command that launches a
+      // `kohlab open` for the dashboard: a bare command that launches a
       // browser is a surprise on a headless server.
       usage();
       break;
@@ -307,21 +321,48 @@ async function main() {
 /**
  * Where the dashboard actually is: loopback plus every non-internal IPv4 this
  * box has (the Tailscale address shows up here), the SSH tunnel for anything
- * else, and the state directory in use — so "which fleet am I looking at?" is
+ * else, and the state directory in use: so "which fleet am I looking at?" is
  * never a guess.
  */
 function printDashboard() {
   const port = process.env.PORT ?? "7676";
+  // The address worth bookmarking: a `tailscale serve` route to this port, if
+  // there is one (fixed name, real TLS, tailnet only).
+  let serveUrl: string | undefined;
+  try {
+    const web = JSON.parse(spawnSync("tailscale", ["serve", "status", "--json"], { encoding: "utf8" }).stdout || "{}").Web ?? {};
+    for (const [hostPort, cfg] of Object.entries<any>(web)) {
+      const proxies = Object.values<any>(cfg?.Handlers ?? {}).map((h) => String(h?.Proxy ?? ""));
+      if (proxies.some((p) => new RegExp(`^https?://(127\\.0\\.0\\.1|localhost):${port}/?$`).test(p))) {
+        serveUrl = `https://${hostPort.replace(/:443$/, "")}`;
+        break;
+      }
+    }
+  } catch {
+    /* no tailscale: fine */
+  }
+  // Only print other addresses when the server actually listens on them. Bound
+  // to loopback (the default when exposed through a proxy), they would be dead links.
+  const listen = spawnSync("ss", ["-ltnH", `sport = :${port}`], { encoding: "utf8" }).stdout ?? "";
+  // Column 4 is the local address; column 5 (the peer, "0.0.0.0:*") must not count.
+  const locals = listen.trim().split("\n").filter(Boolean).map((l) => l.trim().split(/\s+/)[3] ?? "");
+  const loopbackOnly = locals.length > 0 && locals.every((a) => /^(127\.|\[::1\]|localhost)/.test(a));
   const extra: string[] = [];
-  for (const [name, addrs] of Object.entries(networkInterfaces())) {
-    for (const a of addrs ?? []) {
-      if (a.family === "IPv4" && !a.internal) extra.push(`http://${a.address}:${port}   (${name})`);
+  if (!loopbackOnly) {
+    for (const [name, addrs] of Object.entries(networkInterfaces())) {
+      for (const a of addrs ?? []) {
+        if (a.family === "IPv4" && !a.internal) extra.push(`http://${a.address}:${port}   (${name})`);
+      }
     }
   }
-  console.log(`dashboard:  http://localhost:${port}`);
+  if (serveUrl) console.log(`dashboard:  ${serveUrl}   (bookmark this; tailnet devices only)`);
+  console.log(`${serveUrl ? "on the box:" : "dashboard: "} http://localhost:${port}`);
   for (const u of extra) console.log(`            ${u}`);
-  console.log(`tunnel:     ssh -L ${port}:localhost:${port} ${userInfo().username}@${hostname()}`);
-  console.log(`state:      ${WORKS_DIR}`);
+  if (!serveUrl && loopbackOnly) {
+    console.log(`tunnel:     ssh -L ${port}:localhost:${port} ${userInfo().username}@${hostname()}`);
+    console.log(`            or a fixed private link: tailscale serve --bg --https=8444 http://127.0.0.1:${port}`);
+  }
+  console.log(`first time on a device? run: kohlab key   (or kohlab pair, for a phone)`);
 }
 
 /** Open the dashboard in the browser, or print the URL if headless. */
@@ -334,7 +375,19 @@ const UNIT = process.env.KOHLAB_UNIT ?? "kohlab";
 /** The key as configured in the service unit, if there is one. */
 function unitKey(): string | undefined {
   // systemd merges every Environment= line into one, so match anywhere on it.
-  return /KOHLAB_KEY=([^ ]+)/.exec(systemctl(["show", UNIT, "-p", "Environment"]).out)?.[1];
+  const inline = /KOHLAB_KEY=([^ ]+)/.exec(systemctl(["show", UNIT, "-p", "Environment"]).out)?.[1];
+  if (inline) return inline;
+  // Since 1.17 the key lives in a 0600 EnvironmentFile, not the world-readable
+  // unit, and `show -p Environment` does not expand those files.
+  for (const m of systemctl(["show", UNIT, "-p", "EnvironmentFiles"]).out.matchAll(/EnvironmentFiles=(\S+)/g)) {
+    try {
+      const key = /^KOHLAB_KEY=(.+)$/m.exec(readFileSync(m[1], "utf8"))?.[1]?.trim();
+      if (key) return key;
+    } catch {
+      /* not readable as this user: fall through */
+    }
+  }
+  return undefined;
 }
 
 /** The key generated at startup, if one was. */
@@ -352,7 +405,7 @@ function version(): { version: string; commit: string } {
   try {
     v = JSON.parse(readFileSync(join(import.meta.dir, "package.json"), "utf8")).version;
   } catch {
-    /* not a checkout — report the placeholder rather than dying */
+    /* not a checkout, report the placeholder rather than dying */
   }
   const commit = spawnSync("git", ["-C", import.meta.dir, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).stdout?.trim() ?? "";
   return { version: v, commit };
@@ -376,7 +429,7 @@ async function printStatus() {
   const port = process.env.PORT ?? "7676";
   const up = await probePort(port);
 
-  // the unit, when there is one — how the server is meant to stay up
+  // the unit, when there is one: how the server is meant to stay up
   const unit = systemctl(["is-active", "kohlab"]);
   if (unit.available) {
     const enabled = systemctl(["is-enabled", "kohlab"]).out;
@@ -393,7 +446,7 @@ async function printStatus() {
   try {
     const release = await checkRelease();
     if (release.error) console.log(`  update      ${NOTE} could not check${dim(release.error)}`);
-    else if (release.available) console.log(`  update      ${NOTE} v${release.latest} available${dim(`${release.commits.length} commit(s) — kohlab update`)}`);
+    else if (release.available) console.log(`  update      ${NOTE} v${release.latest} available${dim(`${release.commits.length} commit(s), kohlab update`)}`);
     else console.log(`  update      ${TICK} up to date${dim(`v${release.current}`)}`);
   } catch {
     /* status must never fail on a network check */
@@ -413,7 +466,7 @@ async function doctor() {
   for (const dep of ["git", "bun"]) {
     const r = spawnSync(dep, ["--version"], { encoding: "utf8" });
     if (r.status === 0) ok(dep, (r.stdout ?? "").trim().split("\n")[0]);
-    else bad(dep, "not on PATH — install it, then re-run");
+    else bad(dep, "not on PATH, install it, then re-run");
   }
 
   const self = spawnSync("which", ["kohlab"], { encoding: "utf8" }).stdout?.trim();
@@ -440,16 +493,15 @@ async function doctor() {
   // The one misconfiguration that silently costs you every live agent.
   const killMode = systemctl(["show", "kohlab", "-p", "KillMode"]).out.replace(/^KillMode=/, "");
   if (killMode === "process") ok("KillMode=process", "a restart keeps every live agent session");
-  else if (killMode) bad(`KillMode=${killMode}`, "a restart kills the PTY daemon and every live agent — see docs/systemd.md");
+  else if (killMode) bad(`KillMode=${killMode}`, "a restart kills the PTY daemon and every live agent, see docs/systemd.md");
 
   const port = process.env.PORT ?? "7676";
   if (await probePort(port)) ok("dashboard", `http://localhost:${port}`);
   else warn(`nothing answering on :${port}`, "start it: kohlab serve");
 
-  // The key lives in the unit, not in this process's environment — checking
+  // The key lives in the unit, not in this process's environment: checking
   // process.env alone reported a false alarm on every healthy deployment.
-  const unitEnv = systemctl(["show", "kohlab", "-p", "Environment"]).out;
-  if (process.env.KOHLAB_KEY || /KOHLAB_KEY=[^ ]/.test(unitEnv)) {
+  if (process.env.KOHLAB_KEY || unitKey()) {
     ok("access key set");
   } else {
     warn("no access key", "set KOHLAB_KEY in the unit, or the dashboard is open to anything that reaches the port");
@@ -482,7 +534,7 @@ function flag(args: string[], name: string): string | undefined {
 
 function usage(extra?: string, code = extra ? 1 : 0) {
   if (extra) console.error(`usage: kohlab ${extra}\n`);
-  console.log(`kohlab — run AI coding agents in parallel, persistently, from any device
+  console.log(`kohlab, run AI coding agents in parallel, persistently, from any device
 
 usage: kohlab <command> [options]
 
@@ -520,6 +572,7 @@ access
   health                                     is the daemon up? (answers locally)
   key                                        print the access key (from this box)
   key rotate                                 issue a new one and say how to apply it
+  pair                                       mint a one-time code to sign in a new device
 
 agents
   agents                                     list agent launchers

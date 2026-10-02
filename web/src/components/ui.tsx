@@ -2,29 +2,30 @@ import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "re
 import * as RadixTabs from "@radix-ui/react-tabs";
 import * as RadixMenu from "@radix-ui/react-dropdown-menu";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
-
-/** Dialog parts are styled by .dialog-overlay / .dialog-content; re-exported so
- *  surfaces still import every Radix primitive through this file. */
-export * as Dialog from "@radix-ui/react-dialog";
+import { CaretRight, Check, Diamond, Play, Square, X } from "@phosphor-icons/react";
 import { cn } from "../lib/utils";
 import { subscribeAnnouncements } from "../lib/announce";
-import { CaretRight, Check, Diamond, Play, Square } from "@phosphor-icons/react";
 import { STATUS_CHIP, STATUS_LABEL, type WorkspaceStatus } from "../lib/status";
 
-/** Shape cue per status, so state survives greyscale and forced-colors. */
-const STATUS_ICON = {
+/** Dialog parts are styled by .dialog-overlay / .dialog-content; re-exported so
+ *  surfaces import every Radix primitive through this file. */
+export * as Dialog from "@radix-ui/react-dialog";
+
+/** Shape cue per status, drawn from the icon set rather than text glyphs. */
+const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
   running: <Play size={9} weight="fill" />,
   "needs-review": <Diamond size={9} weight="fill" />,
   committed: <Check size={10} weight="bold" />,
+  discarded: <X size={10} weight="bold" />,
   stopped: <Square size={8} weight="fill" />,
-} as const;
+};
 
 /* ------------------------------------------------------------------ button -- */
 
 type ButtonVariant = "primary" | "secondary" | "quiet" | "danger";
 type ButtonSize = "md" | "sm";
 
-/** Fully static class strings — Tailwind cannot see interpolated names. */
+/** Fully static class strings, Tailwind cannot see interpolated names. */
 const BUTTON_VARIANT: Record<ButtonVariant, string> = {
   primary: "btn-primary",
   secondary: "btn-secondary",
@@ -38,7 +39,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   iconOnly?: boolean;
-  /** Required when iconOnly — the visible label is absent, the name is not. */
+  /** Required when iconOnly, the visible label is absent, the name is not. */
   "aria-label"?: string;
 }
 
@@ -181,7 +182,17 @@ export function MenuItem({ tone, className, ...rest }: RadixMenu.DropdownMenuIte
 export const TooltipProvider = RadixTooltip.Provider;
 
 /** Supplementary only: the trigger must carry its own accessible name. */
-export function Tooltip({ content, side = "right", disabled, children }: { content: ReactNode; side?: RadixTooltip.TooltipContentProps["side"]; disabled?: boolean; children: ReactNode }) {
+export function Tooltip({
+  content,
+  side = "right",
+  disabled,
+  children,
+}: {
+  content: ReactNode;
+  side?: RadixTooltip.TooltipContentProps["side"];
+  disabled?: boolean;
+  children: ReactNode;
+}) {
   if (disabled) return <>{children}</>;
   return (
     <RadixTooltip.Root>
@@ -315,4 +326,16 @@ export function Announcer() {
     [],
   );
   return <div ref={ref} role="status" aria-live="polite" aria-atomic="true" className="sr-only" />;
+}
+
+/** The Kohlab mark (brand/kohlab-mark.svg): cursor-bar stem, branch arm, and the
+ *  session dot that outlives the connection. Inherits colour from its parent. */
+export function BrandMark({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <rect x="6" y="5" width="4.6" height="22" rx="1.4" fill="currentColor" />
+      <path d="M10.6 16.4 23 6.6M10.6 16.4 19.2 22" stroke="currentColor" strokeWidth="4.6" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="24.8" cy="26.8" r="2.9" fill="currentColor" />
+    </svg>
+  );
 }

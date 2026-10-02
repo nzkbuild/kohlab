@@ -5,7 +5,7 @@
 Open a [private security advisory](https://github.com/nzkbuild/kohlab/security/advisories/new)
 on this repository. Please do not open a public issue for anything exploitable.
 
-Include what you did, what you expected, and what happened — a command or a
+Include what you did, what you expected, and what happened, a command or a
 sequence of clicks is worth more than a description. If you can, say which version
 (`kohlab --version`, or the tag you installed from).
 
@@ -53,7 +53,7 @@ Behaviour worth knowing, each asserted by a check:
 - **Every gate answers 401 before 403.** A request with no credentials is told it
   sent nothing; a request with insufficient credentials is told it is not enough.
   Because this is one predicate rather than a convention, a new route cannot
-  accidentally inherit an open door — the failure mode that shipped once already.
+  accidentally inherit an open door, the failure mode that shipped once already.
 - **Guessing is throttled** (20 refusals per address per minute, in memory). The key
   is checked before the throttle is consulted, so a correct key still works after a
   run of wrong ones. A dead key reports 429 rather than 401 while the window is

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowsClockwise, Bell, BellRinging, Cpu, HardDrives, SpeakerHigh, WarningCircle } from "@phosphor-icons/react";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { announce, setAnnouncementsPaused } from "../lib/announce";
 import { cn } from "../lib/utils";
 import Account from "./Account";
@@ -20,7 +20,7 @@ const PERMISSION_LABEL: Record<Permission, string> = {
   denied: "blocked",
 };
 
-/** Chip class per permission state — static map, Tailwind cannot read a template. */
+/** Chip class per permission state, static map, Tailwind cannot read a template. */
 const PERMISSION_CHIP: Record<Permission, string> = {
   unsupported: "chip-stopped",
   default: "chip-stopped",
@@ -30,6 +30,7 @@ const PERMISSION_CHIP: Record<Permission, string> = {
 
 /** Settings: agents, server facts, notifications, team. */
 export default function Settings() {
+  const can = useCan();
   const workspaceCount = useApp((s) => s.workspaces.length);
 
   // Read, never request: `Notification.permission` is free, and browsers only
@@ -103,6 +104,9 @@ export default function Settings() {
           </table>
         </Panel>
 
+        {/* Only an owner can update the server, so nobody else is shown a
+            button the server would refuse. */}
+        {can.own ? (
         <Panel className="mt-4">
           <PanelHead
             title="Updates"
@@ -111,6 +115,7 @@ export default function Settings() {
           />
           <UpdatePanel />
         </Panel>
+        ) : null}
 
         <Panel className="mt-4">
           <PanelHead title="Notifications" icon={<Bell size={15} aria-hidden="true" />} meta="what reaches you when the tab is hidden" />
@@ -129,13 +134,13 @@ export default function Settings() {
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-text-muted">
                   A ping when an agent finishes and its workspace needs review while this tab is
-                  hidden. Nothing is sent while the tab is in front of you — that is what the
+                  hidden. Nothing is sent while the tab is in front of you, that is what the
                   sidebar badge is for.
                 </p>
                 {permission === "denied" ? (
                   <p className="mt-1.5 flex items-start gap-1.5 text-xs text-status-danger">
                     <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
-                    The browser will not ask again — allow notifications for this site in your browser
+                    The browser will not ask again, allow notifications for this site in your browser
                     settings, then reload.
                   </p>
                 ) : null}
@@ -166,7 +171,7 @@ export default function Settings() {
                 <span className="min-w-0">
                   <span className="flex items-center gap-1.5 text-xs text-text-primary">
                     <SpeakerHigh size={14} className="text-text-muted" aria-hidden="true" />
-                    Pause screen-reader announcements
+                    pause screen-reader announcements
                   </span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
                     Stops the live region from announcing workspace state changes (finished, needs

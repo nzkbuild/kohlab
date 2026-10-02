@@ -7,7 +7,52 @@ and this project adheres to Semantic Versioning.
 
 Kohlab's versioning philosophy:
 
-- **1.x line is home.** Steady growth — features, fixes, improvements — stays on 1.x.
+- **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
+
+## [1.17.0] - 2026-10-02
+
+Review comes first, a new device signs in without the key, and the key stops
+sitting in a world-readable file.
+
+### Added
+
+- **`kohlab pair`, sign in a new device with a short code.** The server mints a
+  one-time `XXXX-XXXX` code (RFC 8628 alphabet, hashed at rest, 10 minutes, one
+  claim); the sign-in screen trades it for access. The key never has to cross
+  devices by hand.
+- **Merge from the dashboard**, once a workspace is committed, into its own
+  checkout. Prints the reset that undoes it, like the CLI.
+- **One home screen.** `/` is the review queue (oldest first), then every
+  workspace. The separate Command center is gone; `/workspaces` still works.
+- **`/new` opens the create form**, from the sidebar and the palette.
+- **The workspace pane is in the URL** (`/w/<id>/review`), and work waiting for
+  review opens on Review.
+- **Role-aware controls.** Viewers and members are no longer offered actions the
+  server refuses; a viewer sees "view only" and a one-line reason.
+- **Brand mark and favicon** from `brand/`.
+- **`scripts/check-browser.mjs`**, check 21: 74 assertions on the built UI at
+  320, 390, 768 and 1280px (one `h1`, no sideways scroll, 24px targets, review
+  routing, no third-party requests, no CSP violations).
+
+### Changed
+
+- **Monaco is served from this server**, not cdn.jsdelivr.net, so Review and
+  Files work without outbound internet. It is themed from the same tokens as the
+  terminal.
+- **Review marks survive switching tabs** (session storage, per round of work).
+- Commit and merge confirm in a neutral tone and name the file count; red is
+  kept for discard and delete.
+- Update polling pauses while the tab is hidden.
+
+### Security
+
+- **The access key leaves the systemd unit.** Unit files are world-readable and
+  members' agents run as their own users on the same box. `install.sh` now
+  writes `~/.kohlab/kohlab.env` (0600) with `EnvironmentFile=`; re-running it
+  migrates an existing unit. `kohlab key` and `doctor` read the env file.
+- **Security headers on every response:** `Content-Security-Policy`
+  (`script-src 'self' 'wasm-unsafe-eval'`, measured against the build),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
 
 ## [1.16.0] - 2026-09-20
 
@@ -16,7 +61,7 @@ where it had drifted from what is actually in the repository.
 
 ### Added
 
-- **`kohlab merge <id>` — the review last mile is a command.** Accepting a
+- **`kohlab merge <id>`, the review last mile is a command.** Accepting a
   workspace committed on `kohlab/<id>` and then stopped: the work was reviewed and
   safe, and getting it into your own branch was a paragraph of git you had to
   remember. It merges with `--no-ff` and prints the `reset --hard` that undoes it.
@@ -25,7 +70,7 @@ where it had drifted from what is actually in the repository.
   a branch with nothing on it (`Accept the workspace first`), refuses to merge a
   branch into itself, refuses a bare clone with advice instead, and on conflict
   **aborts and leaves the repository exactly as it found it**.
-- **`scripts/check-a11y-static.mjs`** — a source scan for the accessibility faults
+- **`scripts/check-a11y-static.mjs`**, a source scan for the accessibility faults
   visible in markup: clickable non-interactive elements, missing `alt`, unlabelled
   controls, positive `tabindex`, a removed focus ring, a page with no language, no
   live region. It reads whole JSX elements rather than single lines, because props
@@ -33,12 +78,12 @@ where it had drifted from what is actually in the repository.
   **verifies itself** against seven planted faults, since a scanner silently broken
   by a regex change would report a clean codebase forever. Findings are fixed or
   acknowledged in code with `a11y-ok: <reason>`.
-- **`scripts/check-load.mjs`** — performance budgets, in the suite. Nothing here
+- **`scripts/check-load.mjs`**, performance budgets, in the suite. Nothing here
   measured latency before this; every claim that the dashboard stays responsive was
   an impression. With 50 workspaces: `GET /api/workspaces` p50 8 ms, p95 14 ms, 20
   concurrent mixed requests in 45 ms, no 5xx, and reads proven not to write the
   audit trail. Budgets are tunable (`PERF_P95_MS`, `PERF_WORKSPACES`).
-- **[docs/accessibility.md](docs/accessibility.md)** — what is verified and, at
+- **[docs/accessibility.md](docs/accessibility.md)**, what is verified and, at
   more length, what is not: no browser-based DOM audit, no screen-reader pass, no
   reflow or keyboard-only testing, no ACR. It replaces an unsupported claim.
 - `--into <checkout>` and `--message` on `kohlab merge`.
@@ -75,14 +120,14 @@ did not write it.
   refused rather than read: reading it would mean working with fields this build
   does not know about and then writing the file back without them, which turns a
   downgrade into silent data loss. Refusing to start is recoverable; writing over
-  it is not. A versionless file — every install predating this release — is loaded
+  it is not. A versionless file (every install predating this release) is loaded
   as version 0, stamped, and kept. Both paths are exercised by a check, and the
   versionless one is the path every existing install takes.
 - **`GET /api/health`**, the same shape `kohlab health` reads. Without credentials
   it answers liveness and nothing else, because a probe usually runs unkeyed and a
   health endpoint should not be reconnaissance. With credentials it reports the
-  version, schema, uptime, the state directory, whether a key is required, and —
-  from the daemon, which is the only thing that actually knows — how many agent
+  version, schema, uptime, the state directory, whether a key is required, and,
+  from the daemon, which is the only thing that actually knows, how many agent
   sessions are live.
 - **`kohlab health`.** Answers locally, so it works when the server is the thing
   that is broken. It probes the daemon rather than reading a flag: a one-shot CLI
@@ -93,9 +138,9 @@ did not write it.
   death ends every live session at once; the chips used to keep reading "running"
   for work that was no longer happening. The death is pushed to every open
   dashboard and written to the audit trail, and `/api/health` keeps reporting
-  `lastDaemonDeath` after a probe has brought a new daemon up — otherwise an
+  `lastDaemonDeath` after a probe has brought a new daemon up, otherwise an
   outage that killed every session would leave no trace anywhere a monitor looks.
-- **`kohlab backup [file]`** and **`kohlab restore <file>`** — state, members,
+- **`kohlab backup [file]`** and **`kohlab restore <file>`**, state, members,
   audit trail and generated key in one tar. A restore moves the files it replaces
   aside rather than deleting them, and refuses an archive containing a path.
   [docs/backup.md](docs/backup.md) says what a backup does and does not contain.
@@ -103,19 +148,19 @@ did not write it.
   (`AUDIT_KEEP`), and records the roll in the new log. Best-effort throughout:
   losing old history is bad, refusing to record new events is worse.
 - **`bash install.sh --uninstall`** and [docs/uninstall.md](docs/uninstall.md).
-  Deliberately non-destructive — it stops the service and removes the unit, the
+  Deliberately non-destructive, it stops the service and removes the unit, the
   command and the embedded daemon, and leaves every workspace, member and audit
   event exactly where they were. Stopping a service and deleting somebody's work
   are different requests, and only one of them is usually what was meant.
-- **[docs/troubleshooting.md](docs/troubleshooting.md)** — the failures with a
+- **[docs/troubleshooting.md](docs/troubleshooting.md)**, the failures with a
   known answer, including what a dead daemon costs you.
 
 ### Fixed
 
 - **A read that writes, writing at the wrong time.** Stamping `schemaVersion` on
   first load was an unawaited background write, so it could land *after* another
-  writer had replaced the file — a restore in progress, or anything else touching
-  `state.json` — silently clobbering it with what had been read a moment earlier.
+  writer had replaced the file, a restore in progress, or anything else touching
+  `state.json`, silently clobbering it with what had been read a moment earlier.
   `loadState` now finishes the write before it returns. The existing corruption
   check caught this, which is the whole argument for having one.
 - **`kohlab health` reported the daemon as down when it was up**, and the health
@@ -132,19 +177,19 @@ did not write it.
 - The checks give every throwaway server its own `PTY_SOCKET`, and the durability
   check kills the daemon bound to *its* socket by pid. It previously used
   `pkill -f pty-daemon.cjs`, which would also kill the daemon of a real kohlab
-  instance on the same machine — ending live agent sessions. A check that damages
+  instance on the same machine, ending live agent sessions. A check that damages
   the thing it checks is worse than no check.
 
 ## [1.14.0] - 2026-09-20
 
-The access story, finished — and three of the structural seams the roadmap called
+The access story, finished, and three of the structural seams the roadmap called
 thin, closed with a check behind each.
 
 ### Security
 
 - **One gate, so 401 and 403 mean what they say.** Eleven gate sites each decided
   for themselves whether to answer 401 or 403, and ten of them answered 403 to a
-  caller with no credentials at all — they tested the role before testing whether
+  caller with no credentials at all, they tested the role before testing whether
   there was anyone to have one. Both refuse, so neither was a hole, but a client
   could not tell "you sent no key" from "your key is not enough", and testing a
   role before testing authentication is exactly the shape that let `POST
@@ -152,35 +197,35 @@ thin, closed with a check behind each.
   route goes through.
 - **Guessing keys is throttled.** 20 refusals per address per minute, in memory.
   The key is verified *before* the throttle is consulted, so a correct key still
-  works after a run of wrong ones — otherwise anyone behind the same NAT could
+  works after a run of wrong ones, otherwise anyone behind the same NAT could
   lock everyone else out by guessing. A revoked key reports 429 rather than 401
   while a window is open: the throttle cannot tell a revoked key from a guessed
   one, and refusing both is the point.
 - **Keys no longer travel in URLs.** The dashboard now sends `Authorization:
   Bearer`, and the terminal and push sockets carry theirs in a WebSocket
-  subprotocol — a browser cannot set a header on an upgrade, which is why the
+  subprotocol, a browser cannot set a header on an upgrade, which is why the
   query parameter existed. A key in a query string leaks into browser history,
   proxy logs and `Referer`. The `?key=` form still works for bookmarks, curl and
   the CLI; the app never sends it.
 
 ### Added
 
-- **Account panel** (Settings): who you are — id and role — with two actions.
+- **Account panel** (Settings): who you are (id and role) with two actions.
   **Rotate my key** replaces your key without an owner minting one and handing it
   over, which is how keys end up in chat windows. The new key is shown once and
   stored in the browser *before* the UI re-renders, because the old one stops
   working the instant the server answers. **Sign out** clears it from this
   browser only.
-- **`GET /api/account`** — the caller's own id, role and credential kind, so a
+- **`GET /api/account`**, the caller's own id, role and credential kind, so a
   member can see how they are seen rather than inferring it.
-- **`docs/architecture.md`** — the shape in four diagrams: the three processes and
+- **`docs/architecture.md`**, the shape in four diagrams: the three processes and
   what survives what, the request path where authorization happens, a workspace's
   life, and how someone gets in. Plus the five seams that are thin and the
   smallest fix for each.
-- **`SECURITY.md`** — what is in scope, the trust model in plain terms, the access
+- **`SECURITY.md`**, what is in scope, the trust model in plain terms, the access
   model, and an explicit statement that the checks in `scripts/` are the only
   evidence behind any of it.
-- **`CONTRIBUTING.md`** — setup, the bar for a change (a claim needs a check), and
+- **`CONTRIBUTING.md`**, setup, the bar for a change (a claim needs a check), and
   the conventions.
 
 ### Changed
@@ -189,7 +234,7 @@ thin, closed with a check behind each.
   (five routes, no credentials, 401 not 403), the throttle (a loop is refused; a
   correct key is not), rotation end-to-end (new key works, old key dead in a
   header *and* in a URL, the rotation is in the audit trail), and both socket
-  handshakes — with the key, and without.
+  handshakes, with the key, and without.
 - `docs/security.md` documents the throttle, the header-only key, self-service
   rotation, and the 401-before-403 rule.
 
@@ -201,7 +246,7 @@ neighbours were, and one command path that turned a member into root.
 ### Security
 
 - **A viewer could mint themselves an owner.** `POST /api/users` had **no gate at
-  all** — not even an authentication check — while the two routes beside it
+  all** (not even an authentication check) while the two routes beside it
   (`GET /api/users`, `DELETE /api/users/:id`) both required an owner. Any
   authenticated caller, including a read-only viewer, could create a user with
   `role: "owner"` and take the box; on a keyless server an anonymous caller could.
@@ -210,7 +255,7 @@ neighbours were, and one command path that turned a member into root.
 - **Command injection in the agent installer (member → root).**
   `POST /api/agents/install` ran its input through `/bin/sh` behind a
   `startsWith("npm i -g")` "whitelist", so `npm i -g x; <anything>` executed as
-  the server user — root — with stdout returned to the caller. That made the v1.8
+  the server user (root) with stdout returned to the caller. That made the v1.8
   per-OS-user isolation decorative: a member did not need to read another
   member's home, they could ask the server to. It also allowed
   `curl http://169.254.169.254/…`, a credential-theft primitive on a VPS with a
@@ -218,7 +263,7 @@ neighbours were, and one command path that turned a member into root.
   `<manager> <verb> -g <package>`: no shell, no flags, no URLs, no extra
   arguments.
 - **`POST /api/agents` was gated on authentication only**, so a viewer could
-  register an agent launcher — a command that later runs inside someone's
+  register an agent launcher, a command that later runs inside someone's
   workspace. Owner or member now.
 
 Both gate holes survived because the route table had never been read **as a set**:
@@ -233,7 +278,7 @@ each route was individually reasonable, and only the comparison exposed them.
 ### Accessibility
 
 - **The access-key field had no `autocomplete`**, so a password manager had to
-  guess — and a 48-character random key is exactly the transcription task SC 3.3.8
+  guess, and a 48-character random key is exactly the transcription task SC 3.3.8
   exists to prevent. It is `current-password` now.
 - **The terminal's screen-reader description said output is not announced and
   stopped there.** It now points at the Log tab, which has the same output as text.
@@ -241,7 +286,7 @@ each route was individually reasonable, and only the comparison exposed them.
 ### Docs
 
 - **`docs/security.md` was understating the product.** It claimed "no per-user
-  accounts… named users are planned, not shipped" — while v1.6 shipped roles and
+  accounts… named users are planned, not shipped", while v1.6 shipped roles and
   v1.8 shipped kernel-enforced per-user isolation. The real limits are stated
   plainly now, including that the commit gate is a workflow, not a sandbox.
 - `PRODUCT.md` now says what the product is for, against what: sessions that
@@ -256,18 +301,18 @@ each route was individually reasonable, and only the comparison exposed them.
   screen, grouped: basic (`help`, `version`, `status`, `doctor`), workspaces
   (`list`, `create`, `start`, `stop`, `restart`, `logs`, `diff`, `commit`,
   `remove`), server (`serve`, `open`, `update`), access (`users`, `audit`), and
-  agents. Every old name still works as an alias — `ls`, `new`, `rm`, `delete`,
-  `log`, `server`, `install` — so nothing anyone has learned breaks.
-- **`kohlab status`** — one screen: the version and commit, whether the unit is
+  agents. Every old name still works as an alias, `ls`, `new`, `rm`, `delete`,
+  `log`, `server`, `install`, so nothing anyone has learned breaks.
+- **`kohlab status`**, one screen: the version and commit, whether the unit is
   active and enabled, whether the port answers, the state directory, workspace
   counts, and whether a newer release is published.
-- **`kohlab doctor`** — dependencies, the command on PATH, the state directory,
+- **`kohlab doctor`**, dependencies, the command on PATH, the state directory,
   the service, the port, and the access key, each with a remedy. Non-zero exit
   when something is actually wrong, so it works in a provisioning script. It is
   deliberately picky about the two failures that are otherwise silent: a
   `KillMode` that would cost you every live agent session on restart, and a
   missing access key.
-- **`kohlab logs <id>`** — what the agent has printed, from the daemon's retained
+- **`kohlab logs <id>`**, what the agent has printed, from the daemon's retained
   screen.
 - **A real installer.** `install.sh` now installs bun if missing, checks the repo
   out, builds the dashboard, puts `kohlab` on the PATH, and creates and starts the
@@ -277,7 +322,7 @@ each route was individually reasonable, and only the comparison exposed them.
   `KOHLAB_UNIT_DIR`, `KOHLAB_PORT`, `KOHLAB_REPO` override the defaults.
   Re-running it updates the checkout and leaves an existing service, key and unit
   alone.
-- **`scripts/check-cli.mjs`** — 48 assertions on the surface itself: the command
+- **`scripts/check-cli.mjs`**, 48 assertions on the surface itself: the command
   list, the grouping, that every standard command is documented, that each alias
   resolves, and that an unknown command exits non-zero.
 
@@ -285,7 +330,7 @@ each route was individually reasonable, and only the comparison exposed them.
 
 - **`kohlab` did not work outside an interactive shell.** `bun link` wrote a
   symlink into `~/.bun/bin`, whose PATH export sits below the non-interactive
-  guard in `.bashrc` — so `ssh host kohlab ls`, cron and systemd could not see it,
+  guard in `.bashrc`, so `ssh host kohlab ls`, cron and systemd could not see it,
   and even the absolute path depended on `env bun` resolving. The installer now
   writes a wrapper with an absolute interpreter path.
 - **`kohlab` with no arguments launched a browser.** It prints the command list
@@ -293,7 +338,7 @@ each route was individually reasonable, and only the comparison exposed them.
   dashboard.
 - **An unknown command exited 0.** `kohlab bogus || exit` could not tell that
   nothing had run.
-- **`kohlab doctor` reported a false alarm on every healthy deployment** — it
+- **`kohlab doctor` reported a false alarm on every healthy deployment**, it
   looked for the access key in its own environment instead of the unit's, where
   the key actually lives.
 
@@ -305,8 +350,8 @@ each route was individually reasonable, and only the comparison exposed them.
   the notes at the running version's heading but started them at the top of the
   file, so every release would have opened with `# Changelog` and the versioning
   philosophy paragraph. It now starts at the first `##` heading. Found by reading
-  the notes back through a scratch clone pinned to 1.11.0 — the same data a second
-  instance would see — rather than by trusting the fixture, whose changelog had no
+  the notes back through a scratch clone pinned to 1.11.0, the same data a second
+  instance would see, rather than by trusting the fixture, whose changelog had no
   preamble to exclude.
 
 ## [1.12.0] - 2026-09-20
@@ -317,15 +362,15 @@ each route was individually reasonable, and only the comparison exposed them.
   from. Settings → Updates then shows the published version, the changelog for
   exactly the gap being closed (everything above its own version's heading in
   `CHANGELOG.md`), and one button to take it. `GET /api/release` is the data;
-  `POST /api/release/update` is the action — owner only, audited, 401 without
+  `POST /api/release/update` is the action, owner only, audited, 401 without
   credentials and 403 with the wrong role. Running agents are not interrupted.
 - **An update run that survives its own restart.** The reload kills the server
   that started the update, so the outcome cannot live in memory: the script
   writes `started <epoch> pid <pid>` and `finished <epoch> exit <code>` markers
   into `$WORKS_DIR/update.log`, and the dashboard reads them back. A run that
-  stops without a finish marker — killed, or never started — is reported as
+  stops without a finish marker (killed, or never started) is reported as
   unfinished with its log, instead of silently showing nothing.
-- **`scripts/check-release.ts`** — 25 assertions: the pushed commit is seen, both
+- **`scripts/check-release.ts`**, 25 assertions: the pushed commit is seen, both
   versions are named, the notes are the new release and not the old one's, and
   every state of an update run (never run / running / finished / orphaned /
   never-started).
@@ -338,11 +383,11 @@ each route was individually reasonable, and only the comparison exposed them.
 
 ## [1.11.0] - 2026-09-17
 
-- **`kohlab update`** — a safe self-updater: save → check → download → install →
+- **`kohlab update`**, a safe self-updater: save → check → download → install →
   build → reload. Uncommitted changes go to the stash before anything is
   downloaded (HEAD never moves, because a new workspace is branched from wherever
   HEAD points), commits that were never pushed are pushed, and a failed install,
-  build or reload rolls the checkout back, rebuilds it *and reloads it* — files
+  build or reload rolls the checkout back, rebuilds it *and reloads it*, files
   on disk are not a rollback if the unit is still serving the new build. What
   counts as an update is commits behind upstream, never a version string, so a
   lower upstream version cannot silently rewind unpushed work. It refuses a
@@ -353,7 +398,7 @@ each route was individually reasonable, and only the comparison exposed them.
   the process forks, and `Restart=always` keeps it active through a crash loop.
   The updater now polls `http://127.0.0.1:$PORT/` until it answers, and rolls
   back when it does not.
-- **`scripts/check-update.mjs`** — 47 assertions against a real fixture (a bare
+- **`scripts/check-update.mjs`**, 47 assertions against a real fixture (a bare
   origin, two clones, a real HTTP server on a port, fake `bun`/`systemctl`): the
   stash, HEAD staying put, the push, the fast-forward, the install, the health
   gate, the rollback after a failed install, the rollback-and-reload after a
@@ -364,10 +409,10 @@ each route was individually reasonable, and only the comparison exposed them.
 
 - **Every CLI command that touched the daemon hung forever.** `ptyConnect()`
   caches a module-level socket and nothing closed it, so `kohlab ls`, `start`,
-  `stop`, `diff` and `commit` printed their answer and then never exited — a 45s
+  `stop`, `diff` and `commit` printed their answer and then never exited, a 45s
   timeout was not enough. `kohlab ls` now returns in ~0.15s. Fixed at the root
   (`ptyDisconnect()`, called when the CLI finishes) rather than with
-  `process.exit()`, which truncates stdout when the output is a pipe — exactly
+  `process.exit()`, which truncates stdout when the output is a pipe, exactly
   the `kohlab ls | grep` case. The daemon treats the close as a subscriber
   detaching and keeps every session alive.
 - **The CLI read a different state directory than the service.** With no
@@ -377,12 +422,12 @@ each route was individually reasonable, and only the comparison exposed them.
   a local dev run still gets a throwaway `.works/`.
 - **`kohlab help` opened the dashboard instead of printing help.**
 - **`kohlab open` printed a placeholder** (`http://<vps-ip>:7676`) instead of the
-  addresses this box actually has — now loopback, every non-internal IPv4
+  addresses this box actually has, now loopback, every non-internal IPv4
   (Tailscale included), the SSH tunnel command, and the state directory in use.
 - **`docs/upgrade.md` and `docs/systemd.md` gave a `WORKS_DIR` snippet that
   returned nothing.** `systemctl show -p Environment` emits every variable on one
   merged line (`Environment=WORKS_DIR=… PORT=…`), so `tr ' ' '\n' |
-  sed -n 's/^WORKS_DIR=//p'` never matched the first variable — and the `tar` that
+  sed -n 's/^WORKS_DIR=//p'` never matched the first variable, and the `tar` that
   followed silently backed up the wrong path. Both docs now use a pattern that
   matches anywhere on the line, and `kohlab update` uses the same one.
 
@@ -397,13 +442,13 @@ driver than tmux.
 - **A screen model per session.** The daemon keeps a headless terminal
   (`@xterm/headless`, the same parser major as the browser) alongside each PTY
   and replays the *screen* on attach instead of a rolling byte window. Reattaching
-  to a full-screen TUI — `omp`, `claude` — now reproduces it exactly, including
+  to a full-screen TUI (`omp`, `claude`) now reproduces it exactly, including
   after a resize, because the model resizes in lockstep with the PTY.
 - **A finished agent's output survives.** The final screen is retained when a
   session exits, so a stopped workspace still shows what it did. Previously both
   the terminal *and* the log went blank the instant the agent exited: the byte
   buffer was dropped with the session, and `log` had nothing to answer with.
-- **`scripts/check-screen.mjs`** — drives a real daemon over its real socket and
+- **`scripts/check-screen.mjs`**, drives a real daemon over its real socket and
   asserts the round trip, the resize, the retained screen and the log fallback.
   7 assertions.
 
@@ -411,7 +456,7 @@ driver than tmux.
 
 - **A corrupt `users.json` silently disabled authentication.** `readUsers()`
   swallowed parse errors and returned `[]`, so `usersExist()` read false, so
-  `authRequired()` read false, so `denied` read false — and anonymous requests
+  `authRequired()` read false, so `denied` read false, and anonymous requests
   could mutate. A damaged auth file must tighten access, never loosen it. It now
   fails closed, latching for the process lifetime. The file is **left in place**,
   not moved: an earlier version renamed it aside, which cleared the latch on
@@ -421,20 +466,20 @@ driver than tmux.
 - **A corrupt `state.json` bricked the service with a bare stack trace.**
   `JSON.parse` ran unguarded on a path that every request touches, so a damaged
   file meant an unexplained failure with no recovery route. It now fails with a
-  message naming the file and the remedy — restore it from a backup, or delete it
+  message naming the file and the remedy, restore it from a backup, or delete it
   to start with no workspaces. The file is **left in place** so the failure
   repeats on every start rather than quietly becoming an empty fleet on the next
   one; silently starting from empty defaults would present a missing fleet as the
   truth and invite new state being written over the only surviving copy.
 - **`state.json` and `users.json` were written non-atomically.** Both used
-  `writeFile`, which truncates before writing — so a process death mid-write
+  `writeFile`, which truncates before writing, so a process death mid-write
   (OOM, `kill -9`, power loss) left a half-written file. For `state.json` that
   loses *every workspace at once*; for `users.json` it locks out every member.
   Both now write to a sibling temp file, `fsync`, then `rename`, so a reader sees
   the old file or the new one and never a torn one.
 - **The daemon had no process-level guard.** It owns every live PTY, so an
   unhandled throw anywhere took every running agent down with it. It now logs and
-  continues on `uncaughtException`/`unhandledRejection` — a degraded screen model
+  continues on `uncaughtException`/`unhandledRejection`, a degraded screen model
   is recoverable from the browser, a lost fleet is not.
 - **A session could briefly outlive its screen.** `onExit` disposed the headless
   terminal in a write callback while the session stayed in `SESSIONS` for another
@@ -444,11 +489,11 @@ driver than tmux.
 - **A deferred replay could write to a disconnected caller.** The serialize
   callback runs a tick after the request, so it now checks `sock.destroyed`
   before writing.
-- **A dead subscriber could kill the daemon — and every agent with it.** The
+- **A dead subscriber could kill the daemon, and every agent with it.** The
   daemon kept a single `client` socket, overwritten by each new connection, and
   had no `'error'` handler on it. When a subscriber went away the reference
   lingered, the next PTY write raised `EPIPE`, and an unhandled `'error'` event
-  terminated the process — losing every live session. Reachable in production
+  terminated the process, losing every live session. Reachable in production
   whenever the server dies abruptly (`kill -9`, OOM). Subscribers are now a set
   of live sockets, deregistered on `error`/`close`, and a failed write can no
   longer escape. The new check surfaced this; the old suite could not.
@@ -456,14 +501,14 @@ driver than tmux.
 ### Known limitation added
 
 - Retained screens live in the daemon's memory, so they are lost when the daemon
-  restarts. Reattaching to a *live* session is unaffected — that is the model,
+  restarts. Reattaching to a *live* session is unaffected, that is the model,
   not a cache. Persisting the serialized screen next to the workspace would close
   it.
 
 ## [1.10.0] - 2026-09-17
 
 The overhaul release: the frontend was rebuilt from scratch on a researched,
-audited design system — and verifying it surfaced twelve backend defects, five
+audited design system, and verifying it surfaced twelve backend defects, five
 of them process-fatal. Full evaluation in `docs/EVAL-AND-REDESIGN.md`; sourcing
 in `docs/research/`.
 
@@ -471,13 +516,13 @@ in `docs/research/`.
 
 - **New design system.** OKLCH primitive → semantic token tiers, bridged to
   Tailwind through `@theme inline`. Every pair audited against WCAG 2.2 AA
-  (`scripts/check-contrast.mjs` — 21 pairs, ratios unrounded). Zero colour
+  (`scripts/check-contrast.mjs`, 21 pairs, ratios unrounded). Zero colour
   literals in components.
 - **URL routing.** `/`, `/workspaces`, `/w/:id`, `/settings`. Refresh preserves
   context, links are shareable, Back/Forward work. The server gained the SPA
   history fallback it never had.
 - **Accept a clean workspace.** A stopped workspace with no changes could never
-  leave the review queue — commit was the only exit and it failed on a clean
+  leave the review queue, commit was the only exit and it failed on a clean
   index. It now records acceptance, from the API and from the UI, and the
   affordance is offered **only** to a workspace actually in review (an empty diff
   alone also matches a workspace that has never run).
@@ -489,22 +534,22 @@ in `docs/research/`.
 - **Realtime honesty.** Connection chip driven by socket state, exponential
   backoff with jitter, visibility-gated polling, coalesced screen-reader
   announcements with a pause control in Settings.
-- **A backend typecheck.** Root `tsconfig.json` — `server.ts`, `lib.ts` and
+- **A backend typecheck.** Root `tsconfig.json`, `server.ts`, `lib.ts` and
   `cli.ts` were never checked, which is how five missing imports shipped.
 
 ### Fixed
 
-- **`/api/workspaces/:id/diff` 404'd** on every non-share request — the main
+- **`/api/workspaces/:id/diff` 404'd** on every non-share request, the main
   action switch had no `case "diff"`. Review-before-merge, the headline
   feature, was dead.
 - **Untracked files were invisible to review** while `git add -A` committed
   them. You could commit files you were never shown.
-- **WebSockets were never authenticated.** With an access key configured — the
-  documented deployment — the terminal and the done-ping were both rejected 401.
+- **WebSockets were never authenticated.** With an access key configured, the
+  documented deployment, the terminal and the done-ping were both rejected 401.
 - **`markStarted` was called but never imported**, killing the server on the
   first terminal attach (since v1.4.1).
 - **`ensurePtySession` was not idempotent**, killing the server on the second
-  attach — a reload, a second tab, a re-open.
+  attach, a reload, a second tab, a re-open.
 - **Unhandled rejections on the socket path were fatal.** One client could take
   the server down for everyone.
 - **The PTY daemon had no `resize` handler** despite documenting one, so the PTY
@@ -513,13 +558,13 @@ in `docs/research/`.
   It now adopts a running daemon instead of replacing it.
 - **The done-ping broadcast never sent**: it guarded on `c.OPEN`, which does not
   exist on Bun's `ServerWebSocket`.
-- **`cwd()` and `saveState` were called without being imported** — two more
+- **`cwd()` and `saveState` were called without being imported**, two more
   crashes on reachable paths.
 - **Monaco rendered the patch, not the change.** `original=""` and
   `modified={diff}` showed raw `@@` hunks as file content against a blank pane.
   Diffs are now split into two real documents.
 - **Opening a finished workspace relaunched its agent.** The attach path spawned
-  unconditionally, so merely looking at a stopped workspace started a new run —
+  unconditionally, so merely looking at a stopped workspace started a new run,
   and when that run ended it put the workspace straight back into the review
   queue, which meant accepting it never stuck. The attach now declines to
   *resurrect an ended run*; a workspace that has never run is still started by
@@ -537,7 +582,7 @@ in `docs/research/`.
 
 - **Add `KillMode=process` to your unit** (`docs/systemd.md`). Without it,
   systemd's default `control-group` kills the detached PTY daemon on every
-  restart, taking all live agent sessions with it — which defeats the point of
+  restart, taking all live agent sessions with it, which defeats the point of
   the daemon-adoption fix.
 - Restarting the daemon itself still ends every live session; its PTYs are its
   children.
@@ -546,30 +591,30 @@ in `docs/research/`.
 
 - PTY replay of a full-screen TUI lands on the final frame rather than the
   scrollback; it needs terminal-state capture, not a frontend change.
-- No bulk dismiss for the review queue — accept one at a time.
+- No bulk dismiss for the review queue, accept one at a time.
 
 ## [1.9.0] - 2026-09-09
 
 The workbench release: one visual language across every screen, plus the usage
-model — task lifecycle, per-file review, and done-ping.
+model, task lifecycle, per-file review, and done-ping.
 
-- **One status language** — carbon-black surfaces, emerald running, amber
+- **One status language**, carbon-black surfaces, emerald running, amber
   *needs review*, zinc stopped. Encoded once in `lib/status.ts`, shared by the
   sidebar, dashboard, cockpit header, and ⌘K palette (docs/ux-v1.9.0.md).
-- **Per-file diff review** — the diff tab lists every changed file (the diff
+- **Per-file diff review**, the diff tab lists every changed file (the diff
   API now returns per-file patches); review each and commit in one click.
-- **Review queue** — when an agent stops with an uncommitted diff, the
+- **Review queue**, when an agent stops with an uncommitted diff, the
   workspace derives *needs review* (`lastCommitAt` on the record) and surfaces
   first on the dashboard.
-- **Done-ping** — the server's `workspace.done` push is now consumed: title
+- **Done-ping**, the server's `workspace.done` push is now consumed: title
   flash plus a browser notification (on first grant) when an agent finishes.
-- **Token-complete CSS** — sidebar/chart/radius/shadow/spacing tokens added to
+- **Token-complete CSS**, sidebar/chart/radius/shadow/spacing tokens added to
   `index.css` (Darkmatter shape, kohlab palette), so 21st.dev components drop
   in without collisions.
-- **Polished chrome** — confirm dialog on delete, count badges on cockpit
+- **Polished chrome**, confirm dialog on delete, count badges on cockpit
   tabs, session-log live marker, activity-feed status dots, audit tail dots,
   toast restyle, sidebar active indicator + workspace groups.
-- **Front door** — README and onboarding copy now tell the task-loop story
+- **Front door**, README and onboarding copy now tell the task-loop story
   (post a task → watch → review → commit) and mention team isolation.
 
 Plans: docs/ux-v1.9.0.md, docs/product-v1.10.0.md
@@ -579,16 +624,16 @@ Plans: docs/ux-v1.9.0.md, docs/product-v1.10.0.md
 ## [1.8.0] - 2026-09-07
 
 The isolation release: one VPS, N safe users. Every named member gets a real
-OS account, and their agents run as that user — the OS, not just the role
+OS account, and their agents run as that user, the OS, not just the role
 check, keeps members out of each other's data.
 
-- **One OS user per member** — `user add` (CLI, API, Settings → Team) provisions `koh-<user>` (uid 10000+, private group, `0700` home + `~/.config`) and records the mapping in `users.json`. Revoke removes the account, home, and worktrees.
-- **Sessions run as the owner** — the PTY daemon spawns each workspace's agent with the owner's `uid`/`gid` and `$HOME` (node-pty setuid). Alice's agent cannot read Bob's home, `~/.config`, or repos; cannot list or signal his sessions; cannot read `/root`.
-- **Isolated workspaces** — members create from a git URL; the workspace is checked out under `/home/<user>/works/<id>/` (`admin/` bare clone + `tree/` + `images/`), all chowned to the member. Path-based creation stays the legacy root flow.
-- **One spawn choke point** — `spawnAgentSession()` in lib.ts now carries caps (v1.7) *and* identity for both the CLI/API start path and the browser-attach path, so they can never drift.
-- **Image pasting works in isolated sessions** — pasted screenshots land in the workspace's private `images/` dir, readable by the agent.
-- **Team UI** — members see the team roster + audit tail; add/revoke stay owner-only.
-- **Docs** — `docs/isolation.md`.
+- **One OS user per member**, `user add` (CLI, API, Settings → Team) provisions `koh-<user>` (uid 10000+, private group, `0700` home + `~/.config`) and records the mapping in `users.json`. Revoke removes the account, home, and worktrees.
+- **Sessions run as the owner**, the PTY daemon spawns each workspace's agent with the owner's `uid`/`gid` and `$HOME` (node-pty setuid). Alice's agent cannot read Bob's home, `~/.config`, or repos; cannot list or signal his sessions; cannot read `/root`.
+- **Isolated workspaces**, members create from a git URL; the workspace is checked out under `/home/<user>/works/<id>/` (`admin/` bare clone + `tree/` + `images/`), all chowned to the member. Path-based creation stays the legacy root flow.
+- **One spawn choke point**, `spawnAgentSession()` in lib.ts now carries caps (v1.7) *and* identity for both the CLI/API start path and the browser-attach path, so they can never drift.
+- **Image pasting works in isolated sessions**, pasted screenshots land in the workspace's private `images/` dir, readable by the agent.
+- **Team UI**, members see the team roster + audit tail; add/revoke stay owner-only.
+- **Docs**, `docs/isolation.md`.
 
 Full plan: ROADMAP.md
 
@@ -596,34 +641,34 @@ Full plan: ROADMAP.md
 
 The shared-box safety release. Per-workspace resource caps.
 
-- **Resource caps** — workspaces carry optional `limits` (`timeoutSec`, `maxMemoryMb`, `maxProcs`), applied at agent spawn via `timeout` + `ulimit -d`/`-u` in `pty-daemon.cjs`.
-- **Wall-clock timeout** — a `--timeout <sec>` cap kills a runaway agent and cleans its process tree.
-- **Memory cap** — `--max-mem <mb>` uses `ulimit -d` (RLIMIT_DATA), which actually constrains Node agents' heap (unlike `-v`, which V8's address-space reservation bypasses).
-- **Process cap** — `--max-procs <n>` via `ulimit -u`.
-- **CLI + UI** — `kohlab new … --timeout/--max-mem/--max-procs`; the dashboard create form gains max-mem + timeout fields.
-- **Docs** — `docs/resource-limits.md`.
+- **Resource caps**, workspaces carry optional `limits` (`timeoutSec`, `maxMemoryMb`, `maxProcs`), applied at agent spawn via `timeout` + `ulimit -d`/`-u` in `pty-daemon.cjs`.
+- **Wall-clock timeout**, a `--timeout <sec>` cap kills a runaway agent and cleans its process tree.
+- **Memory cap**, `--max-mem <mb>` uses `ulimit -d` (RLIMIT_DATA), which actually constrains Node agents' heap (unlike `-v`, which V8's address-space reservation bypasses).
+- **Process cap**, `--max-procs <n>` via `ulimit -u`.
+- **CLI + UI**, `kohlab new … --timeout/--max-mem/--max-procs`; the dashboard create form gains max-mem + timeout fields.
+- **Docs**, `docs/resource-limits.md`.
 
 Full plan: ROADMAP.md
 
 ## [1.6.0] - 2026-09-05
 
-The team release. Named users, roles, and an audit trail — still JSON files, no database.
+The team release. Named users, roles, and an audit trail, still JSON files, no database.
 
 ### Team & security
 
-- **Named users with roles** — `owner` / `member` / `viewer`, stored hashed (SHA-256) in `users.json`. A generated key is returned exactly once, never persisted or listed.
-- **Role gating** — `viewer` is read-only (watch terminals, read diffs/logs/files); `member` can create/start/stop/commit/delete and install agents; `owner` alone manages users. Mutating routes return 403 for viewers.
-- **Audit trail** — every mutation (create/start/stop/restart/delete/commit/share/user-manage/agent-install) appends one JSON line to `audit.log`, attributed to the named user. Served at `GET /api/audit` (owner/member only).
-- **Backward compatible** — a bare `KOHLAB_KEY` still works (treated as `owner`); a keyless server stays open.
+- **Named users with roles**, `owner` / `member` / `viewer`, stored hashed (SHA-256) in `users.json`. A generated key is returned exactly once, never persisted or listed.
+- **Role gating**, `viewer` is read-only (watch terminals, read diffs/logs/files); `member` can create/start/stop/commit/delete and install agents; `owner` alone manages users. Mutating routes return 403 for viewers.
+- **Audit trail**, every mutation (create/start/stop/restart/delete/commit/share/user-manage/agent-install) appends one JSON line to `audit.log`, attributed to the named user. Served at `GET /api/audit` (owner/member only).
+- **Backward compatible**, a bare `KOHLAB_KEY` still works (treated as `owner`); a keyless server stays open.
 
 ### CLI
 
-- `kohlab user add <id> [--name 'N'] [--role R]` — prints the key once.
+- `kohlab user add <id> [--name 'N'] [--role R]`, prints the key once.
 - `kohlab user rm <id>`, `kohlab user` (list), `kohlab audit`.
 
 ### Frontend
 
-- Settings gains a **Team section** — list/add/revoke teammates, show the one-time key, and tail recent activity. Hidden when the caller lacks rights.
+- Settings gains a **Team section**, list/add/revoke teammates, show the one-time key, and tail recent activity. Hidden when the caller lacks rights.
 
 Full plan: RELEASE-PLAN.md
 
@@ -633,33 +678,33 @@ The hardening + frontend-experience follow-up. Finishes the v1.4.0 plan's fronte
 
 ### Adoption & UX
 
-- **Fix false access-key prompt** — the login gate now only appears when the server actually requires a key (`GET /api/auth/required`); an open (keyless) server goes straight to the app. Keyed deployment still prompts and still enforces.
-- **One-line installer** — `curl -fsSL https://raw.githubusercontent.com/nzkbuild/kohlab/main/install.sh | bash` clones, installs deps, and builds the dashboard.
-- **`kohlab install` subcommand** — checks git/bun, generates a suggested `KOHLAB_KEY`, prints start + tunnel + auto-start steps.
-- **`docs/` directory** — install, systemd, reverse-proxy, upgrade, and security guides (the README referenced these but the dir didn't exist).
-- **CLI text consistency** — every user-facing `works …` command now reads `kohlab …`, matching the actual binary name.
-- **Onboarding close-the-loop** — after "create & launch", the flow shows a share-link button that copies a read-only URL to the clipboard.
+- **Fix false access-key prompt**, the login gate now only appears when the server actually requires a key (`GET /api/auth/required`); an open (keyless) server goes straight to the app. Keyed deployment still prompts and still enforces.
+- **One-line installer**, `curl -fsSL https://raw.githubusercontent.com/nzkbuild/kohlab/main/install.sh | bash` clones, installs deps, and builds the dashboard.
+- **`kohlab install` subcommand**, checks git/bun, generates a suggested `KOHLAB_KEY`, prints start + tunnel + auto-start steps.
+- **`docs/` directory**, install, systemd, reverse-proxy, upgrade, and security guides (the README referenced these but the dir didn't exist).
+- **CLI text consistency**, every user-facing `works …` command now reads `kohlab …`, matching the actual binary name.
+- **Onboarding close-the-loop**, after "create & launch", the flow shows a share-link button that copies a read-only URL to the clipboard.
 
 ### Backend
 
-- **State mutex** — all `state.json` read-modify-write now serializes through one lock (`mutateState`), eliminating lost-update races between concurrent API handlers and the completion watcher.
-- **Daemon self-healing** — a watchdog respawns the PTY daemon if it dies, dropping the stale socket so the next op starts fresh instead of failing forever. `ptyList` returns `null` (not `[]`) when the daemon is unreachable, so the watcher never misreads an outage as "everything done".
-- **Intentional-stop tracking** — stop/delete mark a workspace so its daemon `exit` isn't reported as an agent completion.
-- **Completion-watcher fix** — session IDs are matched by exact id instead of `split("-")`, which broke on workspace ids containing dashes.
-- **Path containment** — static serving and the `file` endpoint use `resolve`+`relative` checks; a crafted path can no longer escape its root.
-- **PTY log endpoint** — `/log` now tails the daemon's buffered output instead of a legacy `session.log` file.
+- **State mutex**, all `state.json` read-modify-write now serializes through one lock (`mutateState`), eliminating lost-update races between concurrent API handlers and the completion watcher.
+- **Daemon self-healing**, a watchdog respawns the PTY daemon if it dies, dropping the stale socket so the next op starts fresh instead of failing forever. `ptyList` returns `null` (not `[]`) when the daemon is unreachable, so the watcher never misreads an outage as "everything done".
+- **Intentional-stop tracking**, stop/delete mark a workspace so its daemon `exit` isn't reported as an agent completion.
+- **Completion-watcher fix**, session IDs are matched by exact id instead of `split("-")`, which broke on workspace ids containing dashes.
+- **Path containment**, static serving and the `file` endpoint use `resolve`+`relative` checks; a crafted path can no longer escape its root.
+- **PTY log endpoint**, `/log` now tails the daemon's buffered output instead of a legacy `session.log` file.
 
 ### Frontend
 
-- **Bundle split (F1)** — Monaco and xterm are now in their own chunks via `manualChunks`; the entry dropped from 728 KB → 275 KB raw (207 KB → 86 KB gzip). Workspace list + shell paint before the editor/terminal load.
-- **Command center** — new dashboard with KPIs, agent availability, and a recent-activity feed.
-- **Guided onboarding** — a three-step first-run flow (install agent → create workspace → launch) replaces the bare empty list; the workspace-creation step only activates once an agent is installed.
-- **Command palette** — ⌘K quick actions (start/stop/new/navigate) across workspaces.
-- **Settings** — agent management + server info in one place.
-- **Session log view** — live tail of a workspace's main-session output.
-- **Scrollback persistence** — xterm instances are cached (bounded) so scrollback and fit survive tab switches and remounts.
-- **Terminal reconnect with backoff** — exponential backoff (500ms → 10s cap) resets on successful connect, and a drop announces "disconnected" once instead of spamming each retry.
-- **Image upload** — paste/send a PNG/JPEG/GIF/WebP into a workspace's terminal.
+- **Bundle split (F1)**, Monaco and xterm are now in their own chunks via `manualChunks`; the entry dropped from 728 KB → 275 KB raw (207 KB → 86 KB gzip). Workspace list + shell paint before the editor/terminal load.
+- **Command center**, new dashboard with KPIs, agent availability, and a recent-activity feed.
+- **Guided onboarding**, a three-step first-run flow (install agent → create workspace → launch) replaces the bare empty list; the workspace-creation step only activates once an agent is installed.
+- **Command palette**, ⌘K quick actions (start/stop/new/navigate) across workspaces.
+- **Settings**, agent management + server info in one place.
+- **Session log view**, live tail of a workspace's main-session output.
+- **Scrollback persistence**, xterm instances are cached (bounded) so scrollback and fit survive tab switches and remounts.
+- **Terminal reconnect with backoff**, exponential backoff (500ms → 10s cap) resets on successful connect, and a drop announces "disconnected" once instead of spamming each retry.
+- **Image upload**, paste/send a PNG/JPEG/GIF/WebP into a workspace's terminal.
 
 ## [1.4.0] - 2026-08-25
 
@@ -667,12 +712,12 @@ The PTY cutover release. The node-pty daemon is now the single source of truth f
 
 ### Backend
 
-- **PTY cutover completion** — running status, stop, delete, and completion all derive from the PTY daemon, not tmux. (tmux is fully out of the hot path.)
-- **Session lifecycle hardening** — stop/delete terminate the real PTY process tree (SIGKILL to the whole tree, not just the shell); orphaned child processes are reliably killed.
-- **Event-driven completion** — the watcher listens to daemon exit events and marks workspaces done immediately; polling remains as a fallback.
-- **State consistency** — started/stopped timestamps reflect daemon session open/close; start now spawns the agent's PTY immediately instead of waiting for the first browser attach.
-- **Shared daemon client** — the socket connection moved into lib.ts, shared by the server (terminal streaming) and lib (lifecycle). No more dual connections or drift.
-- **Fixes** — stop/delete now actually work (routes were missing cases); stop/delete no longer lose state writes (double-load bug fixed).
+- **PTY cutover completion**, running status, stop, delete, and completion all derive from the PTY daemon, not tmux. (tmux is fully out of the hot path.)
+- **Session lifecycle hardening**, stop/delete terminate the real PTY process tree (SIGKILL to the whole tree, not just the shell); orphaned child processes are reliably killed.
+- **Event-driven completion**, the watcher listens to daemon exit events and marks workspaces done immediately; polling remains as a fallback.
+- **State consistency**, started/stopped timestamps reflect daemon session open/close; start now spawns the agent's PTY immediately instead of waiting for the first browser attach.
+- **Shared daemon client**, the socket connection moved into lib.ts, shared by the server (terminal streaming) and lib (lifecycle). No more dual connections or drift.
+- **Fixes**, stop/delete now actually work (routes were missing cases); stop/delete no longer lose state writes (double-load bug fixed).
 
 ### Deferred
 
@@ -684,36 +729,36 @@ Full plan: RELEASE-PLAN.md
 
 The "from zero to running agent" release. Functional parity with the core Superset loop, on a real frontend.
 
-- **React + Vite + TypeScript frontend** — replaces the hand-rolled HTML/JS dashboard.
-- **Agent installer** — detect missing agents (codex, opencode, pi) and install from the UI.
-- **Agent login walkthrough** — guided setup per agent (claude setup, codex API key).
-- **GitHub integration** — repo browser + clone-to-workspace flow.
-- **Monaco editor + diff** — real code editing and review, not plain text.
-- **Multi-terminal tabs** — one terminal per workspace, tabbed.
-- **Guided workspace creation** — pick repo, branch, agent, task in one flow.
+- **React + Vite + TypeScript frontend**, replaces the hand-rolled HTML/JS dashboard.
+- **Agent installer**, detect missing agents (codex, opencode, pi) and install from the UI.
+- **Agent login walkthrough**, guided setup per agent (claude setup, codex API key).
+- **GitHub integration**, repo browser + clone-to-workspace flow.
+- **Monaco editor + diff**, real code editing and review, not plain text.
+- **Multi-terminal tabs**, one terminal per workspace, tabbed.
+- **Guided workspace creation**, pick repo, branch, agent, task in one flow.
 
 ## [1.2.0] - 2026-08-25
 
 ### Added
 
-- **File tree & code view** — browse any workspace's repo in the dashboard; click a file to read it with line numbers. No more SSH-ing in to look at code.
-- **Clone from GitHub** — paste a repo URL in the dashboard and kohlab clones it into a workspace. New projects take seconds, not setup.
-- **Agent availability** — the dashboard shows which agents (omp, claude, codex, …) are installed on the host at a glance.
-- **`kohlab` launcher** — typing `kohlab` opens the dashboard in your browser; closing the tab never stops the agents.
-- **Keyboard shortcuts** — ⌘/Ctrl+1/2/3 jump between files/terminal/diff; `n` focuses new-workspace; `r` refreshes.
-- **Access-key prompt** — the dashboard asks for the access key once and remembers it, instead of a bare 401.
+- **File tree & code view**, browse any workspace's repo in the dashboard; click a file to read it with line numbers. No more SSH-ing in to look at code.
+- **Clone from GitHub**, paste a repo URL in the dashboard and kohlab clones it into a workspace. New projects take seconds, not setup.
+- **Agent availability**, the dashboard shows which agents (omp, claude, codex, …) are installed on the host at a glance.
+- **`kohlab` launcher**, typing `kohlab` opens the dashboard in your browser; closing the tab never stops the agents.
+- **Keyboard shortcuts**, ⌘/Ctrl+1/2/3 jump between files/terminal/diff; `n` focuses new-workspace; `r` refreshes.
+- **Access-key prompt**, the dashboard asks for the access key once and remembers it, instead of a bare 401.
 
 ### Fixed
 
-- **Security**: WebSocket terminal connections are now gated by the access key — previously unauthenticated sockets could attach.
+- **Security**: WebSocket terminal connections are now gated by the access key, previously unauthenticated sockets could attach.
 
 ## [1.1.0] - 2026-08-25
 
 ### Added
 
-- **Completion notifications** — the moment an agent finishes its work, the dashboard shows it as done and (optionally) fires a webhook. Walk away and trust it.
-- **Workspace sharing** — share a read-only link to any workspace; a teammate (or your other device) can watch the live terminal and review the diff without touching controls.
-- **Scoped access key** — optional `KOHLAB_KEY`; when set, the dashboard and API require it. Deploy safely behind a reverse proxy. Share links stay public-read.
+- **Completion notifications**, the moment an agent finishes its work, the dashboard shows it as done and (optionally) fires a webhook. Walk away and trust it.
+- **Workspace sharing**, share a read-only link to any workspace; a teammate (or your other device) can watch the live terminal and review the diff without touching controls.
+- **Scoped access key**, optional `KOHLAB_KEY`; when set, the dashboard and API require it. Deploy safely behind a reverse proxy. Share links stay public-read.
 
 ### Fixed
 
@@ -724,13 +769,13 @@ The "from zero to running agent" release. Functional parity with the core Supers
 
 ### Added
 
-- **Parallel agent workspaces** — run Claude Code, Codex, omp, or any terminal agent, each isolated in its own git worktree.
-- **Persistent sessions** — agents run in durable tmux sessions; they survive disconnects, device switches, and server restarts.
-- **Browser dashboard** — live workspace list, attach to any agent terminal in real time, from any device.
-- **Diff viewer** — review each agent's changes before committing, with one-click commit.
-- **CLI** — full control from any shell: `new`, `ls`, `start`, `stop`, `restart`, `attach`, `diff`, `commit`, `delete`.
-- **Custom agent launchers** — register any terminal command as an agent.
-- **Lightweight by design** — single server process, JSON state file, no database, no containers.
+- **Parallel agent workspaces**, run Claude Code, Codex, omp, or any terminal agent, each isolated in its own git worktree.
+- **Persistent sessions**, agents run in durable tmux sessions; they survive disconnects, device switches, and server restarts.
+- **Browser dashboard**, live workspace list, attach to any agent terminal in real time, from any device.
+- **Diff viewer**, review each agent's changes before committing, with one-click commit.
+- **CLI**, full control from any shell: `new`, `ls`, `start`, `stop`, `restart`, `attach`, `diff`, `commit`, `delete`.
+- **Custom agent launchers**, register any terminal command as an agent.
+- **Lightweight by design**, single server process, JSON state file, no database, no containers.
 
 ### Security
 

@@ -7,12 +7,12 @@ import {
   ArrowsClockwise,
   GearSix,
   MagnifyingGlass,
-  PlusCircle,
+  Plus,
   Stack,
   TerminalWindow,
   X,
 } from "@phosphor-icons/react";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { ROUTE_LABEL } from "../lib/route";
 import { byReviewFirst, STATUS_LABEL, workspaceStatus, type WorkspaceStatus } from "../lib/status";
@@ -47,7 +47,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * Command palette — an APG combobox + listbox (popup) with grouped options.
+ * Command palette: an APG combobox + listbox (popup) with grouped options.
  *
  * The combobox role lives on the input itself and DOM focus never leaves it:
  * the active option is expressed as `aria-activedescendant`, never as focus, so
@@ -61,7 +61,7 @@ export default function CommandPalette() {
   const workspaces = useApp((s) => s.workspaces);
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
-  const setCreating = useApp((s) => s.setCreating);
+  const can = useCan();
   const refresh = useApp((s) => s.refresh);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -107,8 +107,8 @@ export default function CommandPalette() {
       label: "Workspaces",
       group: "Views",
       icon: <Stack size={16} />,
-      keywords: ["home", "dashboard", "command center", "overview", "status", "all", "list", "queue", "review"],
-      onAction: () => navigate({ kind: "dashboard" }),
+      keywords: ["all", "list", "queue", "review", "home", "dashboard"],
+      onAction: () => navigate({ kind: "workspaces" }),
     },
     {
       id: "view-settings",
@@ -133,20 +133,23 @@ export default function CommandPalette() {
         onAction: () => navigate({ kind: "workspace", id: w.id }),
       };
     }),
-    {
-      id: "action-new",
-      label: "New workspace",
-      group: "Actions",
-      icon: <PlusCircle size={16} />,
-      keywords: ["create", "launch", "start", "task", "clone"],
-      onAction: () => {
-        setCreating(true);
-        navigate({ kind: "dashboard" });
-      },
-    },
+    // `/new` arrives with the form already open. Before, this landed on the
+    // list with the form closed, so the most direct command needed a second press.
+    ...(can.mutate
+      ? [
+          {
+            id: "action-new",
+            label: "new workspace",
+            group: "Actions" as const,
+            icon: <Plus size={16} />,
+            keywords: ["create", "launch", "start", "task", "clone"],
+            onAction: () => navigate({ kind: "workspaces", create: true }),
+          },
+        ]
+      : []),
     {
       id: "action-refresh",
-      label: "Refresh workspaces",
+      label: "refresh workspaces",
       group: "Actions",
       icon: <ArrowsClockwise size={16} />,
       keywords: ["reload", "sync", "update"],
@@ -238,13 +241,13 @@ export default function CommandPalette() {
               aria-expanded={open}
               aria-controls={listId}
               aria-activedescendant={activeOptionId}
-              placeholder="Search workspaces or run a command…"
+              placeholder="search workspaces, or run a command…"
               className="min-w-0 flex-1 bg-transparent py-3 text-sm text-text-primary outline-none placeholder:text-text-faint"
             />
             <Kbd>⌘K</Kbd>
             <Dialog.Close asChild>
-              <Button variant="quiet" iconOnly size="sm" aria-label="Close command palette">
-                <X size={15} />
+              <Button variant="quiet" iconOnly size="sm" aria-label="close command palette">
+                <X size={13} />
               </Button>
             </Dialog.Close>
           </div>
@@ -252,7 +255,7 @@ export default function CommandPalette() {
           <div className="max-h-[60vh] overflow-y-auto p-1.5">
             {/* `option` has no native element outside <select>, so the listbox and
                 its options are ARIA roles on plain elements.
-                a11y-ok: they are deliberately NOT focusable — in the ARIA combobox
+                a11y-ok: they are deliberately NOT focusable, in the ARIA combobox
                 pattern focus stays on the input above and movement is announced via
                 aria-activedescendant. Giving the options tabIndex would add a stop
                 for every result and break that pattern. */}

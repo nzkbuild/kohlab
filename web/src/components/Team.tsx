@@ -14,9 +14,9 @@ import { announce } from "../lib/announce";
 import { clockTime } from "../lib/format";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
-import { Button, Field, Panel, PanelHead, SkeletonRows } from "./ui";
+import { Button, EmptyState, Field, Panel, PanelHead, SkeletonRows } from "./ui";
 
-/** Static dot colour per audit action — Tailwind cannot read an interpolated class. */
+/** Static dot colour per audit action, Tailwind cannot read an interpolated class. */
 const ACTION_DOT: Record<string, string> = {
   start: "bg-status-running",
   stop: "bg-status-stopped",
@@ -36,7 +36,7 @@ const DOT_FALLBACK = "bg-status-stopped";
 /**
  * `/api/users` answers 403 unless the caller is an owner; `/api/audit` needs
  * owner or member. A refusal is a permission state, not a network error, so it
- * is reported as one — and never as a red "something broke".
+ * is reported as one: and never as a red "something broke".
  */
 function refusal(message: string): boolean {
   return /forbidden|not your|unauthorized|permission/i.test(message);
@@ -107,7 +107,7 @@ export default function Team() {
 
   /**
    * Invite, rather than mint a key and hand it over. The link carries the
-   * credential to the person it is for, and is spent when they open it — nobody
+   * credential to the person it is for, and is spent when they open it: nobody
    * has to copy a secret into a chat window.
    */
   const invite = async (e: React.FormEvent) => {
@@ -197,10 +197,14 @@ export default function Team() {
             {canManage ? (
               <div className="flex flex-col gap-3">
                 {users.length === 0 ? (
-                  <p className="text-xs leading-relaxed text-text-muted">
-                    It is just you. Invite someone and they get their own account on this box — you
-                    never see their files, and they never see yours.
-                  </p>
+                  /* An ad-hoc paragraph in the slot the member table occupies.
+                     Same copy, rendered with the shared empty state so "nothing
+                     here yet" looks the same everywhere. */
+                  <EmptyState
+                    icon={<Users size={18} />}
+                    title="It is just you"
+                    description="Invite someone and they get their own account on this box, you never see their files, and they never see yours."
+                  />
                 ) : (
                   <table className="data-table w-full">
                     <caption className="sr-only">Members of this server</caption>
@@ -250,8 +254,8 @@ export default function Team() {
                               variant="danger"
                               size="sm"
                               iconOnly
-                              aria-label={`Revoke ${u.name} (${u.id})`}
-                              title={`Revoke ${u.id}`}
+                              aria-label={`revoke ${u.name} (${u.id})`}
+                              title={`revoke ${u.id}`}
                               onClick={() => {
                                 setRevokeError(null);
                                 setRevoking(u);
@@ -311,7 +315,7 @@ export default function Team() {
                     type="submit"
                     disabled={adding || !canInvite || !id.trim() || !name.trim()}
                   >
-                    <UserPlus size={15} weight="bold" aria-hidden="true" />
+                    <UserPlus size={14} weight="bold" aria-hidden="true" />
                     {adding ? "creating…" : "create invitation"}
                   </Button>
                 </form>
@@ -337,7 +341,7 @@ export default function Team() {
                 <ShieldWarning size={15} className="mt-px shrink-0 text-text-muted" aria-hidden="true" />
                 <p className="text-xs leading-relaxed text-text-muted">
                   {usersError && refusal(usersError)
-                    ? "Member management needs an owner key — your role can read activity below, but not the member list."
+                    ? "Member management needs an owner key, your role can read activity below, but not the member list."
                     : `Could not load members: ${usersError ?? "unknown error"}`}
                   {usersError && !refusal(usersError) ? (
                     <Button
@@ -357,17 +361,20 @@ export default function Team() {
             {/* ---- audit tail: owner + member --------------------------- */}
             <div className="border-t border-line-subtle pt-3">
               <div className="flex items-center gap-2">
-                <h3 className="section-label">Recent activity</h3>
+                {/* h2, not h3: the app's outline is h1 for the route and h2 for
+                    every panel-level section, and this one had no h2 above it
+                    to sit under. */}
+                <h2 className="section-label">Recent activity</h2>
                 <div className="flex-1" />
                 <Button
                   variant="quiet"
                   size="sm"
                   iconOnly
-                  aria-label="Refresh team and activity"
+                  aria-label="refresh team and activity"
                   disabled={loading}
                   onClick={() => void load()}
                 >
-                  <ArrowsClockwise size={14} />
+                  <ArrowsClockwise size={13} />
                 </Button>
               </div>
 
@@ -395,7 +402,7 @@ export default function Team() {
                       <span className="mono shrink-0 text-text-primary">{e.action}</span>
                       <span className="log-text text-text-muted">
                         {e.id ?? ""}
-                        {e.detail ? ` — ${e.detail}` : ""}
+                        {e.detail ? `, ${e.detail}` : ""}
                       </span>
                     </li>
                   ))}
@@ -418,7 +425,7 @@ export default function Team() {
             </Dialog.Title>
             <Dialog.Description className="mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-status-review">
               <ShieldWarning size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-              Send this to them. It works once and expires {freshLink ? new Date(freshLink.expires).toLocaleString() : ""} — the server stores only a hash, so it cannot be shown again. If it is
+              Send this to them. It works once and expires {freshLink ? new Date(freshLink.expires).toLocaleString() : ""}, the server stores only a hash, so it cannot be shown again. If it is
               lost or already used, invite them again to get a new one.
             </Dialog.Description>
             <code className="mono mt-3 block break-all rounded-md border border-line-strong bg-surface-sunken px-2.5 py-2 text-xs text-text-primary">
@@ -431,7 +438,7 @@ export default function Team() {
             ) : null}
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => void copyLink()}>
-                <Copy size={14} aria-hidden="true" />
+                <Copy size={13} aria-hidden="true" />
                 {copied ? "copied" : "copy link"}
               </Button>
               <Dialog.Close asChild>

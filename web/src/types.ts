@@ -11,6 +11,10 @@ export interface Workspace {
   share?: string;
   /** timestamp of the last commit (set on commit; undefined = never committed) */
   lastCommitAt?: number;
+  /** timestamp of the last discard (set on discard; undefined = never discarded).
+   *  Mirrors lastCommitAt: the two decisions that end a run, and which one came
+   *  last is what the status is derived from. */
+  discardedAt?: number;
 }
 
 export interface TreeNode {

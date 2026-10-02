@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
+import { MONACO_THEME, baseOptions, defineKohlabTheme } from "../lib/monaco";
 import { ArrowLeft, Copy } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
@@ -60,19 +61,22 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-10 items-center gap-2 border-b border-line-subtle px-3">
+      {/* A toolbar row inside the Files pane, so it follows the same pane-header
+          geometry as the rest. No title: the open file's identity is the
+          breadcrumb in the pane header directly above this one. */}
+      <header className="cockpit-head">
         <Button size="sm" variant="quiet" onClick={onBack}>
-          <ArrowLeft size={12} aria-hidden="true" />
+          <ArrowLeft size={13} aria-hidden="true" />
           close
         </Button>
-        {/* The path itself is in the tab's breadcrumb — repeating it here would
+        {/* The path itself is in the tab's breadcrumb, repeating it here would
             just push the actions off a narrow pane. */}
         <div className="flex-1" />
         <Button
           size="sm"
           variant="quiet"
           iconOnly
-          aria-label="Copy file path"
+          aria-label="copy file path"
           disabled={loading || !!error}
           onClick={() => void copy(filePath, "path")}
         >
@@ -82,13 +86,13 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
           size="sm"
           variant="quiet"
           iconOnly
-          aria-label="Copy file contents"
+          aria-label="copy file contents"
           disabled={loading || !!error}
           onClick={() => void copy(content, "contents")}
         >
           <Copy size={13} weight="fill" />
         </Button>
-      </div>
+      </header>
 
       {error ? (
         <div role="alert" className="p-4">
@@ -106,12 +110,10 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
             height="100%"
             language={lang}
             value={content}
-            theme="vs-dark"
+            beforeMount={defineKohlabTheme}
+            theme={MONACO_THEME}
             options={{
-              readOnly: true,
-              minimap: { enabled: false },
-              fontSize: 13,
-              scrollBeyondLastLine: false,
+              ...baseOptions(),
               renderWhitespace: "selection",
               padding: { top: 8 },
             }}

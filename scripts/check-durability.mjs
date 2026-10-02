@@ -22,7 +22,7 @@ function check(name, got, want) {
 }
 
 // Its own socket, always. Without one the throwaway server adopts the daemon of
-// a real instance on this machine — harmless in itself, but it makes the check
+// a real instance on this machine: harmless in itself, but it makes the check
 // depend on, and able to disturb, something it was never meant to touch.
 const SOCKET = join(tmpdir(), `kohlab-durability-${process.pid}.sock`);
 const env = {
@@ -206,7 +206,7 @@ try {
 
   // Kill the daemon THIS server started, by the pid bound to THIS socket. An
   // unscoped `pkill -f pty-daemon.cjs` would also kill the daemon of any kohlab
-  // instance running on this machine, ending real agent sessions — a check that
+  // instance running on this machine, ending real agent sessions: a check that
   // damages the thing it checks is worse than no check.
   const killed = pidOnSocket(deadSock);
   check("the daemon is identifiable by its socket", typeof killed, "string");

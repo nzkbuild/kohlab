@@ -7,6 +7,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import "@xterm/xterm/css/xterm.css";
+import { monoFont, tokenColor } from "../lib/tokenColor";
 
 interface Props {
   workspaceId: string;
@@ -15,7 +16,7 @@ interface Props {
 
 /**
  * Socket state as seen by this pane. Explicit and driven by the socket's own
- * lifecycle — never by `navigator.onLine`, which is not a reachability signal.
+ * lifecycle: never by `navigator.onLine`, which is not a reachability signal.
  */
 type SocketState = "connecting" | "live" | "reconnecting" | "offline";
 
@@ -39,25 +40,6 @@ const MAX_RETRY_MS = 10000;
 /** Past this many consecutive failures the pane reports itself offline. */
 const OFFLINE_AFTER_ATTEMPTS = 4;
 
-/**
- * Resolve a semantic token to a colour string the terminal can parse.
- *
- * xterm takes JS colour values, and the tokens are OKLCH custom properties — so
- * the browser does the conversion (paint one pixel, read it back) rather than a
- * literal being pasted into this file. Rounded through 8-bit RGB, which is all a
- * terminal palette can express anyway.
- */
-function tokenColor(el: HTMLElement, token: string, alpha = 1): string | undefined {
-  const raw = getComputedStyle(el).getPropertyValue(token).trim();
-  if (!raw) return undefined;
-  const ctx = document.createElement("canvas").getContext("2d");
-  if (!ctx) return undefined;
-  ctx.fillStyle = raw;
-  ctx.fillRect(0, 0, 1, 1);
-  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-  return alpha < 1 ? `rgba(${r}, ${g}, ${b}, ${alpha})` : `rgb(${r}, ${g}, ${b})`;
-}
-
 function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAddon } {
   const cached = termCache.get(key);
   if (cached && cached.term.element) {
@@ -71,7 +53,7 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
   }
   const term = new Terminal({
     cursorBlink: true,
-    fontFamily: 'ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace',
+    fontFamily: monoFont(el),
     lineHeight: 1.45,
     rightClickSelectsWord: true,
     scrollback: 10000,
@@ -155,7 +137,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         e.preventDefault();
       }
     };
-    // Typed input goes out as a bare string — the same frame shape as paste. The
+    // Typed input goes out as a bare string: the same frame shape as paste. The
     // subscription is per-mount and must be released, because the terminal it
     // listens on is cached and outlives this effect: without dispose(), every
     // remount would send a keystroke once more.
@@ -231,7 +213,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         if (!mountedRef.current) return;
         // only announce on the first drop; later retries stay silent. Dim, not a
         // colour: the buffer must not carry a palette the tokens do not own.
-        if (attempts === 0) term.write("\r\n\x1b[2m[disconnected — retrying]\x1b[22m\r\n");
+        if (attempts === 0) term.write("\r\n\x1b[2m[disconnected, retrying]\x1b[22m\r\n");
         wsRef.current = null;
         attempts += 1;
         setSocket(attempts >= OFFLINE_AFTER_ATTEMPTS ? "offline" : "reconnecting");
@@ -281,12 +263,16 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-8 items-center gap-2 border-b border-line-subtle px-3 text-2xs text-text-muted">
+      {/* Same pane-header geometry as the other panes: a 2rem-min row with 11px
+          text read as a different component. No h2 title: this pane's identity
+          is the tab and the instance strip rendered directly above it by
+          WorkspaceDetail, and the chip plus this line already carry its state. */}
+      <header className="cockpit-head text-2xs text-text-muted">
         <span className={cn("chip", SOCKET_CHIP[socket])}>
           <span className="chip-dot" aria-hidden="true" />
           {SOCKET_LABEL[socket]}
         </span>
-        <span className="min-w-0 truncate">
+        <span className="truncate">
           {socket === "live" ? "attached to the agent's pty" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
         </span>
         <div className="flex-1" />
@@ -295,7 +281,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
             reconnect now
           </Button>
         ) : null}
-      </div>
+      </header>
 
       {/* Not a live region: a screen reader would read every line the agent
           prints. The connection chip above carries the state that matters. */}
@@ -304,7 +290,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           ref={containerRef}
           data-terminal-root=""
           role="group"
-          aria-label={`Terminal ${terminalId} for ${workspaceId}`}
+          aria-label={`terminal ${terminalId} for ${workspaceId}`}
           aria-describedby={descId}
           className="terminal-wrap"
         />

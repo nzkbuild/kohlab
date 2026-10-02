@@ -35,7 +35,7 @@ server.stderr.on("data", (b) => (log += b));
  * The pid bound to a unix socket.
  *
  * A daemon is spawned detached and deliberately outlives its server, so a check
- * that starts a server leaks a daemon per run unless it ends the one it caused —
+ * that starts a server leaks a daemon per run unless it ends the one it caused,
  * and `pkill -f pty-daemon.cjs` would also kill the daemon of a real kohlab
  * instance on this machine, ending live agent sessions.
  */

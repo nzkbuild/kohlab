@@ -2,7 +2,7 @@
 
 Each workspace can carry **resource caps** applied to its agent's terminal
 session. They prevent one runaway agent from pinning the CPU, filling memory,
-or fork-bombing the shared box — without containers.
+or fork-bombing the shared box, without containers.
 
 ## The three caps
 
@@ -20,8 +20,8 @@ kohlab new ~/repo "task" claude --timeout 600 --max-mem 2048 --max-procs 64
 
 ## Dashboard
 
-The new-workspace form has two optional fields — **max mem MB** and
-**timeout s** — alongside repo/task/agent.
+The new-workspace form has two optional fields, **max mem MB** and
+**timeout s**, alongside repo/task/agent.
 
 ## How it works
 
@@ -39,7 +39,7 @@ looks clean; the limits are applied *before* the agent starts.
 
 - **`ulimit -d`, not `-v`.** Node reserves huge virtual address space at
   startup, so `ulimit -v` does not contain its heap. `ulimit -d` (data
-  segment) does — a `node` agent that exceeds the cap aborts with
+  segment) does, a `node` agent that exceeds the cap aborts with
   `JavaScript heap out of memory` instead of touching more RAM.
 
   `ponytail:` `ulimit` is soft: it caps per-process memory but does not fairly

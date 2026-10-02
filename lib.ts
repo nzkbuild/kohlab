@@ -1,9 +1,9 @@
-// works — PTY-daemon-backed coding-agent workspace runner
+// works: PTY-daemon-backed coding-agent workspace runner
 // State lives in $WORKS_DIR/state.json. Sessions are node-pty sessions
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
 import { basename, join } from "path";
 import { randomBytes } from "crypto";
@@ -14,7 +14,7 @@ import { cwd } from "process";
  * Where state lives. An explicit `WORKS_DIR` always wins.
  *
  * Without one, the two entrypoints want opposite things. The server keeps the
- * historical default — a `.works/` directory beside the code — so a local dev
+ * historical default (a `.works/` directory beside the code) so a local dev
  * run never silently adopts a deployment's state. A one-shot CLI must not: with
  * no `WORKS_DIR` it used to report an empty fleet against a service serving
  * `/root/.kohlab`, which is worse than useless. So the CLI asks the systemd unit
@@ -28,7 +28,7 @@ function resolveWorksDir(): string {
       const unit = process.env.KOHLAB_UNIT ?? "kohlab";
       const out = spawnSync("systemctl", ["show", unit, "-p", "Environment"], { encoding: "utf8" });
       // systemd merges every Environment= line into ONE line, so WORKS_DIR can
-      // sit anywhere on it — matching only at the start finds nothing.
+      // sit anywhere on it: matching only at the start finds nothing.
       const m = /.*WORKS_DIR=([^ ]+)/.exec(out.stdout ?? "");
       if (m) return m[1];
     } catch {}
@@ -44,13 +44,13 @@ const AUDIT_FILE = join(WORKS_DIR, "audit.log");
 const KEY_FILE = join(WORKS_DIR, "key");
 
 /**
- * The access key — or one generated on the spot, when this server is about to be
+ * The access key: or one generated on the spot, when this server is about to be
  * reachable from somewhere other than this box with no authentication at all.
  *
  * Without a key and without named users, every route treats an anonymous caller
  * as the owner, so the first person to find the port owns the machine. That is
  * acceptable only on loopback, where the only caller is already on the box. Bound
- * anywhere else — the default — it is not acceptable, and leaving it to a firewall
+ * anywhere else (the default) it is not acceptable, and leaving it to a firewall
  * the operator may not know they need is not a safety net.
  *
  * So: bound beyond loopback, keyless and userless, the server generates a key,
@@ -67,7 +67,7 @@ function resolveAccessKey(): string | undefined {
     mkdirSync(WORKS_DIR, { recursive: true, mode: 0o700 });
     writeFileSync(KEY_FILE, key + "\n", { mode: 0o600 });
     console.warn(
-      `[kohlab] no KOHLAB_KEY, and this server is reachable beyond localhost — generated one.\n` +
+      `[kohlab] no KOHLAB_KEY, and this server is reachable beyond localhost, generated one.\n` +
         `[kohlab] it is in ${KEY_FILE}. Set KOHLAB_KEY yourself to choose your own.`,
     );
   } catch (e) {
@@ -83,8 +83,8 @@ const WATCH_INTERVAL = Number(process.env.WATCH_INTERVAL ?? 2000);
 const ACCESS_KEY = resolveAccessKey();
 // --- OS-user provisioning helpers (v1.8 isolation) -----------------------
 // Every named member maps to a real POSIX user: their agent sessions run as
-// that uid/gid with $HOME=/home/<user>, so the filesystem — not just the
-// role check — keeps members out of each other's data. Helpers here degrade
+// that uid/gid with $HOME=/home/<user>, so the filesystem: not just the
+// role check: keeps members out of each other's data. Helpers here degrade
 // to no-ops when the server isn't root (dev boxes), and `useradd` failures
 // surface as clear errors instead of half-created state.
 
@@ -165,11 +165,11 @@ export async function provisionOsUser(u: User): Promise<{ osUser: string; uid?: 
 export async function deprovisionOsUser(osUser: string): Promise<{ removed: boolean; detail?: string }> {
   if (!isRoot()) {
     console.warn(`not root; skipping OS-user removal for '${osUser}'`);
-    return { removed: false, detail: "not root — the OS account is still there" };
+    return { removed: false, detail: "not root, the OS account is still there" };
   }
   if (!lookupUser(osUser)) return { removed: true };
   // `userdel` refuses while any process still owns the account, which is exactly
-  // the situation when the member's agent is running — the moment you most mean
+  // the situation when the member's agent is running: the moment you most mean
   // it. Revocation stops them first, then removes the account: a revoked member
   // whose agent keeps running, keeps its home and keeps its uid is not revoked.
   try {
@@ -192,7 +192,7 @@ export async function deprovisionOsUser(osUser: string): Promise<{ removed: bool
 }
 
 /**
- * Open a workspace's agent PTY session on the daemon — the single spawn
+ * Open a workspace's agent PTY session on the daemon: the single spawn
  * choke point for both the CLI/API start path and the browser-attach path,
  * so the caps AND the owning user's identity handed to the daemon can never
  * drift between them. Throws with the daemon's error on failure.
@@ -232,7 +232,7 @@ export function authRequired(): boolean {
   // Read FIRST, so corruption latches before the decision is made. Checking the
   // flag before reading left a one-request window: the flag was set *during*
   // usersExist(), too late for the check that had already passed, so the first
-  // request after a users.json was damaged was still admitted as anonymous —
+  // request after a users.json was damaged was still admitted as anonymous,
   // and a mutating one would have been allowed through.
   const users = readUsers();
   if (usersFileCorrupt) return true;
@@ -245,7 +245,7 @@ export function usersExist(): boolean {
   return us.length > 0;
 }
 
-/** SHA-256 hex of a key — stored, never plaintext. */
+/** SHA-256 hex of a key, stored, never plaintext. */
 async function hashKey(key: string): Promise<string> {
   const bytes = new TextEncoder().encode(key);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -261,12 +261,71 @@ async function keyMatches(candidate: string, storedHex: string): Promise<boolean
   return diff === 0;
 }
 
+// --- pairing (RFC 8628-style device grant, for the "loop zero" first run) ---
+// A short human-typeable code lets a fresh browser trade 9 characters for the
+// real access key, so the key never has to cross devices by hand. The code is
+// the credential for exactly one claim inside a short window: generated on the
+// box by `kohlab pair`, hashed at rest like every other secret here, verified
+// by the server per attempt. Guessing is bounded the RFC 8628 §5.1 way — small
+// code + short TTL + the server-wide per-IP auth throttle — not by per-code
+// counters, which a hashed store cannot keep (a wrong guess matches no file).
+
+/** RFC 8628 §6.1 base-20 alphabet: no digits, no vowels, one case, mobile-keyboard safe. */
+export const PAIR_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
+export const PAIR_TTL_MS = Number(process.env.KOHLAB_PAIR_TTL_MS ?? 10 * 60 * 1000);
+const PAIR_FILE = join(WORKS_DIR, "pair");
+
+/** A fresh pairing code: XXXX-XXXX for reading, hashed into PAIR_FILE for checking. */
+export async function createPair(): Promise<string> {
+  const bytes = randomBytes(8);
+  let core = "";
+  for (let i = 0; i < 8; i++) core += PAIR_ALPHABET[bytes[i] % PAIR_ALPHABET.length];
+  const code = `${core.slice(0, 4)}-${core.slice(4)}`;
+  const record = { hash: await hashKey(code.toUpperCase().replace(/[^A-Z]/g, "")), expires: Date.now() + PAIR_TTL_MS };
+  mkdirSync(WORKS_DIR, { recursive: true, mode: 0o700 });
+  // One live code at a time: a new `kohlab pair` replaces the old one, so a
+  // code pasted onto the wrong screen cannot linger for its whole TTL.
+  writeFileSync(PAIR_FILE, JSON.stringify(record) + "\n", { mode: 0o600 });
+  return code;
+}
+
 /**
- * Report a file we could not parse — loudly, and WITHOUT moving it.
+ * Trade a typed code for the access key. The code is consumed atomically by
+ * renaming the file away before the key is read: two simultaneous claims
+ * cannot both pass the rename. Returns undefined for expired, absent, or
+ * already-claimed codes — one answer, so a failure never says which.
+ */
+export async function claimPair(code: string): Promise<string | undefined> {
+  const candidate = code.toUpperCase().replace(/[^A-Z]/g, "");
+  if (candidate.length !== 8) return undefined;
+  let record: { hash: string; expires: number };
+  try {
+    record = JSON.parse(readFileSync(PAIR_FILE, "utf8"));
+  } catch {
+    return undefined; // no pending code, or unparseable: same silence either way
+  }
+  if (Date.now() > record.expires || !(await keyMatches(candidate, record.hash))) return undefined;
+  try {
+    unlinkSync(PAIR_FILE);
+  } catch {
+    return undefined; // lost the race: the other claim consumed it
+  }
+  // Same precedence the CLI prints: unit env, then the generated key file.
+  try {
+    const fromEnv = process.env.KOHLAB_KEY;
+    const fromFile = readFileSync(KEY_FILE, "utf8").trim();
+    return fromEnv || fromFile || undefined;
+  } catch {
+    return process.env.KOHLAB_KEY || undefined;
+  }
+}
+
+/**
+ * Report a file we could not parse: loudly, and WITHOUT moving it.
  *
  * An earlier version renamed the file aside as `<file>.corrupt-<ts>`. That
  * defeated its own purpose. The "we are damaged" signal is module state, so a
- * restart cleared it — and the renamed-away file then read as simply *absent*:
+ * restart cleared it: and the renamed-away file then read as simply *absent*:
  * for `users.json` that meant "no members", and therefore "no authentication
  * required", so a damaged auth file re-opened anonymous access on every restart;
  * for `state.json` it meant starting from an empty fleet and presenting that as
@@ -293,7 +352,7 @@ function readUsers(): User[] {
     return parsed.users ?? [];
   } catch (error) {
     // FAIL CLOSED. Returning [] here used to make usersExist() false, which made
-    // authRequired() false, which made `denied` false — so a corrupt users.json
+    // authRequired() false, which made `denied` false: so a corrupt users.json
     // in a users-based deployment (no KOHLAB_KEY) silently stopped requiring
     // authentication and let anonymous requests mutate. A damaged auth file must
     // tighten access, never loosen it.
@@ -301,7 +360,7 @@ function readUsers(): User[] {
     reportCorrupt(
       USERS_FILE,
       error,
-      "left in place — authentication stays required until it is restored or removed",
+      "left in place, authentication stays required until it is restored or removed",
     );
     return [];
   }
@@ -329,7 +388,7 @@ export async function addUser(opts: { id: string; name: string; role: Role }): P
   users.push(user);
   await writeUsers(users);
   // v1.8: every member maps to an OS account. On failure, roll the user back
-  // out — a half-provisioned account is worse than none.
+  // out: a half-provisioned account is worse than none.
   let osDetail = "no OS account (not root)";
   try {
     const os = await provisionOsUser(user);
@@ -388,7 +447,7 @@ export async function createInvite(opts: { id: string; name: string; role: Role;
   }
   const users = readUsers();
   const existing = users.find((u) => u.id === id);
-  if (existing?.key) throw new Error(`'${id}' is already a member — rotate their key or remove them instead`);
+  if (existing?.key) throw new Error(`'${id}' is already a member, rotate their key or remove them instead`);
 
   const token = randomBytes(32).toString("hex");
   const expires = Date.now() + INVITE_TTL_MS;
@@ -408,8 +467,8 @@ export async function acceptInvite(token: string): Promise<{ id: string; name: s
   const wanted = await hashKey(token);
   const users = readUsers();
   const found = users.find((u) => u.invite && u.invite.token === wanted);
-  if (!found?.invite) throw new Error("this invitation is not valid — ask for a new link");
-  if (found.invite.expires < Date.now()) throw new Error("this invitation has expired — ask for a new link");
+  if (!found?.invite) throw new Error("this invitation is not valid, ask for a new link");
+  if (found.invite.expires < Date.now()) throw new Error("this invitation has expired, ask for a new link");
 
   const key = randomBytes(24).toString("hex");
   try {
@@ -443,7 +502,7 @@ export async function setUserRole(id: string, role: Role): Promise<User> {
  * Rotate a member's own key, returning the new one exactly once.
  *
  * The old key stops working the moment this returns, so the caller has to store
- * the new one immediately — the Account panel does, which is why rotating does
+ * the new one immediately: the Account panel does, which is why rotating does
  * not sign you out of the browser you did it in.
  */
 export async function rotateOwnKey(id: string): Promise<{ key: string }> {
@@ -492,7 +551,7 @@ export async function authenticate(req: { headers: Headers; url: string }): Prom
   const key = extractKey(req);
   if (key) {
     for (const u of readUsers()) {
-      // an invited member has no key until they accept — `keyMatches` would be
+      // an invited member has no key until they accept: `keyMatches` would be
       // handed undefined, and a user without a key must never authenticate
       if (u.key && (await keyMatches(key, u.key))) return { kind: "user", id: u.id, role: u.role };
     }
@@ -510,7 +569,7 @@ export async function authenticate(req: { headers: Headers; url: string }): Prom
 
 /** The WebSocket subprotocol a browser uses to carry its key. A browser cannot
  *  set an `Authorization` header on an upgrade, but it *can* set
- *  `Sec-WebSocket-Protocol`, and that header does not end up in a URL — which is
+ *  `Sec-WebSocket-Protocol`, and that header does not end up in a URL: which is
  *  the whole point: a key in a query string leaks into history, logs and Referer. */
 export const KEY_PROTOCOL = "kohlab.key.";
 
@@ -554,7 +613,7 @@ let auditCheckedAt = 0;
  *
  * An agent workspace that runs all day writes continuously, and an unbounded log
  * on a small VPS is a slow outage. Best-effort like the write itself: if rotating
- * fails, keep appending — losing history is bad, refusing to record it is worse.
+ * fails, keep appending: losing history is bad, refusing to record it is worse.
  * Called on a timer because a size check on every single append is a stat per
  * event for no benefit.
  */
@@ -577,7 +636,7 @@ async function rotateAuditIfNeeded(): Promise<void> {
   }
 }
 
-/** Run tar in the state directory. Relative paths only — see restoreFrom. */
+/** Run tar in the state directory. Relative paths only, see restoreFrom. */
 function tar(args: string[]): { status: number | null; stdout: string; stderr: string } {
   const res = spawnSync("tar", args, { cwd: WORKS_DIR, encoding: "utf8" });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
@@ -585,7 +644,7 @@ function tar(args: string[]): { status: number | null; stdout: string; stderr: s
 
 /**
  * Everything worth keeping in one archive: the state file, the member records,
- * the audit log, and every workspace's metadata (but not its work — that is git's
+ * the audit log, and every workspace's metadata (but not its work: that is git's
  * job, and it is in the repo the workspace was cloned from).
  *
  * Written with tar, and only the paths that exist, so a fresh install still
@@ -646,7 +705,7 @@ export async function readAudit(limit = 200): Promise<{ t: number; user: string;
 
 // --- releases (OTA updates) -------------------------------------------------
 
-/** The checkout this code runs from — the thing an update updates. */
+/** The checkout this code runs from, the thing an update updates. */
 const REPO_ROOT = import.meta.dir;
 
 export type ReleaseCheck = {
@@ -669,7 +728,7 @@ export type UpdateRun = {
   /**
    * A run that stopped without writing its finish marker: killed mid-flight, or
    * it never got as far as starting. Without this the panel had nothing to
-   * report — a log existed, but no exit code, so it showed nothing at all.
+   * report: a log existed, but no exit code, so it showed nothing at all.
    */
   unfinished: boolean;
   log: string;
@@ -692,11 +751,11 @@ function headingVersion(line: string): string | null {
 /**
  * What changed since `version`: the changelog from the first `##` heading down
  * to, but not including, that version's own heading. The file is newest-first, so
- * this needs no version comparison — "newer than mine" is exactly what sits
+ * this needs no version comparison: "newer than mine" is exactly what sits
  * above my heading.
  *
  * It starts at the first `##` heading rather than at the top of the file, so the
- * boilerplate above it — `# Changelog`, the versioning philosophy paragraph — is
+ * boilerplate above it (`# Changelog`, the versioning philosophy paragraph) is
  * not repeated into every release's notes. (An `## [Unreleased]` section sitting
  * above the released ones IS included: those changes are part of what is coming.)
  */
@@ -713,7 +772,7 @@ export function releaseNotes(changelog: string, version: string): string {
  * What the upstream repo publishes, and what is new since this checkout.
  *
  * `git fetch` is the only network call, and it is what makes "someone pushed a
- * release" visible here — so it is cached (RELEASE_CHECK_TTL, default 5 min)
+ * release" visible here: so it is cached (RELEASE_CHECK_TTL, default 5 min)
  * rather than run on every dashboard poll. `force` skips the cache.
  */
 export async function checkRelease(repo: string = REPO_ROOT, opts: { force?: boolean } = {}): Promise<ReleaseCheck> {
@@ -754,7 +813,7 @@ export async function checkRelease(repo: string = REPO_ROOT, opts: { force?: boo
   } catch (e) {
     value.error = String((e as Error).message ?? e).split("\n")[0];
   }
-  // Never cache a failure — a fetch that failed because the network was down
+  // Never cache a failure: a fetch that failed because the network was down
   // must not look like "up to date" for the next five minutes.
   if (!value.error) releaseCache.set(repo, { at: Date.now(), value });
   return value;
@@ -862,14 +921,14 @@ function markDaemonUp() {
 }
 
 /**
- * Start a daemon — called ONLY after a connection attempt has failed, so a
+ * Start a daemon: called ONLY after a connection attempt has failed, so a
  * live daemon is never orphaned.
  *
  * Spawning unconditionally (and unlinking the socket first) used to sever the
  * running daemon on every server start: it stayed alive, detached, still
  * holding every agent PTY and its scrollback, but nothing could reach it ever
- * again. A restart silently lost every live session — the opposite of the
- * product's promise — while state.json still reported those workspaces as
+ * again. A restart silently lost every live session: the opposite of the
+ * product's promise: while state.json still reported those workspaces as
  * running.
  */
 function ensurePtyDaemon() {
@@ -988,7 +1047,7 @@ function removeDaemonHandler(fn: DaemonHandler) {
  *
  * The long-lived server keeps it open on purpose. A one-shot CLI must close it:
  * an open socket holds the event loop, so every command that touched the daemon
- * — `kohlab ls`, `start`, `diff`, `commit` — printed its answer and then hung
+ * (`kohlab ls`, `start`, `diff`, `commit`) printed its answer and then hung
  * forever instead of exiting. Closing is also what lets stdout flush, which a
  * `process.exit()` would truncate when the output is a pipe.
  *
@@ -1054,7 +1113,7 @@ export async function markStarted(id: string): Promise<Workspace> {
 interface State {
   /**
    * Bumped only for a change that older code cannot read. Every file written
-   * before this field existed has no version, which is what version 0 means —
+   * before this field existed has no version, which is what version 0 means,
    * so the migration path for "an install that predates versioning" is the same
    * code path as any future one, and is exercised by a check.
    */
@@ -1087,14 +1146,14 @@ async function loadState(): Promise<State> {
   try {
     s = JSON.parse(raw) as State;
   } catch (error) {
-    // Loud, never silent — and the file stays where it is, so the failure
+    // Loud, never silent: and the file stays where it is, so the failure
     // repeats on every start instead of quietly becoming an empty fleet.
     reportCorrupt(
       STATE_FILE,
       error,
-      "left in place — restore it from a backup, or delete it to start with no workspaces",
+      "left in place, restore it from a backup, or delete it to start with no workspaces",
     );
-    throw new Error(`${STATE_FILE} is corrupt — see the message above, then restart`);
+    throw new Error(`${STATE_FILE} is corrupt, see the message above, then restart`);
   }
   return await migrateState(s, STATE_FILE);
 }
@@ -1104,11 +1163,11 @@ async function loadState(): Promise<State> {
  *
  * A file *newer* than this server is refused rather than read. Reading it would
  * mean working with fields this build does not know about, and then writing the
- * file back without them — a downgrade that silently destroys data. Refusing to
+ * file back without them: a downgrade that silently destroys data. Refusing to
  * start is recoverable; writing over it is not.
  *
  * An older (or versionless) file is stamped and kept. There are no migrations
- * yet, so the only real work is the stamp — but the versionless path is the one
+ * yet, so the only real work is the stamp: but the versionless path is the one
  * every existing install takes, which is exactly why it is tested.
  */
 async function migrateState(s: State, file: string): Promise<State> {
@@ -1120,7 +1179,7 @@ async function migrateState(s: State, file: string): Promise<State> {
     reportCorrupt(
       file,
       error,
-      "left untouched — update kohlab, or move the file aside to start with no workspaces",
+      "left untouched, update kohlab, or move the file aside to start with no workspaces",
     );
     throw error;
   }
@@ -1128,9 +1187,9 @@ async function migrateState(s: State, file: string): Promise<State> {
   if (found < SCHEMA_VERSION) {
     s.schemaVersion = SCHEMA_VERSION;
     // Awaited, deliberately. This is a read that writes, and an unawaited write
-    // here is a write that can land after somebody else has replaced the file —
+    // here is a write that can land after somebody else has replaced the file,
     // an operator restoring a backup, or a test that writes a deliberately
-    // corrupt one — silently clobbering it with what we happened to read a
+    // corrupt one: silently clobbering it with what we happened to read a
     // moment earlier. Finishing before we return means "the file is now what we
     // read" is true by the time the caller sees anything.
     try {
@@ -1152,7 +1211,7 @@ async function migrateState(s: State, file: string): Promise<State> {
  * A sibling temp file plus `rename` makes the swap all-or-nothing: a reader sees
  * either the old file or the new one, never a torn one, and the rename is atomic
  * because it stays within one filesystem. The `sync` is for durability rather
- * than atomicity — without it a power loss can commit the rename while the
+ * than atomicity: without it a power loss can commit the rename while the
  * contents are still unwritten.
  */
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
@@ -1201,7 +1260,7 @@ async function mutateState<T>(fn: (s: State) => T | Promise<T>): Promise<T> {
 /** Workspaces that were running on the previous watcher tick. */
 let previouslyRunning = new Set<string>();
 
-/** Workspaces stopped manually (stop/delete) — their daemon `exit` must not
+/** Workspaces stopped manually (stop/delete), their daemon `exit` must not
  *  be reported as an agent completion. */
 const intentionallyStopped = new Set<string>();
 
@@ -1245,7 +1304,7 @@ export function startWatcher() {
   setInterval(async () => {
     try {
       const sessions = await ptyList();
-      if (sessions === null) return; // daemon unreachable — don't read as "all done"
+      if (sessions === null) return; // daemon unreachable, don't read as "all done"
       const s = await loadState();
       const running = new Set<string>();
       const finished = new Set<string>();
@@ -1535,7 +1594,7 @@ export async function deleteWorkspace(id: string) {
     }
   }
   // isolated workspaces have no worktree linkage (they are plain clones under
-  // the owner's home) — nothing to un-register, skip straight to the rm.
+  // the owner's home): nothing to un-register, skip straight to the rm.
   if (!ws.dir) {
     try {
       await run(ws.repo, "git", ["worktree", "remove", "--force", worktreePath(ws)]);
@@ -1543,7 +1602,7 @@ export async function deleteWorkspace(id: string) {
       console.warn(`worktree remove failed (${(e as Error).message}); leaving tree on disk`);
     }
   }
-  // isolated workspaces live entirely under ws.dir — remove the private root
+  // isolated workspaces live entirely under ws.dir: remove the private root
   // (admin repo + worktree + images). Legacy: shared store + shared images.
   if (ws.dir) await rm(ws.dir, { recursive: true, force: true });
   else await rm(join(WORKS_DIR, "images", id), { recursive: true, force: true });
@@ -1568,7 +1627,7 @@ export async function getDiff(id: string): Promise<{ name: string; diff: string 
   const tree = worktreePath(ws);
 
   // `git diff` only reports tracked edits. Agents create files constantly, and
-  // an untracked file is still staged by commitWorkspace's `git add -A` — so
+  // an untracked file is still staged by commitWorkspace's `git add -A`: so
   // without the untracked pass, review silently omits files that get committed.
   const [{ stdout: modified }, { stdout: untracked }] = await Promise.all([
     runOut(tree, "git", ["diff", "--name-only", "--no-color"]),
@@ -1594,7 +1653,7 @@ export async function getDiff(id: string): Promise<{ name: string; diff: string 
       continue; // vanished between listing and stat
     }
     if (size > MAX_DIFF_PREVIEW_BYTES) {
-      out.push({ name: f, diff: `new file — ${size} bytes, too large to preview` });
+      out.push({ name: f, diff: `new file, ${size} bytes, too large to preview` });
       continue;
     }
     // --no-index exits 1 whenever the files differ: that is the success path.
@@ -1612,19 +1671,58 @@ export async function commitWorkspace(id: string, message: string) {
   await run(tree, "git", ["add", "-A"]);
   // A clean tree has nothing to stage and `git commit` exits 1, which surfaced
   // as a raw "git commit -m … exited 1". Nothing staged means the workspace is
-  // already in the accepted state, so record it and continue — otherwise a
+  // already in the accepted state, so record it and continue: otherwise a
   // stopped workspace with no changes can never leave the review queue, since
   // accepting it is the only path out.
   const { stdout: staged } = await runOut(tree, "git", ["diff", "--cached", "--name-only"]);
   if (staged.trim()) {
     await run(tree, "git", ["commit", "-m", message || `works: ${ws.task}`]);
   } else {
-    console.log(`[kohlab] ${id}: nothing to commit — accepting the workspace as-is`);
+    console.log(`[kohlab] ${id}: nothing to commit, accepting the workspace as-is`);
   }
   return mutateState(async (st) => {
     const w = st.workspaces.find((x) => x.id === id);
     if (!w) throw new Error(`no workspace '${id}'`);
     w.lastCommitAt = Date.now();
+    return { ok: true };
+  });
+}
+
+/**
+ * Reject an agent's work without deleting the workspace.
+ *
+ * The product promises that a finished workspace is something you "accept or
+ * discard". Only accept existed: the sole way to say no was to delete the
+ * workspace, its worktree and its branch, so rejecting an attempt cost far more
+ * than accepting one. Discard is the other half. It throws away what the agent
+ * did, returns the tree to whatever its branch already holds, and leaves the
+ * workspace able to run again.
+ *
+ * It refuses while the workspace is running. A `git reset --hard` under an agent
+ * that is still writing would race, and the result would be neither the agent's
+ * work nor the branch's, which is the one outcome worse than either.
+ *
+ * `git clean -fd`, not `-fdx`. Ignored paths are the environment (installed
+ * dependencies, build output), not the agent's work, and wiping them would make
+ * the next run pay to rebuild something discard had no business touching.
+ */
+export async function discardWorkspace(id: string): Promise<{ ok: true }> {
+  const ws = await getWorkspace(id);
+  // Ask the daemon, not a stored flag: the flag can be stale after a crash, and
+  // a reset under a live agent is the one outcome worse than either choice.
+  if (await isRunning(ws)) throw new Error("stop the workspace before discarding, its agent is still running");
+  const tree = worktreePath(ws);
+  await run(tree, "git", ["reset", "--hard", "HEAD"]);
+  await run(tree, "git", ["clean", "-fd"]);
+  // Record the decision. Without this the workspace keeps claiming it needs
+  // review, with an empty diff and nothing left to review, because the review
+  // queue is derived from lastCommitAt and a discard sets no commit. Setting
+  // lastCommitAt instead would be worse: it would report the work as committed,
+  // which is the opposite of what happened.
+  return mutateState(async (st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) throw new Error(`no workspace '${id}'`);
+    w.discardedAt = Date.now();
     return { ok: true };
   });
 }
@@ -1644,7 +1742,7 @@ export async function commitWorkspace(id: string, message: string) {
  */
 export async function mergeWorkspace(
   id: string,
-  opts: { into?: string; message?: string; noCommit?: boolean } = {},
+  opts: { into?: string; message?: string; noCommit?: boolean; actor?: string } = {},
 ): Promise<{ repo: string; branch: string; from: string; to: string; previous: string; commit: string }> {
   const ws = await getWorkspace(id);
   const branch = `kohlab/${ws.id}`;
@@ -1661,7 +1759,7 @@ export async function mergeWorkspace(
   if (bare.code !== 0) throw new Error(`${repo} is not a git repository`);
   if (bare.stdout.trim() === "true") {
     throw new Error(
-      `${repo} is a bare clone, so there is no branch of yours to merge into — ` +
+      `${repo} is a bare clone, so there is no branch of yours to merge into, ` +
         `pass --into <your checkout>, or fetch ${branch} from it`,
     );
   }
@@ -1670,7 +1768,7 @@ export async function mergeWorkspace(
   if (status.stdout.trim()) {
     const lines = status.stdout.trim().split("\n").length;
     throw new Error(
-      `${repo} has ${lines} uncommitted change${lines === 1 ? "" : "s"} — commit or stash them first. ` +
+      `${repo} has ${lines} uncommitted change${lines === 1 ? "" : "s"}, commit or stash them first. ` +
         `Merging would put your work in progress in the middle of someone else's.`,
     );
   }
@@ -1678,13 +1776,13 @@ export async function mergeWorkspace(
   const current = (await runOut(repo, "git", ["rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim();
   if (current === branch) throw new Error(`${repo} is already on ${branch}`);
 
-  // A worktree's branch exists from the moment it is created — it points at the
+  // A worktree's branch exists from the moment it is created: it points at the
   // commit it was cut from. So "the branch is there" says nothing; what matters is
   // whether it has a commit the target does not have.
   const ahead = await runOut(repo, "git", ["rev-list", "--count", `${current}..${branch}`], [1, 128]);
   if (ahead.code !== 0 || Number(ahead.stdout.trim() || 0) === 0) {
     throw new Error(
-      `${branch} has no commits beyond ${current} — there is nothing to merge yet. ` +
+      `${branch} has no commits beyond ${current}, there is nothing to merge yet. ` +
         `Accept the workspace first: kohlab commit ${id}`,
     );
   }
@@ -1705,14 +1803,14 @@ export async function mergeWorkspace(
     const conflicted = /CONFLICT|conflict/i.test(merged.stdout + merged.stderr);
     throw new Error(
       conflicted
-        ? `merge conflict — nothing was changed, ${repo} is back where it was. ` +
+        ? `merge conflict, nothing was changed, ${repo} is back where it was. ` +
           `Resolve it yourself with: git -C ${repo} merge ${branch}`
         : `merge failed: ${(merged.stderr || merged.stdout).trim() || merged.code}` +
           (abort.code === 0 ? " (aborted; the repository is unchanged)" : ""),
     );
   }
 
-  await audit("cli", "merge", id, `${branch} -> ${current} in ${repo} (${commit.slice(0, 8)})`);
+  await audit(opts.actor ?? "cli", "merge", id, `${branch} -> ${current} in ${repo} (${commit.slice(0, 8)})`);
   return {
     repo,
     branch,

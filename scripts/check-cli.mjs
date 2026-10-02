@@ -4,7 +4,7 @@
  *
  * Run:  node scripts/check-cli.mjs
  *
- * The command list is a contract — `kohlab <command>` is the whole interface, so
+ * The command list is a contract: `kohlab <command>` is the whole interface, so
  * a command that silently disappears, or an alias that stops resolving, is a
  * break. Exit codes matter for the same reason: a script that runs
  * `kohlab bogus || exit` must be able to tell that nothing ran.
@@ -44,7 +44,7 @@ function cli(args) {
 }
 
 try {
-  console.log("\nkohlab — cli surface\n");
+  console.log("\nkohlab, cli surface\n");
 
   const bare = cli([]);
   check("no arguments prints the command list", bare.status === 0 && bare.out.includes("usage: kohlab <command>"), bare.out.slice(0, 120));
@@ -85,7 +85,7 @@ try {
   check("a missing argument exits non-zero", missing.status === 1, `exit ${missing.status}`);
   check("a missing argument names the usage", missing.out.includes("usage: kohlab create"), missing.out.slice(0, 120));
 
-  // Aliases must resolve — not merely be documented.
+  // Aliases must resolve: not merely be documented.
   for (const [alias, hint] of [["new", "create"], ["rm", "remove"], ["delete", "remove"], ["log", "logs"]]) {
     const r = cli([alias]);
     check(`alias ${alias} resolves to ${hint}`, r.status === 1 && !r.out.includes("unknown command"), r.out.slice(0, 120));

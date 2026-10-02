@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
+  ArrowRight,
   ArrowSquareOut,
   CaretDown,
   DotsThree,
+  GitDiff,
   GithubLogo,
   LinkSimple,
   MagnifyingGlass,
@@ -15,16 +17,31 @@ import {
   Trash,
 } from "@phosphor-icons/react";
 import { api } from "../api";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { toastAction, withToast } from "../lib/actions";
 import { relativeTime } from "../lib/format";
-import { STATUS_LABEL, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
+import { STATUS_LABEL, STATUS_TEXT, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
 import { AGENT_CATALOG } from "../types";
 import type { Workspace } from "../types";
-import { Button, EmptyState, Field, Menu, MenuItem, MenuSub, PageHeader, Panel, StatusChip, Tab, TabList, TabPanel, Tabs } from "./ui";
-import { ActivityPanel, AgentsPanel, ReviewQueue } from "./HomePanels";
+import {
+  Button,
+  EmptyState,
+  Field,
+  Menu,
+  MenuItem,
+  MenuSub,
+  PageHeader,
+  Panel,
+  PanelHead,
+  StatusChip,
+  Tab,
+  TabList,
+  TabPanel,
+  Tabs,
+} from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
+import { cn } from "../lib/utils";
 
 /* --------------------------------------------------------------- constants -- */
 
@@ -52,7 +69,7 @@ function matches(w: Workspace, query: string): boolean {
 /**
  * Agent options come from the server, never a hand-kept list. The catalog is
  * only a fallback for a server that reports nothing (fresh install, or the
- * status call failed) — it must never be the primary source.
+ * status call failed): it must never be the primary source.
  */
 function useAgentOptions(): { names: string[]; reported: boolean } {
   const [installed, setInstalled] = useState<string[]>([]);
@@ -97,7 +114,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
     try {
       const res = await api.ghRepos();
       setRepos(res.repos);
-      if (!res.authed) setReposError("GitHub is not authenticated on this server — paste a path or URL instead.");
+      if (!res.authed) setReposError("GitHub is not authenticated on this server, paste a path or URL instead.");
       else if (res.repos.length === 0) setReposError("GitHub returned no repositories for this account.");
     } catch (e) {
       setRepos([]);
@@ -125,7 +142,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
           : api.create({ task: task.trim(), repo: trimmed || undefined, agent: chosenAgent, limits }),
       );
       await refresh();
-      announce(`${created.id} created — the agent is starting`);
+      announce(`${created.id} created, the agent is starting`);
       navigate({ kind: "workspace", id: created.id });
     } catch {
       /* withToast already reported the reason */
@@ -161,7 +178,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
               placeholder="/srv/repos/app or https://github.com/owner/name"
             />
             <Button onClick={() => void loadRepos()} disabled={reposBusy}>
-              <GithubLogo size={15} />
+              <GithubLogo size={14} />
               {reposBusy ? "loading…" : "github"}
             </Button>
           </div>
@@ -170,7 +187,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         {repos && repos.length > 0 ? (
           <select
             className="field-select"
-            aria-label="Pick a GitHub repository"
+            aria-label="pick a GitHub repository"
             value=""
             onChange={(e) => {
               if (e.target.value) setRepo(asCloneUrl(e.target.value));
@@ -188,7 +205,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         <Field
           label="Agent"
           htmlFor="new-workspace-agent"
-          help={reported ? "Reported as installed by this server." : "This server reports none installed — showing every known agent."}
+          help={reported ? "Reported as installed by this server." : "This server reports none installed, showing every known agent."}
         >
           <select
             id="new-workspace-agent"
@@ -236,7 +253,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
             </Button>
           ) : null}
           <Button type="submit" variant="primary" disabled={busy || !task.trim() || !chosenAgent}>
-            <Rocket size={15} weight="fill" />
+            <Rocket size={14} weight="fill" />
             {busy ? "creating…" : "create & start"}
           </Button>
         </div>
@@ -245,11 +262,60 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   );
 }
 
+/* -------------------------------------------------------------- the view -- */
+
+/**
+ * What is waiting on you, oldest first: the longer an agent's work has sat
+ * unreviewed, the further its branch has drifted. Only rendered when non-empty,
+ * so an empty queue costs no space.
+ */
+function ReviewQueue({ items }: { items: Workspace[] }) {
+  const navigate = useApp((s) => s.navigate);
+  return (
+    <Panel className="mt-5">
+      <PanelHead
+        title="Waiting for review"
+        icon={<GitDiff size={15} />}
+        meta={<span className="tnum">{items.length}</span>}
+      />
+      <ul className="p-1.5">
+        {items.map((w) => (
+          <li key={w.id}>
+            <button
+              type="button"
+              onClick={() => navigate({ kind: "workspace", id: w.id, tab: "review" })}
+              className="group flex min-h-11 w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
+            >
+              <span className={cn("chip-dot shrink-0", STATUS_TEXT["needs-review"])} aria-hidden="true" />
+              <span className="mono shrink-0 text-sm font-medium text-text-primary">{w.id}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">{w.task}</span>
+              <span className="mono hidden shrink-0 text-xs text-text-faint shell:inline">{w.agent}</span>
+              <span className="tnum shrink-0 text-xs text-text-muted" title="waiting since">
+                {relativeTime(w.stopped ?? w.created)}
+              </span>
+              <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-status-review">
+                review
+                <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+/**
+ * Home: the review queue first, then every workspace with search, a status
+ * filter and per-row actions. This replaced a separate "Command center" that
+ * showed the same workspaces as KPI cards, a second tabbed table and an
+ * activity feed: three readings of one list, none of which acted on it.
+ */
 /* --------------------------------------------------------------- open menu -- */
 
 /**
- * The page-level entry into existing work: a fresh shell or a relaunched agent
- * in any workspace. Creating a workspace stays in the sidebar.
+ * The page-level way back into existing work: a fresh shell or a relaunched
+ * agent in any workspace. Creating a workspace belongs to the sidebar.
  */
 function OpenMenu({ workspaces }: { workspaces: Workspace[] }) {
   const navigate = useApp((s) => s.navigate);
@@ -263,7 +329,7 @@ function OpenMenu({ workspaces }: { workspaces: Workspace[] }) {
 
   const openTerminal = (id: string) => {
     setOpenShell(id);
-    navigate({ kind: "workspace", id });
+    navigate({ kind: "workspace", id, tab: "terminal" });
   };
 
   const runAgent = async (w: Workspace) => {
@@ -272,7 +338,7 @@ function OpenMenu({ workspaces }: { workspaces: Workspace[] }) {
       await toastAction(w.id, action);
       await refresh();
       announce(`${w.id} agent ${action === "start" ? "starting" : "restarting"}`);
-      navigate({ kind: "workspace", id: w.id });
+      navigate({ kind: "workspace", id: w.id, tab: "terminal" });
     } catch {
       /* toastAction already reported the reason */
     }
@@ -280,10 +346,10 @@ function OpenMenu({ workspaces }: { workspaces: Workspace[] }) {
 
   return (
     <Menu
-      label="Open a terminal or agent"
+      label="open a terminal or agent"
       trigger={
-        <Button variant="primary" disabled={workspaces.length === 0}>
-          <TerminalWindow size={15} weight="bold" />
+        <Button variant="primary">
+          <TerminalWindow size={14} weight="bold" />
           open…
           <CaretDown size={12} weight="bold" />
         </Button>
@@ -310,19 +376,34 @@ function OpenMenu({ workspaces }: { workspaces: Workspace[] }) {
 
 /* -------------------------------------------------------------- the view -- */
 
-/**
- * Home: the review queue first, then every workspace (search, status filter,
- * per-row actions), then activity and agents as context.
- */
 export default function WorkspacesView() {
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
   const refresh = useApp((s) => s.refresh);
+  const route = useApp((s) => s.route);
+  const can = useCan();
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const creating = useApp((s) => s.creating);
-  const setCreating = useApp((s) => s.setCreating);
+  // `/new` (the sidebar button, the palette) arrives with the form open, and a
+  // second arrival while already here opens it too: the route object is new.
+  const wantsCreate = route.kind === "workspaces" && !!route.create;
+  const [creating, setCreating] = useState(wantsCreate);
+  useEffect(() => {
+    if (wantsCreate) setCreating(true);
+  }, [route, wantsCreate]);
+  const closeForm = () => {
+    setCreating(false);
+    if (wantsCreate) navigate({ kind: "workspaces" }, { replace: true });
+  };
+
+  const queue = useMemo(
+    () =>
+      workspaces
+        .filter((w) => workspaceStatus(w) === "needs-review")
+        .sort((a, b) => (a.stopped ?? a.created) - (b.stopped ?? b.created)),
+    [workspaces],
+  );
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -333,8 +414,13 @@ export default function WorkspacesView() {
       "needs-review": 0,
       committed: 0,
       stopped: 0,
+      discarded: 0,
     };
     for (const w of workspaces) by[workspaceStatus(w)] += 1;
+    // Discarded is shown under `stopped` (it is stopped: not running, not waiting
+    // on anyone, and its row carries its own chip), so the number beside that
+    // filter has to include it or it would undercount what it shows.
+    by.stopped += by.discarded;
     return by;
   }, [workspaces]);
 
@@ -342,7 +428,13 @@ export default function WorkspacesView() {
   const visible = useMemo(
     () =>
       workspaces
-        .filter((w) => (filter === "all" || workspaceStatus(w) === filter) && matches(w, trimmedQuery))
+        // Discarded counts as stopped here: without this it would match no filter
+        // except "all", which is a dead end for the state a reject produces.
+        .filter((w) => {
+          const st = workspaceStatus(w);
+          const inFilter = filter === "all" || st === filter || (filter === "stopped" && st === "discarded");
+          return inFilter && matches(w, trimmedQuery);
+        })
         .sort(byReviewFirst),
     [workspaces, filter, trimmedQuery],
   );
@@ -404,26 +496,31 @@ export default function WorkspacesView() {
   return (
     <div className="surface">
       <div className="surface-inner">
+        {/* Creating lives in the sidebar; the page action re-enters existing work. */}
         <PageHeader
           title="Workspaces"
-          description="Every task an agent has been given on this server. Work waiting for review comes first."
-          actions={<OpenMenu workspaces={workspaces} />}
+          description={
+            queue.length > 0
+              ? `${queue.length} waiting for you. Everything an agent has been given on this server is below.`
+              : "Nothing is waiting for review. Everything an agent has been given on this server is below."
+          }
+          actions={can.mutate && workspaces.length > 0 ? <OpenMenu workspaces={workspaces} /> : undefined}
         />
 
+        {/* The form sits directly under the button that opened it, not between
+            the filter tabs and the list they control. */}
         <div id="new-workspace">
-          {creating ? (
+          {creating && can.mutate ? (
             <div className="mt-4">
-              <NewWorkspaceForm onCancel={() => setCreating(false)} />
+              <NewWorkspaceForm onCancel={closeForm} />
             </div>
           ) : null}
         </div>
 
-        <ReviewQueue workspaces={workspaces} />
+        {queue.length > 0 ? <ReviewQueue items={queue} /> : null}
 
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)} className="mt-6">
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="relative min-w-56 flex-1">
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <div className="relative min-w-0 flex-1 basis-56">
             <MagnifyingGlass
               size={14}
               className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
@@ -432,7 +529,7 @@ export default function WorkspacesView() {
             <input
               type="search"
               className="field-input pl-8"
-              aria-label="Search workspaces by id, task or agent"
+              aria-label="search workspaces by id, task or agent"
               placeholder="search id, task or agent"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -443,7 +540,8 @@ export default function WorkspacesView() {
           </span>
         </div>
 
-        <TabList label="Filter workspaces by status">
+        <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+        <TabList label="filter workspaces by status" className="mt-3">
           {FILTERS.map((option) => (
             <Tab key={option} value={option}>
               {FILTER_LABEL[option]}
@@ -460,20 +558,22 @@ export default function WorkspacesView() {
                 title="No workspaces on this server"
                 description="The setup steps walk through installing an agent and creating the first one."
                 action={
-                  <Button variant="primary" onClick={() => setCreating(true)}>
-                    new workspace
-                  </Button>
+                  can.mutate ? (
+                    <Button variant="primary" onClick={() => setCreating(true)}>
+                      new workspace
+                    </Button>
+                  ) : undefined
                 }
               />
             </Panel>
           ) : visible.length === 0 ? (
             /* The system has data; the filter excluded it. Creation is the wrong
-               offer here — the way out is to widen the filter again. */
+               offer here, the way out is to widen the filter again. */
             <Panel>
               <EmptyState
                 icon={<MagnifyingGlass size={18} />}
                 title={`No workspaces match ${describedFilter}`}
-                description="Nothing is hidden — the filter is just narrower than the list."
+                description="Nothing is hidden, the filter is just narrower than the list."
                 action={<Button onClick={clearFilters}>clear filters</Button>}
               />
             </Panel>
@@ -483,13 +583,13 @@ export default function WorkspacesView() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th scope="col">Workspace</th>
-                      <th scope="col">Task</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Agent</th>
-                      <th scope="col">Age</th>
+                      <th scope="col">workspace</th>
+                      <th scope="col">task</th>
+                      <th scope="col">status</th>
+                      <th scope="col">agent</th>
+                      <th scope="col">age</th>
                       <th scope="col">
-                        <span className="sr-only">Actions</span>
+                        <span className="sr-only">actions</span>
                       </th>
                     </tr>
                   </thead>
@@ -499,7 +599,19 @@ export default function WorkspacesView() {
                       return (
                         <tr key={w.id}>
                           <th scope="row" className="normal-case tracking-normal">
-                            <span className="mono text-sm font-medium text-text-primary">{w.id}</span>
+                            {/* The id is the row's way in. The icon actions are
+                                opacity 0 until hover, so on their own they
+                                leave the list with no visible target: someone
+                                scanning for what needs review sees nothing to
+                                press. This target needs no hover, so it also
+                                works wherever hover does not exist. */}
+                            <button
+                              type="button"
+                              className="row-link mono text-sm font-medium"
+                              onClick={() => navigate({ kind: "workspace", id: w.id })}
+                            >
+                              {w.id}
+                            </button>
                           </th>
                           <td className="max-w-md truncate text-text-secondary">{w.task}</td>
                           <td>
@@ -508,16 +620,8 @@ export default function WorkspacesView() {
                           <td className="mono text-xs text-text-muted">{w.agent}</td>
                           <td className="tnum text-xs text-text-muted">{relativeTime(w.created)}</td>
                           <td>
+                            {can.mutate ? (
                             <div className="row-actions flex items-center justify-end gap-1">
-                              <Button
-                                variant="quiet"
-                                iconOnly
-                                size="sm"
-                                aria-label={`open ${w.id}`}
-                                onClick={() => navigate({ kind: "workspace", id: w.id })}
-                              >
-                                <ArrowSquareOut size={14} />
-                              </Button>
                               <Button
                                 variant="quiet"
                                 iconOnly
@@ -525,7 +629,7 @@ export default function WorkspacesView() {
                                 aria-label={`${w.running ? "stop" : "start"} ${w.id}`}
                                 onClick={() => void toggle(w)}
                               >
-                                {w.running ? <Stop size={14} /> : <Play size={14} />}
+                                {w.running ? <Stop size={13} /> : <Play size={13} />}
                               </Button>
                               <Button
                                 variant="quiet"
@@ -534,7 +638,7 @@ export default function WorkspacesView() {
                                 aria-label={`copy share link for ${w.id}`}
                                 onClick={() => void share(w)}
                               >
-                                <LinkSimple size={14} />
+                                <LinkSimple size={13} />
                               </Button>
                               <Button
                                 variant="quiet"
@@ -543,9 +647,10 @@ export default function WorkspacesView() {
                                 aria-label={`delete ${w.id}`}
                                 onClick={() => setPendingDelete(w)}
                               >
-                                <Trash size={14} />
+                                <Trash size={13} />
                               </Button>
                             </div>
+                            ) : null}
                           </td>
                         </tr>
                       );
@@ -555,7 +660,7 @@ export default function WorkspacesView() {
               </Panel>
 
               {/* Below the shell breakpoint a table reflows into one card per
-                  workspace with a single primary action — never a sideways scroll. */}
+                  workspace with a single primary action, never a sideways scroll. */}
               <ul className="flex flex-col gap-2 shell:hidden">
                 {visible.map((w) => (
                   <li key={w.id} className="panel p-3">
@@ -576,30 +681,32 @@ export default function WorkspacesView() {
                         className="flex-1"
                         onClick={() => navigate({ kind: "workspace", id: w.id })}
                       >
-                        <ArrowSquareOut size={14} />
+                        <ArrowSquareOut size={13} />
                         open
                       </Button>
-                      <Menu
-                        label={`More actions for ${w.id}`}
-                        trigger={
-                          <Button variant="secondary" size="sm" iconOnly>
-                            <DotsThree size={16} weight="bold" />
-                          </Button>
-                        }
-                      >
-                        <MenuItem onSelect={() => void toggle(w)}>
-                          {w.running ? <Stop size={14} /> : <Play size={14} />}
-                          {w.running ? "stop" : "start"}
-                        </MenuItem>
-                        <MenuItem onSelect={() => void share(w)}>
-                          <LinkSimple size={14} />
-                          copy share link
-                        </MenuItem>
-                        <MenuItem tone="danger" onSelect={() => setPendingDelete(w)}>
-                          <Trash size={14} />
-                          delete
-                        </MenuItem>
-                      </Menu>
+                      {can.mutate ? (
+                        <Menu
+                          label={`more actions for ${w.id}`}
+                          trigger={
+                            <Button variant="secondary" size="sm" iconOnly>
+                              <DotsThree size={16} weight="bold" />
+                            </Button>
+                          }
+                        >
+                          <MenuItem onSelect={() => void toggle(w)}>
+                            {w.running ? <Stop size={14} /> : <Play size={14} />}
+                            {w.running ? "stop" : "start"}
+                          </MenuItem>
+                          <MenuItem onSelect={() => void share(w)}>
+                            <LinkSimple size={14} />
+                            copy share link
+                          </MenuItem>
+                          <MenuItem tone="danger" onSelect={() => setPendingDelete(w)}>
+                            <Trash size={14} />
+                            delete
+                          </MenuItem>
+                        </Menu>
+                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -608,11 +715,6 @@ export default function WorkspacesView() {
           )}
         </TabPanel>
         </Tabs>
-
-        <div className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-2">
-          <ActivityPanel workspaces={workspaces} />
-          <AgentsPanel />
-        </div>
       </div>
 
       <ConfirmDialog

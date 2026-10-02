@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Token contrast audit — the runnable check behind the design system.
+ * Token contrast audit: the runnable check behind the design system.
  *
  * Parses the :root primitive + semantic tokens out of web/src/index.css,
  * resolves OKLCH -> sRGB, composites translucent chips over their surface, and
@@ -108,7 +108,7 @@ function mixOver(expr, surface, ratioOverride) {
 /**
  * Read the chip's BACKGROUND tint percentage straight out of the
  * `.chip-<name>` rule so this audit can never drift from the stylesheet.
- * Must anchor on `background:` — the same block also carries a border tint at a
+ * Must anchor on `background:`: the same block also carries a border tint at a
  * different percentage.
  */
 function chipTintPercent(chipName) {
@@ -127,7 +127,7 @@ function chipTintPercent(chipName) {
  *   L = 0.2126R + 0.7152G + 0.0722B
  * where each channel is first linearised:
  *   c <= 0.04045 ? c/12.92 : ((c + 0.055)/1.055) ^ 2.4
- * `resolve()` returns GAMMA-ENCODED sRGB, so the transform below is required —
+ * `resolve()` returns GAMMA-ENCODED sRGB, so the transform below is required,
  * skipping it overstates contrast badly near black.
  */
 const linearise = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
@@ -162,7 +162,7 @@ const CHECKS = [
   ["text faint / sunken", "--text-faint", "--surface-sunken", 4.5, "log timestamps"],
   ["text faint / raised", "--text-faint", "--surface-raised", 4.5, "placeholders, faint meta"],
 
-  // Accent surfaces (SC 1.4.3 — button label is normal-size text)
+  // Accent surfaces (SC 1.4.3: button label is normal-size text)
   ["on-accent / accent", "--text-on-accent", "--accent", 4.5, "primary button label"],
 
   // Focus ring against the surfaces it is drawn over (SC 1.4.11 -> 3:1)
@@ -181,7 +181,7 @@ const CHECKS = [
 ];
 
 let failures = 0;
-console.log("\nkohlab token contrast audit — WCAG 2.2 AA\n");
+console.log("\nkohlab token contrast audit, WCAG 2.2 AA\n");
 
 for (const [label, fgTok, bgTok, min, why, chipName, chipTint] of CHECKS) {
   const fg = resolve(fgTok);
@@ -199,13 +199,13 @@ for (const [label, fgTok, bgTok, min, why, chipName, chipTint] of CHECKS) {
   const ok = ratio >= min;
   if (!ok) failures++;
   console.log(
-    `  ${ok ? "ok  " : "FAIL"} ${label.padEnd(26)} ${ratio.toFixed(2).padStart(6)}:1  (min ${min})  ${hex(fg)} on ${hex(bg)}  — ${why}`,
+    `  ${ok ? "ok  " : "FAIL"} ${label.padEnd(26)} ${ratio.toFixed(2).padStart(6)}:1  (min ${min})  ${hex(fg)} on ${hex(bg)}, ${why}`,
   );
 }
 
 console.log(
   failures
-    ? `\n${failures} contrast failure(s). WCAG 2.2 AA is the conformance target — fix the token, not the check.\n`
+    ? `\n${failures} contrast failure(s). WCAG 2.2 AA is the conformance target, fix the token, not the check.\n`
     : `\nall ${CHECKS.length} pairs meet WCAG 2.2 AA\n`,
 );
 process.exit(failures ? 1 : 0);

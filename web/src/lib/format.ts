@@ -1,6 +1,6 @@
 /** Formatting helpers shared by every surface. */
 
-/** "3m", "2h", "4d" — compact, for dense rows. */
+/** "3m", "2h", "4d", compact, for dense rows. */
 export function relativeTime(ts: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));
   if (s < 45) return "just now";
@@ -9,7 +9,7 @@ export function relativeTime(ts: number, now = Date.now()): string {
   return `${Math.round(s / 86400)}d`;
 }
 
-/** "4m 12s" — for elapsed run time. */
+/** "4m 12s", for elapsed run time. */
 export function elapsed(from: number, to: number): string {
   const s = Math.max(0, Math.round((to - from) / 1000));
   if (s < 60) return `${s}s`;

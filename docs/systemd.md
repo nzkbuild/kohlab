@@ -15,14 +15,18 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/kohlab
-Environment=KOHLAB_KEY=your-long-random-secret
+# The key is NOT written here: unit files are world-readable (0644), and a
+# member's agent runs as its own OS user on this box. Keep it in a 0600 file:
+#   mkdir -m 700 -p /root/.kohlab
+#   (umask 077; echo KOHLAB_KEY=your-long-random-secret > /root/.kohlab/kohlab.env)
+EnvironmentFile=/root/.kohlab/kohlab.env
 ExecStart=/root/.bun/bin/bun run server.ts
 Restart=on-failure
 RestartSec=3
 # The PTY daemon is deliberately spawned detached so it outlives the server and
 # keeps every agent session and its scrollback alive across a restart. systemd's
 # default KillMode=control-group signals the whole unit cgroup, which would kill
-# that daemon too and take every live agent with it — the opposite of the
+# that daemon too and take every live agent with it: the opposite of the
 # product's promise. Signal only the server process.
 KillMode=process
 
@@ -59,15 +63,15 @@ journalctl -u kohlab -f
   signals only the server, so the detached daemon survives the stop, keeps every
   PTY and its CPU/memory, and is re-adopted on the next start. An operator
   stopping the service to free the box will find agents still running with no UI
-  to show them. To end them, kill the daemon — which discards their sessions:
+  to show them. To end them, kill the daemon, which discards their sessions:
   ```bash
   pkill -f pty-daemon.cjs
   ```
 - If several Kohlab servers run on one box, give each its own `PTY_SOCKET`,
   `PORT`, and `WORKS_DIR`. They otherwise share `/tmp/kohlab-pty.sock` and will
   fight over the same daemon.
-- Workspace state lives wherever `WORKS_DIR` points — **not** necessarily
-  `.works/` next to the code. Read it from the unit rather than assuming —
+- Workspace state lives wherever `WORKS_DIR` points, **not** necessarily
+  `.works/` next to the code. Read it from the unit rather than assuming,
   systemd merges every `Environment=` line into one, so match `WORKS_DIR=`
   anywhere on that line:
   ```bash

@@ -6,8 +6,8 @@ import type { Terminal } from "@xterm/xterm";
  * cockpit (tab switch, route change) re-attaches to the same buffer, so the
  * scrollback survives.
  *
- * This module is deliberately xterm-free at runtime — the imports above are
- * types and are erased — so the delete path can dispose cached buffers without
+ * This module is deliberately xterm-free at runtime: the imports above are
+ * types and are erased: so the delete path can dispose cached buffers without
  * dragging the ~390 KB terminal bundle into the eager chunk that
  * `lazy(() => import("./TerminalView"))` keeps it out of.
  */

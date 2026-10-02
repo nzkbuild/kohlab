@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kohlab updater — save → check → download → install → build → reload.
+# kohlab updater: save → check → download → install → build → reload.
 #
 #   bash scripts/update.sh          update this checkout, then reload the service
 #   bash scripts/update.sh --check  say what would happen, change nothing
@@ -8,14 +8,14 @@
 #
 # Running agents are NOT interrupted. Workspaces are separate git worktrees with
 # their own branches, so nothing here touches an agent's files; and the reload
-# restarts only the server process, leaving the detached PTY daemon — every live
-# session — running (that is what KillMode=process in the unit is for).
+# restarts only the server process, leaving the detached PTY daemon: every live
+# session: running (that is what KillMode=process in the unit is for).
 #
 # Your work is not the updater's collateral either. Uncommitted changes go to the
 # stash before anything is downloaded (HEAD never moves, because a new workspace
 # branches from wherever HEAD points); commits that were never pushed are pushed.
 # If install, build or reload fails, the checkout returns to the commit it
-# started from, is rebuilt, and is reloaded — so the known-good version is what
+# started from, is rebuilt, and is reloaded: so the known-good version is what
 # is actually serving.
 #
 # Versioning lives in package.json (`version`). What counts as "an update" is
@@ -54,7 +54,7 @@ TMP="$(mktemp -d)"
 
 # OTA mode: the dashboard runs this with KOHLAB_OTA=1 and sends our stdout to
 # $WORKS_DIR/update.log. These two markers are how it tells "running" from
-# "finished, exit N" afterwards — the reload restarts the server that spawned us
+# "finished, exit N" afterwards: the reload restarts the server that spawned us
 # before we finish, so nothing in memory survives to report the outcome.
 # Both live in ONE trap: a second `trap ... EXIT` would replace the cleanup.
 cleanup() {
@@ -71,15 +71,15 @@ if [ "${KOHLAB_OTA:-0}" = "1" ]; then
 fi
 
 cd "$REPO"
-git rev-parse --git-dir >/dev/null 2>&1 || die "$REPO is not a git checkout — update it the way you installed it"
-git config --get remote.origin.url >/dev/null 2>&1 || die "no 'origin' remote in $REPO — there is nothing to update from"
+git rev-parse --git-dir >/dev/null 2>&1 || die "$REPO is not a git checkout, update it the way you installed it"
+git config --get remote.origin.url >/dev/null 2>&1 || die "no 'origin' remote in $REPO, there is nothing to update from"
 
 CURRENT="$(git rev-parse --abbrev-ref HEAD)"
 UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-[ -n "$UPSTREAM" ] || die "'$CURRENT' has no upstream — set one with: git push -u origin $CURRENT"
+[ -n "$UPSTREAM" ] || die "'$CURRENT' has no upstream, set one with: git push -u origin $CURRENT"
 REMOTE_BRANCH="${UPSTREAM#origin/}"
 
-step "kohlab update — $REPO · $CURRENT ← $UPSTREAM"
+step "kohlab update, $REPO · $CURRENT ← $UPSTREAM"
 
 # ── what the unit looks like ─────────────────────────────────────────────────
 # Read once, up front: the state backup needs WORKS_DIR, the health probe needs
@@ -94,7 +94,7 @@ if command -v systemctl >/dev/null 2>&1; then
   UENV="$(systemctl show "$UNIT" -p Environment 2>/dev/null || true)"
   # systemd merges every Environment= line into ONE line, so WORKS_DIR can sit
   # anywhere on it. Matching only at the start of a space-split token silently
-  # finds nothing — and the backup that follows would protect the wrong path.
+  # finds nothing: and the backup that follows would protect the wrong path.
   UNIT_WORKS="$(printf '%s' "$UENV" | sed -n 's/.*WORKS_DIR=\([^ ]*\).*/\1/p' | tail -1)"
   UNIT_PORT="$(printf '%s' "$UENV" | tr ' ' '\n' | sed -n 's/^Environment=//; s/^PORT=//p' | head -1)"
   UNIT_PORT="${UNIT_PORT:-7676}"
@@ -136,12 +136,12 @@ STASH_MSG=""
 BACKUP=""
 
 # ── 1. save ──────────────────────────────────────────────────────────────────
-step "1/5  save — your work first, before anything is downloaded"
+step "1/5  save, your work first, before anything is downloaded"
 
 if [ -n "$(git status --porcelain)" ]; then
   CHANGED="$(git status --porcelain | wc -l | tr -d ' ')"
   STASH_MSG="kohlab update autosave $STAMP"
-  warn "$CHANGED uncommitted path(s) — saving them to the stash first"
+  warn "$CHANGED uncommitted path(s), saving them to the stash first"
   if [ "$CHECK" -eq 1 ]; then
     warn "--check: leaving them where they are"
   else
@@ -168,15 +168,15 @@ if [ "$AHEAD" -gt 0 ]; then
   elif git push -q origin "$CURRENT" 2>/dev/null; then
     log "pushed $AHEAD commit(s) → $UPSTREAM"
   else
-    warn "could not push (no credentials, or $UPSTREAM moved) — they exist only on this box"
+    warn "could not push (no credentials, or $UPSTREAM moved), they exist only on this box"
   fi
 fi
 
 # ── 2. check ─────────────────────────────────────────────────────────────────
-step "2/5  check — is there a new version?"
+step "2/5  check, is there a new version?"
 
-git fetch -q origin "$REMOTE_BRANCH" || die "git fetch failed — no network, or no access to $(git config --get remote.origin.url)"
-git show "$UPSTREAM:package.json" > "$TMP/remote-package.json" || die "$UPSTREAM has no package.json — is $REMOTE_BRANCH the right upstream?"
+git fetch -q origin "$REMOTE_BRANCH" || die "git fetch failed, no network, or no access to $(git config --get remote.origin.url)"
+git show "$UPSTREAM:package.json" > "$TMP/remote-package.json" || die "$UPSTREAM has no package.json, is $REMOTE_BRANCH the right upstream?"
 
 LOCAL_V="$(pkg_version package.json)"
 REMOTE_V="$(pkg_version "$TMP/remote-package.json")"
@@ -184,30 +184,30 @@ REMOTE_V="$(pkg_version "$TMP/remote-package.json")"
 log "here   v$LOCAL_V  ($(git rev-parse --short HEAD))"
 log "remote v$REMOTE_V  ($(git rev-parse --short "$UPSTREAM"))"
 
-# Commits behind upstream decide this — never the version strings. A version
+# Commits behind upstream decide this: never the version strings. A version
 # that is merely different could be *older*, and pulling it would rewind over
 # commits you have not pushed yet.
 PENDING="$(git rev-list --count "HEAD..$UPSTREAM")"
 if [ "$PENDING" -eq 0 ]; then
-  step "already up to date — v$LOCAL_V, nothing to download (nothing changed)"
+  step "already up to date, v$LOCAL_V, nothing to download (nothing changed)"
   exit 0
 fi
 
 NEWER="$(printf '%s\n%s\n' "$LOCAL_V" "$REMOTE_V" | sort -V 2>/dev/null | tail -1 || true)"
 if [ "$NEWER" = "$LOCAL_V" ] && [ "$REMOTE_V" != "$LOCAL_V" ]; then
-  die "upstream is v$REMOTE_V and you are on v$LOCAL_V — refusing to go backwards. Push your commits first: git push origin $CURRENT"
+  die "upstream is v$REMOTE_V and you are on v$LOCAL_V, refusing to go backwards. Push your commits first: git push origin $CURRENT"
 fi
 
 log "$PENDING commit(s) available: v$LOCAL_V → v$REMOTE_V"
 
 if [ "$CHECK" -eq 1 ]; then
   git --no-pager log --oneline "HEAD..$UPSTREAM" | sed 's/^/      /'
-  step "--check — nothing downloaded, installed or restarted"
+  step "--check, nothing downloaded, installed or restarted"
   exit 0
 fi
 
 # ── 3. download ──────────────────────────────────────────────────────────────
-step "3/5  download — $CURRENT ← $UPSTREAM"
+step "3/5  download, $CURRENT ← $UPSTREAM"
 
 # Back up the small state files a bad migration could damage. Not the whole
 # WORKS_DIR: the checkout cannot touch it, and it can be large. Kept on disk
@@ -223,7 +223,7 @@ if [ -n "$UNIT_WORKS" ] && [ -d "$UNIT_WORKS" ]; then
     tar czf "$BACKUP" -C "$UNIT_WORKS" $KEEP && log "state backed up → $BACKUP"
   fi
 else
-  warn "no WORKS_DIR found (unit not installed?) — skipping the state backup"
+  warn "no WORKS_DIR found (unit not installed?), skipping the state backup"
 fi
 
 PRE="$(git rev-parse HEAD)"
@@ -251,29 +251,29 @@ rollback() {
 }
 
 if ! git merge -q --ff-only "$UPSTREAM"; then
-  die "cannot fast-forward: $CURRENT and $UPSTREAM have diverged. Push your commits (git push origin $CURRENT), then re-run — do not reset, that would discard them."
+  die "cannot fast-forward: $CURRENT and $UPSTREAM have diverged. Push your commits (git push origin $CURRENT), then re-run, do not reset, that would discard them."
 fi
 AFTER="$(git rev-parse HEAD)"
 AFTER_V="$(pkg_version package.json)"
 log "downloaded $(git rev-list --count "$PRE..$AFTER") commit(s): v$LOCAL_V → v$AFTER_V"
 
 # ── 4. install ───────────────────────────────────────────────────────────────
-step "4/5  install — dependencies and the dashboard"
+step "4/5  install, dependencies and the dashboard"
 
 if ! bun install --silent; then
   rollback
-  die "bun install failed — nothing was reloaded"
+  die "bun install failed, nothing was reloaded"
 fi
 log "backend dependencies"
 
 if ! ( cd web && bun install --silent && bun run build ); then
   rollback
-  die "frontend install/build failed — nothing was reloaded"
+  die "frontend install/build failed, nothing was reloaded"
 fi
 log "frontend dependencies + dashboard build"
 
 # ── 5. reload ────────────────────────────────────────────────────────────────
-step "5/5  reload — $UNIT"
+step "5/5  reload, $UNIT"
 
 if [ "$UNIT_ACTIVE" -ne 1 ]; then
   log "v$AFTER_V installed; $UNIT is not running under systemd"
@@ -282,18 +282,18 @@ if [ "$UNIT_ACTIVE" -ne 1 ]; then
 fi
 
 if [ "${#RESTART[@]}" -eq 0 ]; then
-  die "not root and no sudo. v$AFTER_V is installed — reload it yourself: systemctl restart $UNIT"
+  die "not root and no sudo. v$AFTER_V is installed, reload it yourself: systemctl restart $UNIT"
 fi
 
 if [ "$UNIT_KILLMODE" != "process" ] && [ "$FORCE" -ne 1 ]; then
-  warn "$UNIT has KillMode=$UNIT_KILLMODE. Restarting signals the whole unit cgroup, which kills the detached PTY daemon — and every live agent session with it."
+  warn "$UNIT has KillMode=$UNIT_KILLMODE. Restarting signals the whole unit cgroup, which kills the detached PTY daemon, and every live agent session with it."
   warn "Add KillMode=process to the unit (docs/systemd.md), or re-run with --force to accept the loss."
   die "v$AFTER_V is installed; only the reload is pending"
 fi
 
 if ! "${RESTART[@]}"; then
   rollback
-  die "reload failed — check: journalctl -u $UNIT -n 40"
+  die "reload failed, check: journalctl -u $UNIT -n 40"
 fi
 RELOADED=1
 
@@ -305,13 +305,13 @@ if ! health_ok; then
 fi
 log "$UNIT is serving v$AFTER_V on port $UNIT_PORT"
 
-step "done — v$LOCAL_V → v$AFTER_V"
+step "done, v$LOCAL_V → v$AFTER_V"
 git --no-pager log --oneline "$PRE..$AFTER" | sed 's/^/      /'
-log "agents were not interrupted — verify with:  cd $REPO && bun run cli.ts ls"
+log "agents were not interrupted, verify with:  cd $REPO && bun run cli.ts ls"
 if [ -n "$STASH_MSG" ]; then
   warn "your uncommitted work is in the stash:  git stash pop"
 fi
 if [ -n "$BACKUP" ]; then
-  warn "state backup kept at $BACKUP — delete it once you are happy"
+  warn "state backup kept at $BACKUP, delete it once you are happy"
 fi
 exit 0

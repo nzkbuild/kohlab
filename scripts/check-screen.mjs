@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Screen-model check — the guarantee behind "reattach and see the screen".
+ * Screen-model check: the guarantee behind "reattach and see the screen".
  *
  * Run:  node scripts/check-screen.mjs
  *
@@ -39,7 +39,7 @@ function check(name, condition, detail = "") {
   }
 }
 
-/** @xterm/headless v6 throws on write() without this — see the daemon comment. */
+/** @xterm/headless v6 throws on write() without this, see the daemon comment. */
 const newScreen = (cols, rows) =>
   new Terminal({ cols, rows, scrollback: 500, allowProposedApi: true });
 
@@ -106,7 +106,7 @@ function askWithOutput(message) {
 
 /**
  * Poll until the daemon actually ACCEPTS a connection. Checking for the socket
- * file is not enough — it exists a moment before listen() starts accepting, and
+ * file is not enough: it exists a moment before listen() starts accepting, and
  * that race shows up as a spurious ECONNREFUSED.
  */
 async function waitForSocket() {
@@ -165,7 +165,7 @@ daemon.on("exit", (code) => {
   daemonExit = code;
 });
 
-/** Surfaced on any failure — a dead daemon must say why. */
+/** Surfaced on any failure, a dead daemon must say why. */
 function daemonReport() {
   return `daemon exit=${daemonExit}\n${daemonLog.trim().split("\n").slice(-6).join("\n")}`;
 }
@@ -200,7 +200,7 @@ try {
   // 3. The screen model must resize with the PTY, or every later replay restores
   //    a wrongly-wrapped screen. Asserted on the reported dimensions rather than
   //    behaviourally: the PTY's own width does the wrapping, so a divergent model
-  //    still produces a byte-identical replay — a behavioural check cannot fail.
+  //    still produces a byte-identical replay: a behavioural check cannot fail.
   const RESIZE_SESSION = "screen-resize";
   await askWithOutput({ type: "open", id: RESIZE_SESSION, cwd: "/tmp", cmd: ["sh"], cols: 20, rows: 8 });
   await new Promise((r) => setTimeout(r, 400));
@@ -215,13 +215,13 @@ try {
   );
   // 3b. The consequence, behaviourally: TUIs draw with absolute cursor
   //     addressing, so a stale width misplaces everything. `ESC[1;50H` clamps to
-  //     the model's width — column 20 if the mirror never resized, column 50 if
+  //     the model's width: column 20 if the mirror never resized, column 50 if
   //     it did. (This has to use absolute addressing: a line long enough to wrap
   //     is indistinguishable, because the emulator soft-wraps it and serialize
   //     emits the wrapped rows as one logical line, so re-rendering un-wraps it
   //     either way.)
   // Silence echo first, then clear, so the marker below is the only one on
-  // screen — searching for it in an echoed command line would match the command
+  // screen: searching for it in an echoed command line would match the command
   // text itself and measure the wrong thing.
   await fireAndForget({
     type: "input",
@@ -251,7 +251,7 @@ try {
     `reply=${gone.reply.type} screen=${JSON.stringify(finalScreen)}`,
   );
 
-  // 5. The Log tab reads the same retained screen — otherwise a finished
+  // 5. The Log tab reads the same retained screen: otherwise a finished
   //    workspace showed an empty log, since the byte buffer dies with the
   //    session.
   const logReply = await askWithOutput({ type: "log", id: SESSION });

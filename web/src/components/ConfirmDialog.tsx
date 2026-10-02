@@ -1,5 +1,6 @@
 import { Dialog } from "./ui";
-import { Warning } from "@phosphor-icons/react";
+import { CheckCircle, Warning } from "@phosphor-icons/react";
+import { cn } from "../lib/utils";
 import { Button } from "./ui";
 
 interface Props {
@@ -9,15 +10,18 @@ interface Props {
   description: string;
   confirmLabel?: string;
   busy?: boolean;
+  /** `danger` destroys something (delete, discard, revoke). `commit` is final but
+   *  keeps work (commit, merge): it still asks, but must not look like delete. */
+  tone?: "danger" | "commit";
   onConfirm: () => void;
 }
 
 /**
- * Destructive-action confirm.
+ * Irreversible-action confirm.
  *
  * Radix owns the semantics: `role="alertdialog"`, focus trap, focus restore,
  * Escape, and `aria-labelledby` / `aria-describedby` wired from Title and
- * Description — which is why those must be Dialog.Title / Dialog.Description
+ * Description: which is why those must be Dialog.Title / Dialog.Description
  * and not plain headings.
  *
  * The caller is responsible for naming the specific object in `description`
@@ -30,6 +34,7 @@ export default function ConfirmDialog({
   description,
   confirmLabel = "delete",
   busy = false,
+  tone = "danger",
   onConfirm,
 }: Props) {
   return (
@@ -42,10 +47,13 @@ export default function ConfirmDialog({
         <Dialog.Content role="alertdialog" className="dialog-content p-4">
           <div className="flex items-start gap-3">
             <span
-              className="grid size-8 shrink-0 place-items-center rounded-lg border border-line-strong text-status-danger"
+              className={cn(
+                "grid size-8 shrink-0 place-items-center rounded-lg border border-line-strong",
+                tone === "danger" ? "text-status-danger" : "text-accent",
+              )}
               aria-hidden="true"
             >
-              <Warning size={16} weight="bold" />
+              {tone === "danger" ? <Warning size={16} /> : <CheckCircle size={16} />}
             </span>
             <div className="min-w-0 flex-1">
               <Dialog.Title className="text-base font-semibold text-text-primary">{title}</Dialog.Title>
@@ -61,7 +69,7 @@ export default function ConfirmDialog({
                 cancel
               </Button>
             </Dialog.Close>
-            <Button variant="danger" size="sm" disabled={busy} aria-busy={busy} onClick={onConfirm}>
+            <Button variant={tone === "danger" ? "danger" : "primary"} size="sm" disabled={busy} aria-busy={busy} onClick={onConfirm}>
               {busy ? "working…" : confirmLabel}
             </Button>
           </div>

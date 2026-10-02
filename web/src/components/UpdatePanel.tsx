@@ -21,7 +21,7 @@ import { Button, SkeletonRows } from "./ui";
  * release notes for exactly the gap being closed.
  *
  * While an update runs the server restarts underneath the page, so the panel
- * polls rather than streams, and the outcome is read back from the run's log —
+ * polls rather than streams, and the outcome is read back from the run's log,
  * nothing in memory on either side survives the restart.
  */
 export default function UpdatePanel() {
@@ -52,18 +52,25 @@ export default function UpdatePanel() {
     void load();
   }, [load]);
 
-  // Poll only while something is actually in flight.
+  // Poll only while something is actually in flight and the page is visible.
   useEffect(() => {
     if (!status?.running) return;
-    const timer = window.setInterval(() => void load(true), 3000);
-    return () => window.clearInterval(timer);
+    const loadWhenVisible = () => {
+      if (!document.hidden) void load(true);
+    };
+    const timer = window.setInterval(loadWhenVisible, 3000);
+    document.addEventListener("visibilitychange", loadWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", loadWhenVisible);
+    };
   }, [status?.running, load]);
 
   const apply = async () => {
     setBusy(true);
     try {
       await api.applyUpdate();
-      announce("update started — agents keep running; this page reconnects on its own");
+      announce("update started, agents keep running; this page reconnects on its own");
       await load(true);
     } catch (e) {
       setError((e as Error).message);
@@ -84,7 +91,7 @@ export default function UpdatePanel() {
   const failed =
     status?.unfinished === true || (status?.exit !== null && status?.exit !== undefined && status.exit !== 0);
   const lastRun = status?.unfinished
-    ? { danger: true, text: "The last update did not finish — the log below is all it left" }
+    ? { danger: true, text: "The last update did not finish, the log below is all it left" }
     : status?.finishedAt
       ? failed
         ? { danger: true, text: `Last update ${relativeTime(status.finishedAt)} failed (exit ${status.exit})` }
@@ -112,7 +119,7 @@ export default function UpdatePanel() {
           </span>
         )}
         {status?.upstream ? (
-          <span className="text-2xs text-text-muted">
+          <span className="text-xs text-text-muted">
             {status.upstream}
             {status.head ? ` · at ${status.head}` : ""}
             {status.checkedAt ? ` · checked ${relativeTime(status.checkedAt)}` : ""}
@@ -155,19 +162,19 @@ export default function UpdatePanel() {
           <Button variant="primary" size="sm" disabled={busy || status?.running} onClick={() => void apply()}>
             {status?.running ? (
               <>
-                <CircleNotch size={14} className="animate-spin" aria-hidden="true" />
+                <CircleNotch size={13} className="animate-spin" aria-hidden="true" />
                 updating…
               </>
             ) : (
               <>
-                <DownloadSimple size={14} aria-hidden="true" />
+                <DownloadSimple size={13} aria-hidden="true" />
                 {failed ? "retry update" : `update to v${status?.latest}`}
               </>
             )}
           </Button>
         ) : (
           <Button variant="secondary" size="sm" disabled={busy} onClick={() => void load(true)}>
-            <ArrowsClockwise size={14} aria-hidden="true" />
+            <ArrowsClockwise size={13} aria-hidden="true" />
             check again
           </Button>
         )}

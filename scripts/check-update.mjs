@@ -12,7 +12,7 @@
  *      stays on the branch it started on, and no side branch appears.
  *   2. Commits that were never pushed get pushed.
  *   3. The happy path fast-forwards, installs, builds, reloads, and confirms the
- *      service is actually answering on its port — and backs the state up first.
+ *      service is actually answering on its port: and backs the state up first.
  *   4. With nothing new upstream, nothing is downloaded, installed or restarted.
  *   5. It refuses the two ways an update can hurt you: a diverged branch, and a
  *      reload under KillMode that would kill every live agent session.
@@ -86,7 +86,7 @@ const LIVE_BEFORE = liveState();
 const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : "");
 const write = (p, s) => writeFileSync(p, s);
 
-/** the copy under test — never the live checkout's, which would update IT */
+/** the copy under test, never the live checkout's, which would update IT */
 const fixtureScript = join(work, "scripts/update.sh");
 if (!fixtureScript.startsWith(tmp) || fixtureScript.startsWith(ROOT)) {
   throw new Error(`refusing to run: ${fixtureScript} is not inside the fixture`);
@@ -180,7 +180,7 @@ if [ -n "\${FAKE_BUN_FAIL:-}" ]; then echo "fake bun: failing on purpose" >&2; e
 exit 0
 `);
   // fake systemctl. `show -p Environment` mirrors systemd's real merged
-  // single-line form — a prettier stub once hid a parsing bug in the updater,
+  // single-line form: a prettier stub once hid a parsing bug in the updater,
   // which found no WORKS_DIR and silently skipped the state backup.
   write(join(bin, "systemctl"), `#!/usr/bin/env bash
 echo "systemctl $*" >> "$CALLS"
@@ -201,7 +201,7 @@ exit 0
   startUnit();
   if (!(await unitAnswers())) throw new Error(`fixture service never came up on port ${PORT}`);
 
-  console.log("\n\x1b[1mkohlab — safe update\x1b[0m");
+  console.log("\n\x1b[1mkohlab, safe update\x1b[0m");
 
   // ── 1. save uncommitted work, then update ─────────────────────────────────
   console.log("\n\x1b[1m1. uncommitted work, then a real update\x1b[0m");

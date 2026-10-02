@@ -1,7 +1,7 @@
-// works server — HTTP + WebSocket API over lib.ts
+// works server: HTTP + WebSocket API over lib.ts
 
 import { serve } from "bun";
-import type { ServerWebSocket } from "bun";
+import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { execFile, spawn } from "child_process";
 import { mkdir, open, readdir, readFile } from "fs/promises";
 import { isAbsolute, join, relative, resolve } from "path";
@@ -15,6 +15,8 @@ import {
   startWorkspace,
   stopWorkspace,
   commitWorkspace,
+  mergeWorkspace,
+  discardWorkspace,
   worktreePath,
   imagesDir,
   spawnAgentSession,
@@ -51,6 +53,9 @@ import {
   updateRunState,
   createInvite,
   acceptInvite,
+  createPair,
+  claimPair,
+  PAIR_TTL_MS,
   setUserRole,
   canProvisionOsUsers,
 } from "./lib";
@@ -75,7 +80,7 @@ const pushClients = new Set<ServerWebSocket>();
 
 /**
  * Failed key attempts per address. A key is 24 random bytes, so guessing is
- * already hopeless — this is not the thing that saves you, it is what stops a
+ * already hopeless: this is not the thing that saves you, it is what stops a
  * loop from filling the audit log and burning CPU. In memory on purpose: a
  * restart clears it, which is the right trade for a lock-out nobody can trip by
  * accident, and there is no shared store to keep it in.
@@ -118,7 +123,7 @@ onWorkspaceDone((ws) => {
 
 /**
  * The daemon owns every PTY. When its socket closes, every live session is gone
- * — there is nothing to reconnect to — so the dashboard is told, loudly, instead
+ * (there is nothing to reconnect to) so the dashboard is told, loudly, instead
  * of continuing to show "running" for work that is no longer happening.
  */
 // Kept as "the last time it went down", not cleared when it comes back: a
@@ -306,6 +311,38 @@ async function handleCommit(id: string, req: Request): Promise<Response> {
   }
 }
 
+/** The last mile: merge the accepted branch into the workspace's own repo.
+ *  `into` is deliberately NOT accepted from the web: mergeWorkspace runs as the
+ *  server user (root on a normal install), so a member-supplied path would let
+ *  one member merge into another member's checkout (the v1.8 threat). The merge
+ *  target is always the workspace's own repo; CLI keeps --into (runs as you).
+ *  URL-created (isolated member) workspaces have no local checkout (ws.repo is
+ *  "") so the route refuses them with the CLI path, which runs as the member. */
+async function handleMerge(id: string, req: Request, actor: string): Promise<Response> {
+  try {
+    const body = (await req.json().catch(() => ({}))) as { message?: string; into?: unknown };
+    if (body.into !== undefined) {
+      return json({ error: "into is not accepted here, the merge target is always the workspace's own checkout" }, 400);
+    }
+    const ws = await getWorkspace(id);
+    if (!ws.repo) {
+      return json({ error: `workspace '${id}' was created from a URL and has no local checkout here. Merge it yourself: kohlab merge ${id} --into <your checkout>` }, 400);
+    }
+    const res = await mergeWorkspace(id, { message: body.message, actor });
+    return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+async function handleDiscard(id: string): Promise<Response> {
+  try {
+    const res = await discardWorkspace(id);
+    return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
 
 async function handleAgents(req: Request): Promise<Response> {
   const s = await loadState();
@@ -436,6 +473,26 @@ async function handleUserRole(id: string, req: Request): Promise<Response> {
 
 type Auth = Awaited<ReturnType<typeof authenticate>>;
 
+/** Mint a pairing code. Owner action: it can hand out the real key. */
+async function handlePairCreate(): Promise<Response> {
+  return json({ code: await createPair(), ttlMs: PAIR_TTL_MS });
+}
+
+/**
+ * Trade a typed code for the key. Unauthenticated by definition — the code IS
+ * the credential, like /api/join's token. Same silence as the gate's key error:
+ * wrong, expired, spent, and throttled all read as one failure, so nothing
+ * helps a guesser narrow the search.
+ */
+async function handlePairClaim(req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as { code?: string };
+  const code = typeof body.code === "string" ? body.code : "";
+  if (!code) return json({ error: "that code was not accepted" }, 400);
+  const key = await claimPair(code);
+  if (!key) return json({ error: "that code was not accepted" }, 400);
+  return json({ key });
+}
+
 /** Rotate the caller's own key. Owner, member and viewer alike. */
 async function handleAccountKey(auth: Auth): Promise<Response> {
   if (!auth || auth.kind !== "user") {
@@ -492,7 +549,7 @@ async function handleAgentsStatus(): Promise<Response> {
   return json(status);
 }
 
-/** A package name: `thing` or `@scope/thing`. Nothing else — no flags, no
+/** A package name: `thing` or `@scope/thing`. Nothing else, no flags, no
  *  paths, no shell metacharacters, no URLs. */
 const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
 
@@ -504,7 +561,7 @@ const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
  *
  *  - **No shell.** This used to be `exec(cmd)`, i.e. `/bin/sh -c`, behind a
  *    `cmd.startsWith("npm i -g")` "whitelist". `npm i -g x; cp -r
- *    /home/koh-alice /tmp/loot` passed that check and ran as the server user —
+ *    /home/koh-alice /tmp/loot` passed that check and ran as the server user,
  *    root. Since any *member* may call this route, it was a member-to-root
  *    escalation that made the v1.8 per-OS-user isolation decorative: Bob did not
  *    need to read Alice's home himself, he could ask the server to. `execFile`
@@ -623,8 +680,8 @@ async function handleGhRepos(): Promise<Response> {
  * Start the update script and return immediately.
  *
  * Detached, with stdout and stderr going to $WORKS_DIR/update.log. The reload
- * restarts this server before the script is finished, so that file — and the
- * marker lines the script writes into it — is the only surviving record of how
+ * restarts this server before the script is finished, so that file: and the
+ * marker lines the script writes into it: is the only surviving record of how
  * the update went. `KOHLAB_OTA=1` is what tells the script it is being recorded.
  */
 async function handleReleaseUpdate(): Promise<Response> {
@@ -682,7 +739,7 @@ onDaemonMessage((msg) => {
       }
     }
   } else if (msg.type === "error") {
-    // The daemon answers { type:"error", message } — e.g. "unknown session"
+    // The daemon answers { type:"error", message }: e.g. "unknown session"
     // when a buffer is gone. Unhandled before, so a failed subscribe was
     // indistinguishable from a slow one in both the client and the logs.
     console.error(
@@ -695,7 +752,7 @@ onDaemonMessage((msg) => {
  * The size each session was last asked to be, keyed by session id.
  *
  * The client sends `attach` and then `resize` immediately, but the PTY is
- * created asynchronously — so the first resize routinely arrives before the
+ * created asynchronously: so the first resize routinely arrives before the
  * session exists and would be dropped. The latest size is remembered here and
  * re-applied as soon as the attach finishes. Bounded by the number of open
  * terminals, which is bounded by the number of workspaces.
@@ -714,7 +771,7 @@ function attachPty(ws: ServerWebSocket, id: string, terminalId = "main") {
  * Run a fire-and-forget promise with its rejection contained.
  *
  * Every terminal/push operation below is fire-and-forget by design, but an
- * unhandled rejection on a socket callback exits the Bun process — one client
+ * unhandled rejection on a socket callback exits the Bun process: one client
  * attaching twice would take the server down for everyone. Rejections here are
  * logged and dropped, never fatal.
  */
@@ -735,7 +792,7 @@ async function ensurePtySession(id: string, terminalId = "main") {
    * the only way out of the review queue, but the run that opening it started
    * ended after the acceptance and put the workspace straight back in the queue.
    *
-   * A workspace that has never run is still spawned here on purpose — creating a
+   * A workspace that has never run is still spawned here on purpose: creating a
    * workspace does not start it, and both the onboarding copy and the README
    * promise that opening it does. Only the ended case is blocked.
    */
@@ -755,21 +812,15 @@ async function ensurePtySession(id: string, terminalId = "main") {
 }
 
 // --- server --------------------------------------------------------------
-serve({
-  port: PORT,
-  // Every interface by default, as before — but now a choice with a consequence:
-  // bound anywhere but loopback with no key and no users, the server generates
-  // itself one (see resolveAccessKey in lib.ts).
-  hostname: HOST,
-  fetch: async (req, server) => {
+async function handle(req: Request, server: Server<any>): Promise<Response | undefined> {
     const url = new URL(req.url);
     const path = url.pathname;
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|files|file|image|share|log)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|merge|discard|files|file|image|share|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
     // The terminal and done-ping sockets connect to `/`, not `/api`, so the
-    // upgrade request must be authenticated too — otherwise `auth` is null,
+    // upgrade request must be authenticated too: otherwise `auth` is null,
     // `denied` is true, and every socket is rejected 401 the moment an access
     // key is configured.
     const isWebSocket = req.headers.get("upgrade")?.toLowerCase() === "websocket";
@@ -779,7 +830,7 @@ serve({
     // first, and only a request that *presented* a key and was refused counts. A
     // browser with no key at all is the normal state before the gate screen, not
     // a guess. Checking first costs one HMAC per attempt, and it means a correct
-    // key still works after twenty wrong ones from the same address — otherwise
+    // key still works after twenty wrong ones from the same address: otherwise
     // anyone behind the same NAT could lock everyone else out.
     const address = server?.requestIP?.(req)?.address ?? "unknown";
     const presentedKey = !!extractKey({ headers: req.headers, url: req.url });
@@ -788,7 +839,7 @@ serve({
       recordAuthFailure(address);
       const wait = authThrottle(address);
       if (wait > 0) {
-        return json({ error: `too many failed key attempts — try again in ${wait}s` }, 429);
+        return json({ error: `too many failed key attempts, try again in ${wait}s` }, 429);
       }
     }
 
@@ -804,7 +855,7 @@ serve({
      *
      * Ten routes used to answer 403 to a caller with no credentials at all,
      * because they tested the role before testing whether there was anyone to
-     * have a role. Both refuse, so neither was a hole — but a client cannot tell
+     * have a role. Both refuse, so neither was a hole: but a client cannot tell
      * "you sent no key" from "your key is not enough", and that difference is the
      * whole reason 401 and 403 are separate. Adding a route now means wrapping it
      * in this, not remembering which check goes first.
@@ -812,7 +863,7 @@ serve({
     const gate = (allowed: boolean, why = "forbidden"): Response | null =>
       denied ? json({ error: "unauthorized" }, 401) : allowed ? null : json({ error: why }, 403);
 
-    // WebSocket upgrade: terminal proxy + push — require auth.
+    // WebSocket upgrade: terminal proxy + push: require auth.
     if (isWebSocket) {
       if (denied) return json({ error: "unauthorized" }, 401);
       // Echo the protocol the client offered, or the browser fails the
@@ -842,12 +893,12 @@ serve({
       // the legacy/anonymous single-user flows pass through.
       const readOnly = action === "diff" || action === "files" || action === "file" || action === "log";
       if (!(await mayAccessWorkspace(auth, id))) {
-        return json({ error: "forbidden — not your workspace" }, 403);
+        return json({ error: "forbidden, not your workspace" }, 403);
       }
       if (readOnly) {
         if (denied) return json({ error: "unauthorized" }, 401);
       } else {
-        const refused = gate(canMutate, "forbidden — viewer cannot " + action);
+        const refused = gate(canMutate, "forbidden, viewer cannot " + action);
         if (refused) return refused;
       }
       switch (action) {
@@ -856,6 +907,8 @@ serve({
         case "restart": containFailure(audit(actor, "restart", id), "audit"); return handleRestart(id);
         case "delete": containFailure(audit(actor, "delete", id), "audit"); return handleDelete(id);
         case "commit": containFailure(audit(actor, "commit", id), "audit"); return handleCommit(id, req);
+        case "merge": return handleMerge(id, req, actor);
+        case "discard": containFailure(audit(actor, "discard", id), "audit"); return handleDiscard(id);
         case "diff": return handleDiff(id);
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
@@ -874,7 +927,7 @@ serve({
     /**
      * Health, for a monitor and for `kohlab doctor`.
      *
-     * Unauthenticated callers get liveness only — "the process answers" — with no
+     * Unauthenticated callers get liveness only ("the process answers") with no
      * counts and no paths, because a probe usually runs without a key and a
      * health endpoint should not be a reconnaissance surface. With credentials it
      * reports the detail an operator wants at 3am.
@@ -886,7 +939,7 @@ serve({
       // and no counts, because that is reconnaissance.
       if (denied) return json({ ok: true });
 
-      // With credentials, ask the daemon — the only thing that actually knows what
+      // With credentials, ask the daemon: the only thing that actually knows what
       // is running. `daemonAlive()` alone is not enough: it reports whether *this
       // process* has an open socket, which on a fresh server is false until
       // something touches a PTY. The probe establishes that, adopting a live
@@ -919,16 +972,16 @@ serve({
       return handleAccountKey(auth);
     }
     if (path === "/api/users" && req.method === "GET") {
-      const refused = gate(isOwner, "forbidden — only an owner can list members");
+      const refused = gate(isOwner, "forbidden, only an owner can list members");
       if (refused) return refused;
       return handleUsersList();
     }
     if (path === "/api/users" && req.method === "POST") {
       // GET and DELETE next to this both require isOwner. This had no check at
-      // all — not even `denied` — so any authenticated caller could POST
+      // all (not even `denied`) so any authenticated caller could POST
       // {role: "owner"} and mint themselves an owner key. A viewer escalating to
       // owner is the whole box, and it provisions an OS account while it does it.
-      const refused = gate(isOwner, "forbidden — only an owner can add members");
+      const refused = gate(isOwner, "forbidden, only an owner can add members");
       if (refused) return refused;
       return handleUserAdd(req);
     }
@@ -936,21 +989,32 @@ serve({
     // must work without credentials: the token *is* the credential, it is
     // single-use and it expires. Inviting is an owner action.
     if (path === "/api/invites" && req.method === "POST") {
-      const refused = gate(isOwner, "forbidden — only an owner can invite");
+      const refused = gate(isOwner, "forbidden, only an owner can invite");
       if (refused) return refused;
       return handleInviteCreate(req, actor);
     }
     if (path === "/api/join" && req.method === "POST") {
       return handleJoin(req);
     }
+    // Pairing: mint a short device-grant code (owner action), or trade one for
+    // the key (no auth — the code is the credential, same as /api/join's token).
+    if (path === "/api/pair" && req.method === "POST") {
+      const refused = gate(isOwner, "forbidden, only an owner can create a pairing code");
+      if (refused) return refused;
+      containFailure(audit(actor, "pair.create"), "audit");
+      return handlePairCreate();
+    }
+    if (path === "/api/pair/claim" && req.method === "POST") {
+      return handlePairClaim(req);
+    }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "PATCH") {
-      const refused = gate(isOwner, "forbidden — only an owner can change roles");
+      const refused = gate(isOwner, "forbidden, only an owner can change roles");
       if (refused) return refused;
       const uid = decodeURIComponent(path.split("/").pop() ?? "");
       return handleUserRole(uid, req);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
-      const refused = gate(isOwner, "forbidden — only an owner can remove members");
+      const refused = gate(isOwner, "forbidden, only an owner can remove members");
       if (refused) return refused;
       const uid = decodeURIComponent(path.split("/").pop() ?? "");
       return handleUserRemove(uid);
@@ -966,14 +1030,14 @@ serve({
       // A launcher is a command that later runs in someone's workspace, and
       // adding one writes state. Viewers read; this is not a read.
       if (req.method === "POST") {
-        const refused = gate(canMutate, "forbidden — viewer cannot add agents");
+        const refused = gate(canMutate, "forbidden, viewer cannot add agents");
         if (refused) return refused;
         containFailure(audit(actor, "agent.add"), "audit");
       }
       return handleAgents(req);
     }
     if (path === "/api/agents/install" && req.method === "POST") {
-      const refused = gate(canMutate, "forbidden — viewer cannot install agents");
+      const refused = gate(canMutate, "forbidden, viewer cannot install agents");
       if (refused) return refused;
       containFailure(audit(actor, "agent.install"), "audit");
       return handleAgentInstall(req);
@@ -986,7 +1050,7 @@ serve({
       if (denied) return json({ error: "unauthorized" }, 401);
       return handleGhRepos();
     }
-    // OTA: what the pushed upstream publishes, and — owner only — apply it.
+    // OTA: what the pushed upstream publishes, and (owner only) apply it.
     if (path === "/api/release") {
       if (denied) return json({ error: "unauthorized" }, 401);
       const force = url.searchParams.get("force") === "1";
@@ -996,14 +1060,14 @@ serve({
       // Updating rewrites the checkout and restarts the service, so it is an
       // owner action, never a member/viewer one, and never a share token.
       // No credentials is 401; credentials without the role is 403.
-      const refused = gate(isOwner, "forbidden — only an owner can update the server");
+      const refused = gate(isOwner, "forbidden, only an owner can update the server");
       if (refused) return refused;
       if ((await updateRunState()).running) return json({ error: "an update is already running" }, 409);
       containFailure(audit(actor, "update", undefined, "OTA"), "audit");
       return handleReleaseUpdate();
     }
     if (path === "/api/clone" && req.method === "POST") {
-      const refused = gate(canMutate, "forbidden — viewer cannot clone");
+      const refused = gate(canMutate, "forbidden, viewer cannot clone");
       if (refused) return refused;
       containFailure(audit(actor, "clone", undefined), "audit");
       return handleClone(req, actorUserId);
@@ -1014,7 +1078,7 @@ serve({
       if (shareIdRes) {
         const list = await listWorkspaces();
         const w = list.find((x) => x.id === shareIdRes);
-        if (w && !(await mayAccessWorkspace(auth, w.id))) return json({ error: "forbidden — not your workspace" }, 403);
+        if (w && !(await mayAccessWorkspace(auth, w.id))) return json({ error: "forbidden, not your workspace" }, 403);
         return json(w ? [w] : []);
       }
       if (denied) return json({ error: "unauthorized" }, 401);
@@ -1024,7 +1088,7 @@ serve({
       return json(scoped);
     }
     if (path === "/api/workspaces" && req.method === "POST") {
-      const refused = gate(canMutate, "forbidden — viewer cannot create workspaces");
+      const refused = gate(canMutate, "forbidden, viewer cannot create workspaces");
       if (refused) return refused;
       return handleCreate(req, actorUserId);
     }
@@ -1050,7 +1114,7 @@ serve({
     // SPA history fallback. Client routes (/w/:id, /workspaces, /settings) have
     // no file behind them, so without this a refresh or a shared deep link
     // 404s in production while `vite dev` hides it behind its own fallback.
-    // Only navigations that actually want a document get the shell — an XHR for
+    // Only navigations that actually want a document get the shell: an XHR for
     // a missing asset must still 404 so the client can see the real failure.
     const wantsHtml = (req.headers.get("accept") ?? "").includes("text/html");
     if ((req.method === "GET" || req.method === "HEAD") && wantsHtml && !path.startsWith("/api")) {
@@ -1060,8 +1124,8 @@ serve({
       }
     }
     return new Response("not found", { status: 404 });
-  },
-  websocket: {
+}
+const socketHandlers: WebSocketHandler<any> = {
     open(ws) {
       // every dashboard page is a push subscriber
       pushClients.add(ws);
@@ -1127,7 +1191,45 @@ serve({
     drain(_ws) {
       // no-op
     },
-  },
+};
+
+/**
+ * Browser hardening on every response (docs/access-ux-v1.17.0.md §2.5). The CSP
+ * was measured against the built app: one external module script, no inline
+ * script; the terminal's image addon compiles WebAssembly, hence 'wasm-unsafe-eval'
+ * (not 'unsafe-eval': JS eval stays blocked). Styles need 'unsafe-inline' (Monaco, sonner and React style attributes
+ * inject them). HSTS belongs to the TLS proxy, which this app cannot see.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "content-security-policy":
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+    "font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+};
+
+function secured(res: Response | undefined): Response | undefined {
+  if (!res || res.status === 101) return res; // socket upgrade: nothing to decorate
+  try {
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
+  } catch {
+    // immutable headers (a proxied/fetched response): copy once
+    const copy = new Response(res.body, res);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) copy.headers.set(k, v);
+    return copy;
+  }
+}
+
+serve({
+  port: PORT,
+  // Every interface by default, as before: but now a choice with a consequence:
+  // bound anywhere but loopback with no key and no users, the server generates
+  // itself one (see resolveAccessKey in lib.ts).
+  hostname: HOST,
+  fetch: async (req, server) => secured(await handle(req, server)),
+  websocket: socketHandlers,
 });
 
-console.log(`works server on http://${HOST}:${PORT}${authRequired() ? " (access key required)" : " (no key — loopback only)"}`);
+
+console.log(`works server on http://${HOST}:${PORT}${authRequired() ? " (access key required)" : " (no key, loopback only)"}`);

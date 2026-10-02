@@ -216,7 +216,7 @@ One shell breakpoint at 900px (`shell`, 56.25rem). Above it: a fixed sidebar (15
 
 Surfaces scroll inside the shell with 1.75rem/2rem padding (1.25rem/1rem under 40rem) and a 78rem max width. Panels adapt to their pane via container queries, not the viewport. Density comes from `--control-h`, `--control-h-sm`, `--row-h` and `--tab-h`, always applied as min-height so text-spacing overrides never clip. Stacking uses `--z-sticky` (10), `--z-scrim` (40), `--z-drawer` (50), `--z-overlay` (100), `--z-dialog` (101); no raw z-index numbers.
 
-**Home (/)** reads top-down: PageHeader, whose one action is **open…** (Terminal in / Agent in, each listing workspaces most-recent first) — the way back into existing work; creating a workspace belongs to the sidebar's **new workspace**; a Ready-for-review band only when something needs review; the searchable, filterable workspace list (table at 900px and up, cards with an overflow menu below); then activity and agents.
+**Home (/)** reads top-down: PageHeader, whose one action is **open…** (Terminal in / Agent in, each listing workspaces most-recent first), the way back into existing work. Creating a workspace belongs to the sidebar's **new workspace** (route `/new`). Then the review queue, only when something needs review, oldest first; then the searchable, filterable workspace list (table at 900px and up, cards with an overflow menu below). Discarded counts under the stopped filter.
 
 **Workspace detail** is a cockpit: a header with the workspace id as `<h1>`, status chip, mono path and task; a review-first primary action, run/stop toggle and overflow menu; then tabs Terminal / Files / Review / Log filling the rest. On phones the same actions move to a bottom bar on raised graphite, padded for the safe area.
 
@@ -250,7 +250,7 @@ Softly squared: 0.375rem for small parts (menu items, tooltips, kbd, file rows),
 
 ### Chips
 - **Style:** pill, 0.6875rem, `line-strong` border, secondary text.
-- **Status:** StatusChip only, never ad-hoc: the status word, a non-colour shape cue, and the status tone on its own 10-12% tint. Stopped is neutral.
+- **Status:** StatusChip only, never ad-hoc: the status word, a non-colour shape cue, and the status tone on its own 10-12% tint. Stopped and discarded are neutral; each status has its own Phosphor shape (play, diamond, check, x, square).
 
 ### Cards / Containers
 - **Panel:** raised graphite, `line-subtle` border, 0.75rem radius, no shadow. PanelHead is 2.75rem with an `<h2>` title and muted meta on the right.

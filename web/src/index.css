@@ -7,8 +7,8 @@
    only for code and measurement.
 
    Two tiers, and only two:
-     1. PRIMITIVE  — raw OKLCH ramps. The ONLY place a colour literal exists.
-     2. SEMANTIC   — what a thing IS (surface-raised, text-muted, status-running).
+     1. PRIMITIVE: raw OKLCH ramps. The ONLY place a colour literal exists.
+     2. SEMANTIC: what a thing IS (surface-raised, text-muted, status-running).
    Components consume the semantic tier. No component holds a hex literal or a
    primitive name.
 
@@ -57,7 +57,7 @@
   --text-faint: var(--graphite-500);
   --text-on-accent: oklch(0.20 0.06 124);
 
-  /* --- semantic: lines (borders only — forced-colors deletes box-shadow) --- */
+  /* --- semantic: lines (borders only, forced-colors deletes box-shadow) --- */
   --line-subtle: var(--graphite-800);
   /* Control boundaries must clear 3:1 against their own surface (SC 1.4.11),
      so this is a full step lighter than the decorative divider. */
@@ -66,7 +66,7 @@
 
   /* --- semantic: status lifecycle ---------------------------------------- */
   /* One tone per status, chosen so the chip LABEL passes 4.5:1 against the
-     chip's own tinted background — the token is used for dot, border and text
+     chip's own tinted background, the token is used for dot, border and text
      alike, so it must be legible as text, not merely vivid as a dot. */
   --status-running: oklch(0.9 0.17 124);
   --status-review: oklch(0.89 0.13 80);
@@ -80,7 +80,7 @@
   /* --- motion ------------------------------------------------------------ */
   /* Declared here as well as in @theme: author CSS references var(--ease-*) in
      `transition` shorthands, and a shorthand with an unresolvable var() is
-     dropped silently — a green build with dead transitions. */
+     dropped silently, a green build with dead transitions. */
   --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
   --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9);
   --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);
@@ -107,14 +107,14 @@
   --sidebar-w: 15.5rem;
   --sidebar-w-collapsed: 3.75rem;
 
-  /* Density: one place to tune how tight the console sits. min-height, never
-     height, so text-spacing overrides (SC 1.4.12) still never clip. */
+  /* Density: one place to tune how tight the console sits. Always min-height,
+     never height, so text-spacing overrides (SC 1.4.12) never clip. */
   --control-h: 2.125rem;
   --control-h-sm: 1.75rem;
   --row-h: 2.25rem;
   --tab-h: 2.75rem;
 
-  /* Stacking: named layers instead of magic numbers scattered across rules. */
+  /* Stacking: named layers instead of magic numbers. */
   --z-sticky: 10;
   --z-scrim: 40;
   --z-drawer: 50;
@@ -123,7 +123,7 @@
 }
 
 /* Bridge the semantic tier into Tailwind utilities. `inline` is REQUIRED for
-   every token that references another variable — without it the utility body
+   every token that references another variable, without it the utility body
    carries the alias name and resolves at the point of use, not to the token. */
 @theme inline {
   --color-surface-base: var(--surface-base);
@@ -158,7 +158,7 @@
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
 
-  /* rem-based type scale (Resize Text / SC 1.4.4 — never px, never clamp()). */
+  /* rem-based type scale (Resize Text / SC 1.4.4, never px, never clamp()). */
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
   --text-xs: 0.75rem;
@@ -178,7 +178,7 @@
   --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9);
   --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);
 
-  --breakpoint-shell: 56.25rem; /* 900px — where the sidebar becomes a drawer */
+  --breakpoint-shell: 56.25rem; /* 900px, where the sidebar becomes a drawer */
 }
 
 /* ============================ base ======================================= */
@@ -222,12 +222,15 @@ button:disabled {
   opacity: 0.45;
 }
 
-/* Focus: a real outline, not a box-shadow — forced-colors forces box-shadow to
-   none. Offset outward so it is never swallowed by the component background. */
+/* Focus: a real outline, not a box-shadow, forced-colors forces box-shadow to
+   none. Offset outward so it is never swallowed by the component background.
+   Outline and offset ONLY. This rule sits outside @layer components, so a
+   border-radius here outranks the control's own and a focused control visibly
+   changes shape (measured: the primary button was 8px unfocused, 6px while
+   Tab-focused). A focus ring must never mutate the geometry of what it marks. */
 :focus-visible {
   outline: 2px solid var(--line-accent);
   outline-offset: 2px;
-  border-radius: var(--radius-sm);
 }
 
 ::selection {
@@ -464,7 +467,7 @@ button:disabled {
     color: var(--text-muted);
   }
 
-  /* Section label inside a panel or list — sentence case, never a kicker
+  /* Section label inside a panel or list: sentence case, never a kicker
      above a heading. */
   .section-label {
     font-size: 0.75rem;
@@ -625,8 +628,36 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* Collapsed rail: the brand block yields to the one control that matters in this
+   state. The rail is 60px wide, so its header has a 36px content box. A 28px
+   brand mark, a spacer and a 28px toggle cannot share that row, and because the
+   rail sets overflow:hidden the toggle used to lay out past its right edge and
+   be clipped away entirely: collapse worked, expand was impossible with a
+   pointer, and the state persisted in localStorage, so the rail could never be
+   reopened. Focus made it worse, since the unreachable control was still in the
+   tab order and focusing it scrolled the clipped container sideways.
+   Hiding the brand keeps the toggle inside the rail, in the position the brand
+   mark occupied when expanded. */
+.sidebar[data-collapsed="true"] .sidebar-head {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-brand,
+.sidebar[data-collapsed="true"] .sidebar-head-fill {
+  display: none;
+}
+
+/* In the collapsed rail the toggle is the only thing up there, so give it the
+   full 36px content box rather than leaving a 28px square floating in it. */
+.sidebar[data-collapsed="true"] .sidebar-toggle {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+}
+
 /* Collapsed rail: labels are hidden from layout AND from assistive tech only
-   via the visual state — the accessible name lives on the control itself. */
+   via the visual state, the accessible name lives on the control itself. */
 .sidebar[data-collapsed="true"] .sidebar-label,
 .sidebar[data-collapsed="true"] .sidebar-section-title {
   display: none;
@@ -635,6 +666,20 @@ button:disabled {
 .sidebar[data-collapsed="true"] .sidebar-row {
   justify-content: center;
   padding-inline: 0;
+}
+
+/* The review count is the one number the rail must not lose when it collapses.
+   There is no room beside the icon (rule 11), so it rides on the icon's corner. */
+.sidebar-row {
+  position: relative;
+}
+.sidebar[data-collapsed="true"] .sidebar-badge {
+  position: absolute;
+  inset-block-start: 0.125rem;
+  inset-inline-end: 0.125rem;
+  min-height: 0;
+  padding: 0 0.25rem;
+  line-height: 1rem;
 }
 
 /* --- mobile drawer ------------------------------------------------------- */
@@ -649,7 +694,7 @@ button:disabled {
     padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
     transform: translateX(-100%);
     /* Translating an element does not remove it from the tab order or the
-       accessibility tree, and the aside precedes <main> — so without this the
+       accessibility tree, and the aside precedes <main>, so without this the
        first Tab on a phone lands inside an off-screen nav. Delay the visibility
        flip so the slide-out animation still plays. */
     visibility: hidden;
@@ -672,6 +717,65 @@ button:disabled {
     justify-content: flex-start;
     padding-inline: 0.5rem;
   }
+  .sidebar[data-collapsed="true"] .sidebar-badge {
+    position: static;
+  }
+}
+
+/* --- access gate --------------------------------------------------------- */
+/* The gate is a threshold, and it is the one screen with room for real depth.
+   The depth is material, from tone and light: a card lifted off the canvas by a
+   hairline border, a top edge that catches light, and a two-layer shadow (a
+   tight contact shadow plus a wide ambient one). No ornament, no glow, nothing
+   that animates, so nothing here can cost contrast or reduced-motion. */
+.auth-stage {
+  /* One light source above the card, so it reads as sitting in a lit space
+     rather than floating on a flat fill. The only gradient in the app, and it
+     is light, not a pattern. */
+  background:
+    radial-gradient(
+      70rem 28rem at 50% -10rem,
+      color-mix(in oklch, var(--accent) 5%, transparent),
+      transparent 70%
+    ),
+    var(--surface-base);
+}
+
+.auth-card {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in oklch, var(--text-primary) 9%, transparent),
+    0 1px 2px -1px oklch(0.1 0.005 265 / 0.6),
+    0 1.5rem 3rem -1rem oklch(0.1 0.005 265 / 0.7);
+}
+
+/* The key is a machine fact, so it is set in mono like every other machine fact
+   in the app, at a wider tracking than a code block because it is read
+   character by character. Taller than a normal field: a 48-character secret is
+   the most important thing anyone types here. */
+.auth-key {
+  min-height: 2.75rem;
+  /* Start clears the prompt glyph, end clears the reveal control, so neither
+     can overlap the value. */
+  padding-inline: 2rem 2.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+}
+
+/* The prompt glyph is the identity in one character. It sits behind the hit
+   area so a click still lands in the field. */
+.auth-prompt {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 0.75rem;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-faint);
+  pointer-events: none;
 }
 
 /* ============================ surfaces =================================== */
@@ -746,10 +850,7 @@ button:disabled {
 
 .data-table tbody tr {
   border-top: 1px solid var(--line-subtle);
-}
-
-/* contain: layout paint bounds the cost of per-row updates in a live table. */
-.data-table tbody tr {
+  /* contain: layout paint bounds the cost of per-row updates in a live table. */
   contain: layout paint;
 }
 
@@ -855,8 +956,13 @@ button:disabled {
 }
 
 /* --- skeleton ------------------------------------------------------------ */
+/* One radius for every skeleton, declared here instead of left to the caller.
+   `rounded-lg` from a caller sits in the utilities layer and outranks this rule,
+   so the same component was 6px or 12px depending on who rendered it. 12px is
+   the radius the callers that asked for one already used, so their override is
+   now a no-op. A genuine variant (the 2px status dot) still overrides. */
 .skeleton {
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
   background: var(--surface-hover);
 }
 
@@ -898,7 +1004,7 @@ button:disabled {
   box-shadow: 0 1.5rem 4rem oklch(0.08 0.005 265 / 0.55);
 }
 
-/* --- menu + tooltip (Radix) -------------------------------------------- */
+/* --- menu + tooltip (Radix) --------------------------------------------- */
 .menu {
   z-index: var(--z-overlay);
   min-width: 11rem;
@@ -951,12 +1057,9 @@ button:disabled {
 }
 
 /* Collapsed rail: the count moves into the tooltip and accessible name. */
-.sidebar[data-collapsed="true"] .sidebar-row .chip {
-  display: none;
-}
-@media (max-width: 56.25rem) {
+@media (min-width: 56.25rem) {
   .sidebar[data-collapsed="true"] .sidebar-row .chip {
-    display: inline-flex;
+    display: none;
   }
 }
 
@@ -1017,7 +1120,30 @@ button:disabled {
   color: var(--text-primary);
 }
 
-/* Row actions appear on focus as well as hover — hover must never be the only
+/* The one clickable-text treatment (a table row's id). Underlined at rest, not
+   only on hover: an affordance that appears on hover alone is no affordance for
+   a touch or keyboard user (SC 1.4.13 / 2.1.1), and the whole point of this
+   control is that the row has a visible way in. */
+.row-link {
+  /* 24px floor (contract rule 7): a bare text button is only as tall as its line. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-align: start;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 0.2em;
+  transition: color var(--duration-fast-02) var(--ease-standard);
+}
+
+.row-link:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+/* Row actions appear on focus as well as hover, hover must never be the only
    path (SC 1.4.13 / 2.1.1). */
 .row-actions {
   opacity: 0;

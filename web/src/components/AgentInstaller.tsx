@@ -8,6 +8,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { api } from "../api";
+import { useCan } from "../store";
 import { announce } from "../lib/announce";
 import { cn } from "../lib/utils";
 import { AGENT_CATALOG, type AgentInfo } from "../types";
@@ -23,6 +24,7 @@ const STATUS_CHIP = {
 } as const;
 
 export default function AgentInstaller() {
+  const can = useCan();
   const [agents, setAgents] = useState<AgentCard[]>(
     AGENT_CATALOG.map((a) => ({ ...a, installed: false })),
   );
@@ -101,11 +103,11 @@ export default function AgentInstaller() {
           variant="quiet"
           size="sm"
           iconOnly
-          aria-label="Re-check installed agents"
+          aria-label="re-check installed agents"
           disabled={loading}
           onClick={() => void load()}
         >
-          <ArrowsClockwise size={14} />
+          <ArrowsClockwise size={13} />
         </Button>
       </div>
 
@@ -138,7 +140,7 @@ export default function AgentInstaller() {
                         )}
                       >
                         {agent.installed ? (
-                          <CheckCircle size={11} weight="fill" aria-hidden="true" />
+                          <CheckCircle size={12} weight="fill" aria-hidden="true" />
                         ) : (
                           <span className="chip-dot" aria-hidden="true" />
                         )}
@@ -157,8 +159,8 @@ export default function AgentInstaller() {
                           variant="quiet"
                           size="sm"
                           iconOnly
-                          aria-label={`Copy install command for ${agent.name}`}
-                          title={copied === agent.name ? "Copied" : "Copy install command"}
+                          aria-label={`copy install command for ${agent.name}`}
+                          title={copied === agent.name ? "copied" : "copy install command"}
                           onClick={() => void copy(agent, agent.installCmd ?? "")}
                         >
                           <Copy size={13} />
@@ -167,7 +169,7 @@ export default function AgentInstaller() {
                     ) : null}
                   </div>
 
-                  {!agent.installed && agent.installCmd ? (
+                  {!agent.installed && agent.installCmd && can.mutate ? (
                     <Button
                       variant="primary"
                       size="sm"
@@ -176,9 +178,9 @@ export default function AgentInstaller() {
                       onClick={() => void install(agent)}
                     >
                       {busy ? (
-                        <CircleNotch size={14} className="animate-spin" aria-hidden="true" />
+                        <CircleNotch size={13} className="animate-spin" aria-hidden="true" />
                       ) : (
-                        <DownloadSimple size={14} aria-hidden="true" />
+                        <DownloadSimple size={13} aria-hidden="true" />
                       )}
                       {busy ? "installing…" : "install"}
                     </Button>

@@ -5,13 +5,12 @@ import {
   GearSix,
   Plus,
   Stack,
-  TerminalWindow,
   X,
 } from "@phosphor-icons/react";
-import { useApp, type Connection } from "../store";
+import { useApp, useCan, type Connection } from "../store";
 import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import { Button, Tooltip } from "./ui";
+import { Button, BrandMark, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -40,7 +39,7 @@ export default function Sidebar({ open, onClose }: Props) {
   const workspaces = useApp((s) => s.workspaces);
   const connection = useApp((s) => s.connection);
   const navigate = useApp((s) => s.navigate);
-  const setCreating = useApp((s) => s.setCreating);
+  const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
 
   useEffect(() => {
@@ -51,11 +50,11 @@ export default function Sidebar({ open, onClose }: Props) {
   const reviewCount = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
 
   const nav = [
-    { kind: "dashboard" as const, label: "Workspaces", icon: Stack, badge: reviewCount },
+    { kind: "workspaces" as const, label: "Workspaces", icon: Stack, badge: reviewCount },
     { kind: "settings" as const, label: "Settings", icon: GearSix, badge: 0 },
   ];
 
-  const activeKind = route.kind === "workspace" ? "dashboard" : route.kind;
+  const activeKind = route.kind === "workspace" ? "workspaces" : route.kind;
 
   return (
     <aside
@@ -64,64 +63,65 @@ export default function Sidebar({ open, onClose }: Props) {
       data-collapsed={collapsed}
       aria-label="Primary navigation"
     >
-      <div className="flex min-h-13 items-center gap-2.5 border-b border-line-subtle px-3">
-        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
-          <TerminalWindow size={15} weight="bold" />
+      <div className="sidebar-head flex min-h-13 items-center gap-2.5 border-b border-line-subtle px-3">
+        <span className="sidebar-brand grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
+          <BrandMark size={16} />
         </span>
         <span className="sidebar-label text-base font-semibold tracking-tight">kohlab</span>
-        <div className="flex-1" />
-        {/* Desktop: collapse the rail. Mobile: dismiss the drawer. */}
+        <div className="sidebar-head-fill flex-1" />
+        {/* Desktop: collapse the rail. Mobile: dismiss the drawer. The collapsed
+            rail has room for one control, so this one is the survivor: see
+            .sidebar[data-collapsed="true"] .sidebar-head in index.css. */}
         <Button
           variant="quiet"
           iconOnly
           size="sm"
-          className="hidden shell:inline-flex"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="sidebar-toggle hidden shell:inline-flex"
+          aria-label={collapsed ? "expand sidebar" : "collapse sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((v) => !v)}
         >
-          {collapsed ? <CaretDoubleRight size={15} /> : <CaretDoubleLeft size={15} />}
+          {collapsed ? <CaretDoubleRight size={13} /> : <CaretDoubleLeft size={13} />}
         </Button>
         <Button
           variant="quiet"
           iconOnly
           size="sm"
           className="shell:hidden"
-          aria-label="Close navigation"
+          aria-label="close navigation"
           onClick={onClose}
         >
-          <X size={15} />
+          <X size={13} />
         </Button>
       </div>
 
-      <div className="px-2.5 pt-3">
-        <Button
-          variant="primary"
-          className={cn("w-full", collapsed && "shell:px-0")}
-          aria-label="New workspace"
-          onClick={() => {
-            setCreating(true);
-            navigate({ kind: "dashboard" });
-          }}
-        >
-          <Plus size={16} weight="bold" />
-          <span className="sidebar-label">new workspace</span>
-        </Button>
-      </div>
+      {can.mutate ? (
+        <div className="px-2.5 pt-3">
+          <Button
+            variant="primary"
+            className={cn("w-full", collapsed && "shell:px-0")}
+            aria-label="new workspace"
+            onClick={() => navigate({ kind: "workspaces", create: true })}
+          >
+            <Plus size={14} />
+            <span className="sidebar-label">new workspace</span>
+          </Button>
+        </div>
+      ) : null}
 
       <nav className="flex flex-col gap-0.5 p-2.5" aria-label="Views">
         {nav.map(({ kind, label, icon: Icon, badge }) => (
-          <Tooltip key={kind} content={badge > 0 ? `${label} — ${badge} to review` : label} disabled={!collapsed}>
+          <Tooltip key={kind} content={badge > 0 ? `${label}, ${badge} waiting for review` : label} disabled={!collapsed}>
           <button
             type="button"
             className="sidebar-row"
             aria-current={activeKind === kind ? "page" : undefined}
-            aria-label={badge > 0 ? `${label} — ${badge} to review` : label}
+            aria-label={badge > 0 ? `${label}, ${badge} waiting for review` : label}
             onClick={() => navigate({ kind })}
           >
             <Icon size={17} className="shrink-0" weight={activeKind === kind ? "fill" : "regular"} />
             <span className="sidebar-label flex-1">{label}</span>
-            {badge > 0 ? <span className="chip chip-review tnum" aria-hidden="true">{badge}</span> : null}
+            {badge > 0 ? <span className="sidebar-badge chip chip-review tnum" aria-hidden="true">{badge}</span> : null}
           </button>
           </Tooltip>
         ))}
@@ -129,7 +129,8 @@ export default function Sidebar({ open, onClose }: Props) {
 
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
         <p className="sidebar-section-title section-label mb-2 px-2">
-          All workspaces
+          Workspaces
+          {reviewCount > 0 ? <span className="text-status-review"> · {reviewCount} to review</span> : null}
         </p>
 
         {ordered.length === 0 ? (
@@ -141,13 +142,13 @@ export default function Sidebar({ open, onClose }: Props) {
             const status = workspaceStatus(workspace);
             const selected = route.kind === "workspace" && route.id === workspace.id;
             return (
-              <Tooltip key={workspace.id} content={`${workspace.id} — ${STATUS_LABEL[status]}`} disabled={!collapsed}>
+              <Tooltip key={workspace.id} content={`${workspace.id}, ${STATUS_LABEL[status]}`} disabled={!collapsed}>
               <button
                 type="button"
                 className="sidebar-row"
                 data-selected={selected}
                 aria-current={selected ? "page" : undefined}
-                aria-label={`${workspace.id} — ${STATUS_LABEL[status]}`}
+                aria-label={`${workspace.id}, ${STATUS_LABEL[status]}`}
                 onClick={() => navigate({ kind: "workspace", id: workspace.id })}
               >
                 <span

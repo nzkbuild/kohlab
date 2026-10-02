@@ -1,8 +1,8 @@
-# Release Plan — v1.6.0
+# Release Plan: v1.6.0
 
 **Status:** planning (this doc)
 **Type:** Team-collaboration feature release
-**Theme:** "From one key to a team. Named users, roles, and an audit trail — still no database."
+**Theme:** "From one key to a team. Named users, roles, and an audit trail, still no database."
 
 ---
 
@@ -16,12 +16,12 @@ anonymous read-only share links. That's fine for a solo dev, but a small team
   stop, commit, and delete every workspace.
 - **No idea who did what.** There's no record of who stopped an agent, who
   committed a diff, or who deleted a workspace.
-- **Reviewers can't be restricted.** The only read path is a public share token —
+- **Reviewers can't be restricted.** The only read path is a public share token,
   anonymous, so you can't tell *who* looked, and it can't be revoked per-person.
 
 v1.6.0 fixes all three while preserving Kohlab's identity: **JSON files, no
 database, no containers.** It does not move to OIDC/OAuth, multi-host, or
-quotas — those stay explicitly out of scope.
+quotas, those stay explicitly out of scope.
 
 ---
 
@@ -44,21 +44,21 @@ A `users.json` file inside the workspace state directory (`$WORKS_DIR/users.json
 - **`key` is stored hashed** (SHA-256), never plaintext. The live key only
   appears once, when it's generated.
 - **Roles:**
-  - `owner` — full control, incl. managing other users.
-  - `member` — create/start/stop/commit/delete workspaces, manage agents.
-  - `viewer` — read-only (watch terminals, read diffs/logs/files), like today's
+  - `owner`, full control, incl. managing other users.
+  - `member`, create/start/stop/commit/delete workspaces, manage agents.
+  - `viewer`, read-only (watch terminals, read diffs/logs/files), like today's
     share links but *named* and *revocable*.
 
 ### Backward compatibility
 
 - If `users.json` is absent, fall back to the existing single `KOHLAB_KEY`
-  (exact current behavior — nothing breaks for existing installs).
+  (exact current behavior, nothing breaks for existing installs).
 - If `KOHLAB_KEY` is unset AND no `users.json`, the server stays open (current
   keyless behavior).
 
 ### Audit log
 
-Append-only `audit.log` in the same directory — one JSON line per event:
+Append-only `audit.log` in the same directory, one JSON line per event:
 
 ```json
 {"t":1788621887083,"user":"bob","action":"stop","id":"kohlab-fix-billing"}
@@ -92,16 +92,16 @@ Auth resolution order on every request:
 ## Work
 
 1. **`users.json` + key hashing + role type** (`lib.ts`, `types.ts`).
-2. **`authenticate(req)` → `{ user, role }` | legacy | share | anonymous** — one
+2. **`authenticate(req)` → `{ user, role }` | legacy | share | anonymous**, one
    resolver replacing scattered `authorized()` calls; additive, `authorized()`
    remains for the legacy-only path.
 3. **Role gating on every mutating route** in `server.ts` (viewer blocked from
    start/stop/commit/delete/install/user-manage).
-4. **Audit writer** — a `logAudit(user, action, id?, detail?)` helper invoked in
+4. **Audit writer**, a `logAudit(user, action, id?, detail?)` helper invoked in
    `mutateState` call sites; served at `/api/audit`.
-5. **`kohlab user` CLI** — `add` (prints key once), `list`, `rm`, plus `kohlab audit`.
+5. **`kohlab user` CLI**, `add` (prints key once), `list`, `rm`, plus `kohlab audit`.
 6. **Frontend**: settings gains a "Team" section (list/add/revoke users, show
-   audit tail) — gated to `owner`/`member`.
+   audit tail), gated to `owner`/`member`.
 
 ## Explicitly out of scope (unchanged from v1.4.0)
 

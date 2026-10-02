@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
- * Release checking — the data behind Settings → Updates.
+ * Release checking: the data behind Settings → Updates.
  *
  * Run:  bun scripts/check-release.ts
  *
  * A release is published by pushing, and this is the logic that turns a push
  * into "v1.1.0 is available, here is what is in it". It checks that the pushed
  * commit is seen, that both versions are named, and that the notes are exactly
- * the changelog above the running version — not the old release's notes, which
+ * the changelog above the running version: not the old release's notes, which
  * are not news.
  *
  * It also covers `updateRunState`, which has to survive the one thing that makes
@@ -35,7 +35,7 @@ function check(name: string, condition: boolean, detail = "") {
 const tmp = mkdtempSync(join(tmpdir(), "kohlab-release-"));
 
 // lib.ts resolves WORKS_DIR when it is first imported, so point it at the
-// fixture before importing — hence a dynamic import rather than a static one.
+// fixture before importing: hence a dynamic import rather than a static one.
 process.env.WORKS_DIR = join(tmp, "state");
 mkdirSync(join(tmp, "state"), { recursive: true });
 
@@ -96,7 +96,7 @@ try {
   git(["push", "-q", "-u", "origin", "main"], work);
   git(["clone", "-q", origin, rel], tmp);
 
-  console.log("\nkohlab — release checking\n");
+  console.log("\nkohlab, release checking\n");
 
   const before = await checkRelease(work, { force: true });
   check("up to date reports current == latest", before.current === "1.0.0" && before.latest === "1.0.0", JSON.stringify(before));

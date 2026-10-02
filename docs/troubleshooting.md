@@ -12,9 +12,9 @@ probe from a monitoring script.
 
 ## The dashboard does not load
 
-1. `systemctl status kohlab` — is the unit running?
-2. `journalctl -u kohlab -n 50` — the server logs what it could not do.
-3. `kohlab status` — does it say the port answers?
+1. `systemctl status kohlab`, is the unit running?
+2. `journalctl -u kohlab -n 50`, the server logs what it could not do.
+3. `kohlab status`, does it say the port answers?
 
 If the port answers but the page is blank, the dashboard build is missing or
 stale. Rebuild it:
@@ -40,7 +40,7 @@ the agent starts again with the same task.
 Two things guard against this recurring: the server tells every open dashboard the
 moment the socket closes, so the "running" chips do not keep lying, and
 `daemon.down` lands in the audit trail with the time. A daemon that dies routinely
-is a bug worth reporting — include `journalctl -u kohlab` around the timestamp.
+is a bug worth reporting, include `journalctl -u kohlab` around the timestamp.
 
 ## A workspace says running but nothing is happening
 
@@ -57,7 +57,7 @@ mid-sentence.
 
 ## I lost the access key
 
-It is recoverable on the box — it is never only in your head:
+It is recoverable on the box, it is never only in your head:
 
 ```bash
 kohlab key            # prints it, and says where it came from
@@ -71,7 +71,7 @@ an owner minting one.
 ## Locked out after too many wrong keys
 
 Wait a minute. Twenty refused attempts from one address in a minute trip the
-throttle, and it clears itself. A correct key still works during the window —
+throttle, and it clears itself. A correct key still works during the window,
 that is deliberate, so one address behind a shared NAT cannot lock out the others.
 
 ## "written by a newer kohlab"
@@ -83,7 +83,7 @@ with no workspaces.
 
 ## Restoring after a botched update
 
-Updates roll back on their own if the new build fails its health gate — see
+Updates roll back on their own if the new build fails its health gate, see
 [upgrade.md](upgrade.md). If you need to get back to a known state by hand:
 
 ```bash
@@ -102,7 +102,7 @@ du -sh ~/.kohlab/* 2>/dev/null | sort -h | tail
 
 In order of how often it is the answer: workspace trees under a member's home
 (real code, delete via the UI so the git bookkeeping goes with it), the audit log
-(rotated at 8 MiB — see [backup.md](backup.md)), and uploaded images.
+(rotated at 8 MiB, see [backup.md](backup.md)), and uploaded images.
 
 ## Nothing here matches
 

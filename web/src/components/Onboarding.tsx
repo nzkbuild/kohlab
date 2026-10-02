@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Rocket, Terminal } from "@phosphor-icons/react";
+import { useApp, useCan } from "../store";
 import { Button, EmptyState, PageHeader, Panel } from "./ui";
 import AgentInstaller from "./AgentInstaller";
 import { NewWorkspaceForm } from "./WorkspacesView";
@@ -36,7 +37,7 @@ function Step({
       <div className="mt-3">{children}</div>
       <div className="mt-3 flex justify-end border-t border-line-subtle pt-3">
         <Button variant="quiet" size="sm" onClick={onSkip}>
-          close the guide
+          hide the guide
         </Button>
       </div>
     </Panel>
@@ -45,14 +46,17 @@ function Step({
 
 /**
  * First run. The empty state is the base layer and stands on its own; the
- * three-step guide is an optional layer opened from it, never a gate — the app
+ * three-step guide is an optional layer opened from it, never a gate: the app
  * is fully usable with the guide closed or abandoned halfway.
  */
 export default function Onboarding() {
-  const [guide, setGuide] = useState(false);
+  // `/new` on an empty server means "show me how", so the guide opens.
+  const route = useApp((s) => s.route);
+  const [guide, setGuide] = useState(route.kind === "workspaces" && !!route.create);
+  const can = useCan();
 
-  // Nothing sits behind this screen on an empty server; leaving the guide
-  // returns to the empty state, and the first workspace swaps in the list.
+  // There is nowhere else to "skip to": this is home. Closing the guide leaves
+  // the empty state, which already has the way forward.
   const skip = () => setGuide(false);
 
   return (
@@ -62,14 +66,19 @@ export default function Onboarding() {
             below is an empty state, so the heading lives here. */}
         <PageHeader
           title="Workspaces"
-          description="One task, one repository, one agent — each in its own isolated worktree."
+          description="One task, one repository, one agent, each in its own isolated worktree."
         />
 
         <EmptyState
           icon={<Terminal size={18} />}
           title="No workspaces yet"
-          description="A workspace is one task, one repository and one agent. The three steps below take about two minutes — or skip them entirely and explore first."
+          description={
+            can.mutate
+              ? "A workspace is one task, one repository and one agent. The three steps below take about two minutes."
+              : "A workspace is one task, one repository and one agent. Your role can look but not create, so an owner or member starts the first one."
+          }
           action={
+            can.mutate ? (
             <>
               <Button
                 variant="primary"
@@ -77,10 +86,11 @@ export default function Onboarding() {
                 aria-controls="onboarding-steps"
                 onClick={() => setGuide(true)}
               >
-                <Rocket size={15} weight="fill" />
+                <Rocket size={14} weight="fill" />
                 get started
               </Button>
             </>
+            ) : undefined
           }
         />
 
@@ -98,7 +108,7 @@ export default function Onboarding() {
             <Step
               n={2}
               title="Create a workspace"
-              description="One task, one repository, one agent. Creating the workspace starts the agent — there is nothing to launch afterwards."
+              description="One task, one repository, one agent. Creating the workspace starts the agent, there is nothing to launch afterwards."
               onSkip={skip}
             >
               {/* No cancel here: the step's own skip and "hide the guide" are the
@@ -122,13 +132,13 @@ export default function Onboarding() {
                   its diff, so you read the change before anything else happens to it.
                 </li>
                 <li>
-                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically —
+                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically,
                   you write the message and press commit.
                 </li>
               </ul>
               <div className="mt-3">
                 <Button variant="primary" onClick={skip}>
-                  close the guide
+                  done
                 </Button>
               </div>
             </Step>

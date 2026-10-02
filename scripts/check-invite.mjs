@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Invitations — the one way someone joins a kohlab.
+ * Invitations: the one way someone joins a kohlab.
  *
  * Run:  node scripts/check-invite.mjs
  *
  * The flow it asserts, end to end: an owner invites; the link lands on a screen
  * that exchanges it for that member's own key; the key works and is scoped to
  * what they own; the link is single-use and expiring; and the two rules that
- * protect the box — the last owner cannot be removed or demoted, and inviting on
+ * protect the box: the last owner cannot be removed or demoted, and inviting on
  * a server that cannot create accounts is refused rather than quietly sharing the
  * owner's account.
  *
@@ -82,7 +82,7 @@ let server = null;
 let memberKey = null;
 
 try {
-  console.log("\nkohlab — invitations\n");
+  console.log("\nkohlab, invitations\n");
 
   mkdirSync(join(tmp, "state"), { recursive: true });
   server = spawn("bun", ["run", "server.ts"], {
@@ -169,7 +169,7 @@ try {
   check("an owner can change a role", roleChange.status === 200 && roleChange.body.user?.role === "viewer", `${roleChange.status} ${JSON.stringify(roleChange.body)}`);
 
   // The legacy key is an owner here, so demoting a named owner is recoverable and
-  // allowed — the lockout rule only bites with no key configured. Assert what is
+  // allowed: the lockout rule only bites with no key configured. Assert what is
   // true rather than what would be true on a keyed-only box.
   const demoteSelf = await call(`/api/users/${id}`, KEY, {
     method: "PATCH",

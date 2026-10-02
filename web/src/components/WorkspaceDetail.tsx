@@ -18,7 +18,8 @@ import { toast } from "sonner";
 import { api } from "../api";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
+import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
 import BrowseView from "./BrowseView";
@@ -29,12 +30,12 @@ import { disposeWorkspaceTerminals } from "./terminalCache";
 import { Button, EmptyState, Menu, MenuItem, SkeletonRows, StatusChip, Tab, TabList, TabPanel, Tabs } from "./ui";
 
 // xterm (~390 KB) and Monaco must not load before the cockpit does: only an
-// import through lazy() defers the fetch. A static import here — even one that
-// only wants a helper — would pull the whole chunk into first paint.
+// import through lazy() defers the fetch. A static import here: even one that
+// only wants a helper: would pull the whole chunk into first paint.
 const TerminalView = lazy(() => import("./TerminalView"));
 const DiffView = lazy(() => import("./DiffView"));
 
-type TabId = "terminal" | "files" | "review" | "log";
+type TabId = WorkspaceTab;
 
 const TABS: { id: TabId; label: string; icon: typeof Terminal }[] = [
   { id: "terminal", label: "Terminal", icon: Terminal },
@@ -64,8 +65,14 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const loading = useApp((s) => s.loading);
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
+  const route = useApp((s) => s.route);
+  const can = useCan();
 
-  const [tab, setTab] = useState<TabId>("terminal");
+  // The pane lives in the URL (/w/:id/review), so a refresh, a shared link or
+  // Back returns to it. Switching panes replaces the entry rather than pushing
+  // one per click.
+  const routeTab = route.kind === "workspace" ? route.tab : undefined;
+  const setTab = (next: TabId) => navigate({ kind: "workspace", id: workspaceId, tab: next }, { replace: true });
   const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
   const [confirming, setConfirming] = useState(false);
@@ -79,7 +86,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // their outcome before the server confirms it. Deleting and committing never do.
   const [optimisticRunning, setOptimisticRunning] = useOptimistic(w?.running ?? false);
 
-  // Home's "Open… → Terminal in" lands here: open one fresh shell, once.
+  // Home's "open… > Terminal in" lands here: open one fresh shell, once.
   const openShell = useApp((s) => s.openShell);
   const setOpenShell = useApp((s) => s.setOpenShell);
   useEffect(() => {
@@ -88,7 +95,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     const id = `terminal-${Date.now()}`;
     setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
     setActiveTerminal(id);
-    setTab("terminal");
   }, [openShell, workspaceId, setOpenShell]);
 
   const run = (action: string) => {
@@ -113,7 +119,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       toast.success("share link copied");
       announce(`share link copied for ${workspaceId}`);
     } catch (e) {
-      toast.error(`could not copy the link — ${(e as Error).message}`);
+      toast.error(`could not copy the link, ${(e as Error).message}`);
     }
   };
 
@@ -121,23 +127,30 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     setDeleting(true);
     try {
       // Cached xterm buffers outlive their pane, so they are dropped explicitly
-      // — the cache module is xterm-free, which is why this stays a static import.
+      //: the cache module is xterm-free, which is why this stays a static import.
       disposeWorkspaceTerminals(workspaceId);
       await toastAction(workspaceId, "delete");
       await refresh();
       announce(`${workspaceId} deleted`);
       setConfirming(false);
-      navigate({ kind: "dashboard" });
+      navigate({ kind: "workspaces" });
     } catch (e) {
-      toast.error(`delete failed — ${(e as Error).message}`);
+      toast.error(`delete failed, ${(e as Error).message}`);
     } finally {
       setDeleting(false);
     }
   };
 
   // The review badge has to be readable before the tab is opened, so the count
-  // is fetched once per needs-review state — not polled.
+  // is fetched once per needs-review state: not polled.
   const needsReview = w !== undefined && workspaceStatus(w) === "needs-review";
+  // Work waiting for a decision opens on that decision, not on a finished
+  // terminal. The default is written into the URL once, so a workspace that
+  // flips to needs-review while you watch it does not yank you off the terminal.
+  const tab: TabId = routeTab ?? (needsReview ? "review" : "terminal");
+  useEffect(() => {
+    if (w && !routeTab) setTab(tab);
+  }, [w === undefined, routeTab]);
   useEffect(() => {
     if (!needsReview) {
       setReviewCount(0);
@@ -181,7 +194,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [workspaceId]);
 
   // The terminal bundle may still be in flight on the first `.`, so the focus
   // request retries briefly instead of silently doing nothing.
@@ -225,7 +238,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             title="Workspace not found"
             description={`${workspaceId} is not on this server. It may have been deleted, or the link may be stale.`}
             action={
-              <Button variant="primary" onClick={() => navigate({ kind: "dashboard" })}>
+              <Button variant="primary" onClick={() => navigate({ kind: "workspaces" })}>
                 back to workspaces
               </Button>
             }
@@ -247,7 +260,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     const id = `terminal-${Date.now()}`;
     setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
     setActiveTerminal(id);
-    setTab("terminal");
   };
 
   const closeTerminal = (id: string) => {
@@ -255,28 +267,28 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     if (activeTerminal === id) setActiveTerminal("main");
   };
 
-  // Review leads when there is something to review (Product principle 2);
-  // otherwise the run toggle does. The rest live in the overflow menu.
-  const reviewFirst = st === "needs-review";
+  // One primary per state: a workspace waiting for review asks for a review,
+  // not for its agent to be started again. The rest live in the overflow menu,
+  // which also keeps the row inside a 320px viewport.
   const actions = (
     <>
-      {reviewFirst ? (
+      {needsReview && tab !== "review" ? (
         <Button size="sm" variant="primary" className="flex-1 shell:flex-none" onClick={() => setTab("review")}>
-          <GitDiff size={12} aria-hidden="true" />
-          review{reviewCount > 0 ? ` ${reviewCount} ${reviewCount === 1 ? "file" : "files"}` : ""}
+          <GitDiff size={13} aria-hidden="true" />
+          {reviewCount > 0 ? `review ${reviewCount} file${reviewCount === 1 ? "" : "s"}` : "review"}
         </Button>
       ) : null}
       <Button
         size="sm"
-        variant={reviewFirst ? "secondary" : "primary"}
+        variant={needsReview ? "secondary" : "primary"}
         className="flex-1 shell:flex-none"
         onClick={() => run(running ? "stop" : "start")}
       >
-        {running ? <Stop size={12} weight="fill" aria-hidden="true" /> : <Play size={12} weight="fill" aria-hidden="true" />}
+        {running ? <Stop size={13} weight="fill" aria-hidden="true" /> : <Play size={13} weight="fill" aria-hidden="true" />}
         {running ? "stop" : "start"}
       </Button>
       <Menu
-        label={`More actions for ${w.id}`}
+        label={`more actions for ${w.id}`}
         trigger={
           <Button size="sm" variant="secondary" iconOnly>
             <DotsThree size={16} weight="bold" />
@@ -306,7 +318,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <div className="flex min-w-0 items-center gap-2">
             {/* The workspace id IS this route's page identity, so it carries the
                 single <h1> rather than leaving the route headingless. */}
-            <h1 className="mono m-0 shrink-0 text-base font-semibold text-text-primary">{w.id}</h1>
+            <h1 className="mono m-0 shrink-0 text-lg font-semibold text-text-primary">{w.id}</h1>
             <StatusChip status={st} />
             <span className="mono min-w-0 truncate text-2xs text-text-faint" title={w.path}>
               {w.path}
@@ -317,7 +329,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </p>
         </div>
 
-        <div className="hidden shrink-0 items-center gap-1.5 shell:flex">{actions}</div>
+        {can.mutate ? (
+          <div className="hidden items-center gap-1.5 shell:flex">{actions}</div>
+        ) : (
+          <span className="chip chip-stopped" title="Your role can watch this workspace but not change it.">
+            view only
+          </span>
+        )}
       </header>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
@@ -325,7 +343,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         {TABS.map(({ id, label, icon: Icon }) => {
           const badge = badges[id];
           return (
-            <Tab key={id} value={id} aria-label={badge ? `${label} — ${badge.count} ${badge.noun}` : undefined}>
+            <Tab key={id} value={id} aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}>
               <Icon size={14} aria-hidden="true" />
               {label}
               {badge ? (
@@ -367,7 +385,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                     aria-label={`Close terminal ${term.label}`}
                     onClick={() => closeTerminal(term.id)}
                   >
-                    <X size={11} />
+                    <X size={13} />
                   </Button>
                 ) : null}
               </span>
@@ -393,17 +411,21 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                 <>
                   {/* The terminal is mounted even when the workspace is not
                       running, because the daemon retains the final screen of a
-                      finished session — replacing it with a notice would throw
+                      finished session, replacing it with a notice would throw
                       away the only surviving record of what the agent did. */}
                   {running ? null : (
                     <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5">
                       <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
                       <span className="min-w-0 flex-1 text-xs text-text-muted">
-                        Not running — showing the last screen. Start it to take over the terminal.
+                        {can.mutate
+                          ? "Not running, showing the last screen. Start it to take over the terminal."
+                          : "Not running, showing the last screen."}
                       </span>
-                      <Button variant="secondary" size="sm" onClick={() => run("start")}>
-                        start
-                      </Button>
+                      {can.mutate ? (
+                        <Button variant="secondary" size="sm" onClick={() => run("start")}>
+                          start
+                        </Button>
+                      ) : null}
                     </div>
                   )}
                   <div className="min-h-0 flex-1">
@@ -428,7 +450,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <TabPanel value="review" className="h-full min-h-0" tabIndex={-1}>
           <ErrorBoundary label="Review">
             <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
-              {tab === "review" ? <DiffView workspaceId={workspaceId} /> : null}
+              {tab === "review" ? <DiffView key={workspaceId} workspaceId={workspaceId} /> : null}
             </Suspense>
           </ErrorBoundary>
         </TabPanel>
@@ -442,9 +464,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       </Tabs>
 
       {/* Phones: the actions sit under the thumb, not in a wrapped header. */}
-      <div className="flex items-center gap-2 border-t border-line-subtle bg-surface-raised px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shell:hidden">
-        {actions}
-      </div>
+      {can.mutate ? (
+        <div className="flex items-center gap-2 border-t border-line-subtle bg-surface-raised px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shell:hidden">
+          {actions}
+        </div>
+      ) : null}
 
       <ConfirmDialog
         open={confirming}

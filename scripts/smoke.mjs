@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Backend smoke test — proves the HTTP + WebSocket contract the frontend depends
+ * Backend smoke test: proves the HTTP + WebSocket contract the frontend depends
  * on still works. Run against a live server:
  *
  *   PORT=7699 WORKS_DIR=/tmp/kohlab-smoke/.works bun run server.ts &
@@ -19,12 +19,12 @@ const WS_BASE = `ws://127.0.0.1:${PORT}`;
 /**
  * This script CREATES, starts, commits, shares and DELETES a workspace, so
  * pointing it at a live server mutates real state. 7676 is the documented
- * production port — refuse it unless the operator says so explicitly.
+ * production port: refuse it unless the operator says so explicitly.
  */
 const PRODUCTION_PORTS = new Set([7676]);
 if (PRODUCTION_PORTS.has(PORT) && !process.argv.includes("--force")) {
   console.error(
-    `\nrefusing to run against port ${PORT} — that is the documented production port.\n` +
+    `\nrefusing to run against port ${PORT}, that is the documented production port.\n` +
       `This suite creates and deletes a real workspace. Start a throwaway server:\n\n` +
       `  PORT=7699 WORKS_DIR=/tmp/kohlab-smoke/.works PTY_SOCKET=/tmp/kohlab-smoke.sock bun run server.ts\n` +
       `  node scripts/smoke.mjs 7699\n\n` +
@@ -126,7 +126,7 @@ try {
 
   // The install route takes user text and runs a process. These attempt the
   // exploit with a harmless canary: if the fix ever regresses, the canary file
-  // appears and this fails loudly — instead of the box quietly being rootable
+  // appears and this fails loudly: instead of the box quietly being rootable
   // by any member.
   console.log("agent install hardening");
   const canary = join(repoDir, "pwned");
@@ -153,8 +153,8 @@ try {
   // This is how two holes survived: `POST /api/users` had no gate at all (a
   // viewer could mint an owner) and `POST /api/agents` had only `denied`. Each
   // route was individually plausible; only the comparison showed them. No
-  // handler checks roles itself — the route table is the single place
-  // authorization happens — so a missing gate has no second line of defence.
+  // handler checks roles itself: the route table is the single place
+  // authorization happens: so a missing gate has no second line of defence.
   //
   // Bodies are empty on purpose: if a gate ever goes missing, the handler answers
   // 400 and this fails, without performing the mutation it was asked to.
@@ -171,6 +171,7 @@ try {
     ["POST", "/api/workspaces/nope/restart"],
     ["POST", "/api/workspaces/nope/delete"],
     ["POST", "/api/workspaces/nope/commit"],
+    ["POST", "/api/workspaces/nope/merge"],
     ["POST", "/api/workspaces/nope/share"],
   ];
   const PRIVILEGED_READS = [
@@ -218,7 +219,7 @@ try {
       );
       // Refused is the property that matters. 401 is the correct status for "no
       // credentials at all", but ten routes answer 403 because they test the role
-      // first — which also refuses. That inconsistency is recorded in ROADMAP.md
+      // first: which also refuses. That inconsistency is recorded in ROADMAP.md
       // rather than churned here; what must never happen is a 2xx.
       const leaked = anonPosts.filter((r) => r.status !== 401 && r.status !== 403);
       check("no mutating route accepts an anonymous caller", leaked.length === 0, JSON.stringify(leaked));
@@ -310,7 +311,7 @@ try {
 
     // Committing an already-clean workspace must succeed. It used to run
     // `git commit` on an empty index, which exits 1 and surfaced as a raw
-    // "git commit -m … exited 1" — and since commit is the ONLY way a stopped
+    // "git commit -m … exited 1": and since commit is the ONLY way a stopped
     // workspace leaves the review queue, a workspace with no changes could
     // never be cleared.
     const cleanCommit = await post(`/api/workspaces/${createdId}/commit`, { message: "accept clean tree" });
@@ -318,6 +319,24 @@ try {
       "POST .../commit on a clean tree succeeds",
       cleanCommit.status === 200 && cleanCommit.body?.ok === true,
       `got ${cleanCommit.status} ${JSON.stringify(cleanCommit.body).slice(0, 100)}`,
+    );
+    // The last mile: merge the accepted branch into the workspace's own checkout.
+    const merge = await post(`/api/workspaces/${createdId}/merge`, { message: "smoke merge" });
+    check(
+      "POST .../merge -> {repo,branch,from,to,previous,commit}",
+      merge.status === 200 && !!merge.body?.to && !!merge.body?.previous && merge.body.to !== merge.body.previous,
+      `got ${merge.status} ${JSON.stringify(merge.body).slice(0, 160)}`,
+    );
+    check(
+      "merge reports the workspace branch",
+      merge.status === 200 && merge.body?.branch === `kohlab/${createdId}`,
+      `got ${JSON.stringify(merge.body?.branch)}`,
+    );
+    const mergeInto = await post(`/api/workspaces/${createdId}/merge`, { message: "x", into: "/tmp" });
+    check(
+      "POST .../merge rejects an into path",
+      mergeInto.status === 400 && /into is not accepted/.test(JSON.stringify(mergeInto.body)),
+      `got ${mergeInto.status} ${JSON.stringify(mergeInto.body).slice(0, 120)}`,
     );
 
     const attachOnce = () =>
@@ -361,7 +380,7 @@ try {
     // server on the very first terminal open.
     const first = await attachOnce();
     check("terminal attach keeps the socket open", first.open === true, `closeCode=${first.closeCode} ${first.failed ?? ""}`);
-    check("server survives a terminal attach", first.status === 200, `api returned ${first.status} — the process died`);
+    check("server survives a terminal attach", first.status === 200, `api returned ${first.status}, the process died`);
     const afterFirstAttach = await req("/api/workspaces");
     const rowAfterFirst = Array.isArray(afterFirstAttach.body) ? afterFirstAttach.body.find((w) => w.id === createdId) : null;
     check(
@@ -376,14 +395,14 @@ try {
     // suite must attach twice.
     const second = await attachOnce();
     check("terminal re-attach keeps the socket open", second.open === true, `closeCode=${second.closeCode} ${second.failed ?? ""}`);
-    check("server survives a terminal re-attach", second.status === 200, `api returned ${second.status} — the process died`);
+    check("server survives a terminal re-attach", second.status === 200, `api returned ${second.status}, the process died`);
 
     const stop = await post(`/api/workspaces/${createdId}/stop`);
     check("POST .../stop -> ok", stop.status === 200);
 
     // Opening a finished workspace must not relaunch its agent. It used to: the
     // attach spawned a fresh run, and when that run ended the workspace went
-    // straight back into the review queue — so accepting it never stuck.
+    // straight back into the review queue: so accepting it never stuck.
     const stoppedAttach = await attachOnce();
     const rowsAfterStop = await req("/api/workspaces");
     const rowAfterStop = Array.isArray(rowsAfterStop.body) ? rowsAfterStop.body.find((w) => w.id === createdId) : null;
@@ -417,7 +436,7 @@ try {
   check("WS / accepts an authenticated push subscriber", wsCheck.ok, wsCheck.why ?? "");
 
   // The sockets connect to `/`, not `/api`. When an access key is configured the
-  // upgrade path must authenticate them — for several releases it did not, so
+  // upgrade path must authenticate them: for several releases it did not, so
   // the terminal and the done-ping were dead in the documented deployment while
   // the key-less test suite stayed green.
   if (KEY) {
@@ -456,6 +475,52 @@ try {
       failures.push(`cleanup failed: ${err.message}`);
     }
   }
+  // --- pairing: the device-grant bootstrap (docs/access-ux-v1.17.0.md) ---
+  // Mints a real code, trades it for a key that must actually authenticate,
+  // then proves wrong/expired/spent codes all fail with one silence and that
+  // unauthenticated minting is refused.
+  const isKeyed = !!KEY;
+  if (isKeyed) {
+    try {
+      const noAuth = await fetch(`${BASE}/api/pair`, { method: "POST" });
+      check("pair minting refuses the unauthenticated", noAuth.status === 401 || noAuth.status === 403, `got ${noAuth.status}`);
+
+      const mintRes = await post("/api/pair");
+      const mint = typeof mintRes.body === "string" ? JSON.parse(mintRes.body) : mintRes.body;
+      check("pair minting returns a KWDJ-MJHT shape code", /^[A-Z]{4}-[A-Z]{4}$/.test(mint.code || ""), mint.code);
+
+      const claim = await fetch(`${BASE}/api/pair/claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: mint.code.toLowerCase() }),
+      });
+      const claimBody = await claim.json();
+      check("claim accepts the code in any case", claim.status === 200 && typeof claimBody.key === "string", `got ${claim.status}`);
+      if (claimBody.key) {
+        const probe = await fetch(`${BASE}/api/workspaces`, { headers: { authorization: `Bearer ${claimBody.key}` } });
+        check("the claimed key authenticates", probe.status === 200, `got ${probe.status}`);
+      }
+
+      const spent = await fetch(`${BASE}/api/pair/claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: mint.code }),
+      });
+      check("a spent code is dead (single use)", spent.status === 400, `got ${spent.status}`);
+
+      const bogus = await fetch(`${BASE}/api/pair/claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: "AAAA-AAAA" }),
+      });
+      check("a wrong code reads as one failure", bogus.status === 400, `got ${bogus.status}`);
+    } catch (err) {
+      failures.push(`pairing suite failed: ${err.message}`);
+    }
+  } else {
+    console.log("  (no --key: skipping pairing suite, it needs a keyed server)");
+  }
+
   rmSync(repoDir, { recursive: true, force: true });
 
   console.log(`\n${passed} passed, ${failures.length} failed`);

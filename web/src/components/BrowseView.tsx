@@ -19,15 +19,19 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-10 items-center gap-2 border-b border-line-subtle px-3">
+      {/* One pane-header treatment: .cockpit-head and the same h2 title used by
+          every other pane, rather than a hand-rolled row with an section-label. The
+          breadcrumb is a path display, not a second title style. */}
+      <header className="cockpit-head">
+        <h2 className="shrink-0 text-sm font-semibold text-text-primary">Files</h2>
         {openFile ? (
-          <nav aria-label="Breadcrumb" className="min-w-0 flex-1 overflow-hidden">
+          <nav aria-label="breadcrumb" className="min-w-0 flex-1 overflow-hidden">
             <ol className="flex min-w-0 items-center gap-1">
               {segments.map((segment, index) => {
                 const last = index === segments.length - 1;
                 return (
                   <li key={`${index}:${segment}`} className="flex min-w-0 items-center gap-1">
-                    {index > 0 ? <CaretRight size={9} className="shrink-0 text-text-faint" aria-hidden="true" /> : null}
+                    {index > 0 ? <CaretRight size={12} className="shrink-0 text-text-faint" aria-hidden="true" /> : null}
                     <span
                       className={cn("mono truncate text-2xs", last ? "text-text-secondary" : "text-text-faint")}
                       title={last ? (openFile ?? undefined) : undefined}
@@ -40,19 +44,19 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
             </ol>
           </nav>
         ) : (
-          <span className="section-label flex-1">Files</span>
+          <div className="flex-1" />
         )}
         <Button
           variant="quiet"
           size="sm"
           iconOnly
           aria-pressed={showTree}
-          aria-label={showTree ? "Hide file tree" : "Show file tree"}
+          aria-label={showTree ? "hide file tree" : "show file tree"}
           onClick={() => setShowTree((v) => !v)}
         >
-          <TreeStructure size={14} />
+          <TreeStructure size={13} />
         </Button>
-      </div>
+      </header>
 
       <div className="flex min-h-0 flex-1">
         {showTree ? (
@@ -70,7 +74,7 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
             <EmptyState
               icon={<FileCode size={18} />}
               title="No file open"
-              description="Pick a file from the tree to read it here. Nothing is editable — this view is for reading the agent's changes."
+              description="Pick a file from the tree to read it here. Nothing is editable, this view is for reading the agent's changes."
             />
           )}
         </div>

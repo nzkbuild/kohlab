@@ -155,8 +155,8 @@ function scan(text, file) {
     const managedFocus = /aria-activedescendant/.test(text) && /role="(option|listitem|row|gridcell)"/.test(el);
     if (managedFocus) continue;
 
-    if (!keyboard) fail(file, n, `onClick on <${m[1]}> with no role/tabIndex/onKeyDown — use <button>`);
-    else warn(file, n, `onClick on <${m[1]}> — confirm the keyboard path is complete`);
+    if (!keyboard) fail(file, n, `onClick on <${m[1]}> with no role/tabIndex/onKeyDown, use <button>`);
+    else warn(file, n, `onClick on <${m[1]}>, confirm the keyboard path is complete`);
   }
 
   // ── images ─────────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ function scan(text, file) {
   const tabRe = /tabIndex=\{?["']?(\d+)/g;
   while ((m = tabRe.exec(text))) {
     if (Number(m[1]) > 0) {
-      fail(file, lineOf(text, m.index), `positive tabIndex=${m[1]} — it reorders focus for the whole page; use 0 or -1`);
+      fail(file, lineOf(text, m.index), `positive tabIndex=${m[1]}, it reorders focus for the whole page; use 0 or -1`);
     }
   }
 
@@ -197,7 +197,7 @@ function scan(text, file) {
   const aRe = /<a\b/g;
   while ((m = aRe.exec(text))) {
     const el = elementAt(text, m.index).text;
-    if (!/href=/.test(el)) warn(file, lineOf(text, m.index), "<a> with no href — not focusable; use <button> if it is an action");
+    if (!/href=/.test(el)) warn(file, lineOf(text, m.index), "<a> with no href, not focusable; use <button> if it is an action");
   }
 
   // ── hidden but focusable ───────────────────────────────────────────────────
@@ -205,7 +205,7 @@ function scan(text, file) {
   while ((m = hiddenRe.exec(text))) {
     const el = elementAt(text, m.index).text;
     if (/tabIndex=\{?["']?0/.test(el)) {
-      fail(file, lineOf(text, m.index), "aria-hidden with tabIndex=0 — focusable but invisible to screen readers");
+      fail(file, lineOf(text, m.index), "aria-hidden with tabIndex=0, focusable but invisible to screen readers");
     }
   }
 }
@@ -259,7 +259,7 @@ if (fixtureFailures.length !== 4) {
   selfTestFailed = true;
 }
 if (selfTestFailed) {
-  console.log("\nthe scanner is not detecting what it claims — treat the clean result above as meaningless");
+  console.log("\nthe scanner is not detecting what it claims, treat the clean result above as meaningless");
   process.exit(1);
 }
 
@@ -271,7 +271,7 @@ if (!/name=["']viewport["']/.test(html)) warn(join(ROOT, "web/index.html"), 1, "
 
 // ── a live region must exist, or state changes are silent ────────────────────
 if (!files.some((f) => /aria-live|role=["'](status|alert)["']/.test(readFileSync(f, "utf8")))) {
-  fail(SRC, 0, "no aria-live region anywhere — state changes are never announced");
+  fail(SRC, 0, "no aria-live region anywhere, state changes are never announced");
 }
 
 // ── the focus indicator must not have been removed ───────────────────────────
@@ -279,12 +279,12 @@ const css = readFileSync(join(SRC, "index.css"), "utf8");
 const outlineNone = css.match(/outline:\s*none/g)?.length ?? 0;
 const focusVisible = (css.match(/:focus-visible/g)?.length ?? 0) > 0;
 if (outlineNone > 0 && !focusVisible) {
-  fail(join(SRC, "index.css"), 0, `${outlineNone} "outline: none" with no :focus-visible replacement — the focus indicator is gone`);
+  fail(join(SRC, "index.css"), 0, `${outlineNone} "outline: none" with no :focus-visible replacement, the focus indicator is gone`);
 }
 if (!focusVisible) warn(join(SRC, "index.css"), 0, "no :focus-visible rule found");
 
 // ── report ───────────────────────────────────────────────────────────────────
-console.log(`\nstatic accessibility scan — ${files.length} source files\n`);
+console.log(`\nstatic accessibility scan, ${files.length} source files\n`);
 for (const w of warnings) console.log(`  warn  ${w}`);
 for (const e of errors) console.log(`  FAIL  ${e}`);
 console.log(
