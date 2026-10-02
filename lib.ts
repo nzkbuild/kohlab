@@ -345,7 +345,7 @@ function reportCorrupt(file: string, error: unknown, remedy: string): void {
  */
 let usersFileCorrupt = false;
 
-function readUsers(): User[] {
+export function readUsers(): User[] {
   if (!existsSync(USERS_FILE)) return [];
   try {
     const parsed = JSON.parse(readFileSync(USERS_FILE, "utf8")) as { users?: User[] };

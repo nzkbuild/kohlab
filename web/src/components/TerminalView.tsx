@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, socketProtocol } from "../api";
 import { cn } from "../lib/utils";
 import { Button } from "./ui";
-import { Copy, Monitor } from "@phosphor-icons/react";
+import { Copy, Monitor, Paperclip } from "@phosphor-icons/react";
 import { cacheTerminal, termCache } from "./terminalCache";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -141,6 +141,8 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
   /** Set inside the effect; the reconnect control calls it. */
   const reconnectRef = useRef<() => void>(() => {});
   const termRef = useRef<Terminal | null>(null);
+  const attachRef = useRef<(files: File[]) => void>(() => {});
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [socket, setSocket] = useState<SocketState>("connecting");
 
   useEffect(() => {
@@ -161,14 +163,25 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
       if (value && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) wsRef.current.send(value);
     };
     const bracketedPaste = (value: string) => `\x1b[200~${value}\x1b[201~`;
-    const sendImage = async (image: Blob) => {
-      try {
-        const uploaded = await api.uploadImage(workspaceId, image);
-        sendInput(bracketedPaste(uploaded.path));
-      } catch (e) {
-        console.error("image upload failed", e);
+    // Files reach the agent as paths: upload each, then paste the paths the way
+    // a desktop terminal pastes a dropped file. Claude Code and similar agents
+    // turn an image path into an attachment.
+    const sendFiles = async (files: File[]) => {
+      if (files.length === 0) return;
+      const paths: string[] = [];
+      for (const file of files) {
+        try {
+          paths.push((await api.uploadImage(workspaceId, file)).path);
+        } catch (e) {
+          toast.error(`could not attach ${file.name || "the file"}: ${(e as Error).message}`);
+        }
       }
+      if (paths.length === 0) return;
+      sendInput(bracketedPaste(paths.join(" ")));
+      toast.success(`attached ${paths.length} file${paths.length === 1 ? "" : "s"}`);
+      announce(`attached ${paths.length} file${paths.length === 1 ? "" : "s"}`);
     };
+    attachRef.current = (files) => void sendFiles(files);
     // Returning false keeps a key from the pty. Ctrl/Cmd+C copies only when
     // there is a selection, so with nothing selected it still interrupts the
     // agent; Ctrl+Shift+C always copies, as in desktop terminals. keydown only:
@@ -180,19 +193,23 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
       copySel();
       return false;
     });
+    // Capture phase on the terminal itself: xterm's own paste handler calls
+    // stopPropagation, so a document listener never saw a paste made inside the
+    // terminal, which is why pasting a screenshot did nothing. Files are taken
+    // here; plain text is left to xterm.
+    const filesOf = (data: DataTransfer | null) => {
+      const fromItems = Array.from(data?.items ?? [])
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => !!f);
+      return fromItems.length ? fromItems : Array.from(data?.files ?? []);
+    };
     const onPaste = (e: ClipboardEvent) => {
-      const imageItem = Array.from(e.clipboardData?.items ?? []).find((item) => item.type.startsWith("image/"));
-      const imageFile = imageItem?.getAsFile() ?? Array.from(e.clipboardData?.files ?? []).find((file) => file.type.startsWith("image/"));
-      if (imageFile) {
-        void sendImage(imageFile);
-        e.preventDefault();
-        return;
-      }
-      const txt = e.clipboardData?.getData("text");
-      if (txt) {
-        sendInput(txt);
-        e.preventDefault();
-      }
+      const files = filesOf(e.clipboardData);
+      if (files.length === 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void sendFiles(files);
     };
     // Typed input goes out as a bare string: the same frame shape as paste. The
     // subscription is per-mount and must be released, because the terminal it
@@ -200,15 +217,15 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
     // remount would send a keystroke once more.
     const inputSubscription = term.onData(sendInput);
     const onDrop = (e: DragEvent) => {
-      const image = Array.from(e.dataTransfer?.files ?? []).find((file) => file.type.startsWith("image/"));
-      if (!image) return;
-      void sendImage(image);
+      const files = filesOf(e.dataTransfer);
+      if (files.length === 0) return;
       e.preventDefault();
+      void sendFiles(files);
     };
     const onDragOver = (e: DragEvent) => {
-      if (Array.from(e.dataTransfer?.items ?? []).some((item) => item.type.startsWith("image/"))) e.preventDefault();
+      if (Array.from(e.dataTransfer?.items ?? []).some((item) => item.kind === "file")) e.preventDefault();
     };
-    document.addEventListener("paste", onPaste);
+    el.addEventListener("paste", onPaste, true);
     el.addEventListener("drop", onDrop);
     el.addEventListener("dragover", onDragOver);
 
@@ -304,7 +321,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
       inputSubscription.dispose();
       window.removeEventListener("resize", sendResize);
       observer.disconnect();
-      document.removeEventListener("paste", onPaste);
+      el.removeEventListener("paste", onPaste, true);
       el.removeEventListener("drop", onDrop);
       el.removeEventListener("dragover", onDragOver);
       clearTimeout(t1);
@@ -333,6 +350,28 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           {socket === "live" ? "attached to the agent's pty · shift+drag to select" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
         </span>
         <div className="flex-1" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(e) => {
+            attachRef.current(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <Button
+          variant="quiet"
+          size="sm"
+          className="shrink-0"
+          title="send a file or screenshot to the agent (or paste / drop it on the terminal)"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Paperclip size={13} aria-hidden="true" />
+          attach
+        </Button>
         <Button
           variant="quiet"
           size="sm"

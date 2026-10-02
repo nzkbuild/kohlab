@@ -247,6 +247,19 @@ try {
   await api(`/api/workspaces/${id}/stop`, { method: "POST", headers: jsonAuth });
   await wait(500);
 
+  // ── attach: any file reaches the agent as a readable path ────────────────
+  const upload = await fetch(`${base}/api/workspaces/${id}/image`, {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/pdf", "x-file-name": encodeURIComponent("../spec v2.pdf") },
+    body: "%PDF-1.4 kohlab",
+  });
+  const uploaded = await upload.json().catch(() => ({}));
+  check("a non-image file can be attached", upload.status, 200);
+  check("its name is kept, sanitised, with no path escape", /-spec_v2\.pdf$/.test(uploaded.path ?? "") && !uploaded.path.includes(".."), true);
+  check("the bytes land intact", existsSync(uploaded.path ?? "") && readFileSync(uploaded.path, "utf8"), "%PDF-1.4 kohlab");
+  const nameless = await fetch(`${base}/api/workspaces/${id}/image`, { method: "POST", headers: auth, body: "plain" });
+  check("an unnamed non-image is still refused", nameless.status, 415);
+
   // ── it is auditable, because it destroys work ────────────────────────────
   const audit = await api("/api/audit", { headers: auth });
   const events = Array.isArray(audit.body?.events) ? audit.body.events : [];

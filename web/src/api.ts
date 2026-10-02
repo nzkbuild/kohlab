@@ -152,7 +152,11 @@ export const api = {
   uploadImage: async (workspaceId: string, image: Blob): Promise<{ path: string; mimeType: string; bytes: number }> => {
     const res = await req(`/api/workspaces/${encodeURIComponent(workspaceId)}/image`, {
       method: "POST",
-      headers: { "content-type": image.type || "application/octet-stream" },
+      headers: {
+        "content-type": image.type || "application/octet-stream",
+        // Non-image files keep (a sanitised form of) their own name on the server.
+        ...(image instanceof File && image.name ? { "x-file-name": encodeURIComponent(image.name) } : {}),
+      },
       body: image,
     });
     const body = await res.json().catch(() => ({}));
