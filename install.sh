@@ -34,6 +34,9 @@ WITH_SYSTEMD=1
 WITH_COMMAND=1
 UNINSTALL=0
 UNIT=kohlab.service
+# The key lives here, 0600, not in the unit: unit files are world-readable, and
+# every member's agent runs as its own OS user on this same box.
+ENV_FILE="${KOHLAB_ENV_FILE:-$HOME/.kohlab/kohlab.env}"
 
 log()  { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*"; }
@@ -179,7 +182,20 @@ if [ "$WITH_SYSTEMD" -eq 0 ]; then
 else
   if [ -f "$KOHLAB_UNIT_DIR/$UNIT" ]; then
     log "keeping the existing $KOHLAB_UNIT_DIR/$UNIT"
-    warn "the access key for that server is in $KOHLAB_UNIT_DIR/$UNIT (KOHLAB_KEY=)"
+    # Migration (1.17): an older unit carries the key in plain text. Move it
+    # to the 0600 env file. The PTY daemon survives the restart (KillMode).
+    OLD_KEY="$(sed -n 's/^Environment=KOHLAB_KEY=//p' "$KOHLAB_UNIT_DIR/$UNIT" | head -1)"
+    if [ -n "$OLD_KEY" ]; then
+      mkdir -p "$(dirname "$ENV_FILE")" && chmod 700 "$(dirname "$ENV_FILE")"
+      ( umask 077; printf 'KOHLAB_KEY=%s\n' "$OLD_KEY" > "$ENV_FILE" )
+      sed -i "s#^Environment=KOHLAB_KEY=.*#EnvironmentFile=$ENV_FILE#" "$KOHLAB_UNIT_DIR/$UNIT"
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload 2>/dev/null && systemctl restart "$UNIT" 2>/dev/null || true
+      fi
+      log "moved the access key out of the unit into $ENV_FILE (0600)"
+    else
+      log "the access key is in $ENV_FILE (kohlab key prints it)"
+    fi
   else
     if [ -z "$KEY" ]; then
       if command -v openssl >/dev/null 2>&1; then
@@ -190,6 +206,8 @@ else
       log "generated an access key"
     fi
     mkdir -p "$KOHLAB_UNIT_DIR" 2>/dev/null || true
+    mkdir -p "$(dirname "$ENV_FILE")" && chmod 700 "$(dirname "$ENV_FILE")"
+    ( umask 077; printf 'KOHLAB_KEY=%s\n' "$KEY" > "$ENV_FILE" )
     cat > "$KOHLAB_UNIT_DIR/$UNIT" <<EOF
 [Unit]
 Description=Kohlab, persistent AI agent workspace server
@@ -201,7 +219,7 @@ ExecStart=$BUN run $KOHLAB_HOME/server.ts
 WorkingDirectory=$KOHLAB_HOME
 Environment=WORKS_DIR=$KOHLAB_HOME/.works
 Environment=PORT=$PORT
-Environment=KOHLAB_KEY=$KEY
+EnvironmentFile=$ENV_FILE
 Restart=always
 RestartSec=2
 # The PTY daemon is spawned detached on purpose, so it outlives the server and
@@ -220,7 +238,7 @@ EOF
     # person who must never be locked out of the box they just built.
     cat <<EOF
 
-  Access key, shown once, also stored in $KOHLAB_UNIT_DIR/$UNIT:
+  Access key, shown once, also stored in $ENV_FILE (0600):
 
       $KEY
 

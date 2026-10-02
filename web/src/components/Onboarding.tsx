@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Rocket, Terminal } from "@phosphor-icons/react";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { Button, EmptyState, Panel } from "./ui";
 import AgentInstaller from "./AgentInstaller";
 import { NewWorkspaceForm } from "./WorkspacesView";
@@ -37,7 +37,7 @@ function Step({
       <div className="mt-3">{children}</div>
       <div className="mt-3 flex justify-end border-t border-line-subtle pt-3">
         <Button variant="quiet" size="sm" onClick={onSkip}>
-          skip to command center
+          hide the guide
         </Button>
       </div>
     </Panel>
@@ -50,10 +50,14 @@ function Step({
  * is fully usable with the guide closed or abandoned halfway.
  */
 export default function Onboarding() {
-  const navigate = useApp((s) => s.navigate);
-  const [guide, setGuide] = useState(false);
+  // `/new` on an empty server means "show me how", so the guide opens.
+  const route = useApp((s) => s.route);
+  const [guide, setGuide] = useState(route.kind === "workspaces" && !!route.create);
+  const can = useCan();
 
-  const skip = () => navigate({ kind: "dashboard" });
+  // There is nowhere else to "skip to": this is home. Closing the guide leaves
+  // the empty state, which already has the way forward.
+  const skip = () => setGuide(false);
 
   return (
     <div className="surface">
@@ -70,8 +74,13 @@ export default function Onboarding() {
         <EmptyState
           icon={<Terminal size={18} />}
           title="No workspaces yet"
-          description="A workspace is one task, one repository and one agent. The three steps below take about two minutes, or skip them entirely and explore first."
+          description={
+            can.mutate
+              ? "A workspace is one task, one repository and one agent. The three steps below take about two minutes."
+              : "A workspace is one task, one repository and one agent. Your role can look but not create, so an owner or member starts the first one."
+          }
           action={
+            can.mutate ? (
             <>
               <Button
                 variant="primary"
@@ -82,10 +91,8 @@ export default function Onboarding() {
                 <Rocket size={14} weight="fill" />
                 get started
               </Button>
-              <Button variant="quiet" onClick={skip}>
-                skip to command center
-              </Button>
             </>
+            ) : undefined
           }
         />
 
@@ -133,7 +140,7 @@ export default function Onboarding() {
               </ul>
               <div className="mt-3">
                 <Button variant="primary" onClick={skip}>
-                  open the command center
+                  done
                 </Button>
               </div>
             </Step>

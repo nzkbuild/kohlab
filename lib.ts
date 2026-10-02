@@ -3,7 +3,7 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
 import { basename, join } from "path";
 import { randomBytes } from "crypto";
@@ -259,6 +259,65 @@ async function keyMatches(candidate: string, storedHex: string): Promise<boolean
   let diff = 0;
   for (let i = 0; i < got.length; i++) diff |= got.charCodeAt(i) ^ storedHex.charCodeAt(i);
   return diff === 0;
+}
+
+// --- pairing (RFC 8628-style device grant, for the "loop zero" first run) ---
+// A short human-typeable code lets a fresh browser trade 9 characters for the
+// real access key, so the key never has to cross devices by hand. The code is
+// the credential for exactly one claim inside a short window: generated on the
+// box by `kohlab pair`, hashed at rest like every other secret here, verified
+// by the server per attempt. Guessing is bounded the RFC 8628 §5.1 way — small
+// code + short TTL + the server-wide per-IP auth throttle — not by per-code
+// counters, which a hashed store cannot keep (a wrong guess matches no file).
+
+/** RFC 8628 §6.1 base-20 alphabet: no digits, no vowels, one case, mobile-keyboard safe. */
+export const PAIR_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
+export const PAIR_TTL_MS = Number(process.env.KOHLAB_PAIR_TTL_MS ?? 10 * 60 * 1000);
+const PAIR_FILE = join(WORKS_DIR, "pair");
+
+/** A fresh pairing code: XXXX-XXXX for reading, hashed into PAIR_FILE for checking. */
+export async function createPair(): Promise<string> {
+  const bytes = randomBytes(8);
+  let core = "";
+  for (let i = 0; i < 8; i++) core += PAIR_ALPHABET[bytes[i] % PAIR_ALPHABET.length];
+  const code = `${core.slice(0, 4)}-${core.slice(4)}`;
+  const record = { hash: await hashKey(code.toUpperCase().replace(/[^A-Z]/g, "")), expires: Date.now() + PAIR_TTL_MS };
+  mkdirSync(WORKS_DIR, { recursive: true, mode: 0o700 });
+  // One live code at a time: a new `kohlab pair` replaces the old one, so a
+  // code pasted onto the wrong screen cannot linger for its whole TTL.
+  writeFileSync(PAIR_FILE, JSON.stringify(record) + "\n", { mode: 0o600 });
+  return code;
+}
+
+/**
+ * Trade a typed code for the access key. The code is consumed atomically by
+ * renaming the file away before the key is read: two simultaneous claims
+ * cannot both pass the rename. Returns undefined for expired, absent, or
+ * already-claimed codes — one answer, so a failure never says which.
+ */
+export async function claimPair(code: string): Promise<string | undefined> {
+  const candidate = code.toUpperCase().replace(/[^A-Z]/g, "");
+  if (candidate.length !== 8) return undefined;
+  let record: { hash: string; expires: number };
+  try {
+    record = JSON.parse(readFileSync(PAIR_FILE, "utf8"));
+  } catch {
+    return undefined; // no pending code, or unparseable: same silence either way
+  }
+  if (Date.now() > record.expires || !(await keyMatches(candidate, record.hash))) return undefined;
+  try {
+    unlinkSync(PAIR_FILE);
+  } catch {
+    return undefined; // lost the race: the other claim consumed it
+  }
+  // Same precedence the CLI prints: unit env, then the generated key file.
+  try {
+    const fromEnv = process.env.KOHLAB_KEY;
+    const fromFile = readFileSync(KEY_FILE, "utf8").trim();
+    return fromEnv || fromFile || undefined;
+  } catch {
+    return process.env.KOHLAB_KEY || undefined;
+  }
 }
 
 /**
@@ -1683,7 +1742,7 @@ export async function discardWorkspace(id: string): Promise<{ ok: true }> {
  */
 export async function mergeWorkspace(
   id: string,
-  opts: { into?: string; message?: string; noCommit?: boolean } = {},
+  opts: { into?: string; message?: string; noCommit?: boolean; actor?: string } = {},
 ): Promise<{ repo: string; branch: string; from: string; to: string; previous: string; commit: string }> {
   const ws = await getWorkspace(id);
   const branch = `kohlab/${ws.id}`;
@@ -1751,7 +1810,7 @@ export async function mergeWorkspace(
     );
   }
 
-  await audit("cli", "merge", id, `${branch} -> ${current} in ${repo} (${commit.slice(0, 8)})`);
+  await audit(opts.actor ?? "cli", "merge", id, `${branch} -> ${current} in ${repo} (${commit.slice(0, 8)})`);
   return {
     repo,
     branch,

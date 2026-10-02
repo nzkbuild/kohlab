@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { TerminalWindow, WarningCircle } from "@phosphor-icons/react";
+import { WarningCircle } from "@phosphor-icons/react";
 import { api, setKey } from "../api";
 import { announce } from "../lib/announce";
 import { useApp } from "../store";
-import { Button } from "./ui";
+import { Button, BrandMark } from "./ui";
 
 /**
  * Redeeming an invitation.
@@ -53,7 +53,7 @@ export default function JoinView() {
             className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent"
             aria-hidden="true"
           >
-            <TerminalWindow size={15} weight="bold" />
+            <BrandMark size={16} />
           </span>
           <span className="text-lg font-semibold tracking-tight">kohlab</span>
         </div>

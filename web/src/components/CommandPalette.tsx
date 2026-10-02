@@ -7,13 +7,12 @@ import {
   ArrowsClockwise,
   GearSix,
   MagnifyingGlass,
-  PlusCircle,
-  SquaresFour,
+  Plus,
   Stack,
   TerminalWindow,
   X,
 } from "@phosphor-icons/react";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { ROUTE_LABEL } from "../lib/route";
 import { byReviewFirst, STATUS_LABEL, workspaceStatus, type WorkspaceStatus } from "../lib/status";
@@ -62,6 +61,7 @@ export default function CommandPalette() {
   const workspaces = useApp((s) => s.workspaces);
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
+  const can = useCan();
   const refresh = useApp((s) => s.refresh);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,19 +103,11 @@ export default function CommandPalette() {
 
   const items: PaletteItem[] = [
     {
-      id: "view-dashboard",
-      label: "Command center",
-      group: "Views",
-      icon: <SquaresFour size={16} />,
-      keywords: ["dashboard", "home", "overview", "status"],
-      onAction: () => navigate({ kind: "dashboard" }),
-    },
-    {
       id: "view-workspaces",
       label: "Workspaces",
       group: "Views",
       icon: <Stack size={16} />,
-      keywords: ["all", "list", "queue"],
+      keywords: ["all", "list", "queue", "review", "home", "dashboard"],
       onAction: () => navigate({ kind: "workspaces" }),
     },
     {
@@ -141,18 +133,20 @@ export default function CommandPalette() {
         onAction: () => navigate({ kind: "workspace", id: w.id }),
       };
     }),
-    {
-      id: "action-new",
-      label: "new workspace",
-      group: "Actions",
-      icon: <PlusCircle size={16} />,
-      keywords: ["create", "launch", "start", "task", "clone"],
-      // The Workspaces route is where creation lives. This used to navigate to
-      // the dashboard, which only offers a create button when the server has no
-      // workspaces at all, so the palette's most direct command landed on a page
-      // where the action did not exist.
-      onAction: () => navigate({ kind: "workspaces" }),
-    },
+    // `/new` arrives with the form already open. Before, this landed on the
+    // list with the form closed, so the most direct command needed a second press.
+    ...(can.mutate
+      ? [
+          {
+            id: "action-new",
+            label: "new workspace",
+            group: "Actions" as const,
+            icon: <Plus size={16} />,
+            keywords: ["create", "launch", "start", "task", "clone"],
+            onAction: () => navigate({ kind: "workspaces", create: true }),
+          },
+        ]
+      : []),
     {
       id: "action-refresh",
       label: "refresh workspaces",

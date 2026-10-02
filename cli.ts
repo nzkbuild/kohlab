@@ -26,6 +26,8 @@ import {
   listUsers,
   addUser,
   removeUser,
+  createPair,
+  PAIR_TTL_MS,
   readAudit,
   ptyDisconnect,
   getWorkspace,
@@ -158,7 +160,7 @@ async function main() {
         console.log(`new key written to ${join(WORKS_DIR, "key")}\n`);
         console.log(next);
         console.log(`\nthe running server still uses the old one. to apply it:`);
-        console.log(`  1. if ${UNIT} sets KOHLAB_KEY, replace that value with the key above`);
+        console.log(`  1. put it in the unit's EnvironmentFile (KOHLAB_KEY=...), or wherever ${UNIT} sets KOHLAB_KEY`);
         console.log(`  2. sudo systemctl daemon-reload && sudo systemctl restart ${UNIT}`);
         console.log(`\nthe old key stops working the moment the server restarts.`);
         break;
@@ -171,6 +173,18 @@ async function main() {
       }
       console.log(found[1]);
       console.error(`(from ${found[0]})`);
+      break;
+    }
+    case "pair": {
+      // The device-grant bootstrap: mint a short code on the box that is
+      // already trusted, type it on the device that is not. The key itself
+      // still never leaves this shell — it travels only inside the claim
+      // response, over the same TLS the dashboard already uses.
+      const code = await createPair();
+      console.log(`pairing code:  ${code}`);
+      console.log(`\non the new device, open the dashboard and choose`);
+      console.log(`"got a pairing code?", then type the code in.`);
+      console.log(`one use, ${Math.round(PAIR_TTL_MS / 60000)} minutes, then run this again.`);
       break;
     }
     case "status": {
@@ -334,7 +348,19 @@ const UNIT = process.env.KOHLAB_UNIT ?? "kohlab";
 /** The key as configured in the service unit, if there is one. */
 function unitKey(): string | undefined {
   // systemd merges every Environment= line into one, so match anywhere on it.
-  return /KOHLAB_KEY=([^ ]+)/.exec(systemctl(["show", UNIT, "-p", "Environment"]).out)?.[1];
+  const inline = /KOHLAB_KEY=([^ ]+)/.exec(systemctl(["show", UNIT, "-p", "Environment"]).out)?.[1];
+  if (inline) return inline;
+  // Since 1.17 the key lives in a 0600 EnvironmentFile, not the world-readable
+  // unit, and `show -p Environment` does not expand those files.
+  for (const m of systemctl(["show", UNIT, "-p", "EnvironmentFiles"]).out.matchAll(/EnvironmentFiles=(\S+)/g)) {
+    try {
+      const key = /^KOHLAB_KEY=(.+)$/m.exec(readFileSync(m[1], "utf8"))?.[1]?.trim();
+      if (key) return key;
+    } catch {
+      /* not readable as this user: fall through */
+    }
+  }
+  return undefined;
 }
 
 /** The key generated at startup, if one was. */
@@ -448,8 +474,7 @@ async function doctor() {
 
   // The key lives in the unit, not in this process's environment: checking
   // process.env alone reported a false alarm on every healthy deployment.
-  const unitEnv = systemctl(["show", "kohlab", "-p", "Environment"]).out;
-  if (process.env.KOHLAB_KEY || /KOHLAB_KEY=[^ ]/.test(unitEnv)) {
+  if (process.env.KOHLAB_KEY || unitKey()) {
     ok("access key set");
   } else {
     warn("no access key", "set KOHLAB_KEY in the unit, or the dashboard is open to anything that reaches the port");
@@ -520,6 +545,7 @@ access
   health                                     is the daemon up? (answers locally)
   key                                        print the access key (from this box)
   key rotate                                 issue a new one and say how to apply it
+  pair                                       mint a one-time code to sign in a new device
 
 agents
   agents                                     list agent launchers

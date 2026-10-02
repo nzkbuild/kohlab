@@ -206,3 +206,15 @@ export function Announcer() {
   );
   return <div ref={ref} role="status" aria-live="polite" aria-atomic="true" className="sr-only" />;
 }
+
+/** The Kohlab mark (brand/kohlab-mark.svg): cursor-bar stem, branch arm, and the
+ *  session dot that outlives the connection. Inherits colour from its parent. */
+export function BrandMark({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <rect x="6" y="5" width="4.6" height="22" rx="1.4" fill="currentColor" />
+      <path d="M10.6 16.4 23 6.6M10.6 16.4 19.2 22" stroke="currentColor" strokeWidth="4.6" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="24.8" cy="26.8" r="2.9" fill="currentColor" />
+    </svg>
+  );
+}

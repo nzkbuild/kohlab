@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
+import { MONACO_THEME, baseOptions, defineKohlabTheme } from "../lib/monaco";
 import { ArrowLeft, Copy } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
@@ -109,12 +110,10 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
             height="100%"
             language={lang}
             value={content}
-            theme="vs-dark"
+            beforeMount={defineKohlabTheme}
+            theme={MONACO_THEME}
             options={{
-              readOnly: true,
-              minimap: { enabled: false },
-              fontSize: 12,
-              scrollBeyondLastLine: false,
+              ...baseOptions(),
               renderWhitespace: "selection",
               padding: { top: 8 },
             }}

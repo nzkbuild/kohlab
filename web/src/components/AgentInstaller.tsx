@@ -8,6 +8,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { api } from "../api";
+import { useCan } from "../store";
 import { announce } from "../lib/announce";
 import { cn } from "../lib/utils";
 import { AGENT_CATALOG, type AgentInfo } from "../types";
@@ -23,6 +24,7 @@ const STATUS_CHIP = {
 } as const;
 
 export default function AgentInstaller() {
+  const can = useCan();
   const [agents, setAgents] = useState<AgentCard[]>(
     AGENT_CATALOG.map((a) => ({ ...a, installed: false })),
   );
@@ -167,7 +169,7 @@ export default function AgentInstaller() {
                     ) : null}
                   </div>
 
-                  {!agent.installed && agent.installCmd ? (
+                  {!agent.installed && agent.installCmd && can.mutate ? (
                     <Button
                       variant="primary"
                       size="sm"

@@ -1,7 +1,7 @@
 // works server: HTTP + WebSocket API over lib.ts
 
 import { serve } from "bun";
-import type { ServerWebSocket } from "bun";
+import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { execFile, spawn } from "child_process";
 import { mkdir, open, readdir, readFile } from "fs/promises";
 import { isAbsolute, join, relative, resolve } from "path";
@@ -15,6 +15,7 @@ import {
   startWorkspace,
   stopWorkspace,
   commitWorkspace,
+  mergeWorkspace,
   discardWorkspace,
   worktreePath,
   imagesDir,
@@ -52,6 +53,9 @@ import {
   updateRunState,
   createInvite,
   acceptInvite,
+  createPair,
+  claimPair,
+  PAIR_TTL_MS,
   setUserRole,
   canProvisionOsUsers,
 } from "./lib";
@@ -307,7 +311,29 @@ async function handleCommit(id: string, req: Request): Promise<Response> {
   }
 }
 
-/** The other half of the review gate. See discardWorkspace in lib.ts. */
+/** The last mile: merge the accepted branch into the workspace's own repo.
+ *  `into` is deliberately NOT accepted from the web: mergeWorkspace runs as the
+ *  server user (root on a normal install), so a member-supplied path would let
+ *  one member merge into another member's checkout (the v1.8 threat). The merge
+ *  target is always the workspace's own repo; CLI keeps --into (runs as you).
+ *  URL-created (isolated member) workspaces have no local checkout (ws.repo is
+ *  "") so the route refuses them with the CLI path, which runs as the member. */
+async function handleMerge(id: string, req: Request, actor: string): Promise<Response> {
+  try {
+    const body = (await req.json().catch(() => ({}))) as { message?: string; into?: unknown };
+    if (body.into !== undefined) {
+      return json({ error: "into is not accepted here, the merge target is always the workspace's own checkout" }, 400);
+    }
+    const ws = await getWorkspace(id);
+    if (!ws.repo) {
+      return json({ error: `workspace '${id}' was created from a URL and has no local checkout here. Merge it yourself: kohlab merge ${id} --into <your checkout>` }, 400);
+    }
+    const res = await mergeWorkspace(id, { message: body.message, actor });
+    return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
 async function handleDiscard(id: string): Promise<Response> {
   try {
     const res = await discardWorkspace(id);
@@ -446,6 +472,26 @@ async function handleUserRole(id: string, req: Request): Promise<Response> {
 }
 
 type Auth = Awaited<ReturnType<typeof authenticate>>;
+
+/** Mint a pairing code. Owner action: it can hand out the real key. */
+async function handlePairCreate(): Promise<Response> {
+  return json({ code: await createPair(), ttlMs: PAIR_TTL_MS });
+}
+
+/**
+ * Trade a typed code for the key. Unauthenticated by definition — the code IS
+ * the credential, like /api/join's token. Same silence as the gate's key error:
+ * wrong, expired, spent, and throttled all read as one failure, so nothing
+ * helps a guesser narrow the search.
+ */
+async function handlePairClaim(req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as { code?: string };
+  const code = typeof body.code === "string" ? body.code : "";
+  if (!code) return json({ error: "that code was not accepted" }, 400);
+  const key = await claimPair(code);
+  if (!key) return json({ error: "that code was not accepted" }, 400);
+  return json({ key });
+}
 
 /** Rotate the caller's own key. Owner, member and viewer alike. */
 async function handleAccountKey(auth: Auth): Promise<Response> {
@@ -766,16 +812,10 @@ async function ensurePtySession(id: string, terminalId = "main") {
 }
 
 // --- server --------------------------------------------------------------
-serve({
-  port: PORT,
-  // Every interface by default, as before: but now a choice with a consequence:
-  // bound anywhere but loopback with no key and no users, the server generates
-  // itself one (see resolveAccessKey in lib.ts).
-  hostname: HOST,
-  fetch: async (req, server) => {
+async function handle(req: Request, server: Server<any>): Promise<Response | undefined> {
     const url = new URL(req.url);
     const path = url.pathname;
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|discard|files|file|image|share|log)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|delete|diff|commit|merge|discard|files|file|image|share|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -867,6 +907,7 @@ serve({
         case "restart": containFailure(audit(actor, "restart", id), "audit"); return handleRestart(id);
         case "delete": containFailure(audit(actor, "delete", id), "audit"); return handleDelete(id);
         case "commit": containFailure(audit(actor, "commit", id), "audit"); return handleCommit(id, req);
+        case "merge": return handleMerge(id, req, actor);
         case "discard": containFailure(audit(actor, "discard", id), "audit"); return handleDiscard(id);
         case "diff": return handleDiff(id);
         case "files": return handleFiles(id);
@@ -954,6 +995,17 @@ serve({
     }
     if (path === "/api/join" && req.method === "POST") {
       return handleJoin(req);
+    }
+    // Pairing: mint a short device-grant code (owner action), or trade one for
+    // the key (no auth — the code is the credential, same as /api/join's token).
+    if (path === "/api/pair" && req.method === "POST") {
+      const refused = gate(isOwner, "forbidden, only an owner can create a pairing code");
+      if (refused) return refused;
+      containFailure(audit(actor, "pair.create"), "audit");
+      return handlePairCreate();
+    }
+    if (path === "/api/pair/claim" && req.method === "POST") {
+      return handlePairClaim(req);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "PATCH") {
       const refused = gate(isOwner, "forbidden, only an owner can change roles");
@@ -1072,8 +1124,8 @@ serve({
       }
     }
     return new Response("not found", { status: 404 });
-  },
-  websocket: {
+}
+const socketHandlers: WebSocketHandler<any> = {
     open(ws) {
       // every dashboard page is a push subscriber
       pushClients.add(ws);
@@ -1139,7 +1191,45 @@ serve({
     drain(_ws) {
       // no-op
     },
-  },
+};
+
+/**
+ * Browser hardening on every response (docs/access-ux-v1.17.0.md §2.5). The CSP
+ * was measured against the built app: one external module script, no inline
+ * script; the terminal's image addon compiles WebAssembly, hence 'wasm-unsafe-eval'
+ * (not 'unsafe-eval': JS eval stays blocked). Styles need 'unsafe-inline' (Monaco, sonner and React style attributes
+ * inject them). HSTS belongs to the TLS proxy, which this app cannot see.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "content-security-policy":
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+    "font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+};
+
+function secured(res: Response | undefined): Response | undefined {
+  if (!res || res.status === 101) return res; // socket upgrade: nothing to decorate
+  try {
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
+  } catch {
+    // immutable headers (a proxied/fetched response): copy once
+    const copy = new Response(res.body, res);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) copy.headers.set(k, v);
+    return copy;
+  }
+}
+
+serve({
+  port: PORT,
+  // Every interface by default, as before: but now a choice with a consequence:
+  // bound anywhere but loopback with no key and no users, the server generates
+  // itself one (see resolveAccessKey in lib.ts).
+  hostname: HOST,
+  fetch: async (req, server) => secured(await handle(req, server)),
+  websocket: socketHandlers,
 });
+
 
 console.log(`works server on http://${HOST}:${PORT}${authRequired() ? " (access key required)" : " (no key, loopback only)"}`);

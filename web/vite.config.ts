@@ -24,14 +24,14 @@ export default defineConfig({
     outDir: "dist",
     rollupOptions: {
       output: {
-        manualChunks: {
-          // xterm + Monaco are the heavy per-view deps; they are also lazy()
-          // imports, so keeping them out of the entry lets the shell paint first.
-          // (lucide-react was listed here but is absent from package.json and
-          // imported nowhere: removed.)
-          "monaco-editor": ["@monaco-editor/react", "monaco-editor"],
-          terminal: ["@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-image"],
-          icons: ["@phosphor-icons/react"],
+        // xterm + Monaco are the heavy per-view deps; they are also lazy()
+        // imports, so keeping them out of the entry lets the shell paint first.
+        // A function, not a package list: Monaco is imported by deep path
+        // (lib/monaco.ts), which a package-name entry would not catch.
+        manualChunks(id) {
+          if (id.includes("/node_modules/monaco-editor/") || id.includes("/node_modules/@monaco-editor/")) return "monaco-editor";
+          if (id.includes("/node_modules/@xterm/")) return "terminal";
+          if (id.includes("/node_modules/@phosphor-icons/")) return "icons";
         },
       },
     },

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
+  ArrowRight,
   ArrowSquareOut,
+  GitDiff,
   GithubLogo,
   LinkSimple,
   MagnifyingGlass,
@@ -11,15 +13,16 @@ import {
   Trash,
 } from "@phosphor-icons/react";
 import { api } from "../api";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { withToast } from "../lib/actions";
 import { relativeTime } from "../lib/format";
-import { STATUS_LABEL, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
+import { STATUS_LABEL, STATUS_TEXT, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
 import { AGENT_CATALOG } from "../types";
 import type { Workspace } from "../types";
-import { Button, EmptyState, Field, Panel, StatusChip } from "./ui";
+import { Button, EmptyState, Field, Panel, PanelHead, StatusChip } from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
+import { cn } from "../lib/utils";
 
 /* --------------------------------------------------------------- constants -- */
 
@@ -244,15 +247,81 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
 
 /* -------------------------------------------------------------- the view -- */
 
-/** Browsable workspace list: search, status filter, per-row actions. */
+/**
+ * What is waiting on you, oldest first: the longer an agent's work has sat
+ * unreviewed, the further its branch has drifted. Only rendered when non-empty,
+ * so an empty queue costs no space.
+ */
+function ReviewQueue({ items }: { items: Workspace[] }) {
+  const navigate = useApp((s) => s.navigate);
+  return (
+    <Panel className="mt-5">
+      <PanelHead
+        title="Waiting for review"
+        icon={<GitDiff size={15} />}
+        meta={<span className="tnum">{items.length}</span>}
+      />
+      <ul className="p-1.5">
+        {items.map((w) => (
+          <li key={w.id}>
+            <button
+              type="button"
+              onClick={() => navigate({ kind: "workspace", id: w.id, tab: "review" })}
+              className="group flex min-h-11 w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
+            >
+              <span className={cn("chip-dot shrink-0", STATUS_TEXT["needs-review"])} aria-hidden="true" />
+              <span className="mono shrink-0 text-sm font-medium text-text-primary">{w.id}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">{w.task}</span>
+              <span className="mono hidden shrink-0 text-xs text-text-faint shell:inline">{w.agent}</span>
+              <span className="tnum shrink-0 text-xs text-text-muted" title="waiting since">
+                {relativeTime(w.stopped ?? w.created)}
+              </span>
+              <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-status-review">
+                review
+                <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+/**
+ * Home: the review queue first, then every workspace with search, a status
+ * filter and per-row actions. This replaced a separate "Command center" that
+ * showed the same workspaces as KPI cards, a second tabbed table and an
+ * activity feed: three readings of one list, none of which acted on it.
+ */
 export default function WorkspacesView() {
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
   const refresh = useApp((s) => s.refresh);
+  const route = useApp((s) => s.route);
+  const can = useCan();
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [creating, setCreating] = useState(false);
+  // `/new` (the sidebar button, the palette) arrives with the form open, and a
+  // second arrival while already here opens it too: the route object is new.
+  const wantsCreate = route.kind === "workspaces" && !!route.create;
+  const [creating, setCreating] = useState(wantsCreate);
+  useEffect(() => {
+    if (wantsCreate) setCreating(true);
+  }, [route, wantsCreate]);
+  const closeForm = () => {
+    setCreating(false);
+    if (wantsCreate) navigate({ kind: "workspaces" }, { replace: true });
+  };
+
+  const queue = useMemo(
+    () =>
+      workspaces
+        .filter((w) => workspaceStatus(w) === "needs-review")
+        .sort((a, b) => (a.stopped ?? a.created) - (b.stopped ?? b.created)),
+    [workspaces],
+  );
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -359,22 +428,38 @@ export default function WorkspacesView() {
           <div>
             <h1 className="surface-title">Workspaces</h1>
             <p className="surface-description">
-              Every task an agent has been given on this server. Work waiting for review sorts to the top.
+              {queue.length > 0
+                ? `${queue.length} waiting for you. Everything an agent has been given on this server is below.`
+                : "Nothing is waiting for review. Everything an agent has been given on this server is below."}
             </p>
           </div>
-          <Button
-            variant="primary"
-            aria-expanded={creating}
-            aria-controls="new-workspace"
-            onClick={() => setCreating((v) => !v)}
-          >
-            <Plus size={14} weight="bold" />
-            new workspace
-          </Button>
+          {can.mutate ? (
+            <Button
+              variant={queue.length > 0 ? "secondary" : "primary"}
+              aria-expanded={creating}
+              aria-controls="new-workspace"
+              onClick={() => (creating ? closeForm() : setCreating(true))}
+            >
+              <Plus size={14} />
+              new workspace
+            </Button>
+          ) : null}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="relative min-w-56 flex-1">
+        {/* The form sits directly under the button that opened it, not between
+            the filter tabs and the list they control. */}
+        <div id="new-workspace">
+          {creating && can.mutate ? (
+            <div className="mt-4">
+              <NewWorkspaceForm onCancel={closeForm} />
+            </div>
+          ) : null}
+        </div>
+
+        {queue.length > 0 ? <ReviewQueue items={queue} /> : null}
+
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <div className="relative min-w-0 flex-1 basis-56">
             <MagnifyingGlass
               size={14}
               className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
@@ -417,10 +502,6 @@ export default function WorkspacesView() {
           ))}
         </div>
 
-        <div id="new-workspace" className="mt-3">
-          {creating ? <NewWorkspaceForm onCancel={() => setCreating(false)} /> : null}
-        </div>
-
         <div id={TABLE_PANEL_ID} role="tabpanel" aria-labelledby={`workspaces-tab-${filter}`} className="mt-3">
           {workspaces.length === 0 ? (
             <Panel>
@@ -429,9 +510,11 @@ export default function WorkspacesView() {
                 title="No workspaces on this server"
                 description="The setup steps walk through installing an agent and creating the first one."
                 action={
-                  <Button variant="primary" onClick={() => setCreating(true)}>
-                    new workspace
-                  </Button>
+                  can.mutate ? (
+                    <Button variant="primary" onClick={() => setCreating(true)}>
+                      new workspace
+                    </Button>
+                  ) : undefined
                 }
               />
             </Panel>
@@ -489,6 +572,7 @@ export default function WorkspacesView() {
                           <td className="mono text-xs text-text-muted">{w.agent}</td>
                           <td className="tnum text-xs text-text-muted">{relativeTime(w.created)}</td>
                           <td>
+                            {can.mutate ? (
                             <div className="row-actions flex items-center justify-end gap-1">
                               <Button
                                 variant="quiet"
@@ -518,6 +602,7 @@ export default function WorkspacesView() {
                                 <Trash size={13} />
                               </Button>
                             </div>
+                            ) : null}
                           </td>
                         </tr>
                       );

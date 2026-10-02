@@ -17,7 +17,8 @@ import { toast } from "sonner";
 import { api } from "../api";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
+import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
 import BrowseView from "./BrowseView";
@@ -33,7 +34,7 @@ import { Button, EmptyState, SkeletonRows, StatusChip } from "./ui";
 const TerminalView = lazy(() => import("./TerminalView"));
 const DiffView = lazy(() => import("./DiffView"));
 
-type TabId = "terminal" | "files" | "review" | "log";
+type TabId = WorkspaceTab;
 
 const TABS: { id: TabId; label: string; icon: typeof Terminal }[] = [
   { id: "terminal", label: "Terminal", icon: Terminal },
@@ -63,8 +64,14 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const loading = useApp((s) => s.loading);
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
+  const route = useApp((s) => s.route);
+  const can = useCan();
 
-  const [tab, setTab] = useState<TabId>("terminal");
+  // The pane lives in the URL (/w/:id/review), so a refresh, a shared link or
+  // Back returns to it. Switching panes replaces the entry rather than pushing
+  // one per click.
+  const routeTab = route.kind === "workspace" ? route.tab : undefined;
+  const setTab = (next: TabId) => navigate({ kind: "workspace", id: workspaceId, tab: next }, { replace: true });
   const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
   const [confirming, setConfirming] = useState(false);
@@ -126,6 +133,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // The review badge has to be readable before the tab is opened, so the count
   // is fetched once per needs-review state: not polled.
   const needsReview = w !== undefined && workspaceStatus(w) === "needs-review";
+  // Work waiting for a decision opens on that decision, not on a finished
+  // terminal. The default is written into the URL once, so a workspace that
+  // flips to needs-review while you watch it does not yank you off the terminal.
+  const tab: TabId = routeTab ?? (needsReview ? "review" : "terminal");
+  useEffect(() => {
+    if (w && !routeTab) setTab(tab);
+  }, [w === undefined, routeTab]);
   useEffect(() => {
     if (!needsReview) {
       setReviewCount(0);
@@ -169,7 +183,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [workspaceId]);
 
   // The terminal bundle may still be in flight on the first `.`, so the focus
   // request retries briefly instead of silently doing nothing.
@@ -253,7 +267,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <div className="flex min-w-0 items-center gap-2">
             {/* The workspace id IS this route's page identity, so it carries the
                 single <h1> rather than leaving the route headingless. */}
-            <h1 className="mono m-0 shrink-0 text-base font-semibold text-text-primary">{w.id}</h1>
+            <h1 className="mono m-0 shrink-0 text-lg font-semibold text-text-primary">{w.id}</h1>
             <StatusChip status={st} />
             <span className="mono min-w-0 truncate text-2xs text-text-faint" title={w.path}>
               {w.path}
@@ -270,8 +284,17 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             .app-content, whose overflow:hidden then clips delete off screen
             while it stays focusable (SC 2.4.11). Letting it shrink hands the
             wrap back to this row, which already has flex-wrap. */}
+        {can.mutate ? (
         <div className="flex flex-wrap items-center gap-1.5">
-          <Button size="sm" variant="primary" disabled={running} onClick={() => run("start")}>
+          {/* One primary per state: a workspace waiting for review asks for a
+              review, not for its agent to be started again. */}
+          {needsReview && tab !== "review" ? (
+            <Button size="sm" variant="primary" onClick={() => setTab("review")}>
+              <GitDiff size={13} aria-hidden="true" />
+              {reviewCount > 0 ? `review ${reviewCount} file${reviewCount === 1 ? "" : "s"}` : "review"}
+            </Button>
+          ) : null}
+          <Button size="sm" variant={needsReview ? "secondary" : "primary"} disabled={running} onClick={() => run("start")}>
             <Play size={13} weight="fill" aria-hidden="true" />
             start
           </Button>
@@ -292,6 +315,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             delete
           </Button>
         </div>
+        ) : (
+          <span className="chip chip-stopped" title="Your role can watch this workspace but not change it.">
+            view only
+          </span>
+        )}
       </header>
 
       <div className="tabstrip" role="tablist" aria-label="Workspace panes">
@@ -398,11 +426,15 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                     <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5">
                       <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
                       <span className="min-w-0 flex-1 text-xs text-text-muted">
-                        Not running, showing the last screen. Start it to take over the terminal.
+                        {can.mutate
+                          ? "Not running, showing the last screen. Start it to take over the terminal."
+                          : "Not running, showing the last screen."}
                       </span>
-                      <Button variant="primary" size="sm" onClick={() => run("start")}>
-                        start
-                      </Button>
+                      {can.mutate ? (
+                        <Button variant="primary" size="sm" onClick={() => run("start")}>
+                          start
+                        </Button>
+                      ) : null}
                     </div>
                   )}
                   <div className="min-h-0 flex-1">
@@ -439,7 +471,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         >
           <ErrorBoundary label="Review">
             <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
-              {tab === "review" ? <DiffView workspaceId={workspaceId} /> : null}
+              {tab === "review" ? <DiffView key={workspaceId} workspaceId={workspaceId} /> : null}
             </Suspense>
           </ErrorBoundary>
         </section>

@@ -72,8 +72,8 @@ surfaces you re-verified.
 
 Two systems, and they are deliberate:
 
-- **Destinations and group headings are Title Case**: `Command center`,
-  `Workspaces`, `Settings`, the palette's `Views` / `Actions` groups.
+- **Destinations and group headings are Title Case**: `Workspaces`,
+  `Settings`, `Waiting for review`, the palette's `Views` / `Actions` groups.
 - **Actions are lowercase sentence fragments**: `new workspace`, `commit`,
   `discard`, `retry`, `clear filters`, `copy link`, and busy states
   (`committing…`, `discarding…`).
@@ -161,10 +161,13 @@ Prefer these classes over re-deriving the same layout in utilities. In particula
 <Announcer />                                                // mounted once in App
 ```
 
-`ConfirmDialog` (`web/src/components/ConfirmDialog.tsx`) is the destructive-action
-confirm. Every irreversible action uses it: `delete workspace`, `revoke`, `commit`
-and `discard`. Name the specific object in `description` (workspace id, branch,
-file count), never "this item".
+`ConfirmDialog` (`web/src/components/ConfirmDialog.tsx`) is the irreversible-action
+confirm. Every irreversible action uses it: `delete workspace`, `revoke`, `commit`,
+`discard` and `merge`. Name the specific object in `title` and `description`
+(workspace id, branch, file count), never "this item". `tone="danger"` (the
+default) is for actions that destroy work: delete, discard, revoke.
+`tone="commit"` is for actions that are final but keep it: commit, merge. Accepting
+good work must not look like deleting it.
 
 ---
 
@@ -178,22 +181,33 @@ useApp(s => s.loading)                  // true only on the very first load
 useApp(s => s.error)                    // string | null
 useApp(s => s.lastUpdated)              // number | null
 useApp(s => s.connection)               // "connecting"|"live"|"reconnecting"|"offline"
+useApp(s => s.me)                       // { id, role, kind } | null  (null = not loaded yet)
 useApp(s => s.refresh)                  // () => Promise<void>
-useApp(s => s.navigate)                 // (Route) => void   pushes history
+useApp(s => s.navigate)                 // (Route, { replace? }) => void   pushes (or replaces) history
+useCan()                                // { mutate, own }: mirrors the server's canMutate / isOwner
 ```
+
+**Role-aware rendering.** A control the server would refuse for this role is not
+rendered (or is replaced by a one-line reason). Gate on `useCan()`: `mutate` for
+workspace life-cycle, create, commit/discard/merge and agent install; `own` for
+updates and team management. The server remains the authority; this only stops
+the UI offering what will fail.
 
 **There is no `selectedId` / `view` / `select` / `setView` any more.** Navigation is
 by route:
 
 ```ts
 type Route =
-  | { kind: "dashboard" }
-  | { kind: "workspaces" }
-  | { kind: "workspace"; id: string }
+  | { kind: "workspaces"; create?: boolean }          // "/" (home), "/new" opens the form
+  | { kind: "workspace"; id: string; tab?: WorkspaceTab } // "/w/:id", "/w/:id/review"
   | { kind: "settings" }
   | { kind: "join" }
-navigate({ kind: "workspace", id })
+navigate({ kind: "workspace", id, tab: "review" })
 ```
+
+Home is the review queue and then the full list; there is no separate dashboard.
+A workspace with no tab in its URL opens on Review when it needs review, and on
+Terminal otherwise.
 
 ---
 

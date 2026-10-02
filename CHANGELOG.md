@@ -9,6 +9,51 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.17.0] - 2026-10-02
+
+Review comes first, a new device signs in without the key, and the key stops
+sitting in a world-readable file.
+
+### Added
+
+- **`kohlab pair`, sign in a new device with a short code.** The server mints a
+  one-time `XXXX-XXXX` code (RFC 8628 alphabet, hashed at rest, 10 minutes, one
+  claim); the sign-in screen trades it for access. The key never has to cross
+  devices by hand.
+- **Merge from the dashboard**, once a workspace is committed, into its own
+  checkout. Prints the reset that undoes it, like the CLI.
+- **One home screen.** `/` is the review queue (oldest first), then every
+  workspace. The separate Command center is gone; `/workspaces` still works.
+- **`/new` opens the create form**, from the sidebar and the palette.
+- **The workspace pane is in the URL** (`/w/<id>/review`), and work waiting for
+  review opens on Review.
+- **Role-aware controls.** Viewers and members are no longer offered actions the
+  server refuses; a viewer sees "view only" and a one-line reason.
+- **Brand mark and favicon** from `brand/`.
+- **`scripts/check-browser.mjs`**, check 21: 74 assertions on the built UI at
+  320, 390, 768 and 1280px (one `h1`, no sideways scroll, 24px targets, review
+  routing, no third-party requests, no CSP violations).
+
+### Changed
+
+- **Monaco is served from this server**, not cdn.jsdelivr.net, so Review and
+  Files work without outbound internet. It is themed from the same tokens as the
+  terminal.
+- **Review marks survive switching tabs** (session storage, per round of work).
+- Commit and merge confirm in a neutral tone and name the file count; red is
+  kept for discard and delete.
+- Update polling pauses while the tab is hidden.
+
+### Security
+
+- **The access key leaves the systemd unit.** Unit files are world-readable and
+  members' agents run as their own users on the same box. `install.sh` now
+  writes `~/.kohlab/kohlab.env` (0600) with `EnvironmentFile=`; re-running it
+  migrates an existing unit. `kohlab key` and `doctor` read the env file.
+- **Security headers on every response:** `Content-Security-Policy`
+  (`script-src 'self' 'wasm-unsafe-eval'`, measured against the build),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
+
 ## [1.16.0] - 2026-09-20
 
 The last mile, evidence for the claims that had none, and the roadmap corrected

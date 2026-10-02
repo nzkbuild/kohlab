@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
+import { MONACO_THEME, baseOptions, defineKohlabTheme } from "../lib/monaco";
 import {
   ArrowUUpLeft,
   ArrowsClockwise,
   CheckSquare,
   Files,
   GitCommit,
+  GitMerge,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { api } from "../api";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { diffStats } from "../lib/format";
 import { languageForFile, splitUnifiedDiff } from "../lib/diff";
@@ -24,6 +26,24 @@ interface Props {
 }
 
 type Filter = "all" | "unreviewed" | "reviewed";
+
+/**
+ * Review marks survive leaving the pane. They used to be component state, so
+ * peeking at the terminal unmounted this view and dropped every tick. Session
+ * storage, not local: marks are about this sitting, and the key carries the
+ * last commit so a new round of work starts unticked.
+ */
+function marksKey(workspaceId: string, round: number | undefined) {
+  return `kohlab_reviewed:${workspaceId}:${round ?? 0}`;
+}
+function readMarks(key: string): ReadonlySet<string> {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "all" },
@@ -60,10 +80,19 @@ export default function DiffView({ workspaceId }: Props) {
   const task = useApp((s) => s.workspaces.find((w) => w.id === workspaceId)?.task ?? "");
   const workspace = useApp((s) => s.workspaces.find((w) => w.id === workspaceId) ?? null);
   const refresh = useApp((s) => s.refresh);
+  const can = useCan();
 
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [reviewed, setReviewed] = useState<ReadonlySet<string>>(new Set());
+  const storageKey = marksKey(workspaceId, workspace?.lastCommitAt);
+  const [reviewed, setReviewed] = useState<ReadonlySet<string>>(() => readMarks(storageKey));
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify([...reviewed]));
+    } catch {
+      /* private mode: marks still work for as long as the pane is open */
+    }
+  }, [storageKey, reviewed]);
   const [filter, setFilter] = useState<Filter>("all");
 
   const [loading, setLoading] = useState(true);
@@ -74,8 +103,10 @@ export default function DiffView({ workspaceId }: Props) {
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [mergeResult, setMergeResult] = useState<string | null>(null);
   /** Which irreversible action the confirm dialog is currently asking about. */
-  const [confirming, setConfirming] = useState<null | "commit" | "discard">(null);
+  const [confirming, setConfirming] = useState<null | "commit" | "discard" | "merge">(null);
 
   const load = async () => {
     setLoading(true);
@@ -211,6 +242,36 @@ export default function DiffView({ workspaceId }: Props) {
       setConfirming(null);
     }
   };
+  /**
+   * The last mile: bring the accepted branch into the workspace's own checkout.
+   * Offered only when committed (never mid-review): merging unaccepted work
+   * would skip the review gate this pane exists to enforce. Never optimistic.
+   */
+  const committedHere = workspace !== null && workspaceStatus(workspace) === "committed";
+  const canMerge =
+    committedHere &&
+    workspace !== null &&
+    !!workspace.repo &&
+    !merging &&
+    !committing &&
+    !discarding;
+  const merge = async () => {
+    if (!canMerge) return;
+    setMerging(true);
+    setCommitError(null);
+    setMergeResult(null);
+    try {
+      const res = await api.merge(workspaceId, message.trim() || undefined);
+      announce(`merged ${workspaceId}`);
+      setMergeResult(`merged kohlab/${workspaceId} into ${res.from} in ${res.repo}: ${res.previous.slice(0, 8)} → ${res.to.slice(0, 8)}. Undo: git -C ${res.repo} reset --hard ${res.previous}`);
+      await refresh();
+    } catch (e) {
+      setCommitError(`merge failed: ${(e as Error).message}`);
+    } finally {
+      setMerging(false);
+      setConfirming(null);
+    }
+  };
 
   return (
     <div className="cockpit">
@@ -278,7 +339,7 @@ export default function DiffView({ workspaceId }: Props) {
             }
             action={
               <>
-                {awaitingReview ? (
+                {awaitingReview && can.mutate ? (
                   <Button
                     variant="primary"
                     size="sm"
@@ -286,7 +347,7 @@ export default function DiffView({ workspaceId }: Props) {
                     aria-busy={committing}
                     onClick={() => void accept()}
                   >
-                    <GitCommit size={13} weight="bold" aria-hidden="true" />
+                    <GitCommit size={13} aria-hidden="true" />
                     {committing ? "accepting…" : "accept"}
                   </Button>
                 ) : null}
@@ -426,17 +487,15 @@ export default function DiffView({ workspaceId }: Props) {
                       language={languageForFile(current.name)}
                       original={split.original}
                       modified={split.modified}
-                      theme="vs-dark"
+                      beforeMount={defineKohlabTheme}
+                      theme={MONACO_THEME}
                       options={{
-                        readOnly: true,
-                        minimap: { enabled: false },
+                        ...baseOptions(),
                         // Side-by-side on a wide pane, inline when it narrows,
                         // Monaco decides, so there is no breakpoint to maintain.
                         renderSideBySide: true,
                         useInlineViewWhenSpaceIsLimited: true,
-                        scrollBeyondLastLine: false,
                         renderOverviewRuler: false,
-                        fontSize: 12,
                       }}
                     />
                   ) : (
@@ -461,6 +520,11 @@ export default function DiffView({ workspaceId }: Props) {
         </div>
       )}
 
+      {!can.mutate ? (
+        <footer className="border-t border-line-subtle bg-surface-raised px-3 py-2.5 text-xs text-text-muted">
+          Your role can read this diff. An owner or member commits, discards or merges it.
+        </footer>
+      ) : (
       <footer className="sticky bottom-0 z-10 border-t border-line-subtle bg-surface-raised px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="commit-message">
@@ -477,8 +541,8 @@ export default function DiffView({ workspaceId }: Props) {
           {/* The two halves of the review decision, side by side. Discard used
               to not exist, so the only way to reject an agent's work was to
               delete the workspace and its worktree. */}
-          <Button variant="secondary" disabled={!canDiscard} onClick={() => setConfirming("discard")}>
-            <ArrowUUpLeft size={14} weight="bold" aria-hidden="true" />
+          <Button variant="danger" disabled={!canDiscard} onClick={() => setConfirming("discard")}>
+            <ArrowUUpLeft size={14} aria-hidden="true" />
             {discarding ? "discarding…" : "discard"}
           </Button>
           <Button
@@ -487,14 +551,22 @@ export default function DiffView({ workspaceId }: Props) {
             aria-busy={committing}
             onClick={() => setConfirming("commit")}
           >
-            <GitCommit size={14} weight="bold" aria-hidden="true" />
+            <GitCommit size={14} aria-hidden="true" />
             {committing ? "committing…" : "commit"}
           </Button>
+          {/* Merge only exists after commit: offering it, disabled, through the
+              whole review made a third choice out of something not yet possible. */}
+          {committedHere ? (
+            <Button variant="secondary" disabled={!canMerge} aria-busy={merging} onClick={() => setConfirming("merge")}>
+              <GitMerge size={14} aria-hidden="true" />
+              {merging ? "merging…" : "merge"}
+            </Button>
+          ) : null}
         </div>
         {/* Load-bearing sentence: the only place the app says the commit cannot
             be taken back. It used to be the faintest thing on the pane, sitting
             under the loudest. */}
-        <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
+        <p className="mt-1.5 max-w-prose text-xs leading-relaxed text-text-secondary">
           Commit stages every file in this workspace (<span className="mono">git add -A</span>) and is
           final, Kohlab cannot undo, amend or un-commit it. Discard throws the changes away and keeps
           the workspace.
@@ -504,7 +576,13 @@ export default function DiffView({ workspaceId }: Props) {
             {commitError}
           </p>
         ) : null}
+        {mergeResult ? (
+          <p role="status" className="mt-1.5 break-words text-2xs text-text-secondary">
+            {mergeResult}
+          </p>
+        ) : null}
       </footer>
+      )}
 
       {/* Irreversible is irreversible. Commit is at least as consequential as
           delete, and delete already asked first. */}
@@ -513,9 +591,10 @@ export default function DiffView({ workspaceId }: Props) {
         onOpenChange={(v) => {
           if (!v) setConfirming(null);
         }}
-        title="accept this work?"
-        description={`This stages and commits every changed file in ${workspaceId} on its own branch, kohlab/${workspaceId}. Kohlab cannot undo, amend or un-commit it.`}
+        title={`Commit ${files.length} file${files.length === 1 ? "" : "s"}?`}
+        description={`This stages and commits every changed file in ${workspaceId}${reviewed.size < files.length ? ` (${files.length - reviewed.size} not marked reviewed)` : ""} on its own branch, kohlab/${workspaceId}, as "${message.trim()}". Kohlab cannot undo, amend or un-commit it.`}
         confirmLabel="commit"
+        tone="commit"
         busy={committing}
         onConfirm={() => void commit()}
       />
@@ -524,11 +603,27 @@ export default function DiffView({ workspaceId }: Props) {
         onOpenChange={(v) => {
           if (!v) setConfirming(null);
         }}
-        title="discard this work?"
+        title={`Discard ${files.length} file${files.length === 1 ? "" : "s"}?`}
         description={`This throws away every uncommitted change in ${workspaceId}${files.length ? `, ${files.length} file${files.length === 1 ? "" : "s"} in all` : ""}. The workspace stays and can run again. The agent's work does not come back.`}
         confirmLabel="discard"
         busy={discarding}
         onConfirm={() => void discard()}
+      />
+      <ConfirmDialog
+        open={confirming === "merge"}
+        onOpenChange={(v) => {
+          if (!v) setConfirming(null);
+        }}
+        title={`Merge into ${workspace?.repo ? workspace.repo.split("/").pop() : "your checkout"}?`}
+        description={
+          workspace?.repo
+            ? `This merges kohlab/${workspaceId} into your checkout at ${workspace.repo}. Undo: git -C ${workspace.repo} reset --hard <previous> (shown after).`
+            : `Workspace ${workspaceId} was created from a URL and has no local checkout here. Merge it yourself: kohlab merge ${workspaceId} --into <your checkout>.`
+        }
+        confirmLabel="merge"
+        tone="commit"
+        busy={merging}
+        onConfirm={() => void merge()}
       />
     </div>
   );

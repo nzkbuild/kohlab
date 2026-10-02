@@ -11,7 +11,6 @@ import JoinView from "./components/JoinView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import CommandPalette from "./components/CommandPalette";
-import Dashboard from "./components/Dashboard";
 import WorkspacesView from "./components/WorkspacesView";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
@@ -28,10 +27,16 @@ export default function App() {
   const workspaces = useApp((s) => s.workspaces);
   const loading = useApp((s) => s.loading);
   const error = useApp((s) => s.error);
+  const loadMe = useApp((s) => s.loadMe);
 
   const [navOpen, setNavOpen] = useState(false);
 
   useSync();
+
+  // Role decides which controls render, so it is read once per sign-in.
+  useEffect(() => {
+    if (isAuthed) void loadMe();
+  }, [isAuthed, loadMe]);
 
   // Auth bootstrap: only prompt when the server actually requires a key.
   useEffect(() => {
@@ -124,7 +129,6 @@ export default function App() {
             ) : null}
 
             <ErrorBoundary label={ROUTE_LABEL[route.kind]}>
-              {route.kind === "dashboard" ? <Dashboard /> : null}
               {route.kind === "settings" ? <Settings /> : null}
               {route.kind === "workspaces" ? (
                 loading ? (

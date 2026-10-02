@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
-import { Eye, EyeSlash, TerminalWindow } from "@phosphor-icons/react";
+import { Eye, EyeSlash } from "@phosphor-icons/react";
 import { api, hasKey, setKey } from "../api";
 import { useApp } from "../store";
-import { Button, Field } from "./ui";
+import { Button, Field, BrandMark } from "./ui";
 
 const KEY_FIELD = "access-key";
 /** Password managers key off `name` as much as `id`, so both are set on purpose. */
@@ -28,7 +28,7 @@ const KEY_NAME = "kohlab-access-key";
  */
 export default function AuthGate() {
   const setAuthed = useApp((s) => s.setAuthed);
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(() => localStorage.getItem("kohlab_key") ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reveal, setReveal] = useState(false);
@@ -36,6 +36,10 @@ export default function AuthGate() {
   // Read once: a key this browser had, which the bootstrap then failed to
   // authenticate. Usually a rotation.
   const [hadKey] = useState(() => hasKey());
+  // Pairing mode: a fresh device trades a short code (minted by `kohlab pair`
+  // on the server) for the real key, instead of transcribing 48 characters
+  // across devices. Same screen, same card — one field swaps, not one page.
+  const [pairing, setPairing] = useState(false);
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -63,6 +67,24 @@ export default function AuthGate() {
     setAuthed(true);
   };
 
+  const submitPair = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // One failure shape on purpose: wrong, expired, spent, and throttled all
+      // land here, so a guesser learns nothing by watching the screen.
+      const { key } = await api.pairClaim(value.trim());
+      setKey(key);
+      setAuthed(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "that code was not accepted");
+      setBusy(false);
+      input.current?.focus();
+    }
+  };
+
   return (
     <div className="auth-stage grid h-full place-items-center p-4">
       <div className="auth-card w-full max-w-[26rem] p-7">
@@ -71,7 +93,7 @@ export default function AuthGate() {
             className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent"
             aria-hidden="true"
           >
-            <TerminalWindow size={18} weight="bold" />
+            <BrandMark size={18} />
           </span>
           <div className="min-w-0">
             <h1 className="text-lg font-semibold leading-none tracking-tight">kohlab</h1>
@@ -89,8 +111,8 @@ export default function AuthGate() {
           </div>
         </header>
 
-        <form onSubmit={submit} className="mt-6 flex flex-col gap-3">
-          <Field label="Access key" htmlFor={KEY_FIELD} error={error ?? undefined}>
+        <form onSubmit={pairing ? submitPair : submit} className="mt-6 flex flex-col gap-3">
+          <Field label={pairing ? "Pairing code" : "Access key"} htmlFor={KEY_FIELD} error={error ?? undefined}>
             <div className="relative">
               <span className="auth-prompt" aria-hidden="true">
                 &gt;
@@ -100,14 +122,17 @@ export default function AuthGate() {
                 name={KEY_NAME}
                 ref={input}
                 className="field-input auth-key"
-                type={reveal ? "text" : "password"}
+                type={pairing || reveal ? "text" : "password"}
                 // SC 3.3.8 (Accessible Authentication): a 48-character random key
                 // must not be a memory or transcription test. `current-password`
-                // is what lets a password manager hold it and fill it.
-                autoComplete="current-password"
+                // is what lets a password manager hold it and fill it. A pairing
+                // code is not a password: `one-time-code` is the semantically
+                // correct hint, and it is what SMS/authenticator fills listen for.
+                autoComplete={pairing ? "one-time-code" : "current-password"}
                 // A hex key is not a sentence. Mobile keyboards capitalise and
-                // autocorrect by default, which silently corrupts a paste.
-                autoCapitalize="off"
+                // autocorrect by default, which silently corrupts a paste. A
+                // pairing code is letters only, so capitalising helps it.
+                autoCapitalize={pairing ? "characters" : "off"}
                 autoCorrect="off"
                 spellCheck={false}
                 autoFocus
@@ -143,7 +168,12 @@ export default function AuthGate() {
               is never a moment with two competing messages under one field. */}
           {error ? null : (
             <p id={`${KEY_FIELD}-help`} className="field-help">
-              {hadKey ? (
+              {pairing ? (
+                <>
+                  run <span className="mono text-text-faint">kohlab pair</span> on the server to
+                  mint one.
+                </>
+              ) : hadKey ? (
                 <>the key saved in this browser was rejected. it may have been rotated.</>
               ) : (
                 <>
@@ -161,12 +191,51 @@ export default function AuthGate() {
             disabled={busy || value.trim().length === 0}
             aria-busy={busy}
           >
-            {busy ? "checking" : "enter"}
+            {busy ? (pairing ? "pairing" : "checking") : pairing ? "pair this device" : "enter"}
           </Button>
         </form>
 
         <p className="mt-6 border-t border-line-subtle pt-4 text-2xs leading-relaxed text-text-muted">
-          invited by someone? open the invitation link they sent you. it signs you in without a key.
+          {pairing ? (
+            <>
+              prefer the key?{" "}
+              <Button
+                variant="quiet"
+                size="sm"
+                type="button"
+                className="h-auto min-h-0 px-0 underline underline-offset-2"
+                onClick={() => {
+                  setPairing(false);
+                  setError(null);
+                  setValue("");
+                  input.current?.focus();
+                }}
+              >
+                enter it directly
+              </Button>
+            </>
+          ) : (
+            <>
+              at a new device?{" "}
+              <Button
+                variant="quiet"
+                size="sm"
+                type="button"
+                className="h-auto min-h-0 px-0 underline underline-offset-2"
+                onClick={() => {
+                  setPairing(true);
+                  setError(null);
+                  setValue("");
+                  input.current?.focus();
+                }}
+              >
+                pair it with a code
+              </Button>,{" "}
+              run <span className="mono text-text-faint">kohlab pair</span> on the server first.
+              invited by someone? open the invitation link they sent you. it signs you in without a
+              key.
+            </>
+          )}
         </p>
       </div>
     </div>

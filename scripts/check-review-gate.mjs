@@ -199,6 +199,13 @@ try {
     survivor?.lastCommitAt,
     committedAtBeforeDiscard,
   );
+  // The derivation picks the later of the two decisions, so this ordering is
+  // exactly what makes the status come out "discarded" rather than "committed".
+  check(
+    "the discard is the later decision",
+    survivor?.discardedAt > (survivor?.lastCommitAt ?? 0),
+    true,
+  );
   check(
     "its branch is still there, so it can run again",
     gitSync(repo, ["branch", "--list", `kohlab/${id}`]).includes(`kohlab/${id}`),

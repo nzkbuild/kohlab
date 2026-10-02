@@ -4,15 +4,13 @@ import {
   CaretDoubleRight,
   GearSix,
   Plus,
-  SquaresFour,
   Stack,
-  TerminalWindow,
   X,
 } from "@phosphor-icons/react";
-import { useApp, type Connection } from "../store";
+import { useApp, useCan, type Connection } from "../store";
 import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import { Button } from "./ui";
+import { Button, BrandMark } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -41,6 +39,7 @@ export default function Sidebar({ open, onClose }: Props) {
   const workspaces = useApp((s) => s.workspaces);
   const connection = useApp((s) => s.connection);
   const navigate = useApp((s) => s.navigate);
+  const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
 
   useEffect(() => {
@@ -51,8 +50,7 @@ export default function Sidebar({ open, onClose }: Props) {
   const reviewCount = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
 
   const nav = [
-    { kind: "dashboard" as const, label: "Command center", icon: SquaresFour, badge: 0 },
-    { kind: "workspaces" as const, label: "Workspaces", icon: Stack, badge: 0 },
+    { kind: "workspaces" as const, label: "Workspaces", icon: Stack, badge: reviewCount },
     { kind: "settings" as const, label: "Settings", icon: GearSix, badge: 0 },
   ];
 
@@ -67,7 +65,7 @@ export default function Sidebar({ open, onClose }: Props) {
     >
       <div className="sidebar-head flex min-h-13 items-center gap-2.5 border-b border-line-subtle px-3">
         <span className="sidebar-brand grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
-          <TerminalWindow size={15} weight="bold" />
+          <BrandMark size={16} />
         </span>
         <span className="sidebar-label text-base font-semibold tracking-tight">kohlab</span>
         <div className="sidebar-head-fill flex-1" />
@@ -97,17 +95,19 @@ export default function Sidebar({ open, onClose }: Props) {
         </Button>
       </div>
 
-      <div className="px-2.5 pt-3">
-        <Button
-          variant="primary"
-          className={cn("w-full", collapsed && "shell:px-0")}
-          aria-label="new workspace"
-          onClick={() => navigate({ kind: "workspaces" })}
-        >
-          <Plus size={14} weight="bold" />
-          <span className="sidebar-label">new workspace</span>
-        </Button>
-      </div>
+      {can.mutate ? (
+        <div className="px-2.5 pt-3">
+          <Button
+            variant="primary"
+            className={cn("w-full", collapsed && "shell:px-0")}
+            aria-label="new workspace"
+            onClick={() => navigate({ kind: "workspaces", create: true })}
+          >
+            <Plus size={14} />
+            <span className="sidebar-label">new workspace</span>
+          </Button>
+        </div>
+      ) : null}
 
       <nav className="flex flex-col gap-0.5 p-2.5" aria-label="Views">
         {nav.map(({ kind, label, icon: Icon, badge }) => (
@@ -116,13 +116,13 @@ export default function Sidebar({ open, onClose }: Props) {
             type="button"
             className="sidebar-row"
             aria-current={activeKind === kind ? "page" : undefined}
-            aria-label={label}
+            aria-label={badge > 0 ? `${label}, ${badge} waiting for review` : label}
             title={label}
             onClick={() => navigate({ kind })}
           >
             <Icon size={17} className="shrink-0" weight={activeKind === kind ? "fill" : "regular"} />
             <span className="sidebar-label flex-1">{label}</span>
-            {badge > 0 ? <span className="chip chip-review">{badge}</span> : null}
+            {badge > 0 ? <span className="sidebar-badge chip chip-review tnum" aria-hidden="true">{badge}</span> : null}
           </button>
         ))}
       </nav>

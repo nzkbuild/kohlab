@@ -40,3 +40,17 @@ server {
 - Set `KOHLAB_KEY` (see [install.md](install.md)) so the dashboard is not open.
 - Share links (`?share=…`) are read-only by design and stay public-read.
   If that's a concern, keep the proxy private (VPN / tailscale).
+
+## Tailscale serve
+
+The simplest private setup: TLS with an automatic certificate, reachable only
+from your tailnet. Kohlab stays bound to loopback.
+
+```sh
+tailscale serve --bg --https=8444 http://127.0.0.1:7676
+# then open https://<machine>.<tailnet>.ts.net:8444
+```
+
+Kohlab sends `Content-Security-Policy`, `X-Content-Type-Options` and
+`Referrer-Policy` itself. HSTS is the TLS terminator's job (here, Tailscale):
+the app cannot tell whether it is behind TLS.

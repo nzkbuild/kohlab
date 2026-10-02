@@ -89,6 +89,8 @@ try {
   run("review gate (accept and discard)", "node", ["scripts/check-review-gate.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
+  // Against the built web/dist; skips with a reason when no Chromium is present.
+  run("rendered UI (browser)", "node", ["scripts/check-browser.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);

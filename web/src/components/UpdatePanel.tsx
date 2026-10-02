@@ -52,11 +52,18 @@ export default function UpdatePanel() {
     void load();
   }, [load]);
 
-  // Poll only while something is actually in flight.
+  // Poll only while something is actually in flight and the page is visible.
   useEffect(() => {
     if (!status?.running) return;
-    const timer = window.setInterval(() => void load(true), 3000);
-    return () => window.clearInterval(timer);
+    const loadWhenVisible = () => {
+      if (!document.hidden) void load(true);
+    };
+    const timer = window.setInterval(loadWhenVisible, 3000);
+    document.addEventListener("visibilitychange", loadWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", loadWhenVisible);
+    };
   }, [status?.running, load]);
 
   const apply = async () => {

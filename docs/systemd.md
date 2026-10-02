@@ -15,7 +15,11 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/kohlab
-Environment=KOHLAB_KEY=your-long-random-secret
+# The key is NOT written here: unit files are world-readable (0644), and a
+# member's agent runs as its own OS user on this box. Keep it in a 0600 file:
+#   mkdir -m 700 -p /root/.kohlab
+#   (umask 077; echo KOHLAB_KEY=your-long-random-secret > /root/.kohlab/kohlab.env)
+EnvironmentFile=/root/.kohlab/kohlab.env
 ExecStart=/root/.bun/bin/bun run server.ts
 Restart=on-failure
 RestartSec=3

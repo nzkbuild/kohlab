@@ -3,7 +3,19 @@ import type { AgentStatus, DiffFile, ReleaseStatus, TreeNode, Workspace } from "
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
 
-let key = new URLSearchParams(location.search).get("key") || localStorage.getItem("kohlab_key") || "";
+// A ?key= arrival (bookmark or tunnel link) is adopted into storage once, so
+// the key leaves the URL bar and never leaks into history or Referer again.
+// Next visit the stored copy signs in with no typing.
+const urlKey = new URLSearchParams(location.search).get("key");
+let key = urlKey || localStorage.getItem("kohlab_key") || "";
+if (urlKey) {
+  try {
+    localStorage.setItem("kohlab_key", urlKey);
+    history.replaceState(null, "", location.pathname + location.hash);
+  } catch {
+    /* private mode: the session still works, it just will not persist */
+  }
+}
 
 export function setKey(k: string) {
   key = k;
@@ -77,6 +89,12 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message }),
     }),
+  merge: (id: string, message?: string) =>
+    json<{ repo: string; branch: string; from: string; to: string; previous: string; commit: string }>(`/api/workspaces/${id}/merge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    }),
   files: (id: string) => json<TreeNode[]>(`/api/workspaces/${id}/files`),
   file: (id: string, path: string) =>
     json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
@@ -101,6 +119,17 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token }),
+    }),
+  /**
+   * Pair a fresh device: trade a short one-time code (minted by `kohlab pair`
+   * on the server) for the real key. The one auth call that carries no stored
+   * key: the code is the credential, exactly like join's token.
+   */
+  pairClaim: (code: string) =>
+    json<{ key: string }>("/api/pair/claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
     }),
   setRole: (id: string, role: string) =>
     json<{ user: TeamUser }>(`/api/users/${encodeURIComponent(id)}`, {

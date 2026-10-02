@@ -7,6 +7,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import "@xterm/xterm/css/xterm.css";
+import { monoFont, tokenColor } from "../lib/tokenColor";
 
 interface Props {
   workspaceId: string;
@@ -39,25 +40,6 @@ const MAX_RETRY_MS = 10000;
 /** Past this many consecutive failures the pane reports itself offline. */
 const OFFLINE_AFTER_ATTEMPTS = 4;
 
-/**
- * Resolve a semantic token to a colour string the terminal can parse.
- *
- * xterm takes JS colour values, and the tokens are OKLCH custom properties: so
- * the browser does the conversion (paint one pixel, read it back) rather than a
- * literal being pasted into this file. Rounded through 8-bit RGB, which is all a
- * terminal palette can express anyway.
- */
-function tokenColor(el: HTMLElement, token: string, alpha = 1): string | undefined {
-  const raw = getComputedStyle(el).getPropertyValue(token).trim();
-  if (!raw) return undefined;
-  const ctx = document.createElement("canvas").getContext("2d");
-  if (!ctx) return undefined;
-  ctx.fillStyle = raw;
-  ctx.fillRect(0, 0, 1, 1);
-  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-  return alpha < 1 ? `rgba(${r}, ${g}, ${b}, ${alpha})` : `rgb(${r}, ${g}, ${b})`;
-}
-
 function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAddon } {
   const cached = termCache.get(key);
   if (cached && cached.term.element) {
@@ -71,7 +53,7 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
   }
   const term = new Terminal({
     cursorBlink: true,
-    fontFamily: 'ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace',
+    fontFamily: monoFont(el),
     lineHeight: 1.45,
     rightClickSelectsWord: true,
     scrollback: 10000,

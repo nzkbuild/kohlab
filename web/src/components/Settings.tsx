@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowsClockwise, Bell, BellRinging, Cpu, HardDrives, SpeakerHigh, WarningCircle } from "@phosphor-icons/react";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { announce, setAnnouncementsPaused } from "../lib/announce";
 import { cn } from "../lib/utils";
 import Account from "./Account";
@@ -30,6 +30,7 @@ const PERMISSION_CHIP: Record<Permission, string> = {
 
 /** Settings: agents, server facts, notifications, team. */
 export default function Settings() {
+  const can = useCan();
   const workspaceCount = useApp((s) => s.workspaces.length);
 
   // Read, never request: `Notification.permission` is free, and browsers only
@@ -108,6 +109,9 @@ export default function Settings() {
           </table>
         </Panel>
 
+        {/* Only an owner can update the server, so nobody else is shown a
+            button the server would refuse. */}
+        {can.own ? (
         <Panel className="mt-4">
           <PanelHead
             title="Updates"
@@ -116,6 +120,7 @@ export default function Settings() {
           />
           <UpdatePanel />
         </Panel>
+        ) : null}
 
         <Panel className="mt-4">
           <PanelHead title="Notifications" icon={<Bell size={15} aria-hidden="true" />} meta="what reaches you when the tab is hidden" />

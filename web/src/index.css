@@ -654,6 +654,20 @@ button:disabled {
   padding-inline: 0;
 }
 
+/* The review count is the one number the rail must not lose when it collapses.
+   There is no room beside the icon (rule 11), so it rides on the icon's corner. */
+.sidebar-row {
+  position: relative;
+}
+.sidebar[data-collapsed="true"] .sidebar-badge {
+  position: absolute;
+  inset-block-start: 0.125rem;
+  inset-inline-end: 0.125rem;
+  min-height: 0;
+  padding: 0 0.25rem;
+  line-height: 1rem;
+}
+
 /* --- mobile drawer ------------------------------------------------------- */
 @media (max-width: 56.25rem) {
   .sidebar {
@@ -688,6 +702,9 @@ button:disabled {
   .sidebar[data-collapsed="true"] .sidebar-row {
     justify-content: flex-start;
     padding-inline: 0.5rem;
+  }
+  .sidebar[data-collapsed="true"] .sidebar-badge {
+    position: static;
   }
 }
 
@@ -1022,6 +1039,10 @@ button:disabled {
    a touch or keyboard user (SC 1.4.13 / 2.1.1), and the whole point of this
    control is that the row has a visible way in. */
 .row-link {
+  /* 24px floor (contract rule 7): a bare text button is only as tall as its line. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   text-align: start;
