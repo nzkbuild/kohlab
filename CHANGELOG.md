@@ -9,6 +9,18 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.21.0] - 2026-10-02
+
+### Changed
+
+- **Settings has sections**, each its own page (`/settings/account`, `team`,
+  `agents`, `notifications`, `server`, `updates`): a side list on desktop, a
+  row on phones, instead of one long scroll.
+- **Sidebar:** the top item is **Home**; the list below is headed
+  **Workspaces** (each can hold several terminal sessions). The "live ·
+  sessions persist" footer is gone: the connection only speaks up, as a banner,
+  when the server cannot be reached.
+
 ## [1.20.0] - 2026-10-02
 
 The Files tab becomes a file manager, and new projects go where you want them.

@@ -4,29 +4,15 @@ import {
   CaretDoubleRight,
   GearSix,
   Plus,
-  Stack,
+  House,
   X,
 } from "@phosphor-icons/react";
-import { useApp, useCan, type Connection } from "../store";
+import { useApp, useCan } from "../store";
 import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
 import { Button, BrandMark, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
-
-const CONNECTION_LABEL: Record<Connection, string> = {
-  connecting: "connecting",
-  live: "live",
-  reconnecting: "reconnecting",
-  offline: "offline",
-};
-
-const CONNECTION_CHIP: Record<Connection, string> = {
-  connecting: "chip-stopped",
-  live: "chip-running",
-  reconnecting: "chip-review",
-  offline: "chip-danger",
-};
 
 interface Props {
   /** Mobile drawer visibility. On desktop the rail is always present. */
@@ -37,7 +23,6 @@ interface Props {
 export default function Sidebar({ open, onClose }: Props) {
   const route = useApp((s) => s.route);
   const workspaces = useApp((s) => s.workspaces);
-  const connection = useApp((s) => s.connection);
   const navigate = useApp((s) => s.navigate);
   const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
@@ -50,7 +35,7 @@ export default function Sidebar({ open, onClose }: Props) {
   const reviewCount = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
 
   const nav = [
-    { kind: "workspaces" as const, label: "Workspaces", icon: Stack, badge: reviewCount },
+    { kind: "workspaces" as const, label: "Home", icon: House, badge: reviewCount },
     { kind: "settings" as const, label: "Settings", icon: GearSix, badge: 0 },
   ];
 
@@ -128,9 +113,9 @@ export default function Sidebar({ open, onClose }: Props) {
       </nav>
 
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
-        {/* The list is the Workspaces view in short; the nav row above already
-            names it and carries the review count, so no second heading. */}
-        <div className="sidebar-divider mb-2" aria-hidden="true" />
+        {/* Every row is a workspace: one task, one branch, one agent; it can
+            hold several terminal sessions inside. */}
+        <p className="sidebar-section-title section-label mb-1.5 mt-1 px-2">Workspaces</p>
 
         {ordered.length === 0 ? (
           <p className="sidebar-label px-2 text-xs leading-relaxed text-text-muted">
@@ -167,16 +152,6 @@ export default function Sidebar({ open, onClose }: Props) {
         )}
       </nav>
 
-      <div className="flex min-h-11 items-center gap-2 border-t border-line-subtle px-3">
-        <Tooltip content={`connection ${CONNECTION_LABEL[connection]}`} disabled={!collapsed}>
-          <span className={cn("chip sidebar-conn", CONNECTION_CHIP[connection])} role="status">
-            <span className="chip-dot" aria-hidden="true" />
-            <span className="sidebar-label">{CONNECTION_LABEL[connection]}</span>
-            {collapsed ? <span className="sr-only">connection {CONNECTION_LABEL[connection]}</span> : null}
-          </span>
-        </Tooltip>
-        <span className="sidebar-label text-xs text-text-faint">sessions persist</span>
-      </div>
     </aside>
   );
 }

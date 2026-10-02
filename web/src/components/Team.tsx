@@ -80,7 +80,7 @@ export default function Team() {
         .catch((e: unknown) => ({ ok: false as const, message: (e as Error).message })),
       api
         .audit()
-        .then((res) => ({ ok: true as const, events: res.events }))
+        .then((res) => ({ ok: true as const, events: res.events ?? [] }))
         .catch((e: unknown) => ({ ok: false as const, message: (e as Error).message })),
     ]);
     if (u.ok) {

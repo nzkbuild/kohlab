@@ -27,6 +27,7 @@ export default function App() {
   const workspaces = useApp((s) => s.workspaces);
   const loading = useApp((s) => s.loading);
   const error = useApp((s) => s.error);
+  const connection = useApp((s) => s.connection);
   const loadMe = useApp((s) => s.loadMe);
 
   const [navOpen, setNavOpen] = useState(false);
@@ -118,6 +119,17 @@ export default function App() {
 
             <div className="flex-1" />
           </header>
+
+          {/* Silent while connected; the page only speaks up when it cannot
+              reach the server, and says the agents are unaffected. */}
+          {connection === "reconnecting" || connection === "offline" ? (
+            <div role="status" className="conn-banner" data-state={connection}>
+              <span className="chip-dot" aria-hidden="true" />
+              {connection === "reconnecting"
+                ? "Reconnecting to the server… agents keep running."
+                : "Can't reach the server. Agents keep running there; this page catches up when it reconnects."}
+            </div>
+          ) : null}
 
           <div className="app-content">
             {error && workspaces.length === 0 ? (
