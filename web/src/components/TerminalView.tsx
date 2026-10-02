@@ -286,12 +286,12 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           <span className="chip-dot" aria-hidden="true" />
           {SOCKET_LABEL[socket]}
         </span>
-        <span className="truncate">
+        <span className="min-w-0 truncate">
           {socket === "live" ? "attached to the agent's pty" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
         </span>
         <div className="flex-1" />
         {reconnecting ? (
-          <Button variant="quiet" size="sm" onClick={() => reconnectRef.current()} aria-describedby={descId}>
+          <Button variant="quiet" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => reconnectRef.current()} aria-describedby={descId}>
             reconnect now
           </Button>
         ) : null}

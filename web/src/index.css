@@ -106,6 +106,20 @@
   --topbar-h: 3.25rem;
   --sidebar-w: 15.5rem;
   --sidebar-w-collapsed: 3.75rem;
+
+  /* Density: one place to tune how tight the console sits. min-height, never
+     height, so text-spacing overrides (SC 1.4.12) still never clip. */
+  --control-h: 2.125rem;
+  --control-h-sm: 1.75rem;
+  --row-h: 2.25rem;
+  --tab-h: 2.75rem;
+
+  /* Stacking: named layers instead of magic numbers scattered across rules. */
+  --z-sticky: 10;
+  --z-scrim: 40;
+  --z-drawer: 50;
+  --z-overlay: 100;
+  --z-dialog: 101;
 }
 
 /* Bridge the semantic tier into Tailwind utilities. `inline` is REQUIRED for
@@ -266,7 +280,7 @@ button:disabled {
   /* min-height, never height: SC 1.4.12 text-spacing overrides must not clip. */
   .btn {
     display: inline-flex;
-    min-height: 2.125rem;
+    min-height: var(--control-h);
     align-items: center;
     justify-content: center;
     gap: 0.4375rem;
@@ -282,19 +296,19 @@ button:disabled {
   }
 
   .btn-sm {
-    min-height: 1.75rem;
+    min-height: var(--control-h-sm);
     padding: 0.25rem 0.5625rem;
     font-size: 0.75rem;
   }
   /* Icon-only controls keep a 24x24 minimum hit area (SC 2.5.8 AA). */
   .btn-icon {
-    min-width: 2.125rem;
-    min-height: 2.125rem;
+    min-width: var(--control-h);
+    min-height: var(--control-h);
     padding: 0;
   }
   .btn-icon.btn-sm {
-    min-width: 1.75rem;
-    min-height: 1.75rem;
+    min-width: var(--control-h-sm);
+    min-height: var(--control-h-sm);
   }
 
   .btn-primary {
@@ -450,11 +464,11 @@ button:disabled {
     color: var(--text-muted);
   }
 
-  .eyebrow {
-    font-size: 0.6875rem;
+  /* Section label inside a panel or list — sentence case, never a kicker
+     above a heading. */
+  .section-label {
+    font-size: 0.75rem;
     font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--text-muted);
   }
 
@@ -470,7 +484,7 @@ button:disabled {
   .scrim {
     position: fixed;
     inset: 0;
-    z-index: 40;
+    z-index: var(--z-scrim);
     background: oklch(0.1 0.005 265 / 0.66);
   }
 }
@@ -579,7 +593,7 @@ button:disabled {
 
 .sidebar-row {
   display: flex;
-  min-height: 2.25rem;
+  min-height: var(--row-h);
   width: 100%;
   align-items: center;
   gap: 0.625rem;
@@ -629,7 +643,7 @@ button:disabled {
     position: fixed;
     inset-block: 0;
     inset-inline-start: 0;
-    z-index: 50;
+    z-index: var(--z-drawer);
     width: min(19rem, 84vw);
     flex-basis: auto;
     padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
@@ -710,7 +724,8 @@ button:disabled {
   border-collapse: collapse;
 }
 
-.data-table th {
+/* Header cells only: row-header <th> in tbody keep body type. */
+.data-table thead th {
   padding: 0.5rem 0.875rem;
   font-size: 0.6875rem;
   font-weight: 600;
@@ -721,7 +736,9 @@ button:disabled {
   white-space: nowrap;
 }
 
-.data-table td {
+.data-table td,
+.data-table tbody th {
+  text-align: start;
   padding: 0.6875rem 0.875rem;
   font-size: 0.8125rem;
   vertical-align: middle;
@@ -773,7 +790,7 @@ button:disabled {
 
 .tab {
   display: inline-flex;
-  min-height: 2.75rem;
+  min-height: var(--tab-h);
   align-items: center;
   gap: 0.4375rem;
   border-bottom: 2px solid transparent;
@@ -863,14 +880,14 @@ button:disabled {
 .dialog-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--z-overlay);
   /* Radix sets this; we only supply colour. */
   background: oklch(0.1 0.005 265 / 0.7);
 }
 
 .dialog-content {
   position: fixed;
-  z-index: 101;
+  z-index: var(--z-dialog);
   inset-inline: 0;
   inset-block-start: 22%;
   width: min(30rem, calc(100% - 2rem));
@@ -879,6 +896,78 @@ button:disabled {
   border-radius: var(--radius-lg);
   background: var(--surface-overlay);
   box-shadow: 0 1.5rem 4rem oklch(0.08 0.005 265 / 0.55);
+}
+
+/* --- menu + tooltip (Radix) -------------------------------------------- */
+.menu {
+  z-index: var(--z-overlay);
+  min-width: 11rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  padding: 0.25rem;
+  box-shadow: 0 0.75rem 2rem oklch(0.08 0.005 265 / 0.5);
+}
+
+.menu-item {
+  display: flex;
+  min-height: var(--control-h);
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-sm);
+  padding: 0 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  outline: none;
+  cursor: pointer;
+}
+
+.menu-item[data-highlighted],
+.menu-item[data-state="open"] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.menu-item-danger,
+.menu-item-danger[data-highlighted] {
+  color: var(--status-danger);
+}
+
+.tooltip {
+  z-index: var(--z-overlay);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+
+/* The rail tooltip is a desktop affordance; the drawer shows full labels. */
+@media (max-width: 56.25rem) {
+  .tooltip {
+    display: none;
+  }
+}
+
+/* Collapsed rail: the count moves into the tooltip and accessible name. */
+.sidebar[data-collapsed="true"] .sidebar-row .chip {
+  display: none;
+}
+@media (max-width: 56.25rem) {
+  .sidebar[data-collapsed="true"] .sidebar-row .chip {
+    display: inline-flex;
+  }
+}
+
+@media (forced-colors: active) {
+  .menu,
+  .tooltip {
+    border-color: CanvasText;
+  }
+  .menu-item[data-highlighted] {
+    outline: 2px solid Highlight;
+  }
 }
 
 /* --- palette ------------------------------------------------------------- */

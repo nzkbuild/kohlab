@@ -110,7 +110,7 @@ export default function AgentInstaller() {
       </div>
 
       {statusError ? (
-        <p role="alert" className="mb-2 flex flex-wrap items-center gap-2 px-1 text-2xs text-status-danger">
+        <p role="alert" className="mb-2 flex flex-wrap items-center gap-2 px-1 text-xs text-status-danger">
           Could not read agent status: {statusError}
           <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
             retry
@@ -146,7 +146,7 @@ export default function AgentInstaller() {
                       </span>
                     </p>
                     {agent.setupHint ? (
-                      <p className="mt-1 text-2xs leading-relaxed text-text-muted">{agent.setupHint}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-text-muted">{agent.setupHint}</p>
                     ) : null}
                     {agent.installCmd ? (
                       <div className="mt-1.5 flex items-center gap-1.5">
@@ -188,7 +188,7 @@ export default function AgentInstaller() {
                 {error ? (
                   <p
                     role="alert"
-                    className="mt-2 flex items-start gap-1.5 border-t border-line-subtle pt-2 text-2xs text-status-danger"
+                    className="mt-2 flex items-start gap-1.5 border-t border-line-subtle pt-2 text-xs text-status-danger"
                   >
                     <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
                     <span className="mono min-w-0 break-words">

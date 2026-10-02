@@ -4,7 +4,6 @@ import {
   CaretDoubleRight,
   GearSix,
   Plus,
-  SquaresFour,
   Stack,
   TerminalWindow,
   X,
@@ -12,7 +11,7 @@ import {
 import { useApp, type Connection } from "../store";
 import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import { Button } from "./ui";
+import { Button, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -41,6 +40,7 @@ export default function Sidebar({ open, onClose }: Props) {
   const workspaces = useApp((s) => s.workspaces);
   const connection = useApp((s) => s.connection);
   const navigate = useApp((s) => s.navigate);
+  const setCreating = useApp((s) => s.setCreating);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
 
   useEffect(() => {
@@ -51,12 +51,11 @@ export default function Sidebar({ open, onClose }: Props) {
   const reviewCount = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
 
   const nav = [
-    { kind: "dashboard" as const, label: "Command center", icon: SquaresFour, badge: 0 },
-    { kind: "workspaces" as const, label: "Workspaces", icon: Stack, badge: 0 },
+    { kind: "dashboard" as const, label: "Workspaces", icon: Stack, badge: reviewCount },
     { kind: "settings" as const, label: "Settings", icon: GearSix, badge: 0 },
   ];
 
-  const activeKind = route.kind === "workspace" ? "workspaces" : route.kind;
+  const activeKind = route.kind === "workspace" ? "dashboard" : route.kind;
 
   return (
     <aside
@@ -100,7 +99,10 @@ export default function Sidebar({ open, onClose }: Props) {
           variant="primary"
           className={cn("w-full", collapsed && "shell:px-0")}
           aria-label="New workspace"
-          onClick={() => navigate({ kind: "workspaces" })}
+          onClick={() => {
+            setCreating(true);
+            navigate({ kind: "dashboard" });
+          }}
         >
           <Plus size={16} weight="bold" />
           <span className="sidebar-label">new workspace</span>
@@ -109,26 +111,25 @@ export default function Sidebar({ open, onClose }: Props) {
 
       <nav className="flex flex-col gap-0.5 p-2.5" aria-label="Views">
         {nav.map(({ kind, label, icon: Icon, badge }) => (
+          <Tooltip key={kind} content={badge > 0 ? `${label} — ${badge} to review` : label} disabled={!collapsed}>
           <button
-            key={kind}
             type="button"
             className="sidebar-row"
             aria-current={activeKind === kind ? "page" : undefined}
-            aria-label={label}
-            title={label}
+            aria-label={badge > 0 ? `${label} — ${badge} to review` : label}
             onClick={() => navigate({ kind })}
           >
             <Icon size={17} className="shrink-0" weight={activeKind === kind ? "fill" : "regular"} />
             <span className="sidebar-label flex-1">{label}</span>
-            {badge > 0 ? <span className="chip chip-review">{badge}</span> : null}
+            {badge > 0 ? <span className="chip chip-review tnum" aria-hidden="true">{badge}</span> : null}
           </button>
+          </Tooltip>
         ))}
       </nav>
 
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
-        <p className="sidebar-section-title mb-2 px-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">
-          Workspaces
-          {reviewCount > 0 ? <span className="text-status-review"> · {reviewCount} to review</span> : null}
+        <p className="sidebar-section-title section-label mb-2 px-2">
+          All workspaces
         </p>
 
         {ordered.length === 0 ? (
@@ -140,14 +141,13 @@ export default function Sidebar({ open, onClose }: Props) {
             const status = workspaceStatus(workspace);
             const selected = route.kind === "workspace" && route.id === workspace.id;
             return (
+              <Tooltip key={workspace.id} content={`${workspace.id} — ${STATUS_LABEL[status]}`} disabled={!collapsed}>
               <button
-                key={workspace.id}
                 type="button"
                 className="sidebar-row"
                 data-selected={selected}
                 aria-current={selected ? "page" : undefined}
                 aria-label={`${workspace.id} — ${STATUS_LABEL[status]}`}
-                title={`${workspace.id} — ${STATUS_LABEL[status]}`}
                 onClick={() => navigate({ kind: "workspace", id: workspace.id })}
               >
                 <span
@@ -159,6 +159,7 @@ export default function Sidebar({ open, onClose }: Props) {
                   <span className="mono block truncate text-2xs text-text-muted">{workspace.agent}</span>
                 </span>
               </button>
+              </Tooltip>
             );
           })
         )}
@@ -169,7 +170,7 @@ export default function Sidebar({ open, onClose }: Props) {
           <span className="chip-dot" aria-hidden="true" />
           {CONNECTION_LABEL[connection]}
         </span>
-        <span className="sidebar-label text-2xs text-text-faint">persists on this server</span>
+        <span className="sidebar-label text-xs text-text-faint">persists on this server</span>
       </div>
     </aside>
   );

@@ -11,11 +11,10 @@ import JoinView from "./components/JoinView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import CommandPalette from "./components/CommandPalette";
-import Dashboard from "./components/Dashboard";
 import WorkspacesView from "./components/WorkspacesView";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
-import { Announcer, Button, SkeletonRows } from "./components/ui";
+import { Announcer, Button, SkeletonRows, TooltipProvider } from "./components/ui";
 
 // xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch* —
 // a static import would pull them into the entry chunk and block first paint.
@@ -68,7 +67,7 @@ export default function App() {
   if (!isAuthed) return <AuthGate />;
 
   return (
-    <>
+    <TooltipProvider delayDuration={300}>
       <CommandPalette />
       <Announcer />
       <Toaster
@@ -124,9 +123,8 @@ export default function App() {
             ) : null}
 
             <ErrorBoundary label={ROUTE_LABEL[route.kind]}>
-              {route.kind === "dashboard" ? <Dashboard /> : null}
               {route.kind === "settings" ? <Settings /> : null}
-              {route.kind === "workspaces" ? (
+              {route.kind === "dashboard" ? (
                 loading ? (
                   <div className="surface">
                     <div className="surface-inner">
@@ -158,6 +156,6 @@ export default function App() {
           </div>
         </main>
       </div>
-    </>
+    </TooltipProvider>
   );
 }

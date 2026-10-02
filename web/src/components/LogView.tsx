@@ -130,7 +130,7 @@ export default function LogView({ workspaceId }: Props) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-10 flex-wrap items-center gap-2 border-b border-line-subtle px-3 py-1.5">
         <StatusChip status={workspace ? workspaceStatus(workspace) : "stopped"} />
-        <span className="text-2xs text-text-muted">
+        <span className="text-xs text-text-muted">
           {running ? "session log · tailing every 3s" : "session log · not running"}
         </span>
         <div className="flex-1" />

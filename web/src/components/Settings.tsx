@@ -7,7 +7,7 @@ import Account from "./Account";
 import AgentInstaller from "./AgentInstaller";
 import Team from "./Team";
 import UpdatePanel from "./UpdatePanel";
-import { Button, Chip, Panel, PanelHead } from "./ui";
+import { Button, Chip, PageHeader, Panel, PanelHead } from "./ui";
 
 const PAUSE_KEY = "kohlab_announce_paused";
 
@@ -65,17 +65,12 @@ export default function Settings() {
   return (
     <div className="surface">
       <div className="surface-inner max-w-3xl">
-        <header className="mb-5">
-          <h1 className="surface-title flex items-center gap-2">
-            <HardDrives size={20} className="text-text-muted" aria-hidden="true" />
-            Settings
-          </h1>
-          <p className="surface-description">
-            Everything here is stored on this server; nothing is sent anywhere else.
-          </p>
-        </header>
+        <PageHeader
+          title="Settings"
+          description="Everything here is stored on this server; nothing is sent anywhere else."
+        />
 
-        <Panel>
+        <Panel className="mt-5">
           <PanelHead title="Agents" icon={<Cpu size={15} aria-hidden="true" />} meta="coding agents available to workspaces" />
           <div className="p-2">
             <AgentInstaller />
@@ -99,7 +94,7 @@ export default function Settings() {
                 <td className="text-text-muted">Persistence</td>
                 <td>
                   <Chip>state on disk</Chip>
-                  <span className="ml-2 text-2xs text-text-muted">
+                  <span className="ml-2 text-xs text-text-muted">
                     workspaces, logs and keys survive a restart of this server
                   </span>
                 </td>
@@ -132,13 +127,13 @@ export default function Settings() {
                     {PERMISSION_LABEL[permission]}
                   </span>
                 </p>
-                <p className="mt-1 text-2xs leading-relaxed text-text-muted">
+                <p className="mt-1 text-xs leading-relaxed text-text-muted">
                   A ping when an agent finishes and its workspace needs review while this tab is
                   hidden. Nothing is sent while the tab is in front of you — that is what the
                   sidebar badge is for.
                 </p>
                 {permission === "denied" ? (
-                  <p className="mt-1.5 flex items-start gap-1.5 text-2xs text-status-danger">
+                  <p className="mt-1.5 flex items-start gap-1.5 text-xs text-status-danger">
                     <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
                     The browser will not ask again — allow notifications for this site in your browser
                     settings, then reload.
@@ -173,7 +168,7 @@ export default function Settings() {
                     <SpeakerHigh size={14} className="text-text-muted" aria-hidden="true" />
                     Pause screen-reader announcements
                   </span>
-                  <span className="mt-0.5 block text-2xs leading-relaxed text-text-muted">
+                  <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
                     Stops the live region from announcing workspace state changes (finished, needs
                     review, committed). The status chips keep updating; only the speech stops. The
                     setting is remembered on this browser.

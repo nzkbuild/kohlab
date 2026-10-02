@@ -129,7 +129,7 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-10 items-center gap-2 border-b border-line-subtle px-3">
-        <span className="eyebrow flex-1 truncate">Files</span>
+        <span className="section-label flex-1 truncate">Files</span>
         <Button variant="quiet" size="sm" iconOnly aria-label="Refresh file tree" onClick={() => void load()}>
           <ArrowsClockwise size={13} />
         </Button>

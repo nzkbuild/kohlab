@@ -15,7 +15,13 @@ export interface AppState {
   error: string | null;
   lastUpdated: number | null;
   connection: Connection;
+  /** The new-workspace form on Home; opened from the sidebar and the palette too. */
+  creating: boolean;
+  /** Workspace that should open a fresh shell tab on arrival (Home's Open menu). */
+  openShell: string | null;
 
+  setCreating: (value: boolean) => void;
+  setOpenShell: (id: string | null) => void;
   setAuthed: (value: boolean) => void;
   setConnection: (value: Connection) => void;
   refresh: () => Promise<void>;
@@ -33,7 +39,11 @@ export const useApp = create<AppState>((set) => ({
   error: null,
   lastUpdated: null,
   connection: "connecting",
+  creating: false,
+  openShell: null,
 
+  setCreating: (value) => set({ creating: value }),
+  setOpenShell: (id) => set({ openShell: id }),
   setAuthed: (value) => set({ authed: value }),
   setConnection: (value) => set({ connection: value }),
 
