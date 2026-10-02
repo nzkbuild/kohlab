@@ -288,16 +288,29 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
       }
     };
 
+    // A pty resize makes a full-screen agent (Claude Code) repaint everything,
+    // so it is sent once per real change in the grid, never per pixel: a
+    // sidebar toggle used to fire the observer, the window listener and two
+    // timers, each a repaint, which read as flicker.
+    let lastSent = "";
+    let resizeTimer = 0;
     const sendResize = () => {
       try {
-        fit.fit();
         const dims = fit.proposeDimensions();
-        if (dims && wsRef.current?.readyState === WebSocket.OPEN) {
+        if (!dims || !dims.cols || !dims.rows) return;
+        if (dims.cols !== term.cols || dims.rows !== term.rows) fit.fit();
+        const size = `${dims.cols}x${dims.rows}`;
+        if (size !== lastSent && wsRef.current?.readyState === WebSocket.OPEN) {
+          lastSent = size;
           wsRef.current.send(JSON.stringify({ type: "resize", id: workspaceId, terminalId, cols: dims.cols, rows: dims.rows }));
         }
       } catch {
-        /* ignore */
+        /* not attached yet */
       }
+    };
+    const scheduleResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(sendResize, 80);
     };
 
     const connect = () => {
@@ -308,6 +321,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
         attempts = 0; // reset backoff on a successful connect
         setSocket("live");
         ws.send(JSON.stringify({ type: "attach", id: workspaceId, terminalId }));
+        lastSent = ""; // a new socket has never been told the size
         sendResize();
       };
       // Coalesced onto rAF: a chatty agent would otherwise write per message and
@@ -342,17 +356,16 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
 
     connect();
 
-    window.addEventListener("resize", sendResize);
-    // Window resize misses panel-level changes (sidebar collapse, tab switch).
-    const observer = new ResizeObserver(sendResize);
+    // The observer covers window and panel changes alike (sidebar, tab switch).
+    const observer = new ResizeObserver(scheduleResize);
     observer.observe(el);
-    const t1 = setTimeout(sendResize, 100);
-    const t2 = setTimeout(sendResize, 500);
+    const t1 = setTimeout(scheduleResize, 100);
+    const t2 = setTimeout(scheduleResize, 500);
 
     return () => {
       mountedRef.current = false;
       inputSubscription.dispose();
-      window.removeEventListener("resize", sendResize);
+      window.clearTimeout(resizeTimer);
       observer.disconnect();
       el.removeEventListener("paste", onPaste, true);
       el.removeEventListener("drop", onDrop);
