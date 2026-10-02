@@ -366,7 +366,7 @@ export default function DiffView({ workspaceId }: Props) {
                   ) : (
                     <span className="text-2xs text-text-muted">no line stats</span>
                   )}
-                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 py-1 text-2xs text-text-secondary">
+                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 py-1 text-xs text-text-secondary">
                     <input
                       type="checkbox"
                       className="size-3.5 accent-accent"
@@ -420,7 +420,7 @@ export default function DiffView({ workspaceId }: Props) {
         </div>
       )}
 
-      <footer className="sticky bottom-0 z-10 border-t border-line-subtle bg-surface-raised px-3 py-2">
+      <footer className="sticky bottom-0 z-(--z-sticky) border-t border-line-subtle bg-surface-raised px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="commit-message">
             Commit message
@@ -443,12 +443,12 @@ export default function DiffView({ workspaceId }: Props) {
             {committing ? "committing…" : "commit"}
           </Button>
         </div>
-        <p className="mt-1.5 text-2xs leading-relaxed text-text-muted">
+        <p className="mt-1.5 text-xs leading-relaxed text-text-muted">
           Commit stages every file in this workspace (<span className="mono">git add -A</span>) and is
           final — Kohlab cannot undo, amend or un-commit it.
         </p>
         {commitError ? (
-          <p role="alert" className="mt-1.5 break-words text-2xs text-status-danger">
+          <p role="alert" className="mt-1.5 break-words text-xs text-status-danger">
             commit failed: {commitError}
           </p>
         ) : null}

@@ -40,7 +40,7 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
             </ol>
           </nav>
         ) : (
-          <span className="eyebrow flex-1">Files</span>
+          <span className="section-label flex-1">Files</span>
         )}
         <Button
           variant="quiet"

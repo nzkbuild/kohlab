@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
+import { Dialog } from "./ui";
 import {
   ArrowDown,
   ArrowElbowDownLeft,
@@ -8,7 +8,6 @@ import {
   GearSix,
   MagnifyingGlass,
   PlusCircle,
-  SquaresFour,
   Stack,
   TerminalWindow,
   X,
@@ -62,6 +61,7 @@ export default function CommandPalette() {
   const workspaces = useApp((s) => s.workspaces);
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
+  const setCreating = useApp((s) => s.setCreating);
   const refresh = useApp((s) => s.refresh);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,20 +103,12 @@ export default function CommandPalette() {
 
   const items: PaletteItem[] = [
     {
-      id: "view-dashboard",
-      label: "Command center",
-      group: "Views",
-      icon: <SquaresFour size={16} />,
-      keywords: ["dashboard", "home", "overview", "status"],
-      onAction: () => navigate({ kind: "dashboard" }),
-    },
-    {
       id: "view-workspaces",
       label: "Workspaces",
       group: "Views",
       icon: <Stack size={16} />,
-      keywords: ["all", "list", "queue"],
-      onAction: () => navigate({ kind: "workspaces" }),
+      keywords: ["home", "dashboard", "command center", "overview", "status", "all", "list", "queue", "review"],
+      onAction: () => navigate({ kind: "dashboard" }),
     },
     {
       id: "view-settings",
@@ -147,8 +139,10 @@ export default function CommandPalette() {
       group: "Actions",
       icon: <PlusCircle size={16} />,
       keywords: ["create", "launch", "start", "task", "clone"],
-      // Creation is the command center's first-run affordance.
-      onAction: () => navigate({ kind: "dashboard" }),
+      onAction: () => {
+        setCreating(true);
+        navigate({ kind: "dashboard" });
+      },
     },
     {
       id: "action-refresh",
@@ -265,7 +259,7 @@ export default function CommandPalette() {
             <div role="listbox" id={listId} aria-label="Search results">
               {sections.map((section) => (
                 <div key={section.group} role="group" aria-labelledby={`${uid}-group-${section.group}`} className="py-1">
-                  <div id={`${uid}-group-${section.group}`} className="eyebrow px-3 py-1 text-text-faint">
+                  <div id={`${uid}-group-${section.group}`} className="section-label px-3 py-1 text-text-faint">
                     {section.group}
                   </div>
                   {section.entries.map(({ entry, index }) => (
@@ -297,7 +291,7 @@ export default function CommandPalette() {
           </div>
 
           <div className="flex items-center gap-2 border-t border-line-subtle px-3 py-2 text-xs text-text-muted">
-            <span className="eyebrow">scope</span>
+            <span className="section-label">scope</span>
             <span className="mono text-2xs text-text-secondary">{scope}</span>
             <span className="ml-auto flex items-center gap-3">
               <span className="flex items-center gap-1">

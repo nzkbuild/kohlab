@@ -23,19 +23,6 @@ export const STATUS_LABEL: Record<WorkspaceStatus, string> = {
   stopped: "stopped",
 };
 
-/**
- * Status is NEVER colour-only (SC 1.4.1): every status carries a label, and the
- * ones that appear without one in a dense row carry a glyph too. The chip class
- * supplies colour; the glyph is the non-colour cue that survives greyscale,
- * colour-blindness and forced-colors.
- */
-export const STATUS_GLYPH: Record<WorkspaceStatus, string> = {
-  running: "▶",
-  "needs-review": "◆",
-  committed: "✓",
-  stopped: "■",
-};
-
 export const STATUS_CHIP: Record<WorkspaceStatus, string> = {
   running: "chip-running",
   "needs-review": "chip-review",

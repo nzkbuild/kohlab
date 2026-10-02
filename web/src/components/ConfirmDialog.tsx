@@ -1,4 +1,4 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import { Dialog } from "./ui";
 import { Warning } from "@phosphor-icons/react";
 import { Button } from "./ui";
 

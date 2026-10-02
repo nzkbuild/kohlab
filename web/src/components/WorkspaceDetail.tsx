@@ -1,6 +1,7 @@
-import { lazy, Suspense, startTransition, useEffect, useOptimistic, useRef, useState } from "react";
+import { lazy, Suspense, startTransition, useEffect, useOptimistic, useState } from "react";
 import {
   ArrowsClockwise,
+  DotsThree,
   Files,
   GitDiff,
   Ghost,
@@ -25,7 +26,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import ErrorBoundary from "./ErrorBoundary";
 import LogView from "./LogView";
 import { disposeWorkspaceTerminals } from "./terminalCache";
-import { Button, EmptyState, SkeletonRows, StatusChip } from "./ui";
+import { Button, EmptyState, Menu, MenuItem, SkeletonRows, StatusChip, Tab, TabList, TabPanel, Tabs } from "./ui";
 
 // xterm (~390 KB) and Monaco must not load before the cockpit does: only an
 // import through lazy() defers the fetch. A static import here — even one that
@@ -72,12 +73,23 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [focusTick, setFocusTick] = useState(0);
   const [reviewCount, setReviewCount] = useState(0);
 
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const w = workspaces.find((x) => x.id === workspaceId);
 
   // Lifecycle toggles are bounded single-object mutations, so they may show
   // their outcome before the server confirms it. Deleting and committing never do.
   const [optimisticRunning, setOptimisticRunning] = useOptimistic(w?.running ?? false);
+
+  // Home's "Open… → Terminal in" lands here: open one fresh shell, once.
+  const openShell = useApp((s) => s.openShell);
+  const setOpenShell = useApp((s) => s.setOpenShell);
+  useEffect(() => {
+    if (openShell !== workspaceId) return;
+    setOpenShell(null);
+    const id = `terminal-${Date.now()}`;
+    setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
+    setActiveTerminal(id);
+    setTab("terminal");
+  }, [openShell, workspaceId, setOpenShell]);
 
   const run = (action: string) => {
     startTransition(async () => {
@@ -115,7 +127,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       await refresh();
       announce(`${workspaceId} deleted`);
       setConfirming(false);
-      navigate({ kind: "workspaces" });
+      navigate({ kind: "dashboard" });
     } catch (e) {
       toast.error(`delete failed — ${(e as Error).message}`);
     } finally {
@@ -213,7 +225,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             title="Workspace not found"
             description={`${workspaceId} is not on this server. It may have been deleted, or the link may be stale.`}
             action={
-              <Button variant="primary" onClick={() => navigate({ kind: "workspaces" })}>
+              <Button variant="primary" onClick={() => navigate({ kind: "dashboard" })}>
                 back to workspaces
               </Button>
             }
@@ -231,20 +243,61 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   if (reviewCount > 0)
     badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files", chip: "chip-review" };
 
-  const onTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const last = TABS.length - 1;
-    const next =
-      e.key === "ArrowRight" ? (index === last ? 0 : index + 1) : e.key === "ArrowLeft" ? (index === 0 ? last : index - 1) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
-    if (next < 0) return;
-    e.preventDefault();
-    setTab(TABS[next].id);
-    tabRefs.current[next]?.focus();
+  const addTerminal = () => {
+    const id = `terminal-${Date.now()}`;
+    setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
+    setActiveTerminal(id);
+    setTab("terminal");
   };
 
   const closeTerminal = (id: string) => {
     setTerminals((items) => items.filter((item) => item.id !== id));
     if (activeTerminal === id) setActiveTerminal("main");
   };
+
+  // Review leads when there is something to review (Product principle 2);
+  // otherwise the run toggle does. The rest live in the overflow menu.
+  const reviewFirst = st === "needs-review";
+  const actions = (
+    <>
+      {reviewFirst ? (
+        <Button size="sm" variant="primary" className="flex-1 shell:flex-none" onClick={() => setTab("review")}>
+          <GitDiff size={12} aria-hidden="true" />
+          review{reviewCount > 0 ? ` ${reviewCount} ${reviewCount === 1 ? "file" : "files"}` : ""}
+        </Button>
+      ) : null}
+      <Button
+        size="sm"
+        variant={reviewFirst ? "secondary" : "primary"}
+        className="flex-1 shell:flex-none"
+        onClick={() => run(running ? "stop" : "start")}
+      >
+        {running ? <Stop size={12} weight="fill" aria-hidden="true" /> : <Play size={12} weight="fill" aria-hidden="true" />}
+        {running ? "stop" : "start"}
+      </Button>
+      <Menu
+        label={`More actions for ${w.id}`}
+        trigger={
+          <Button size="sm" variant="secondary" iconOnly>
+            <DotsThree size={16} weight="bold" />
+          </Button>
+        }
+      >
+        <MenuItem onSelect={() => run("restart")}>
+          <ArrowsClockwise size={14} aria-hidden="true" />
+          restart
+        </MenuItem>
+        <MenuItem onSelect={() => void share()}>
+          <ShareNetwork size={14} aria-hidden="true" />
+          copy share link
+        </MenuItem>
+        <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
+          <Trash size={14} aria-hidden="true" />
+          delete workspace
+        </MenuItem>
+      </Menu>
+    </>
+  );
 
   return (
     <div className="cockpit">
@@ -264,51 +317,15 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <Button size="sm" variant="primary" disabled={running} onClick={() => run("start")}>
-            <Play size={12} weight="fill" aria-hidden="true" />
-            start
-          </Button>
-          <Button size="sm" variant="secondary" disabled={!running} onClick={() => run("stop")}>
-            <Stop size={12} weight="fill" aria-hidden="true" />
-            stop
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => run("restart")}>
-            <ArrowsClockwise size={12} aria-hidden="true" />
-            restart
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => void share()}>
-            <ShareNetwork size={12} aria-hidden="true" />
-            share
-          </Button>
-          <Button size="sm" variant="danger" onClick={() => setConfirming(true)}>
-            <Trash size={12} aria-hidden="true" />
-            delete
-          </Button>
-        </div>
+        <div className="hidden shrink-0 items-center gap-1.5 shell:flex">{actions}</div>
       </header>
 
-      <div className="tabstrip" role="tablist" aria-label="Workspace panes">
-        {TABS.map(({ id, label, icon: Icon }, index) => {
-          const selected = tab === id;
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
+      <TabList label="Workspace panes">
+        {TABS.map(({ id, label, icon: Icon }) => {
           const badge = badges[id];
           return (
-            <button
-              key={id}
-              ref={(el) => {
-                tabRefs.current[index] = el;
-              }}
-              type="button"
-              role="tab"
-              id={`tab-${id}`}
-              aria-selected={selected}
-              aria-controls={`panel-${id}`}
-              aria-label={badge ? `${label} — ${badge.count} ${badge.noun}` : undefined}
-              tabIndex={selected ? 0 : -1}
-              className="tab"
-              onClick={() => setTab(id)}
-              onKeyDown={(e) => onTabKeyDown(e, index)}
-            >
+            <Tab key={id} value={id} aria-label={badge ? `${label} — ${badge.count} ${badge.noun}` : undefined}>
               <Icon size={14} aria-hidden="true" />
               {label}
               {badge ? (
@@ -316,10 +333,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                   {badge.count}
                 </span>
               ) : null}
-            </button>
+            </Tab>
           );
         })}
-      </div>
+      </TabList>
 
       {tab === "terminal" ? (
         <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5" role="group" aria-label="Terminal instances">
@@ -361,11 +378,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             size="sm"
             iconOnly
             aria-label="Open another terminal"
-            onClick={() => {
-              const id = `terminal-${Date.now()}`;
-              setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
-              setActiveTerminal(id);
-            }}
+            onClick={addTerminal}
           >
             <Plus size={13} />
           </Button>
@@ -373,13 +386,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       ) : null}
 
       <div className="cockpit-body">
-        <section
-          role="tabpanel"
-          id="panel-terminal"
-          aria-labelledby="tab-terminal"
-          hidden={tab !== "terminal"}
-          className="flex h-full min-h-0 flex-col"
-        >
+        <TabPanel value="terminal" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
           <ErrorBoundary label="Terminal">
             <Suspense fallback={<SkeletonRows rows={8} className="p-4" />}>
               {tab === "terminal" ? (
@@ -394,7 +401,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       <span className="min-w-0 flex-1 text-xs text-text-muted">
                         Not running — showing the last screen. Start it to take over the terminal.
                       </span>
-                      <Button variant="primary" size="sm" onClick={() => run("start")}>
+                      <Button variant="secondary" size="sm" onClick={() => run("start")}>
                         start
                       </Button>
                     </div>
@@ -410,39 +417,33 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               ) : null}
             </Suspense>
           </ErrorBoundary>
-        </section>
+        </TabPanel>
 
-        <section
-          role="tabpanel"
-          id="panel-files"
-          aria-labelledby="tab-files"
-          hidden={tab !== "files"}
-          className="h-full min-h-0"
-        >
+        <TabPanel value="files" className="h-full min-h-0" tabIndex={-1}>
           <ErrorBoundary label="Files">
             {tab === "files" ? <BrowseView workspaceId={workspaceId} /> : null}
           </ErrorBoundary>
-        </section>
+        </TabPanel>
 
-        <section
-          role="tabpanel"
-          id="panel-review"
-          aria-labelledby="tab-review"
-          hidden={tab !== "review"}
-          className="h-full min-h-0"
-        >
+        <TabPanel value="review" className="h-full min-h-0" tabIndex={-1}>
           <ErrorBoundary label="Review">
             <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
               {tab === "review" ? <DiffView workspaceId={workspaceId} /> : null}
             </Suspense>
           </ErrorBoundary>
-        </section>
+        </TabPanel>
 
-        <section role="tabpanel" id="panel-log" aria-labelledby="tab-log" hidden={tab !== "log"} className="h-full min-h-0">
+        <TabPanel value="log" className="h-full min-h-0" tabIndex={-1}>
           <ErrorBoundary label="Log">
             {tab === "log" ? <LogView key={workspaceId} workspaceId={workspaceId} /> : null}
           </ErrorBoundary>
-        </section>
+        </TabPanel>
+      </div>
+      </Tabs>
+
+      {/* Phones: the actions sit under the thumb, not in a wrapped header. */}
+      <div className="flex items-center gap-2 border-t border-line-subtle bg-surface-raised px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shell:hidden">
+        {actions}
       </div>
 
       <ConfirmDialog

@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Rocket, Terminal } from "@phosphor-icons/react";
-import { useApp } from "../store";
-import { Button, EmptyState, Panel } from "./ui";
+import { Button, EmptyState, PageHeader, Panel } from "./ui";
 import AgentInstaller from "./AgentInstaller";
 import { NewWorkspaceForm } from "./WorkspacesView";
 
@@ -37,7 +36,7 @@ function Step({
       <div className="mt-3">{children}</div>
       <div className="mt-3 flex justify-end border-t border-line-subtle pt-3">
         <Button variant="quiet" size="sm" onClick={onSkip}>
-          skip to command center
+          close the guide
         </Button>
       </div>
     </Panel>
@@ -50,22 +49,21 @@ function Step({
  * is fully usable with the guide closed or abandoned halfway.
  */
 export default function Onboarding() {
-  const navigate = useApp((s) => s.navigate);
   const [guide, setGuide] = useState(false);
 
-  const skip = () => navigate({ kind: "dashboard" });
+  // Nothing sits behind this screen on an empty server; leaving the guide
+  // returns to the empty state, and the first workspace swaps in the list.
+  const skip = () => setGuide(false);
 
   return (
     <div className="surface">
       <div className="surface-inner">
         {/* A route must expose exactly one <h1>; with no workspaces the surface
             below is an empty state, so the heading lives here. */}
-        <header className="mb-4">
-          <h1 className="surface-title">Workspaces</h1>
-          <p className="surface-description">
-            One task, one repository, one agent — each in its own isolated worktree.
-          </p>
-        </header>
+        <PageHeader
+          title="Workspaces"
+          description="One task, one repository, one agent — each in its own isolated worktree."
+        />
 
         <EmptyState
           icon={<Terminal size={18} />}
@@ -81,9 +79,6 @@ export default function Onboarding() {
               >
                 <Rocket size={15} weight="fill" />
                 get started
-              </Button>
-              <Button variant="quiet" onClick={skip}>
-                skip to command center
               </Button>
             </>
           }
@@ -133,7 +128,7 @@ export default function Onboarding() {
               </ul>
               <div className="mt-3">
                 <Button variant="primary" onClick={skip}>
-                  open the command center
+                  close the guide
                 </Button>
               </div>
             </Step>

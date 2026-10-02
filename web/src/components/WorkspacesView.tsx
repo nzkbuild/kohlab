@@ -1,24 +1,29 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowSquareOut,
+  CaretDown,
+  DotsThree,
   GithubLogo,
   LinkSimple,
   MagnifyingGlass,
   Play,
   Plus,
+  Robot,
   Rocket,
   Stop,
+  TerminalWindow,
   Trash,
 } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp } from "../store";
 import { announce } from "../lib/announce";
-import { withToast } from "../lib/actions";
+import { toastAction, withToast } from "../lib/actions";
 import { relativeTime } from "../lib/format";
 import { STATUS_LABEL, byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
 import { AGENT_CATALOG } from "../types";
 import type { Workspace } from "../types";
-import { Button, EmptyState, Field, Panel, StatusChip } from "./ui";
+import { Button, EmptyState, Field, Menu, MenuItem, MenuSub, PageHeader, Panel, StatusChip, Tab, TabList, TabPanel, Tabs } from "./ui";
+import { ActivityPanel, AgentsPanel, ReviewQueue } from "./HomePanels";
 import ConfirmDialog from "./ConfirmDialog";
 
 /* --------------------------------------------------------------- constants -- */
@@ -28,8 +33,6 @@ type Filter = WorkspaceStatus | "all";
 const FILTERS: Filter[] = ["all", "needs-review", "running", "committed", "stopped"];
 
 const FILTER_LABEL: Record<Filter, string> = { all: "all", ...STATUS_LABEL };
-
-const TABLE_PANEL_ID = "workspaces-table";
 
 /** A GitHub pick returns either "owner/name" or a full URL; clone needs the URL. */
 function asCloneUrl(repo: string): string {
@@ -242,9 +245,75 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   );
 }
 
+/* --------------------------------------------------------------- open menu -- */
+
+/**
+ * The page-level entry into existing work: a fresh shell or a relaunched agent
+ * in any workspace. Creating a workspace stays in the sidebar.
+ */
+function OpenMenu({ workspaces }: { workspaces: Workspace[] }) {
+  const navigate = useApp((s) => s.navigate);
+  const refresh = useApp((s) => s.refresh);
+  const setOpenShell = useApp((s) => s.setOpenShell);
+  // Most recently touched first: that is the one you are coming back to.
+  const recent = useMemo(
+    () => [...workspaces].sort((a, b) => (b.stopped ?? b.started ?? b.created) - (a.stopped ?? a.started ?? a.created)),
+    [workspaces],
+  );
+
+  const openTerminal = (id: string) => {
+    setOpenShell(id);
+    navigate({ kind: "workspace", id });
+  };
+
+  const runAgent = async (w: Workspace) => {
+    const action = w.running ? "restart" : "start";
+    try {
+      await toastAction(w.id, action);
+      await refresh();
+      announce(`${w.id} agent ${action === "start" ? "starting" : "restarting"}`);
+      navigate({ kind: "workspace", id: w.id });
+    } catch {
+      /* toastAction already reported the reason */
+    }
+  };
+
+  return (
+    <Menu
+      label="Open a terminal or agent"
+      trigger={
+        <Button variant="primary" disabled={workspaces.length === 0}>
+          <TerminalWindow size={15} weight="bold" />
+          open…
+          <CaretDown size={12} weight="bold" />
+        </Button>
+      }
+    >
+      <MenuSub label="Terminal in" icon={<TerminalWindow size={14} />}>
+        {recent.map((w) => (
+          <MenuItem key={w.id} onSelect={() => openTerminal(w.id)}>
+            <span className="mono">{w.id}</span>
+          </MenuItem>
+        ))}
+      </MenuSub>
+      <MenuSub label="Agent in" icon={<Robot size={14} />}>
+        {recent.map((w) => (
+          <MenuItem key={w.id} onSelect={() => void runAgent(w)}>
+            <span className="mono flex-1">{w.id}</span>
+            <span className="text-xs text-text-faint">{w.running ? "restart" : w.agent}</span>
+          </MenuItem>
+        ))}
+      </MenuSub>
+    </Menu>
+  );
+}
+
 /* -------------------------------------------------------------- the view -- */
 
-/** Browsable workspace list: search, status filter, per-row actions. */
+/**
+ * Home: the review queue first, then every workspace (search, status filter,
+ * per-row actions), then activity and agents as context.
+ */
 export default function WorkspacesView() {
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
@@ -252,7 +321,8 @@ export default function WorkspacesView() {
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [creating, setCreating] = useState(false);
+  const creating = useApp((s) => s.creating);
+  const setCreating = useApp((s) => s.setCreating);
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -276,16 +346,6 @@ export default function WorkspacesView() {
         .sort(byReviewFirst),
     [workspaces, filter, trimmedQuery],
   );
-
-  const filterRefs = useRef<Partial<Record<Filter, HTMLButtonElement | null>>>({});
-  const onFilterKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    if (step === 0) return;
-    event.preventDefault();
-    const next = FILTERS[(index + step + FILTERS.length) % FILTERS.length];
-    setFilter(next);
-    filterRefs.current[next]?.focus();
-  };
 
   const clearFilters = () => {
     setQuery("");
@@ -344,23 +404,23 @@ export default function WorkspacesView() {
   return (
     <div className="surface">
       <div className="surface-inner">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="surface-title">Workspaces</h1>
-            <p className="surface-description">
-              Every task an agent has been given on this server. Work waiting for review sorts to the top.
-            </p>
-          </div>
-          <Button
-            variant="primary"
-            aria-expanded={creating}
-            aria-controls="new-workspace"
-            onClick={() => setCreating((v) => !v)}
-          >
-            <Plus size={15} weight="bold" />
-            new workspace
-          </Button>
+        <PageHeader
+          title="Workspaces"
+          description="Every task an agent has been given on this server. Work waiting for review comes first."
+          actions={<OpenMenu workspaces={workspaces} />}
+        />
+
+        <div id="new-workspace">
+          {creating ? (
+            <div className="mt-4">
+              <NewWorkspaceForm onCancel={() => setCreating(false)} />
+            </div>
+          ) : null}
         </div>
+
+        <ReviewQueue workspaces={workspaces} />
+
+        <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)} className="mt-6">
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <div className="relative min-w-56 flex-1">
@@ -383,34 +443,16 @@ export default function WorkspacesView() {
           </span>
         </div>
 
-        <div className="tabstrip mt-3" role="tablist" aria-label="Filter workspaces by status">
-          {FILTERS.map((option, index) => (
-            <button
-              key={option}
-              type="button"
-              role="tab"
-              id={`workspaces-tab-${option}`}
-              ref={(el) => {
-                filterRefs.current[option] = el;
-              }}
-              aria-selected={filter === option}
-              aria-controls={TABLE_PANEL_ID}
-              tabIndex={filter === option ? 0 : -1}
-              className="tab"
-              onClick={() => setFilter(option)}
-              onKeyDown={(event) => onFilterKey(event, index)}
-            >
+        <TabList label="Filter workspaces by status">
+          {FILTERS.map((option) => (
+            <Tab key={option} value={option}>
               {FILTER_LABEL[option]}
               <span className="tnum text-2xs text-text-muted">{counts[option]}</span>
-            </button>
+            </Tab>
           ))}
-        </div>
+        </TabList>
 
-        <div id="new-workspace" className="mt-3">
-          {creating ? <NewWorkspaceForm onCancel={() => setCreating(false)} /> : null}
-        </div>
-
-        <div id={TABLE_PANEL_ID} role="tabpanel" aria-labelledby={`workspaces-tab-${filter}`} className="mt-3">
+        <TabPanel value={filter} className="mt-3" tabIndex={-1}>
           {workspaces.length === 0 ? (
             <Panel>
               <EmptyState
@@ -527,20 +569,49 @@ export default function WorkspacesView() {
                     <p className="mono mt-1 truncate text-2xs text-text-muted" title={w.repo}>
                       {w.agent} · {w.repo}
                     </p>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="mt-3 w-full"
-                      onClick={() => navigate({ kind: "workspace", id: w.id })}
-                    >
-                      <ArrowSquareOut size={14} />
-                      open
-                    </Button>
+                    <div className="mt-3 flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => navigate({ kind: "workspace", id: w.id })}
+                      >
+                        <ArrowSquareOut size={14} />
+                        open
+                      </Button>
+                      <Menu
+                        label={`More actions for ${w.id}`}
+                        trigger={
+                          <Button variant="secondary" size="sm" iconOnly>
+                            <DotsThree size={16} weight="bold" />
+                          </Button>
+                        }
+                      >
+                        <MenuItem onSelect={() => void toggle(w)}>
+                          {w.running ? <Stop size={14} /> : <Play size={14} />}
+                          {w.running ? "stop" : "start"}
+                        </MenuItem>
+                        <MenuItem onSelect={() => void share(w)}>
+                          <LinkSimple size={14} />
+                          copy share link
+                        </MenuItem>
+                        <MenuItem tone="danger" onSelect={() => setPendingDelete(w)}>
+                          <Trash size={14} />
+                          delete
+                        </MenuItem>
+                      </Menu>
+                    </div>
                   </li>
                 ))}
               </ul>
             </>
           )}
+        </TabPanel>
+        </Tabs>
+
+        <div className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-2">
+          <ActivityPanel workspaces={workspaces} />
+          <AgentsPanel />
         </div>
       </div>
 
