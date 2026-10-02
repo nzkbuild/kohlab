@@ -9,6 +9,14 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.21.1] - 2026-10-02
+
+### Changed
+- `web/dist` is no longer committed. `install.sh` and `update.sh` already build it, so updates stop colliding with a locally built copy.
+
+### Added
+- GitHub Actions workflow that builds the dashboard and runs `scripts/check-all.mjs` on every push to main and every pull request.
+
 ## [1.21.0] - 2026-10-02
 
 ### Changed
