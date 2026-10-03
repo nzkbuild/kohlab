@@ -26,7 +26,8 @@ function banner(text) {
 
 function run(name, cmd, args, cwd = ROOT) {
   const started = Date.now();
-  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: process.env });
+  // A hung check must fail by name, not hold the whole run (and a CI runner) forever.
+  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: process.env, timeout: 300_000 });
   const out = `${res.stdout ?? ""}${res.stderr ?? ""}`;
   const ok = res.status === 0;
   const ms = Date.now() - started;

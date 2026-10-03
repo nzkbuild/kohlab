@@ -195,6 +195,10 @@ done
 exit 0
 `);
   chmodSync(join(bin, "bun"), 0o755);
+  // Not root (CI): the updater restarts through `sudo systemctl`, and real sudo
+  // would reset PATH and reach the real systemctl.
+  write(join(bin, "sudo"), `#!/usr/bin/env bash\nexec "$@"\n`);
+  chmodSync(join(bin, "sudo"), 0o755);
   chmodSync(join(bin, "systemctl"), 0o755);
   write(killmode, "process");
 
