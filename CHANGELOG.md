@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.22.1] - 2026-10-03
+
+### Added
+- GitHub Actions workflow: builds the dashboard and runs `scripts/check-all.mjs` on every push to main and every pull request.
+
 ## [1.22.0] - 2026-10-03
 
 ### Added
