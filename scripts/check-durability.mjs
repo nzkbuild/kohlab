@@ -5,7 +5,7 @@
 // than half-read, a backup must restore, and the health endpoint must tell the
 // truth about the daemon. Each is run against real files and a real server.
 import { spawn, spawnSync } from "child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -130,9 +130,13 @@ check("the files it replaced were kept, not deleted", aside.length >= 1, true);
 
 // A path in the archive must be refused: that is a write outside the state dir.
 const evil = join(tmpdir(), `kohlab-evil-${Date.now()}.tar.gz`);
-writeFileSync(join(dir, "escape"), "x");
-spawnSync("tar", ["czf", evil, "-C", tmpdir(), ".."], { encoding: "utf8" });
-rmSync(join(dir, "escape"));
+// Archive `..` of a small directory of our own. `..` of tmpdir() is the whole
+// filesystem on a machine whose tmpdir is /tmp, which is a hang, not a check.
+const evilRoot = mkdtempSync(join(tmpdir(), "kohlab-evilsrc-"));
+mkdirSync(join(evilRoot, "inner"));
+writeFileSync(join(evilRoot, "escape"), "x");
+spawnSync("tar", ["czf", evil, "-C", join(evilRoot, "inner"), ".."], { encoding: "utf8" });
+rmSync(evilRoot, { recursive: true, force: true });
 const evilResult = cli("restore", evil);
 check("an archive with a path in it is refused", evilResult.status !== 0, true);
 rmSync(evil, { force: true });

@@ -56,7 +56,7 @@ try {
   const as = (script: string) =>
     sh("runuser", ["-u", name, "--", "sh", "-c", script], { HOME: acct.home });
   const w = as(`cd '${ws.path}' && echo hi > f && git add f && git -c user.name=a -c user.email=a@a commit -qm agent`);
-  check("the account can commit in its tree (repo is under /root)", w.status === 0, w.stderr);
+  check("the account can commit in its tree (repo is under /root)", w.status === 0, `${w.stderr}\n${sh("namei", ["-l", ws.path]).stdout}`);
   check("the account cannot read root's home", as("ls /root").status !== 0);
 
   check("root's git reads the tree it does not own", sh("git", ["-C", ws.path, "-c", "safe.directory=*", "status", "--porcelain"]).status === 0);
