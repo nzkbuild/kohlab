@@ -126,13 +126,13 @@ export default function Sidebar({ open, onClose }: Props) {
             const status = workspaceStatus(workspace);
             const selected = route.kind === "workspace" && route.id === workspace.id;
             return (
-              <Tooltip key={workspace.id} content={`${workspace.id}, ${STATUS_LABEL[status]}`} disabled={!collapsed}>
+              <Tooltip key={workspace.id} content={`${workspace.task || workspace.id}, ${STATUS_LABEL[status]}`} disabled={!collapsed}>
               <button
                 type="button"
                 className="sidebar-row"
                 data-selected={selected}
                 aria-current={selected ? "page" : undefined}
-                aria-label={`${workspace.id}, ${STATUS_LABEL[status]}`}
+                aria-label={`${workspace.task || workspace.id}, ${STATUS_LABEL[status]}`}
                 onClick={() => navigate({ kind: "workspace", id: workspace.id })}
               >
                 <span
@@ -140,9 +140,12 @@ export default function Sidebar({ open, onClose }: Props) {
                   aria-hidden="true"
                 />
                 <span className="sidebar-label flex-1">
-                  <span className="mono block truncate text-xs text-text-primary">{workspace.id}</span>
+                  <span className="block truncate text-xs text-text-primary" title={workspace.id}>
+                    {workspace.task || workspace.id}
+                  </span>
                   <span className="block truncate text-xs text-text-muted">
-                    {workspace.agent} · {STATUS_LABEL[status]}
+                    {workspace.agent}
+                    {status === "running" ? "" : ` · ${STATUS_LABEL[status]}`}
                   </span>
                 </span>
               </button>

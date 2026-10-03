@@ -392,9 +392,11 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           <span className="chip-dot" aria-hidden="true" />
           {SOCKET_LABEL[socket]}
         </span>
-        <span className="truncate">
-          {socket === "live" ? "attached to the agent's pty · shift+drag to select" : socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
-        </span>
+        {socket === "live" ? null : (
+          <span className="truncate">
+            {socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
+          </span>
+        )}
         <div className="flex-1" />
         <input
           ref={fileInputRef}

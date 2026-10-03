@@ -317,16 +317,15 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       <header className="cockpit-head flex-wrap">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex min-w-0 items-center gap-2">
-            {/* The workspace id IS this route's page identity, so it carries the
-                single <h1> rather than leaving the route headingless. */}
-            <h1 className="mono m-0 shrink-0 text-lg font-semibold text-text-primary">{w.id}</h1>
+            {/* The task is what the person named; the id is only a handle, so the
+                task carries the single <h1> and the id drops to the line below. */}
+            <h1 className="m-0 min-w-0 truncate text-lg font-semibold text-text-primary" title={w.task || w.id}>
+              {w.task || w.id}
+            </h1>
             <StatusChip status={st} />
-            <span className="mono min-w-0 truncate text-2xs text-text-faint" title={w.path}>
-              {w.path}
-            </span>
           </div>
-          <p className="min-w-0 truncate text-xs text-text-muted" title={w.task}>
-            {w.task}
+          <p className="mono min-w-0 truncate text-2xs text-text-faint" title={`${w.id} · ${w.path}`}>
+            {w.id} · …/{w.path.split("/").slice(-2).join("/")}
           </p>
         </div>
 
@@ -395,11 +394,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <Button
             variant="quiet"
             size="sm"
-            iconOnly
-            aria-label="Open another terminal"
             onClick={addTerminal}
+            title="Open a plain shell in this workspace's folder"
           >
-            <Plus size={13} />
+            <Plus size={13} aria-hidden="true" />
+            shell
           </Button>
         </div>
       ) : null}
