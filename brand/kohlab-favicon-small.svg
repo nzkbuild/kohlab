@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" role="img" aria-label="Kohlab favicon small">
+  <title>Kohlab small — joined leg, no pinch gap</title>
+  <!-- 16px variant: the 2.2u detach gap is ~1.1px and pinches shut.
+       Here the lower leg connects solid (joined K), the dot is dropped:
+       reads as K at tab size, full mark takes over at 24px+. -->
+  <rect x="2.5" y="1.5" width="3" height="13" rx="0.9" fill="currentColor"/>
+  <path d="M5.5 8.2 12.6 2.8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M5.5 8.2 12.6 13.6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+</svg>

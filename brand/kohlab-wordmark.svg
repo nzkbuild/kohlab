@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 32" fill="none" role="img" aria-label="Kohlab wordmark">
+  <title>kohlab — stroke wordmark</title>
+  <!-- Mono-line geometric lowercase, same grammar as the mark:
+       stroke 4.2, round caps/joins, x-height 10→24, ascenders to 5.
+       No <text>: portable paths, renders identically everywhere. -->
+  <g stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- k -->
+    <path d="M6 5v19"/>
+    <path d="M6 16.5 15.5 10"/>
+    <path d="M6 16.5 14.5 24"/>
+    <!-- o -->
+    <ellipse cx="27.5" cy="17" rx="6.5" ry="7"/>
+    <!-- h -->
+    <path d="M41 5v19"/>
+    <path d="M41 17.5c0-5 10-5 10 0v6.5"/>
+    <!-- l -->
+    <path d="M60 5v19"/>
+    <!-- a -->
+    <ellipse cx="74.5" cy="17.5" rx="6" ry="6.5"/>
+    <path d="M81.5 11v13"/>
+    <!-- b -->
+    <path d="M91 5v19"/>
+    <ellipse cx="99" cy="17.5" rx="6" ry="6.5"/>
+  </g>
+  <!-- session dot: the detach, same as the mark -->
+  <circle cx="158" cy="24.5" r="3.4" fill="currentColor"/>
+  <path d="M113 17.5h32" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none" role="img" aria-label="Kohlab social cover">
+  <title>Kohlab — sessions that outlive the connection</title>
+  <rect width="1200" height="630" fill="#0A0A0B"/>
+  <rect x="24.5" y="24.5" width="1151" height="581" stroke="#26262B" stroke-width="1"/>
+  <!-- mark, large, white, joined K + detached session dot -->
+  <g fill="#FAFAFA" stroke="#FAFAFA">
+    <rect x="116" y="200" width="55" height="230" rx="16"/>
+    <path d="M171 332 316 216" stroke-width="55" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M171 332 270 398" stroke-width="55" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="344" cy="412" r="34" stroke="none"/>
+  </g>
+  <!-- wordmark as stroke paths (same grammar as mark), NOT <text>. Captions below stay as text: they are copy, not brand geometry. -->
+  <g transform="translate(430,272) scale(3.2)" stroke="#FAFAFA" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M6 5v19"/>
+    <path d="M6 16.5 15.5 10"/>
+    <path d="M6 16.5 14.5 24"/>
+    <ellipse cx="27.5" cy="17" rx="6.5" ry="7"/>
+    <path d="M41 5v19"/>
+    <path d="M41 17.5c0-5 10-5 10 0v6.5"/>
+    <path d="M60 5v19"/>
+    <ellipse cx="74.5" cy="17.5" rx="6" ry="6.5"/>
+    <path d="M81.5 11v13"/>
+    <path d="M91 5v19"/>
+    <ellipse cx="99" cy="17.5" rx="6" ry="6.5"/>
+  </g>
+  <g fill="#FAFAFA">
+    <circle cx="936" cy="350.4" r="10.9"/>
+  </g>
+  <path d="M797.6 328H900" stroke="#FAFAFA" stroke-width="13.4" stroke-linecap="round"/>
+  <text x="432" y="412" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="30" letter-spacing="-0.01em" fill="#A1A1AA">sessions that outlive the connection</text>
+  <line x1="116" y1="500" x2="1084" y2="500" stroke="#3F3F46" stroke-width="1"/>
+  <text x="116" y="540" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="24" fill="#71717A">$ kohlab new . "ship it" --agent omp  →  running ●</text>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Kohlab mark">
+  <title>Kohlab — session dot</title>
+  <!-- K stem = terminal cursor bar. Upper arm = branch splitting off.
+       Lower leg detaches into a dot = the session that outlives the connection. -->
+  <rect x="6" y="5" width="4.6" height="22" rx="1.4" fill="currentColor"/>
+  <path d="M10.6 16.4 23 6.6" stroke="currentColor" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10.6 16.4 19.2 22" stroke="currentColor" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="24.8" cy="26.8" r="2.9" fill="currentColor"/>
+</svg>

@@ -1,0 +1,71 @@
+/**
+ * Kohlab monochrome brand tokens — PARALLEL KIT, NOT WIRED IN.
+ *
+ * Decision (2026-09-22): brand kit ships first as new files in brand/.
+ * The live UI keeps its graphite + acid-lime tokens (web/src/index.css)
+ * until the migration pass. Nothing here is imported anywhere yet.
+ *
+ * Direction: Linear/Vercel quiet. Near-black canvas, hairline borders,
+ * one white accent. Status is glyph + label, never colour-only
+ * (contract §8 / SC 1.4.1), so monochrome status works by construction.
+ *
+ * OKLCH neutrals: equal-L steps read as equal weight; hue is near-zero so
+ * the ramp stays neutral under any white balance. White accent is oklch(1 0 0)
+ * only for fills on near-black; status text tokens sit at L≈0.9 so the chip
+ * LABEL clears 4.5:1 on its own tinted ground.
+ */
+
+:root {
+  /* --- primitive: zinc neutrals (hue 286, trace chroma, Linear-like) --- */
+  --mono-1000: oklch(0.145 0.002 286); /* canvas       */
+  --mono-950: oklch(0.175 0.002 286);  /* raised       */
+  --mono-900: oklch(0.205 0.003 286);  /* overlay      */
+  --mono-800: oklch(0.255 0.003 286);  /* dividers     */
+  --mono-700: oklch(0.315 0.004 286);
+  --mono-600: oklch(0.53 0.005 286);   /* control edge */
+  --mono-500: oklch(0.64 0.005 286);
+  --mono-400: oklch(0.72 0.005 286);
+  --mono-300: oklch(0.81 0.004 286);
+  --mono-100: oklch(0.97 0.001 286);   /* primary ink  */
+
+  /* --- semantic: surfaces (same plane grammar as index.css) --- */
+  --mono-surface-base: var(--mono-1000);
+  --mono-surface-sunken: oklch(0.125 0.002 286);
+  --mono-surface-raised: var(--mono-950);
+  --mono-surface-overlay: var(--mono-900);
+  --mono-surface-hover: var(--mono-900);
+  --mono-surface-active: var(--mono-800);
+
+  /* --- semantic: text --- */
+  --mono-text-primary: var(--mono-100);
+  --mono-text-secondary: var(--mono-300);
+  --mono-text-muted: var(--mono-400);
+  --mono-text-faint: var(--mono-500);
+  --mono-text-on-accent: oklch(0.18 0.002 286);
+
+  /* --- semantic: lines (borders only; forced-colors deletes box-shadow) --- */
+  --mono-line-subtle: var(--mono-800);
+  --mono-line-strong: var(--mono-600);
+  --mono-line-accent: var(--mono-100);
+
+  /* --- semantic: status — label-legible in monochrome.
+     In the live lime system these carry hue; here weight + glyph do the work:
+     running = solid fill, review = diamond outline weight, committed = check,
+     stopped = hollow. The SVG sprite (kohlab-status.svg) is the source. --- */
+  --mono-status-running: oklch(0.97 0.001 286);
+  --mono-status-review: oklch(0.81 0.004 286);
+  --mono-status-committed: oklch(0.72 0.005 286);
+  --mono-status-stopped: oklch(0.53 0.005 286);
+  --mono-status-danger: oklch(0.82 0.14 25); /* destructive keeps red: never monochrome */
+
+  /* --- accent: Vercel rule — the primary action is a white fill --- */
+  --mono-accent: var(--mono-100);
+  --mono-accent-hover: oklch(1 0 0);
+  --mono-accent-press: var(--mono-300);
+
+  /* --- type: system stack, zero bytes, no FOUT (same as live) --- */
+  --mono-font-sans: system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --mono-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}

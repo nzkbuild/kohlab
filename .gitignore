@@ -13,3 +13,9 @@ ROADMAP.md
 
 # built by install.sh / update.sh
 web/dist/
+
+# local tool state, not part of the product
+.codex/
+.grok/
+.impeccable/
+docs/omp-stability.md

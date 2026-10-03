@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120" fill="none" role="img" aria-label="Kohlab empty state">
+  <title>no work yet — the session dot waits</title>
+  <!-- Geometry only: hairline terminal frame, prompt bar, detached session dot.
+       No gradients, no sketch strokes, no feTurbulence. currentColor inherits text. -->
+  <rect x="48.5" y="16.5" width="143" height="88" rx="10" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/>
+  <line x1="48.5" y1="40.5" x2="191.5" y2="40.5" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/>
+  <circle cx="64" cy="28.5" r="3" fill="currentColor" fill-opacity="0.32"/>
+  <circle cx="77" cy="28.5" r="3" fill="currentColor" fill-opacity="0.32"/>
+  <circle cx="90" cy="28.5" r="3" fill="currentColor" fill-opacity="0.32"/>
+  <!-- K-dot mark, centered, the only solid ink -->
+  <g fill="currentColor">
+    <rect x="106" y="54" width="7" height="34" rx="2"/>
+    <path d="M118.4 71.2 134 55.4" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M118.4 71.2 127.4 80.2" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="140.5" cy="85.5" r="4.4" stroke="none"/>
+  </g>
+</svg>

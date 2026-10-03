@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 208 32" fill="none" role="img" aria-label="Kohlab logo">
+  <title>Kohlab</title>
+  <!-- mark: joined K (no mush gap), detached session dot (deliberate ~2.2u gap) -->
+  <g fill="currentColor">
+    <rect x="6" y="5" width="4.6" height="22" rx="1.4"/>
+    <path d="M10.6 16.4 23 6.6" stroke="currentColor" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M10.6 16.4 19.2 22" stroke="currentColor" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="24.8" cy="26.8" r="2.9" stroke="none"/>
+  </g>
+  <!-- wordmark: stroke paths, same grammar as mark (4.2, round). No <text>. -->
+  <g transform="translate(36,0)" stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M6 5v19"/>
+    <path d="M6 16.5 15.5 10"/>
+    <path d="M6 16.5 14.5 24"/>
+    <ellipse cx="27.5" cy="17" rx="6.5" ry="7"/>
+    <path d="M41 5v19"/>
+    <path d="M41 17.5c0-5 10-5 10 0v6.5"/>
+    <path d="M60 5v19"/>
+    <ellipse cx="74.5" cy="17.5" rx="6" ry="6.5"/>
+    <path d="M81.5 11v13"/>
+    <path d="M91 5v19"/>
+    <ellipse cx="99" cy="17.5" rx="6" ry="6.5"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="196" cy="24.5" r="3.4"/>
+  </g>
+  <path d="M149 17.5h32" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/>
+</svg>

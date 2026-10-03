@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" role="img" aria-label="Kohlab favicon">
+  <title>Kohlab</title>
+  <rect x="2.5" y="1.5" width="3" height="13" rx="0.9" fill="currentColor"/>
+  <path d="M7.4 8.2 12.6 2.8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M7.4 8.2 10.4 11.2" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="12.8" cy="13.4" r="1.9" fill="currentColor"/>
+</svg>

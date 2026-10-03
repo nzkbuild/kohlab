@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 72" fill="none" role="img" aria-label="Kohlab stacked lockup">
+  <title>Kohlab stacked</title>
+  <g fill="currentColor">
+    <rect x="53.7" y="4" width="4.6" height="22" rx="1.4"/>
+    <path d="M58.3 15.4 71.7 5.6" stroke="currentColor" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M58.3 15.4 66.9 21" stroke="currentColor" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="72.5" cy="25.8" r="2.9" stroke="none"/>
+  </g>
+  <g transform="translate(13,38) scale(0.56)" stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M6 5v19"/>
+    <path d="M6 16.5 15.5 10"/>
+    <path d="M6 16.5 14.5 24"/>
+    <ellipse cx="27.5" cy="17" rx="6.5" ry="7"/>
+    <path d="M41 5v19"/>
+    <path d="M41 17.5c0-5 10-5 10 0v6.5"/>
+    <path d="M60 5v19"/>
+    <ellipse cx="74.5" cy="17.5" rx="6" ry="6.5"/>
+    <path d="M81.5 11v13"/>
+    <path d="M91 5v19"/>
+    <ellipse cx="99" cy="17.5" rx="6" ry="6.5"/>
+  </g>
+  <g transform="translate(13,38) scale(0.56)" fill="currentColor">
+    <circle cx="158" cy="24.5" r="3.4"/>
+  </g>
+  <path d="M76.3 47.6h17.9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

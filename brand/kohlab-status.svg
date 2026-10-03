@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 24" fill="none" role="img" aria-label="Kohlab workspace status glyphs">
+  <title>status: running, needs review, committed, discarded, stopped</title>
+  <g fill="currentColor">
+    <path d="M11 5.5v13l11-6.5z"/>
+    <rect x="34" y="7" width="10" height="10" rx="1" transform="rotate(45 39 12)"/>
+    <path d="M60.5 12.5l3.2 3.2 6.3-6.7 1.8 1.7-8.1 8.6-5-5z"/>
+    <path d="M84 8.2l1.7 1.7-3.3 3.3 3.3 3.3-1.7 1.7-3.4-3.3-3.3 3.3-1.7-1.7 3.3-3.3-3.3-3.3 1.7-1.7 3.3 3.3z"/>
+    <rect x="102" y="8" width="8" height="8" rx="1.5"/>
+  </g>
+</svg>
