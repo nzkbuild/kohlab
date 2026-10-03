@@ -9,6 +9,14 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.22.0] - 2026-10-03
+
+### Added
+- `KOHLAB_AGENT_USER` and `kohlab agent-user`: run your own agents as an unprivileged account instead of root. Opt-in, new workspaces only (see docs/isolation.md).
+
+### Fixed
+- The server's git can now read trees owned by another account (Review, commit and merge in a member's workspace failed with "dubious ownership").
+
 ## [1.21.2] - 2026-10-03
 
 ### Changed

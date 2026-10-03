@@ -81,3 +81,28 @@ as the server user. Only provisioned members get isolation.
   read other users' processes' memory). If that stops being acceptable, the
   roadmap's next rung is `bwrap` per session.
 - Cross-user quotas beyond per-workspace caps.
+
+## Running your own agents unprivileged (v1.22)
+
+Members are isolated; the owner's agents used to run as the server user, which
+on most installs is root. Set `KOHLAB_AGENT_USER` and workspaces created from
+then on run their agent as that account instead.
+
+```
+sudo kohlab agent-user                 # creates `kohlab-agent` (idempotent)
+sudo -u kohlab-agent -i claude         # sign the agent in as that account, once
+sudo systemctl edit kohlab             # [Service]  Environment=KOHLAB_AGENT_USER=kohlab-agent
+sudo systemctl restart kohlab
+```
+
+- **New workspaces only.** Existing ones keep running as they do now; the flag is
+  stored on each workspace when it is created.
+- **Repos under `/root` still work.** The account gets search-only access to the
+  path leading to the repo (it cannot list `/root`) and read/write on that repo's
+  git directory, through ACLs. This needs the `acl` package (`apt install acl`).
+- **Its own credentials.** The account has its own home, so it needs its own agent
+  login and, to push, its own `gh auth login`. Root's tokens are not shared with it.
+- **Git as root.** The server runs git with `safe.directory=*` so it can diff,
+  commit and merge in trees the account owns.
+- **Turning it off** (unset the variable) puts new workspaces back on the server
+  user. Workspaces already flagged fall back to the server user too.

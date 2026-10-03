@@ -2,6 +2,7 @@
 
 import { serve } from "bun";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
+import type { Workspace } from "./types";
 import { execFile, spawn } from "child_process";
 import { chown, mkdir, open, readdir, readFile, realpath, stat, writeFile } from "fs/promises";
 import { dirname } from "path";
@@ -26,7 +27,7 @@ import {
   discardWorkspace,
   worktreePath,
   imagesDir,
-  readUsers,
+  identityOf,
   spawnAgentSession,
   // ensurePtySession() calls markStarted() to record a browser-attach as a real
   // run. The call existed but the import did not, so the first terminal attach
@@ -659,10 +660,10 @@ async function insideTree(tree: string, rel: string, forWrite: boolean): Promise
 const MAX_FILE_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 /** A member's agent runs as their own OS user, so what the server writes is theirs. */
-async function giveToOwner(ownerId: string | undefined, ...paths: string[]) {
-  const owner = ownerId ? readUsers().find((u) => u.id === ownerId) : undefined;
-  if (owner?.uid === undefined || owner.gid === undefined) return;
-  for (const p of paths) await chown(p, owner.uid, owner.gid);
+async function giveToOwner(ws: Workspace, ...paths: string[]) {
+  const who = identityOf(ws);
+  if (!who) return;
+  for (const p of paths) await chown(p, who.uid, who.gid);
 }
 
 /** Download a file as bytes, or a folder as .tar.gz. */
@@ -703,7 +704,7 @@ async function handleFs(id: string, req: Request): Promise<Response> {
     const parent = dirname(abs);
     if (op === "mkdir") {
       await mkdir(abs, { recursive: true });
-      await giveToOwner(ws.ownerId, abs);
+      await giveToOwner(ws, abs);
       return json({ ok: true, path: rel });
     }
     if (op === "touch" || op === "upload") {
@@ -714,7 +715,7 @@ async function handleFs(id: string, req: Request): Promise<Response> {
       if (bytes.length > MAX_FILE_UPLOAD_BYTES) return json({ error: "file exceeds 100 MiB" }, 413);
       await mkdir(parent, { recursive: true });
       await writeFile(abs, bytes);
-      await giveToOwner(ws.ownerId, abs);
+      await giveToOwner(ws, abs);
       return json({ ok: true, path: rel, bytes: bytes.length });
     }
     return json({ error: "op must be mkdir, touch or upload" }, 400);
@@ -752,11 +753,7 @@ async function handleImageUpload(id: string, req: Request): Promise<Response> {
     await Bun.write(imagePath, bytes);
     // A member's agent runs as their own OS user; a root-owned file in a 0700
     // root-owned folder would be unreadable to it.
-    const owner = workspace.ownerId ? readUsers().find((u) => u.id === workspace.ownerId) : undefined;
-    if (owner?.uid !== undefined && owner.gid !== undefined) {
-      await chown(imageDir, owner.uid, owner.gid);
-      await chown(imagePath, owner.uid, owner.gid);
-    }
+    await giveToOwner(workspace, imageDir, imagePath);
     return json({ path: imagePath, mimeType: mimeType ?? "application/octet-stream", bytes: bytes.length });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);

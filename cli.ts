@@ -34,6 +34,7 @@ import {
   ptyLog,
   sessionId,
   checkRelease,
+  ensureAgentUser,
 } from "./lib";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -234,6 +235,22 @@ async function main() {
       const users = listUsers();
       if (users.length === 0) console.log("no users yet. add one: kohlab user add <id>");
       for (const u of users) console.log(`${u.id.padEnd(16)} ${u.role.padEnd(8)} ${u.name}`);
+      break;
+    }
+    case "agent-user": {
+      const name = args[0] ?? "kohlab-agent";
+      try {
+        const u = await ensureAgentUser(name);
+        console.log(`account '${name}' is ready (uid ${u.uid}, home ${u.home})`);
+        console.log(`  1. sign the agent in as that account, once:  sudo -u ${name} -i claude`);
+        console.log(`     (and  sudo -u ${name} -i gh auth login  if its agents push to GitHub)`);
+        console.log(`  2. sudo systemctl edit ${UNIT}   and add:  [Service]  Environment=KOHLAB_AGENT_USER=${name}`);
+        console.log(`  3. sudo systemctl restart ${UNIT}`);
+        console.log("New workspaces then run as that account; existing ones keep running as they do now.");
+      } catch (e) {
+        console.error((e as Error).message);
+        process.exit(1);
+      }
       break;
     }
     case "merge": {
@@ -566,6 +583,7 @@ access
   users                                      list team members
   user add <id> [--name 'N'] [--role R]      add one (owner|member|viewer)
   user rm <id>                               revoke one
+  agent-user [name]                          set up the unprivileged account agents run as (root)
   audit                                      the mutation audit trail
   backup [file.tar.gz]                       state, users, audit trail -> one archive
   restore <file.tar.gz>                      put an archive back (previous files are kept)

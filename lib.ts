@@ -3,9 +3,9 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "fs/promises";
-import { basename, join } from "path";
+import { basename, dirname, join } from "path";
 import { randomBytes } from "crypto";
 import { spawn, spawnSync } from "child_process";
 import { cwd } from "process";
@@ -161,6 +161,63 @@ export async function provisionOsUser(u: User): Promise<{ osUser: string; uid?: 
   return { osUser, uid, gid: uid, home };
 }
 
+// --- the agent user (v1.22) ------------------------------------------------
+// A root server would otherwise run every owner agent as root. With
+// KOHLAB_AGENT_USER set, workspaces created from then on run their agent as that
+// unprivileged account instead; existing ones are left exactly as they are.
+
+const AGENT_USER = process.env.KOHLAB_AGENT_USER ?? "";
+
+export function agentIdentity(): { name: string; uid: number; gid: number; home: string } | null {
+  if (!AGENT_USER || !isRoot()) return null;
+  const u = lookupUser(AGENT_USER);
+  return u ? { name: AGENT_USER, ...u } : null;
+}
+
+/** Whose uid/gid a workspace's agent runs as, and who owns the files kohlab writes for it. */
+export function identityOf(ws: Workspace): { uid: number; gid: number; home: string } | undefined {
+  if (ws.ownerId) {
+    const o = readUsers().find((u) => u.id === ws.ownerId);
+    return o?.uid !== undefined && o.gid !== undefined ? { uid: o.uid, gid: o.gid, home: o.home ?? "" } : undefined;
+  }
+  return ws.asAgent ? agentIdentity() ?? undefined : undefined;
+}
+
+/**
+ * Let `user` walk to a repo and use its git store, without handing over anything
+ * else. The path must be searchable (x only, so nothing is listed), and the git
+ * dir needs read/write for the account, with a default entry so what root
+ * creates there later (a merge, a new worktree) stays usable by the agent.
+ */
+async function grantAgentAccess(user: string, repo: string): Promise<void> {
+  const gitDir = (await runOut(repo, "git", ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
+  for (let p = dirname(gitDir); p !== "/"; p = dirname(p)) {
+    if (statSync(p).mode & 0o001) continue; // already searchable by everyone
+    runCmd("setfacl", ["-m", `u:${user}:x`, p]);
+  }
+  runCmd("setfacl", ["-R", "-m", `u:${user}:rwX`, gitDir]);
+  runCmd("setfacl", ["-R", "-d", "-m", `u:${user}:rwX`, gitDir]);
+}
+
+/** Create the agent account (idempotent). Run as root, by `kohlab agent-user`. */
+export async function ensureAgentUser(name: string): Promise<{ uid: number; home: string }> {
+  if (!isRoot()) throw new Error("run this as root");
+  if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(name)) throw new Error(`'${name}' is not a valid account name`);
+  runCmd("setfacl", ["--version"]); // fails with a clear message when the acl package is missing
+  let u = lookupUser(name);
+  if (!u) {
+    runCmd("useradd", ["-m", "-u", String(nextFreeUid()), "-U", "-s", "/bin/bash", name]);
+    u = lookupUser(name);
+    if (!u) throw new Error(`useradd ${name} did not create the account`);
+  }
+  // Git refuses another account's repositories unless told otherwise; the agent
+  // works in trees it owns but pushes through a store root created.
+  const cfg = join(u.home, ".gitconfig");
+  runCmd("git", ["config", "--file", cfg, "safe.directory", "*"]);
+  runCmd("chown", [`${u.uid}:${u.gid}`, cfg]);
+  return { uid: u.uid, home: u.home };
+}
+
 /** Remove a member's OS account and its home tree. Best-effort, safe for dev. */
 export async function deprovisionOsUser(osUser: string): Promise<{ removed: boolean; detail?: string }> {
   if (!isRoot()) {
@@ -200,7 +257,7 @@ export async function deprovisionOsUser(osUser: string): Promise<{ removed: bool
 export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols = 120, rows = 36): Promise<string> {
   const s = await loadState();
   const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
-  const owner = ws.ownerId ? readUsers().find((u) => u.id === ws.ownerId) : undefined;
+  const who = identityOf(ws);
   const sessId = sessionId(ws.id, terminalId);
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
     "open",
@@ -213,9 +270,9 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
       meta: { workspace: ws.id, terminal: terminalId },
       limits: ws.limits ?? {},
       // the daemon spawns the agent as this user when present (v1.8)
-      uid: owner?.uid,
-      gid: owner?.gid,
-      home: owner?.home,
+      uid: who?.uid,
+      gid: who?.gid,
+      home: who?.home,
     },
     "open-result",
   );
@@ -1491,6 +1548,7 @@ export async function createWorkspace(opts: {
       stopped: null,
       ownerId,
       dir,
+      asAgent: !isolated && !!agentIdentity() ? true : undefined,
       payload: opts.payload,
       limits: opts.limits,
     };
@@ -1530,6 +1588,11 @@ export async function createWorkspace(opts: {
     const gitDir = join(tree, ".git");
     if (existsSync(gitDir) && !(await stat(gitDir)).isDirectory()) {
       await run(repo!, "git", ["worktree", "repair", tree]);
+    }
+    const agent = ws.asAgent ? agentIdentity() : null;
+    if (agent) {
+      await grantAgentAccess(agent.name, repo!);
+      await run("", "chown", ["-R", agent.name, dir]);
     }
   }
 
@@ -1920,9 +1983,14 @@ export async function mergeWorkspace(
 
 // --- process helpers -----------------------------------------------------
 
+/** Trees an agent account owns are "dubious" to root's git; the server is the one that must read them. */
+function gitArgs(cmd: string, args: string[]): string[] {
+  return cmd === "git" ? ["-c", "safe.directory=*", ...args] : args;
+}
+
 function run(cwdArg: string, cmd: string, args: string[]): Promise<void> {
   const { promise, resolve, reject } = Promise.withResolvers<void>();
-  const p = spawn(cmd, args, { cwd: cwdArg, stdio: ["ignore", "ignore", "inherit"] });
+  const p = spawn(cmd, gitArgs(cmd, args), { cwd: cwdArg, stdio: ["ignore", "ignore", "inherit"] });
   p.on("error", reject);
   p.on("close", (code) => {
     if (code === 0) resolve();
@@ -1939,7 +2007,7 @@ function runOut(
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const { promise, resolve, reject } =
     Promise.withResolvers<{ stdout: string; stderr: string; code: number | null }>();
-  const p = spawn(cmd, args, { cwd: cwdArg, stdio: ["ignore", "pipe", "pipe"] });
+  const p = spawn(cmd, gitArgs(cmd, args), { cwd: cwdArg, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   let err = "";
   p.stdout.on("data", (d) => (out += d));

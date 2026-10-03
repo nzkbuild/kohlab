@@ -19,6 +19,10 @@ export interface Workspace {
   dir?: string;
   /** kohlab user id who created the workspace ("" = legacy/anonymous/root) */
   ownerId?: string;
+  /** The agent runs as the dedicated KOHLAB_AGENT_USER account, not as the
+   *  server (root). Set at creation, so turning the setting on never changes a
+   *  workspace that already exists. */
+  asAgent?: boolean;
   /** read-only share token; link is <host>/?share=<token> */
   share?: string;
   /** optional resource caps applied to the agent's PTY session */

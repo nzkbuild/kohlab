@@ -94,6 +94,7 @@ try {
   // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);
+  run("agent user (root)", "bun", ["scripts/check-agent-user.ts"]);
   run("invitations (root)", "node", ["scripts/check-invite.mjs"]);
   run("backend types", join(ROOT, "node_modules/.bin/tsc"), ["--noEmit"]);
   run("frontend types", join(ROOT, "web/node_modules/.bin/tsc"), ["--noEmit"], join(ROOT, "web"));
