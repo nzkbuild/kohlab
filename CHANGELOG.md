@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.24.0] - 2026-10-03
+
+### Added
+- Push notifications: a finished agent reaches your phone with the browser closed. Settings, Notifications, "Turn on push" (on iPhone, add Kohlab to the Home Screen first). Messages are encrypted for the device (RFC 8291, checked against the RFC's own test vector) and signed with a server key (VAPID). See docs/push.md.
+- Kohlab is installable: web manifest, icons and a Home Screen title.
+
+### Changed
+- `kohlab backup` and the updater's pre-update backup include the push key and subscribed devices.
+
 ## [1.23.1] - 2026-10-03
 
 ### Fixed

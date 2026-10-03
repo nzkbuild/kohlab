@@ -713,7 +713,7 @@ function tar(args: string[]): { status: number | null; stdout: string; stderr: s
  */
 export async function backupTo(target: string): Promise<{ path: string; bytes: number; entries: string[] }> {
   await mkdir(WORKS_DIR, { recursive: true });
-  const entries = [STATE_FILE, USERS_FILE, AUDIT_FILE, KEY_FILE].filter((f) => existsSync(f));
+  const entries = [STATE_FILE, USERS_FILE, AUDIT_FILE, KEY_FILE, join(WORKS_DIR, "vapid.json"), join(WORKS_DIR, "push.json")].filter((f) => existsSync(f));
   if (!entries.length) throw new Error(`nothing to back up in ${WORKS_DIR}`);
   const res = tar(["czf", target, "--", ...entries.map((f) => f.slice(WORKS_DIR.length + 1))]);
   if (res.status !== 0) throw new Error(`tar failed: ${res.stderr.trim() || res.status}`);

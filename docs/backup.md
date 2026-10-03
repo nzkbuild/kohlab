@@ -11,6 +11,7 @@ Everything Kohlab knows lives in its state directory (`kohlab status` prints it;
 | `users.json` | Every member account and role. Keys are hashes, so a restore restores the *same* keys |
 | `audit.log` | The mutation history |
 | `key` | The generated access key, when the server made one |
+| `vapid.json`, `push.json` | The push key and the phones subscribed to it. Lose them and every phone has to turn push on again |
 
 **Your actual code is not in there.** Each workspace is a git worktree or a bare
 clone of a repository that lives somewhere else. Back that up the way you already

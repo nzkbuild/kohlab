@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 import Account from "./Account";
 import AgentInstaller from "./AgentInstaller";
 import Team from "./Team";
+import PushToggle from "./PushToggle";
 import UpdatePanel from "./UpdatePanel";
 import { Button, Chip, PageHeader, Panel } from "./ui";
 
@@ -114,6 +115,10 @@ export default function Settings() {
               </div>
             ) : null}
           </div>
+        </div>
+
+        <div className="border-t border-line-subtle pt-4">
+          <PushToggle />
         </div>
 
         <div className="border-t border-line-subtle pt-4">

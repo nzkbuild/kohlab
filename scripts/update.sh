@@ -214,7 +214,7 @@ step "3/5  download, $CURRENT ← $UPSTREAM"
 # afterwards until you delete it.
 if [ -n "$UNIT_WORKS" ] && [ -d "$UNIT_WORKS" ]; then
   KEEP=""
-  for f in state.json users.json audit.log; do
+  for f in state.json users.json audit.log vapid.json push.json; do
     if [ -f "$UNIT_WORKS/$f" ]; then KEEP="$KEEP $f"; fi
   done
   if [ -n "$KEEP" ]; then

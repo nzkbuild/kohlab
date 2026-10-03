@@ -68,6 +68,7 @@ import {
   setUserRole,
   canProvisionOsUsers,
 } from "./lib";
+import { findSub, notifyDone, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -128,6 +129,7 @@ onWorkspaceDone((ws) => {
     if (c.readyState === WebSocket.OPEN) c.send(msg);
   }
   containFailure(notifyWebhook(ws), "notify webhook");
+  containFailure(notifyDone(ws), "web push");
 });
 
 /**
@@ -1070,6 +1072,36 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
      * health endpoint should not be a reconnaissance surface. With credentials it
      * reports the detail an operator wants at 3am.
      */
+    // Web Push: this device asks to hear when an agent finishes. A share link is
+    // read-only access to one workspace and never subscribes.
+    if (path.startsWith("/api/push/")) {
+      const refused = gate(auth?.kind !== "share");
+      if (refused) return refused;
+      if (path === "/api/push/key" && req.method === "GET") return json({ key: vapidKey().publicKey });
+      if (req.method === "POST") {
+        const b = (await req.json().catch(() => ({}))) as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+        if (typeof b.endpoint !== "string" || !/^https:\/\//.test(b.endpoint)) return json({ error: "endpoint must be an https URL" }, 400);
+        if (path === "/api/push/subscribe") {
+          if (!b.keys?.p256dh || !b.keys?.auth) return json({ error: "keys.p256dh and keys.auth are required" }, 400);
+          subscribe({ endpoint: b.endpoint, p256dh: b.keys.p256dh, auth: b.keys.auth, userId: actorUserId ?? "", role });
+          return json({ ok: true });
+        }
+        if (path === "/api/push/unsubscribe") {
+          unsubscribe(b.endpoint);
+          return json({ ok: true });
+        }
+        if (path === "/api/push/test") {
+          const sub = findSub(b.endpoint);
+          if (!sub) return json({ error: "this device is not subscribed" }, 404);
+          try {
+            await sendPush(sub, { title: "kohlab", body: "Push works on this device.", tag: "kohlab-test", url: "/" });
+            return json({ ok: true });
+          } catch (e) {
+            return json({ error: (e as Error).message }, 502);
+          }
+        }
+      }
+    }
     if (path === "/api/health" && req.method === "GET") {
       const state = await loadState();
       // Without credentials, answer "the process is alive" and nothing else. No

@@ -160,6 +160,25 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
     }),
+  pushKey: () => json<{ key: string }>("/api/push/key"),
+  pushSubscribe: (sub: PushSubscriptionJSON) =>
+    json<{ ok: true }>("/api/push/subscribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(sub),
+    }),
+  pushUnsubscribe: (endpoint: string) =>
+    json<{ ok: true }>("/api/push/unsubscribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    }),
+  pushTest: (endpoint: string) =>
+    json<{ ok: true }>("/api/push/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    }),
   setRole: (id: string, role: string) =>
     json<{ user: TeamUser }>(`/api/users/${encodeURIComponent(id)}`, {
       method: "PATCH",
