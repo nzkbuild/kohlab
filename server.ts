@@ -1297,6 +1297,9 @@ const socketHandlers: WebSocketHandler<any> = {
             // `msg.id` narrowing into a callback.
             const attachId = msg.id;
             const attachTerminal = msg.terminalId;
+            // A terminal socket carries raw bytes. Left in the push set it was
+            // sent {"type":"workspace.done"}, which the terminal printed.
+            pushClients.delete(ws);
             // open/spawn before subscribe so the replay never misses the first bytes
             containFailure(
               ensurePtySession(attachId, attachTerminal)

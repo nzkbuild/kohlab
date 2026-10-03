@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.23.1] - 2026-10-03
+
+### Fixed
+- `{"type":"workspace.done",...}` was printed into open terminals. A socket that has attached to a session now receives terminal bytes only; the dashboard still gets the message.
+
 ## [1.23.0] - 2026-10-03
 
 ### Added
