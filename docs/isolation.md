@@ -100,6 +100,11 @@ sudo systemctl restart kohlab
 - **Repos under `/root` still work.** The account gets search-only access to the
   path leading to the repo (it cannot list `/root`) and read/write on that repo's
   git directory, through ACLs. This needs the `acl` package (`apt install acl`).
+- **Agents installed under `/root`.** `kohlab agent-user` opens the way to each configured
+  agent's binary (search-only), so `claude` runs as the account. A launcher script written
+  for root (one that locks files in `/run/lock`, reads `/root/.tmux.conf` or `/root/.bun`)
+  will not run as another account; keep those on root, or use an agent that installs
+  per user.
 - **Its own credentials.** The account has its own home, so it needs its own agent
   login and, to push, its own `gh auth login`. Root's tokens are not shared with it.
 - **Git as root.** The server runs git with `safe.directory=*` so it can diff,

@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.24.1] - 2026-10-03
+
+### Fixed
+- `kohlab agent-user` now opens the way to each agent's binary, so an agent installed under `/root` (claude) can run as the account.
+
 ## [1.24.0] - 2026-10-03
 
 ### Added

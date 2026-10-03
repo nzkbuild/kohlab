@@ -189,16 +189,19 @@ export function identityOf(ws: Workspace): { uid: number; gid: number; home: str
  * dir needs read/write for the account, with a default entry so what root
  * creates there later (a merge, a new worktree) stays usable by the agent.
  */
+/** Search-only access (x, never r) to every directory above `target` that is not already open to all. */
+function grantTraverse(user: string, target: string): void {
+  for (let p = dirname(target); p !== "/"; p = dirname(p)) {
+    if (statSync(p).mode & 0o001) continue;
+    runCmd("setfacl", ["-m", `u:${user}:x`, p]);
+  }
+}
+
 async function grantAgentAccess(user: string, repo: string, workspaceDir: string): Promise<void> {
   const gitDir = (await runOut(repo, "git", ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
   // The way to the repo AND the way to the workspace: the state directory is
   // often 0700, and the workspace is the one place the agent must be able to enter.
-  for (const target of [gitDir, workspaceDir]) {
-    for (let p = dirname(target); p !== "/"; p = dirname(p)) {
-      if (statSync(p).mode & 0o001) continue; // already searchable by everyone
-      runCmd("setfacl", ["-m", `u:${user}:x`, p]);
-    }
-  }
+  for (const target of [gitDir, workspaceDir]) grantTraverse(user, target);
   runCmd("setfacl", ["-R", "-m", `u:${user}:rwX`, gitDir]);
   runCmd("setfacl", ["-R", "-d", "-m", `u:${user}:rwX`, gitDir]);
 }
@@ -213,6 +216,12 @@ export async function ensureAgentUser(name: string): Promise<{ uid: number; home
     runCmd("useradd", ["-m", "-u", String(nextFreeUid()), "-U", "-s", "/bin/bash", name]);
     u = lookupUser(name);
     if (!u) throw new Error(`useradd ${name} did not create the account`);
+  }
+  // An agent installed under /root (claude is) is unreachable until the way to it
+  // is searchable. Only the path, never the listing.
+  for (const cmd of Object.values((await loadState()).agents)) {
+    const bin = spawnSync("sh", ["-c", `command -v ${JSON.stringify(cmd.split(/\s+/)[0])}`], { encoding: "utf8" }).stdout.trim();
+    if (bin) grantTraverse(name, spawnSync("readlink", ["-f", bin], { encoding: "utf8" }).stdout.trim() || bin);
   }
   // Git refuses another account's repositories unless told otherwise; the agent
   // works in trees it owns but pushes through a store root created.
