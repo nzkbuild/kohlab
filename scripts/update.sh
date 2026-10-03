@@ -221,6 +221,9 @@ if [ -n "$UNIT_WORKS" ] && [ -d "$UNIT_WORKS" ]; then
     BACKUP="$(dirname "$UNIT_WORKS")/kohlab-state-$STAMP.tgz"
     # shellcheck disable=SC2086
     tar czf "$BACKUP" -C "$UNIT_WORKS" $KEEP && log "state backed up → $BACKUP"
+    # Keep the five newest; a backup per update otherwise piles up forever.
+    # shellcheck disable=SC2012
+    ls -1t "$(dirname "$UNIT_WORKS")"/kohlab-state-*.tgz 2>/dev/null | tail -n +6 | xargs -r rm -f
   fi
 else
   warn "no WORKS_DIR found (unit not installed?), skipping the state backup"

@@ -218,7 +218,10 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
       {/* Sidebar-like pane, but the same pane header as the rest: same height,
           padding, border and title treatment. */}
       <header className="cockpit-head">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">Files</h2>
+        {/* The tab header above already says "Files"; this keeps the heading for
+            screen readers and lets the buttons sit at the end. */}
+        <h2 className="sr-only">File tree</h2>
+        <div className="flex-1" />
         {can.mutate ? (
           <>
             <Button variant="quiet" size="sm" iconOnly aria-label="new file" title="new file" onClick={() => setCreating("file")}>

@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.25.1] - 2026-10-03
+
+### Changed
+- The terminal chip says "connected" instead of "live", which read as "the agent is running" even on a stopped workspace.
+- The Files tab no longer shows the word "Files" twice.
+- The updater keeps the five newest pre-update state backups instead of one per update.
+
 ## [1.25.0] - 2026-10-03
 
 ### Changed

@@ -27,7 +27,7 @@ type SocketState = "connecting" | "live" | "reconnecting" | "offline";
 
 const SOCKET_LABEL: Record<SocketState, string> = {
   connecting: "connecting",
-  live: "live",
+  live: "connected",
   reconnecting: "reconnecting",
   offline: "offline",
 };
