@@ -539,7 +539,7 @@ export default function DiffView({ workspaceId }: Props) {
           </label>
           <input
             id="commit-message"
-            className="field-input min-w-48 flex-1"
+            className="field-input min-w-48 basis-full flex-1 shell:basis-auto"
             value={message}
             placeholder={defaultMessage}
             disabled={files.length === 0 || committing || discarding}
@@ -548,12 +548,13 @@ export default function DiffView({ workspaceId }: Props) {
           {/* The two halves of the review decision, side by side. Discard used
               to not exist, so the only way to reject an agent's work was to
               delete the workspace and its worktree. */}
-          <Button variant="danger" disabled={!canDiscard} onClick={() => setConfirming("discard")}>
+          <Button variant="danger" className="flex-1 shell:flex-none" disabled={!canDiscard} onClick={() => setConfirming("discard")}>
             <ArrowUUpLeft size={14} aria-hidden="true" />
             {discarding ? "discarding…" : "discard"}
           </Button>
           <Button
             variant="primary"
+            className="flex-1 shell:flex-none"
             disabled={!canCommit}
             aria-busy={committing}
             onClick={() => setConfirming("commit")}
@@ -574,9 +575,12 @@ export default function DiffView({ workspaceId }: Props) {
             be taken back. It used to be the faintest thing on the pane, sitting
             under the loudest. */}
         <p className="mt-1.5 max-w-prose text-xs leading-relaxed text-text-secondary">
-          Commit stages every file in this workspace (<span className="mono">git add -A</span>) and is
-          final, Kohlab cannot undo, amend or un-commit it. Discard throws the changes away and keeps
-          the workspace.
+          <span className="shell:hidden">Commit is final: Kohlab cannot undo it. Discard keeps the workspace.</span>
+          <span className="hidden shell:inline">
+            Commit stages every file in this workspace (<span className="mono">git add -A</span>) and is
+            final, Kohlab cannot undo, amend or un-commit it. Discard throws the changes away and keeps
+            the workspace.
+          </span>
         </p>
         {commitError ? (
           <p role="alert" className="mt-1.5 break-words text-xs text-status-danger">

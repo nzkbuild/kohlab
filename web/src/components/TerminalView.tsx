@@ -84,6 +84,8 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
   const term = new Terminal({
     cursorBlink: true,
     fontFamily: monoFont(el),
+    // A phone fits ~38 columns at the desktop size, too few for an agent's TUI.
+    ...(window.matchMedia("(max-width: 40rem)").matches ? { fontSize: 12 } : {}),
     lineHeight: 1.45,
     // Agent TUIs turn on mouse tracking, which swallows a plain drag. Shift+drag
     // still selects everywhere; on macOS the convention is Option+click.
@@ -133,6 +135,18 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
   return { term, fit };
 }
 
+/** [label, bytes, accessible name] */
+const TERMINAL_KEYS: [string, string, string][] = [
+  ["esc", "\x1b", "Escape"],
+  ["tab", "\t", "Tab"],
+  ["⇧tab", "\x1b[Z", "Shift Tab"],
+  ["^C", "\x03", "Control C"],
+  ["↑", "\x1b[A", "Up arrow"],
+  ["↓", "\x1b[B", "Down arrow"],
+  ["←", "\x1b[D", "Left arrow"],
+  ["→", "\x1b[C", "Right arrow"],
+];
+
 export default function TerminalView({ workspaceId, terminalId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -142,6 +156,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
   const reconnectRef = useRef<() => void>(() => {});
   const termRef = useRef<Terminal | null>(null);
   const attachRef = useRef<(files: File[]) => void>(() => {});
+  const keyRef = useRef<(value: string) => void>(() => {});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [socket, setSocket] = useState<SocketState>("connecting");
 
@@ -182,6 +197,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
       announce(`attached ${paths.length} file${paths.length === 1 ? "" : "s"}`);
     };
     attachRef.current = (files) => void sendFiles(files);
+    keyRef.current = sendInput;
     // Returning false keeps a key from the pty. Ctrl/Cmd+C copies only when
     // there is a selection, so with nothing selected it still interrupts the
     // agent; Ctrl+Shift+C always copies, as in desktop terminals. keydown only:
@@ -464,6 +480,23 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
           aria-describedby={descId}
           className="terminal-wrap"
         />
+      </div>
+      {/* Phones have no Esc, Tab or arrows, and an agent's TUI needs all of them.
+          Shown on touch devices only; pressing a key must not take focus from the
+          terminal, or the on-screen keyboard closes with every tap. */}
+      <div className="termkeys" role="toolbar" aria-label="terminal keys">
+        {TERMINAL_KEYS.map(([label, value, name]) => (
+          <button
+            key={name}
+            type="button"
+            className="termkey"
+            aria-label={name}
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => keyRef.current(value)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       <p id={descId} className="sr-only">
         Interactive terminal. Keystrokes are sent to the agent&apos;s process; output is not

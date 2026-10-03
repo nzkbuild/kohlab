@@ -50,6 +50,7 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
           variant="quiet"
           size="sm"
           iconOnly
+          className="hidden shell:inline-flex"
           aria-pressed={showTree}
           aria-label={showTree ? "hide file tree" : "show file tree"}
           onClick={() => setShowTree((v) => !v)}
@@ -60,12 +61,12 @@ export default function BrowseView({ workspaceId }: { workspaceId: string }) {
 
       <div className="flex min-h-0 flex-1">
         {showTree ? (
-          <div className="w-64 min-w-64 border-r border-line-subtle">
+          <div className={cn("w-full shell:w-64 shell:min-w-64 shell:border-r border-line-subtle", openFile && "hidden shell:block")}>
             <FileTree workspaceId={workspaceId} onOpenFile={setOpenFile} />
           </div>
         ) : null}
 
-        <div className="min-w-0 flex-1">
+        <div className={cn("min-w-0 flex-1", !openFile && showTree && "hidden shell:block")}>
           {openFile ? (
             <Suspense fallback={<SkeletonRows rows={12} className="p-4" />}>
               <CodeView key={openFile} workspaceId={workspaceId} filePath={openFile} onBack={() => setOpenFile(null)} />

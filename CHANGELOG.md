@@ -9,6 +9,14 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.23.0] - 2026-10-03
+
+### Added
+- Terminal key bar on touch devices: esc, tab, shift+tab, ctrl+C and the arrows, which a phone keyboard does not have. Tapping a key does not close the on-screen keyboard.
+
+### Changed
+- Phones: smaller terminal type (about 47 columns instead of 38), a compact review footer, the Files tree and file viewer take turns instead of sharing a narrow screen, the workspace title wraps to two lines, Settings sections fade at the edge to show they scroll, and toasts sit above the bottom action bar.
+
 ## [1.22.2] - 2026-10-03
 
 ### Fixed

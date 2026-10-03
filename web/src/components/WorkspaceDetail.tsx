@@ -319,7 +319,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <div className="flex min-w-0 items-center gap-2">
             {/* The task is what the person named; the id is only a handle, so the
                 task carries the single <h1> and the id drops to the line below. */}
-            <h1 className="m-0 min-w-0 truncate text-lg font-semibold text-text-primary" title={w.task || w.id}>
+            <h1 className="m-0 min-w-0 line-clamp-2 break-words text-lg font-semibold text-text-primary shell:truncate" title={w.task || w.id}>
               {w.task || w.id}
             </h1>
             <StatusChip status={st} />

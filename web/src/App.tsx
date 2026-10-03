@@ -80,6 +80,7 @@ export default function App() {
       <Toaster
         theme="dark"
         position="bottom-right"
+        mobileOffset={{ bottom: "4.75rem" }}
         toastOptions={{
           style: {
             background: "var(--surface-overlay)",
