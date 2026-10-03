@@ -59,7 +59,7 @@ try {
   check("the account can commit in its tree (repo is under /root)", w.status === 0, w.stderr);
   check("the account cannot read root's home", as("ls /root").status !== 0);
 
-  check("root can read the tree it does not own", git(ws.path, "status", "--porcelain").status !== 0 /* dubious without -c */);
+  check("root's git reads the tree it does not own", sh("git", ["-C", ws.path, "-c", "safe.directory=*", "status", "--porcelain"]).status === 0);
   const m = await lib.mergeWorkspace(ws.id, {}).then(() => null, (e: Error) => e.message);
   check("root can merge the agent's commit into the repo", m === null, String(m));
   check("the merged file is in the repo", existsSync(join(repo, "f")));
