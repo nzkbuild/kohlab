@@ -78,3 +78,33 @@ history is bad; refusing to record new events is worse.
 
 Each roll writes an `audit.rotated` event into the new log, so a gap in the file
 is explained rather than mysterious.
+
+## Off the machine
+
+A backup on the same disk does not survive the disk. `scripts/backup-offbox.sh` makes the
+archive and copies it to another machine, over `rsync` (ssh) or `rclone`:
+
+```
+KOHLAB_BACKUP_DEST=you@other-host:backups/kohlab/ bash scripts/backup-offbox.sh
+KOHLAB_BACKUP_VIA=rclone KOHLAB_BACKUP_DEST=myremote:kohlab bash scripts/backup-offbox.sh
+```
+
+To run it nightly, two small systemd units (adjust the path and destination):
+
+```
+# /etc/systemd/system/kohlab-backup.service
+[Service]
+Type=oneshot
+Environment=KOHLAB_BACKUP_DEST=you@other-host:backups/kohlab/
+ExecStart=/bin/bash /root/kohlab/scripts/backup-offbox.sh
+
+# /etc/systemd/system/kohlab-backup.timer
+[Timer]
+OnCalendar=daily
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+Then `systemctl enable --now kohlab-backup.timer`. The root account needs an ssh key that the
+other machine accepts. Archives pile up there until you prune them.

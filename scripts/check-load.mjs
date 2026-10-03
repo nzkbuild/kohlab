@@ -88,6 +88,23 @@ try {
     }
   }
 
+  // The dashboard's own files: compressed for a phone, and cached when hashed.
+  if (statSync("web/dist/index.html", { throwIfNoEntry: false })) {
+    const assets = (await (await fetch(`${base}/`)).text()).match(/\/assets\/index-[\w-]+\.js/)?.[0];
+    if (assets) {
+      const raw = statSync(`web/dist${assets}`).size;
+      const br = await fetch(base + assets, { headers: { "accept-encoding": "br" } });
+      const body = await br.arrayBuffer();
+      check("static JS is sent brotli-compressed", br.headers.get("content-encoding") === "br");
+      check("and decodes to the same bytes", body.byteLength === raw, `${body.byteLength} vs ${raw}`);
+      check("a hashed asset is cached for a year", /max-age=31536000.*immutable/.test(br.headers.get("cache-control") ?? ""));
+      const gz = await fetch(base + assets, { headers: { "accept-encoding": "gzip" } });
+      await gz.arrayBuffer();
+      check("a gzip-only client gets gzip", gz.headers.get("content-encoding") === "gzip");
+      check("index.html is always revalidated", (await fetch(`${base}/`)).headers.get("cache-control") === "no-cache");
+    }
+  }
+
   // Warm, then measure: the first request pays for the state file's first read.
   await (await fetch(`${base}/api/workspaces`, { headers: auth })).arrayBuffer();
   await (await fetch(`${base}/api/workspaces`, { headers: auth })).arrayBuffer();

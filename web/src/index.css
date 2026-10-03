@@ -1514,3 +1514,14 @@ button:disabled {
     padding-inline-end: 2rem;
   }
 }
+/* Tables on a phone: tighter cells, and a role dropdown wide enough to read. */
+@media (max-width: 40rem) {
+  .data-table td,
+  .data-table thead th,
+  .data-table tbody th {
+    padding-inline: 0.5rem;
+  }
+  .data-table .field-select {
+    min-width: 6.5rem;
+  }
+}

@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.25.0] - 2026-10-03
+
+### Changed
+- The dashboard's files are sent brotli or gzip compressed, and hashed assets are cached for a year. Opening a diff no longer downloads 2.7 MB of editor over cellular: it is 0.6 MB, once.
+- Phones: the Team table's role dropdown is readable.
+
+### Added
+- `scripts/backup-offbox.sh` and a systemd timer recipe (docs/backup.md): copy `kohlab backup` to another machine over rsync or rclone.
+
 ## [1.24.1] - 2026-10-03
 
 ### Fixed

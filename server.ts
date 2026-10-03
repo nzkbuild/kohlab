@@ -4,6 +4,8 @@ import { serve } from "bun";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Workspace } from "./types";
 import { execFile, spawn } from "child_process";
+import { promisify } from "util";
+import { brotliCompress, constants as zlibConstants, gzip as gzipCb } from "zlib";
 import { chown, mkdir, open, readdir, readFile, realpath, stat, writeFile } from "fs/promises";
 import { dirname } from "path";
 import { isAbsolute, join, relative, resolve } from "path";
@@ -86,6 +88,8 @@ const VERSION = (() => {
 })();
 
 /** Browser push subscribers (dashboard pages). */
+const brotli = promisify(brotliCompress);
+const gzip = promisify(gzipCb);
 const pushClients = new Set<ServerWebSocket>();
 
 /**
@@ -1286,8 +1290,9 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
     const roots = [webDist, legacy];
     if (path === "/" || path === "/index.html") {
       for (const root of roots) {
-        const f = Bun.file(join(root, "index.html"));
-        if (f.size > 0) return new Response(f);
+        const file = join(root, "index.html");
+        const f = Bun.file(file);
+        if (f.size > 0) return staticResponse(f, file, req);
       }
     }
     for (const root of roots) {
@@ -1295,7 +1300,7 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
       const staticPath = resolve(root, "." + path);
       if (!staticPath.startsWith(resolve(root) + "/")) continue;
       const f = Bun.file(staticPath);
-      if (f.size > 0) return new Response(f);
+      if (f.size > 0) return staticResponse(f, staticPath, req);
     }
 
     // SPA history fallback. Client routes (/w/:id, /workspaces, /settings) have
@@ -1312,6 +1317,36 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
     }
     return new Response("not found", { status: 404 });
 }
+/**
+ * The dashboard's files, compressed and cached the way a phone needs.
+ *
+ * Monaco is 2.7 MB of JavaScript and was sent raw, uncached, to open a diff on
+ * cellular. Text assets go out brotli or gzip (compressed once, kept in memory
+ * until the file changes); names under /assets/ carry a content hash, so they
+ * are cached for a year, and the entry points (index.html, sw.js) are always
+ * revalidated so a new release is seen at once.
+ */
+const COMPRESSIBLE = /\.(js|css|html|svg|json|webmanifest|map|txt)$/;
+const packed = new Map<string, { mtime: number; enc: string; bytes: Uint8Array }>();
+async function staticResponse(f: ReturnType<typeof Bun.file>, file: string, req: Request): Promise<Response> {
+  const headers: Record<string, string> = {
+    "content-type": f.type,
+    "cache-control": /\/assets\/[^/]+-[\w-]{8}\./.test(file) ? "public, max-age=31536000, immutable" : "no-cache",
+    vary: "Accept-Encoding",
+  };
+  const accepts = req.headers.get("accept-encoding") ?? "";
+  const enc = !COMPRESSIBLE.test(file) ? "" : /\bbr\b/.test(accepts) ? "br" : /\bgzip\b/.test(accepts) ? "gzip" : "";
+  if (!enc) return new Response(f, { headers });
+  const key = `${enc}:${file}`;
+  let hit = packed.get(key);
+  if (!hit || hit.mtime !== f.lastModified) {
+    const raw = Buffer.from(await f.arrayBuffer());
+    const bytes = enc === "br" ? await brotli(raw, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 6 } }) : await gzip(raw);
+    packed.set(key, (hit = { mtime: f.lastModified, enc, bytes }));
+  }
+  return new Response(hit.bytes, { headers: { ...headers, "content-encoding": hit.enc } });
+}
+
 const socketHandlers: WebSocketHandler<any> = {
     open(ws) {
       // every dashboard page is a push subscriber
