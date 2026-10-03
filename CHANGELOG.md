@@ -9,6 +9,12 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.22.2] - 2026-10-03
+
+### Fixed
+- The agent user could not enter its workspace when the state directory is private (`0700`, as on a normal install). Found by CI, which now runs the whole suite as root.
+- The durability check archived the entire filesystem on machines whose temp dir is `/tmp`, and hung.
+
 ## [1.22.1] - 2026-10-03
 
 ### Added

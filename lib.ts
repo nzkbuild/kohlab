@@ -189,11 +189,15 @@ export function identityOf(ws: Workspace): { uid: number; gid: number; home: str
  * dir needs read/write for the account, with a default entry so what root
  * creates there later (a merge, a new worktree) stays usable by the agent.
  */
-async function grantAgentAccess(user: string, repo: string): Promise<void> {
+async function grantAgentAccess(user: string, repo: string, workspaceDir: string): Promise<void> {
   const gitDir = (await runOut(repo, "git", ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
-  for (let p = dirname(gitDir); p !== "/"; p = dirname(p)) {
-    if (statSync(p).mode & 0o001) continue; // already searchable by everyone
-    runCmd("setfacl", ["-m", `u:${user}:x`, p]);
+  // The way to the repo AND the way to the workspace: the state directory is
+  // often 0700, and the workspace is the one place the agent must be able to enter.
+  for (const target of [gitDir, workspaceDir]) {
+    for (let p = dirname(target); p !== "/"; p = dirname(p)) {
+      if (statSync(p).mode & 0o001) continue; // already searchable by everyone
+      runCmd("setfacl", ["-m", `u:${user}:x`, p]);
+    }
   }
   runCmd("setfacl", ["-R", "-m", `u:${user}:rwX`, gitDir]);
   runCmd("setfacl", ["-R", "-d", "-m", `u:${user}:rwX`, gitDir]);
@@ -1591,7 +1595,7 @@ export async function createWorkspace(opts: {
     }
     const agent = ws.asAgent ? agentIdentity() : null;
     if (agent) {
-      await grantAgentAccess(agent.name, repo!);
+      await grantAgentAccess(agent.name, repo!, dir);
       await run("", "chown", ["-R", agent.name, dir]);
     }
   }

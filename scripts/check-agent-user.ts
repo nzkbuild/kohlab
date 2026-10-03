@@ -9,7 +9,7 @@
  * and merge what it wrote.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const sh = (cmd: string, args: string[], env: Record<string, string> = {}) =>
@@ -31,6 +31,8 @@ const name = `kohlab-chk-${process.pid}`;
 const root = mkdtempSync("/root/.kohlab-chk-"); // under /root on purpose: the agent has to be able to reach it
 const works = join(root, "works");
 const repo = join(root, "repo");
+mkdirSync(works, { mode: 0o700 });
+chmodSync(works, 0o700); // the state dir is private on a real install, and the agent must still reach its workspace
 process.env.WORKS_DIR = works;
 process.env.KOHLAB_AGENT_USER = name;
 
