@@ -454,6 +454,14 @@ export async function addUser(opts: { id: string; name: string; role: Role }): P
   const key = [...keyBytes].map((b) => b.toString(16).padStart(2, "0")).join("");
   const users = readUsers();
   if (users.some((u) => u.id === opts.id)) throw new Error(`user '${opts.id}' already exists`);
+  // osUserName() lowercases, folds punctuation and truncates: 'alice' and
+  // 'Alice' (or two ids differing only past 24 slug characters) would
+  // otherwise provision/adopt the same OS account, so the two kohlab users
+  // end up with one shared uid, gid and home. Reject the collision instead
+  // of discovering it when one of them is removed and both lose their files.
+  if (users.some((u) => osUserName(u.id) === osUserName(opts.id))) {
+    throw new Error(`user id '${opts.id}' maps to the same OS account as an existing member; choose a different id`);
+  }
   const user: User = { id: opts.id, name: opts.name, role: opts.role, key: await hashKey(key) };
   users.push(user);
   await writeUsers(users);
@@ -518,6 +526,11 @@ export async function createInvite(opts: { id: string; name: string; role: Role;
   const users = readUsers();
   const existing = users.find((u) => u.id === id);
   if (existing?.key) throw new Error(`'${id}' is already a member, rotate their key or remove them instead`);
+  // Same OS-account-collision guard as addUser(): a different existing id
+  // must not map to this invite's OS account slug.
+  if (users.some((u) => u.id !== id && osUserName(u.id) === osUserName(id))) {
+    throw new Error(`user id '${id}' maps to the same OS account as an existing member; choose a different id`);
+  }
 
   const token = randomBytes(32).toString("hex");
   const expires = Date.now() + INVITE_TTL_MS;
@@ -1529,6 +1542,10 @@ export async function createWorkspace(opts: {
   url?: string;
 }): Promise<Workspace & { running: boolean; path: string }> {
   if (opts.branch !== undefined && !(await validBranch(opts.branch))) throw new Error(`not a valid branch name: ${opts.branch}`);
+  // `opts.url` reaches `git clone --bare` as root with safe.directory=*.
+  // handleClone validates it before calling in; checking again here means a
+  // future caller can't skip that the way handleCreate's own scheme regex did.
+  if (opts.url !== undefined && !validGitUrl(opts.url)) throw new Error("use an https://, ssh:// or git@ URL");
   const ownerId = opts.ownerId ?? "";
   const ownerUser = ownerId ? readUsers().find((u) => u.id === ownerId) : undefined;
   if (ownerId && !ownerUser) throw new Error(`no such user '${ownerId}'`);

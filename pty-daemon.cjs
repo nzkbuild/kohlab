@@ -30,6 +30,15 @@ try {
 const SOCKET = process.env.PTY_SOCKET || "/tmp/kohlab-pty.sock";
 const SESSIONS = new Map(); // id -> { pty, buffer: Buffer[], screen, serializer, exited }
 
+// The daemon inherits the server's full environment (KOHLAB_KEY,
+// NOTIFY_WEBHOOK, ...), because ensurePtyDaemon() in lib.ts spawns it with
+// no `env` option. That's fine for the daemon itself, but every PTY it opens
+// used to inherit the same environment, so a member or agent-user shell
+// (privilege-dropped to their own uid) could `printenv KOHLAB_KEY` and
+// authenticate as the owner. A PTY only needs an ordinary shell's basics,
+// never the server's secrets, so build its environment from an allowlist.
+const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "SHELL", "USER", "LOGNAME", "EDITOR", "PAGER", "COLORTERM"];
+
 /**
  * Last-resort containment.
  *
@@ -143,8 +152,10 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
   try {
     // v1.8: when the owner is provisioned, uid/gid drop privileges for the
     // whole PTY process tree and $HOME points at the owner's home.
-    const spawnEnv = { ...process.env, ...(env || {}) };
-    if (home) spawnEnv.HOME = home;
+    const spawnEnv = {};
+    for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) spawnEnv[k] = process.env[k];
+    Object.assign(spawnEnv, env || {});
+    spawnEnv.HOME = home || os.homedir();
     const p = pty.spawn(argv[0], argv.slice(1), {
       name: "xterm-256color",
       cols: cols || 80,

@@ -87,10 +87,17 @@ const VERSION = (() => {
   }
 })();
 
+// What `server.upgrade` binds to the socket (see the WebSocket branch of
+// `handle` below) and what `socketHandlers.message` reads back from
+// `ws.data`. A concrete type here (vs. `Server<any>`) is required for
+// `data` to type-check on `upgrade()`: with `any`, bun-types' conditional
+// overload resolves to the no-`data` branch instead of the `data`-required one.
+type WSData = { auth: Awaited<ReturnType<typeof authenticate>>; canMutate: boolean };
+
 /** Browser push subscribers (dashboard pages). */
 const brotli = promisify(brotliCompress);
 const gzip = promisify(gzipCb);
-const pushClients = new Set<ServerWebSocket>();
+const pushClients = new Set<ServerWebSocket<WSData>>();
 
 /**
  * Failed key attempts per address. A key is 24 random bytes, so guessing is
@@ -248,7 +255,11 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
   // `cwd()` was never imported here, so creating a workspace without an
   // explicit repo threw ReferenceError and killed the server.
   const repo = (body.repo ?? process.cwd()).trim();
-  const url = repo.match(/^[a-z]+:\/\//) ? repo : undefined;
+  // handleClone rejects anything but https://, ssh:// and git@ via
+  // validGitUrl; this matched any `scheme://` instead, so a member's
+  // repo:"file:///..." passed as a "URL" and reached `git clone` as root
+  // against any local path root's git can read.
+  const url = /^[a-z]+:\/\//.test(repo) && validGitUrl(repo) ? repo : undefined;
   // A named member may only create from a git URL: a host repo path would run
   // the agent in the legacy root-owned flow (privilege escalation) or reach
   // outside the member's home. Owners/anonymous keep the host-path flow.
@@ -851,7 +862,7 @@ function json(body: unknown, status = 200): Response {
 // this section only maps WS clients to sessions and fans terminal bytes out.
 
 /** WS client state per terminal: which session + ack subscription */
-const termClients = new Map<ServerWebSocket, string>();
+const termClients = new Map<ServerWebSocket<WSData>, string>();
 
 // register the fan-out handler once
 onDaemonMessage((msg) => {
@@ -891,7 +902,7 @@ onDaemonMessage((msg) => {
 const pendingResize = new Map<string, { cols: number; rows: number }>();
 
 /** Attach a ws client to a workspace's named PTY session. */
-function attachPty(ws: ServerWebSocket, id: string, terminalId = "main") {
+function attachPty(ws: ServerWebSocket<WSData>, id: string, terminalId = "main") {
   const sessId = sessionId(id, terminalId);
   termClients.set(ws, sessId);
   containFailure(ptySend({ type: "subscribe", id: sessId, replay: true }), `subscribe ${id}`);
@@ -943,7 +954,7 @@ async function ensurePtySession(id: string, terminalId = "main") {
 }
 
 // --- server --------------------------------------------------------------
-async function handle(req: Request, server: Server<any>): Promise<Response | undefined> {
+async function handle(req: Request, server: Server<WSData>): Promise<Response | undefined> {
     const url = new URL(req.url);
     const path = url.pathname;
     const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|log)$/);
@@ -1003,7 +1014,12 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
         .split(",")
         .map((p) => p.trim())
         .find((p) => p === "kohlab" || p.startsWith(KEY_PROTOCOL));
-      const upgradeOpts = offered ? { headers: { "sec-websocket-protocol": offered } } : undefined;
+      // Bind the identity resolved above to the socket: attach/resize/input
+      // used to trust any id a frame named, with no link back to who
+      // authenticated at the handshake. `auth`/`canMutate` travel in
+      // `ws.data` so every later frame can be checked against the caller
+      // that opened the connection, not just "some caller passed `denied`".
+      const upgradeOpts = { data: { auth, canMutate }, ...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
       if (server.upgrade(req, upgradeOpts)) return undefined;
     }
 
@@ -1202,9 +1218,12 @@ async function handle(req: Request, server: Server<any>): Promise<Response | und
     if (path === "/api/agents" && (req.method === "GET" || req.method === "POST")) {
       if (denied) return json({ error: "unauthorized" }, 401);
       // A launcher is a command that later runs in someone's workspace, and
-      // adding one writes state. Viewers read; this is not a read.
+      // the registry is global: a member who could add one could redefine
+      // `claude` or `sh` and have it run under every other member's PTY, or
+      // under root for owner/legacy workspaces. This is owner-only, not
+      // merely mutate-only.
       if (req.method === "POST") {
-        const refused = gate(canMutate, "forbidden, viewer cannot add agents");
+        const refused = gate(isOwner, "forbidden, only an owner can add agents");
         if (refused) return refused;
         containFailure(audit(actor, "agent.add"), "audit");
       }
@@ -1347,13 +1366,17 @@ async function staticResponse(f: ReturnType<typeof Bun.file>, file: string, req:
   return new Response(hit.bytes, { headers: { ...headers, "content-encoding": hit.enc } });
 }
 
-const socketHandlers: WebSocketHandler<any> = {
+const socketHandlers: WebSocketHandler<WSData> = {
     open(ws) {
       // every dashboard page is a push subscriber
       pushClients.add(ws);
     },
     message(ws, raw) {
       const str = String(raw);
+      // Bound to the socket at upgrade (see `server.upgrade` above). Absent
+      // only for a connection made before this check existed and surviving a
+      // hot reload; treat that as no access rather than trusting it.
+      const wsAuth = ws.data;
 
       // JSON control frames (attach/resize) vs raw terminal input
       if (str.startsWith("{")) {
@@ -1364,34 +1387,41 @@ const socketHandlers: WebSocketHandler<any> = {
             // `msg.id` narrowing into a callback.
             const attachId = msg.id;
             const attachTerminal = msg.terminalId;
-            // A terminal socket carries raw bytes. Left in the push set it was
-            // sent {"type":"workspace.done"}, which the terminal printed.
-            pushClients.delete(ws);
-            // open/spawn before subscribe so the replay never misses the first bytes
             containFailure(
-              ensurePtySession(attachId, attachTerminal)
-                .then(() => {
-                  // The session exists now: apply the size this client already
-                  // asked for, which may have been sent before the PTY existed.
-                  const sessId = sessionId(attachId, attachTerminal);
-                  const dims = pendingResize.get(sessId);
-                  if (!dims) return;
-                  return ptySend({ type: "resize", id: sessId, cols: dims.cols, rows: dims.rows });
-                })
-                .then(() => attachPty(ws, attachId, attachTerminal)),
+              mayAccessWorkspace(wsAuth?.auth ?? null, attachId).then((ok) => {
+                if (!ok) {
+                  ws.send(JSON.stringify({ type: "error", error: "forbidden, not your workspace" }));
+                  return;
+                }
+                // A terminal socket carries raw bytes. Left in the push set it
+                // was sent {"type":"workspace.done"}, which the terminal printed.
+                pushClients.delete(ws);
+                // open/spawn before subscribe so the replay never misses the first bytes
+                return ensurePtySession(attachId, attachTerminal)
+                  .then(() => {
+                    // The session exists now: apply the size this client already
+                    // asked for, which may have been sent before the PTY existed.
+                    const sessId = sessionId(attachId, attachTerminal);
+                    const dims = pendingResize.get(sessId);
+                    if (!dims) return;
+                    return ptySend({ type: "resize", id: sessId, cols: dims.cols, rows: dims.rows });
+                  })
+                  .then(() => attachPty(ws, attachId, attachTerminal));
+              }),
               `attach ${attachId}`,
             );
           } else if (msg.type === "resize" && msg.id && msg.cols && msg.rows) {
-            const sessId = sessionId(msg.id, msg.terminalId);
-            pendingResize.set(sessId, { cols: msg.cols, rows: msg.rows });
+            const resizeId = msg.id;
+            const resizeTerminal = msg.terminalId;
+            const cols = msg.cols, rows = msg.rows;
             containFailure(
-              ptySend({
-                type: "resize",
-                id: sessId,
-                cols: msg.cols,
-                rows: msg.rows,
+              mayAccessWorkspace(wsAuth?.auth ?? null, resizeId).then((ok) => {
+                if (!ok) return;
+                const sessId = sessionId(resizeId, resizeTerminal);
+                pendingResize.set(sessId, { cols, rows });
+                return ptySend({ type: "resize", id: sessId, cols, rows });
               }),
-              `resize ${msg.id}`,
+              `resize ${resizeId}`,
             );
           }
           return;
@@ -1399,6 +1429,10 @@ const socketHandlers: WebSocketHandler<any> = {
           // not JSON - fall through to terminal input
         }
       }
+      // Raw bytes are keystrokes: the same mutate/read split HTTP enforces
+      // (viewer reads a workspace but cannot act on it) applies here, or a
+      // viewer's "read-only" session is actually a shell as whoever attached.
+      if (wsAuth && !wsAuth.canMutate) return;
       const sessId = termClients.get(ws);
       if (sessId) {
         containFailure(
