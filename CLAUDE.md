@@ -8,6 +8,7 @@ The user writes vague prompts. Map intent to a skill yourself; do not wait for a
 | add / build / implement a feature | `ponytail:ponytail`, then `mattpocock-skills:tdd` if logic is non-trivial |
 | ugly, looks off, redesign, polish, UI, mobile layout | `impeccable:impeccable` (read `DESIGN.md` and `PRODUCT.md` first) |
 | "is this good", review, before release | `code-review` (+ `security-review` if auth, push, pty, or server routes changed) |
+| security, vulnerabilities, "is it safe", pen test, audit | `security-audit` (guidance mode by default; full audit only if asked, prefer `quick` profile scoped to `server.ts`, `pty-daemon.cjs`, `push.ts`) |
 | "how does X work", docs/API question | `mattpocock-skills:research` or context7 |
 | unsure what the user wants | `mattpocock-skills:grilling`, a few questions max |
 
