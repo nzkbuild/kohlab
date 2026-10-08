@@ -55,7 +55,8 @@ export default function AgentInstaller() {
     return () => window.clearTimeout(copyTimer.current);
   }, []);
 
-  const install = async (agent: AgentCard) => {
+  /** An installed agent updates by re-running its install with @latest. */
+  const install = async (agent: AgentCard, update = false) => {
     if (!agent.installCmd || running) return;
     setRunning(agent.name);
     setErrors((prev) => {
@@ -64,8 +65,8 @@ export default function AgentInstaller() {
       return next;
     });
     try {
-      await api.installAgent(agent.name, agent.installCmd);
-      announce(`${agent.name} installed`);
+      await api.installAgent(agent.name, update ? `${agent.installCmd}@latest` : agent.installCmd);
+      announce(`${agent.name} ${update ? "updated" : "installed"}`);
       await load();
     } catch (e) {
       // Verbatim per card: the server sends the installer's stderr, and a
@@ -170,20 +171,20 @@ export default function AgentInstaller() {
                     ) : null}
                   </div>
 
-                  {!agent.installed && agent.installCmd && can.mutate ? (
+                  {agent.installCmd && can.mutate ? (
                     <Button
-                      variant="primary"
                       size="sm"
                       disabled={running !== null}
                       aria-busy={busy}
-                      onClick={() => void install(agent)}
+                      variant={agent.installed ? "secondary" : "primary"}
+                      onClick={() => void install(agent, agent.installed)}
                     >
                       {busy ? (
                         <CircleNotch size={13} className="animate-spin" aria-hidden="true" />
                       ) : (
                         <DownloadSimple size={13} aria-hidden="true" />
                       )}
-                      {busy ? "installing…" : "install"}
+                      {busy ? (agent.installed ? "updating…" : "installing…") : agent.installed ? "update" : "install"}
                     </Button>
                   ) : null}
                 </div>

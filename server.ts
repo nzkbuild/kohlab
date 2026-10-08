@@ -587,7 +587,7 @@ async function handleAgentsStatus(): Promise<Response> {
 
 /** A package name: `thing` or `@scope/thing`. Nothing else, no flags, no
  *  paths, no shell metacharacters, no URLs. */
-const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(@latest)?$/i; // @latest is how an update is asked for
 
 /**
  * Install an agent globally.
@@ -938,7 +938,7 @@ async function ensurePtySession(id: string, terminalId = "main") {
    * workspace does not start it, and both the onboarding copy and the README
    * promise that opening it does. Only the ended case is blocked.
    */
-  if (ws.stopped !== null) return;
+  if (ws.stopped !== null && terminalId === "main") return;
 
   try {
     await spawnAgentSession(ws, terminalId);

@@ -74,6 +74,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // one per click.
   const routeTab = route.kind === "workspace" ? route.tab : undefined;
   const setTab = (next: TabId) => navigate({ kind: "workspace", id: workspaceId, tab: next }, { replace: true });
+  const [installedAgents, setInstalledAgents] = useState<string[]>([]);
+  useEffect(() => {
+    api.agentsStatus().then((st) => setInstalledAgents(Object.keys(st).filter((n) => st[n])), () => {});
+  }, []);
   const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
   const [confirming, setConfirming] = useState(false);
@@ -93,7 +97,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   useEffect(() => {
     if (openShell !== workspaceId) return;
     setOpenShell(null);
-    const id = `terminal-${Date.now()}`;
+    const id = `shell-${Date.now()}`;
     setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
     setActiveTerminal(id);
   }, [openShell, workspaceId, setOpenShell]);
@@ -257,9 +261,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   if (reviewCount > 0)
     badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files", chip: "chip-review" };
 
-  const addTerminal = () => {
-    const id = `terminal-${Date.now()}`;
-    setTerminals((items) => [...items, { id, label: `shell ${items.length}` }]);
+  // Terminal ids carry their kind (see spawnAgentSession): shell-<n> or agent-<name>-<n>.
+  const addTerminal = (kind: "shell" | string) => {
+    const id = kind === "shell" ? `shell-${Date.now()}` : `agent-${kind}-${Date.now()}`;
+    setTerminals((items) => [...items, { id, label: kind === "shell" ? `shell ${items.length}` : kind }]);
     setActiveTerminal(id);
   };
 
@@ -391,15 +396,26 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               </span>
             );
           })}
-          <Button
-            variant="quiet"
-            size="sm"
-            onClick={addTerminal}
-            title="Open a plain shell in this workspace's folder"
+          <Menu
+            label="new terminal"
+            trigger={
+              <Button variant="quiet" size="sm" title="Open another terminal in this workspace's folder">
+                <Plus size={13} aria-hidden="true" />
+                new
+              </Button>
+            }
           >
-            <Plus size={13} aria-hidden="true" />
-            shell
-          </Button>
+            <MenuItem onSelect={() => addTerminal("shell")}>
+              <Terminal size={14} aria-hidden="true" />
+              plain shell
+            </MenuItem>
+            {installedAgents.map((name) => (
+              <MenuItem key={name} onSelect={() => addTerminal(name)}>
+                <Play size={14} aria-hidden="true" />
+                {name}
+              </MenuItem>
+            ))}
+          </Menu>
         </div>
       ) : null}
 
@@ -413,17 +429,22 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       running, because the daemon retains the final screen of a
                       finished session, replacing it with a notice would throw
                       away the only surviving record of what the agent did. */}
-                  {running ? null : (
+                  {running || activeTerminal !== "main" ? null : (
                     <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5">
                       <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
                       <span className="min-w-0 flex-1 text-xs text-text-muted">
                         {can.mutate
-                          ? "Not running, showing the last screen. Start it to take over the terminal."
+                          ? "Agent exited, showing the last screen. Restart it, or open a shell."
                           : "Not running, showing the last screen."}
                       </span>
                       {can.mutate ? (
                         <Button variant="secondary" size="sm" onClick={() => run("start")}>
-                          start
+                          restart agent
+                        </Button>
+                      ) : null}
+                      {can.mutate ? (
+                        <Button variant="secondary" size="sm" onClick={() => addTerminal("shell")}>
+                          open shell
                         </Button>
                       ) : null}
                     </div>
@@ -433,6 +454,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       key={`${workspaceId}:${activeTerminal}`}
                       workspaceId={workspaceId}
                       terminalId={activeTerminal}
+                      onExit={activeTerminal === "main" ? undefined : () => closeTerminal(activeTerminal)}
                     />
                   </div>
                 </>

@@ -9,6 +9,18 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.26.0] - 2026-10-08
+
+### Added
+- The terminal "+" is a menu: a plain shell, or any installed agent, in the workspace folder.
+- Installed agents get an **update** button in Settings (`npm i -g <pkg>@latest`), so Claude Code can be updated from the dashboard.
+
+### Fixed
+- "+ shell" launched the workspace's agent again instead of a shell.
+- Workspaces using gemini, opencode or pi silently started `sh`.
+- An extra terminal closes its tab when its process exits.
+- After the agent exits, the terminal offers "restart agent" or "open shell" (a shell now opens in a stopped workspace too).
+
 ## [1.25.1] - 2026-10-03
 
 ### Changed

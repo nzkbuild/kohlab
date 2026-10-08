@@ -17,6 +17,8 @@ import { toast } from "sonner";
 interface Props {
   workspaceId: string;
   terminalId: string;
+  /** Called when the session's process ends (the server prints "[process exited]"). */
+  onExit?: () => void;
 }
 
 /**
@@ -147,7 +149,9 @@ const TERMINAL_KEYS: [string, string, string][] = [
   ["→", "\x1b[C", "Right arrow"],
 ];
 
-export default function TerminalView({ workspaceId, terminalId }: Props) {
+export default function TerminalView({ workspaceId, terminalId, onExit }: Props) {
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<number | undefined>(undefined);
@@ -293,6 +297,7 @@ export default function TerminalView({ workspaceId, terminalId }: Props) {
       const chunk = pending;
       pending = "";
       term.write(chunk);
+      if (chunk.includes("[process exited]")) window.setTimeout(() => onExitRef.current?.(), 800);
     };
 
     const teardown = () => {

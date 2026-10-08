@@ -269,7 +269,13 @@ export async function deprovisionOsUser(osUser: string): Promise<{ removed: bool
  */
 export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols = 120, rows = 36): Promise<string> {
   const s = await loadState();
-  const cmd = (s.agents[ws.agent] || "sh").split(/\s+/);
+  if (!/^[\w.-]+$/.test(terminalId)) throw new Error("invalid terminal id");
+  // "+" menu terminals: shell-<n> is a plain login shell, agent-<name>-<n> any
+  // configured agent. Everything else (main) is the workspace's own agent.
+  const extra = terminalId.match(/^agent-([\w.-]+?)-\d+$/);
+  const cmd = terminalId.startsWith("shell-")
+    ? [Bun.which("bash") ? "bash" : "sh", ...(Bun.which("bash") ? ["-l"] : [])]
+    : (s.agents[extra?.[1] ?? ws.agent] || "sh").split(/\s+/);
   const who = identityOf(ws);
   const sessId = sessionId(ws.id, terminalId);
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
@@ -1212,6 +1218,9 @@ const DEFAULT_AGENTS: Record<string, string> = {
   omp: "omp",
   claude: "claude",
   codex: "codex",
+  opencode: "opencode",
+  pi: "pi",
+  gemini: "gemini",
   sh: "sh",
 };
 
@@ -1266,7 +1275,7 @@ async function migrateState(s: State, file: string): Promise<State> {
     );
     throw error;
   }
-  if (!s.agents) s.agents = { ...DEFAULT_AGENTS };
+  s.agents = { ...DEFAULT_AGENTS, ...s.agents }; // new built-ins reach old state files
   if (found < SCHEMA_VERSION) {
     s.schemaVersion = SCHEMA_VERSION;
     // Awaited, deliberately. This is a read that writes, and an unawaited write
