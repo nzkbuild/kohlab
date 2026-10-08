@@ -9,6 +9,22 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.27.0] - 2026-10-08
+
+### Added
+- Keyboard triage in review: `j` and `k` move between files, `space` marks the current file reviewed, and `Ctrl`/`⌘`+`Enter` asks to commit. The commit confirmation still comes first. A key hint shows on desktop.
+
+### Changed
+- The review queue holds only work with changes. A run that stops with nothing changed is **stopped**, not **needs review**. Runs stopped before this version keep their status until they stop again; discard an empty one to clear it.
+- Diff additions use a neutral tint. Lime is reserved for a running agent, so the terminal's "connected" chip is neutral too.
+- While an agent runs, **stop** is a secondary button, not the primary one.
+- The launch sheet is titled "New workspace", and the dashboard heading reads "Home", matching the sidebar.
+- Lists lead with the task, with the workspace id underneath: the table, queue cards and phone cards. A running row shows the id on hover.
+- On phones the review tab no longer shows start or stop in the bottom bar. Both are still on the terminal tab.
+
+### Fixed
+- On phones the "waiting for you" cards were wider than the screen, so their review buttons could not be reached.
+
 ## [1.26.0] - 2026-10-08
 
 ### Added

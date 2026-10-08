@@ -497,7 +497,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="sheet" aria-describedby={undefined}>
           <header className="sheet-head">
-            <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">Start an agent</Dialog.Title>
+            <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">New workspace</Dialog.Title>
             <Dialog.Close asChild>
               <Button variant="quiet" iconOnly aria-label="close">
                 <X size={16} />
@@ -549,15 +549,15 @@ function ReviewCard({ w }: { w: Workspace }) {
   const stats = useDiffStats(w.id);
   const open = () => navigate({ kind: "workspace", id: w.id, tab: "review" });
   return (
-    <li className="inbox-card">
-      <div className="flex min-w-0 items-baseline gap-3">
+    <li className="inbox-card min-w-0">
+      <div className="flex items-baseline gap-3">
         <StatusChip status="needs-review" />
-        <span className="mono truncate text-sm font-medium text-text-primary">{w.id}</span>
         <span className="tnum ml-auto shrink-0 text-xs text-text-muted" title="waiting since">
           {relativeTime(w.stopped ?? w.created)}
         </span>
       </div>
-      <p className="mt-2 line-clamp-2 text-base text-text-primary">{w.task}</p>
+      <p className="mt-2 line-clamp-2 text-base font-medium text-text-primary">{w.task}</p>
+      <span className="mono mt-1 block truncate text-xs text-text-faint">{w.id}</span>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="mono text-xs text-text-muted">{w.agent}</span>
         {stats ? (
@@ -583,7 +583,7 @@ function ReviewQueue({ items }: { items: Workspace[] }) {
       <h2 id="inbox-title" className="section-title">
         Waiting for you <span className="tnum text-text-muted">{items.length}</span>
       </h2>
-      <ul className="mt-3 grid gap-3 lg:grid-cols-2">
+      <ul className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
         {items.map((w) => (
           <ReviewCard key={w.id} w={w} />
         ))}
@@ -625,12 +625,12 @@ function RunningRow({ w }: { w: Workspace }) {
       <button
         type="button"
         className="running-row"
+        title={w.id}
         onClick={() => navigate({ kind: "workspace", id: w.id, tab: "terminal" })}
       >
         <span className="chip-dot live-dot shrink-0 text-status-running" aria-hidden="true" />
-        <span className="mono w-28 shrink-0 truncate text-sm text-text-primary shell:w-44">{w.id}</span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-text-secondary">{w.task}</span>
+          <span className="block truncate text-sm text-text-primary">{w.task}</span>
           <span className="mono block truncate text-xs text-text-faint">{last ?? "waiting for output"}</span>
         </span>
         <span className="mono hidden shrink-0 text-xs text-text-muted shell:inline">{w.agent}</span>
@@ -848,7 +848,7 @@ export default function WorkspacesView() {
       <div className="surface-inner">
         {/* Creating lives in the sidebar; the page action re-enters existing work. */}
         <PageHeader
-          title="Workspaces"
+          title="Home"
           description={
             queue.length > 0
               ? `${queue.length} waiting for you. Everything an agent has been given on this server is below.`
@@ -933,7 +933,6 @@ export default function WorkspacesView() {
                   <thead>
                     <tr>
                       <th scope="col">workspace</th>
-                      <th scope="col">task</th>
                       <th scope="col">status</th>
                       <th scope="col">agent</th>
                       <th scope="col">age</th>
@@ -948,21 +947,18 @@ export default function WorkspacesView() {
                       return (
                         <tr key={w.id}>
                           <th scope="row" className="normal-case tracking-normal">
-                            {/* The id is the row's way in. The icon actions are
-                                opacity 0 until hover, so on their own they
-                                leave the list with no visible target: someone
-                                scanning for what needs review sees nothing to
-                                press. This target needs no hover, so it also
-                                works wherever hover does not exist. */}
+                            {/* The task is the row's way in: the name people recognise,
+                                with the id under it. The icon actions are opacity 0
+                                until hover, so they cannot be the only target. */}
                             <button
                               type="button"
-                              className="row-link mono text-sm font-medium"
+                              className="row-link block max-w-md truncate text-left text-sm font-medium"
                               onClick={() => navigate({ kind: "workspace", id: w.id })}
                             >
-                              {w.id}
+                              {w.task}
                             </button>
+                            <span className="mono block max-w-md truncate text-xs font-normal text-text-faint">{w.id}</span>
                           </th>
-                          <td className="max-w-md truncate text-text-secondary">{w.task}</td>
                           <td>
                             <StatusChip status={status} />
                           </td>
@@ -1014,13 +1010,13 @@ export default function WorkspacesView() {
                 {visible.map((w) => (
                   <li key={w.id} className="panel p-3">
                     <div className="flex items-center gap-2">
-                      <span className="mono text-sm font-medium text-text-primary">{w.id}</span>
                       <StatusChip status={workspaceStatus(w)} />
                       <div className="flex-1" />
                       <span className="tnum text-2xs text-text-faint">{relativeTime(w.created)}</span>
                     </div>
-                    <p className="mt-1.5 line-clamp-2 text-sm text-text-secondary">{w.task}</p>
-                    <p className="mono mt-1 truncate text-2xs text-text-muted" title={w.repo}>
+                    <p className="mt-1.5 line-clamp-2 text-sm font-medium text-text-primary">{w.task}</p>
+                    <p className="mono mt-1 truncate text-2xs text-text-muted">{w.id}</p>
+                    <p className="mono truncate text-2xs text-text-faint" title={w.repo}>
                       {w.agent} · {w.repo}
                     </p>
                     <div className="mt-3 flex gap-2">

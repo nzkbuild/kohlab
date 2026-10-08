@@ -15,6 +15,8 @@ export interface Workspace {
    *  Mirrors lastCommitAt: the two decisions that end a run, and which one came
    *  last is what the status is derived from. */
   discardedAt?: number;
+  /** Mirrors the server's stoppedClean: a run that changed nothing is not queued. */
+  stoppedClean?: boolean;
 }
 
 export interface TreeNode {

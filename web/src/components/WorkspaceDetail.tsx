@@ -286,8 +286,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       ) : null}
       <Button
         size="sm"
-        variant={needsReview ? "secondary" : "primary"}
-        className="flex-1 shell:flex-none"
+        variant={needsReview || running ? "secondary" : "primary"}
+        className={tab === "review" ? "hidden shell:inline-flex" : "flex-1 shell:flex-none"}
         onClick={() => run(running ? "stop" : "start")}
       >
         {running ? <Stop size={13} weight="fill" aria-hidden="true" /> : <Play size={13} weight="fill" aria-hidden="true" />}

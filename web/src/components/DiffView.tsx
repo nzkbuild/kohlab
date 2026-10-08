@@ -18,7 +18,7 @@ import { languageForFile, splitUnifiedDiff } from "../lib/diff";
 import { workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
 import type { DiffFile } from "../types";
-import { Button, EmptyState, Skeleton, SkeletonRows } from "./ui";
+import { Button, EmptyState, Kbd, Skeleton, SkeletonRows } from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
 
 interface Props {
@@ -168,6 +168,36 @@ export default function DiffView({ workspaceId }: Props) {
   const defaultMessage = task.trim() ? task.trim().replace(/\s+/g, " ").slice(0, 72) : `${workspaceId} changes`;
   const message = draft ?? defaultMessage;
   const canCommit = files.length > 0 && message.trim().length > 0 && !committing;
+
+  // Keyboard triage: j and k move through the list, space marks the current
+  // file, Ctrl/⌘+Enter asks to commit. The confirm still comes first, and keys
+  // typed into a field or a control keep their own meaning.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || confirming) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        if (!canCommit) return;
+        e.preventDefault();
+        setConfirming("commit");
+        return;
+      }
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (e.ctrlKey || e.metaKey || target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(target?.tagName ?? "")) return;
+      if (e.key === "j" || e.key === "k") {
+        const at = visible.findIndex((f) => f.name === current?.name);
+        const next = visible[Math.min(Math.max(at + (e.key === "j" ? 1 : -1), 0), visible.length - 1)];
+        if (next) {
+          e.preventDefault();
+          setSelected(next.name);
+        }
+      } else if (e.key === " " && current) {
+        e.preventDefault();
+        toggleReviewed(current.name);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible, current, canCommit, confirming, toggleReviewed]);
   const firstRun = !loading && files.length === 0 && !error;
   /**
    * Discard is offered whenever there is something to throw away, and withheld
@@ -393,6 +423,12 @@ export default function DiffView({ workspaceId }: Props) {
                 </Button>
               ))}
               <div className="flex-1" />
+              <span className="hidden items-center gap-1.5 text-xs text-text-muted shell:inline-flex">
+                <Kbd>j</Kbd>
+                <Kbd>k</Kbd> move
+                <span aria-hidden="true">·</span>
+                <Kbd>space</Kbd> mark
+              </span>
               <Button
                 variant="quiet"
                 size="sm"

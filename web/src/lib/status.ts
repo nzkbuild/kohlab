@@ -5,7 +5,8 @@ import type { Workspace } from "../types";
  *   create → running → needs-review → committed   (or → stopped clean)
  *
  * Derivation is pure and cheap: running wins, then needs-review (the agent
- * finished and nothing has been committed since), then committed, then stopped.
+ * finished with changes and nothing has been committed since), then committed,
+ * then stopped. A run that finished clean is stopped: it has nothing to review.
  */
 export type WorkspaceStatus = "running" | "needs-review" | "committed" | "discarded" | "stopped";
 
@@ -26,7 +27,7 @@ export function workspaceStatus(w: Workspace): WorkspaceStatus {
   if (!w.stopped) return "stopped";
   const committed = w.lastCommitAt ?? -Infinity;
   const discarded = w.discardedAt ?? -Infinity;
-  if (committed < w.stopped && discarded < w.stopped) return "needs-review";
+  if (committed < w.stopped && discarded < w.stopped) return w.stoppedClean ? "stopped" : "needs-review";
   return discarded > committed ? "discarded" : "committed";
 }
 

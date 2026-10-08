@@ -37,7 +37,7 @@ const SOCKET_LABEL: Record<SocketState, string> = {
 /** Static map: an interpolated class name produces no CSS. */
 const SOCKET_CHIP: Record<SocketState, string> = {
   connecting: "chip-stopped",
-  live: "chip-running",
+  live: "", // connected is neutral: lime is for a running agent only
   reconnecting: "chip-review",
   offline: "chip-danger",
 };

@@ -1379,11 +1379,13 @@ export function startWatcher() {
     const wid = main.id;
     if (intentionallyStopped.has(wid)) return;
     void (async () => {
+      const clean = await worktreeIsClean(wid);
       const w = await mutateState(async (st) => {
         const found = st.workspaces.find((x) => x.id === wid);
         if (!found) return null;
         if (found.started && !found.stopped) {
           found.stopped = Date.now();
+          found.stoppedClean = clean;
           return found;
         }
         return null;
@@ -1414,12 +1416,18 @@ export function startWatcher() {
       }
       previouslyRunning = running;
       if (finished.size) {
+        // read each run's cleanliness before taking the state lock: git is slow
+        const clean = new Map<string, boolean>();
+        for (const wid of finished) clean.set(wid, await worktreeIsClean(wid));
         // apply the completion marks under the state lock so concurrent API
         // writes can't be lost-updated
         await mutateState((st) => {
           for (const wid of finished) {
             const w = st.workspaces.find((x) => x.id === wid);
-            if (w && w.started && !w.stopped) w.stopped = Date.now();
+            if (w && w.started && !w.stopped) {
+              w.stopped = Date.now();
+              w.stoppedClean = clean.get(wid);
+            }
           }
         });
         const st = await loadState();
@@ -1746,6 +1754,20 @@ export async function startWorkspace(id: string) {
   });
 }
 
+/**
+ * Whether the worktree has no changes, read when a run stops. A run that changed
+ * nothing has nothing to review, so it must not join the queue.
+ * ponytail: asks for the full diff just to learn it is empty; `git status
+ * --porcelain` is cheaper if stops ever get frequent.
+ */
+async function worktreeIsClean(id: string): Promise<boolean> {
+  try {
+    return (await getDiff(id)).length === 0;
+  } catch {
+    return false; // unknown is not clean: keep the run in the queue
+  }
+}
+
 export async function stopWorkspace(id: string) {
   // close every named PTY session for this workspace (main + extra terminals)
   const sessions = (await ptyList()) ?? [];
@@ -1755,10 +1777,12 @@ export async function stopWorkspace(id: string) {
     }
   }
   markIntentionallyStopped(id);
+  const clean = await worktreeIsClean(id);
   return mutateState(async (s) => {
     const ws = s.workspaces.find((w) => w.id === id);
     if (!ws) throw new Error(`no workspace '${id}'`);
     ws.stopped = Date.now();
+    ws.stoppedClean = clean;
     return { ...ws, running: false, path: worktreePath(ws) };
   });
 }

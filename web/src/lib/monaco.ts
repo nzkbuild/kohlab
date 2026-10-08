@@ -43,9 +43,10 @@ export function defineKohlabTheme(m: Monaco) {
       "editorCursor.foreground": c("--accent"),
       "editorWidget.background": c("--surface-overlay"),
       "editorWidget.border": c("--line-strong"),
-      "diffEditor.insertedTextBackground": c("--status-running", 0.2),
+      // Additions are neutral: lime means a live agent (DESIGN.md), never a diff.
+      "diffEditor.insertedTextBackground": c("--text-primary", 0.16),
       "diffEditor.removedTextBackground": c("--status-danger", 0.2),
-      "diffEditor.insertedLineBackground": c("--status-running", 0.08),
+      "diffEditor.insertedLineBackground": c("--text-primary", 0.08),
       "diffEditor.removedLineBackground": c("--status-danger", 0.08),
       "diffEditor.border": c("--line-subtle"),
       "scrollbarSlider.background": c("--line-strong", 0.5),

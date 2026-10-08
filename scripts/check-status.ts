@@ -86,6 +86,24 @@ check(
   workspaceStatus(ws({ stopped: 40, discardedAt: 20, lastCommitAt: 50 })) === "committed",
 );
 
+// A run that changed nothing has nothing to review: it is stopped, not queued.
+check(
+  "stopped clean is stopped, not needs-review",
+  workspaceStatus(ws({ stopped: 10, stoppedClean: true })) === "stopped",
+);
+check(
+  "stopped with changes still needs review",
+  workspaceStatus(ws({ stopped: 10, stoppedClean: false })) === "needs-review",
+);
+check(
+  "a clean stop that is later committed reports committed",
+  workspaceStatus(ws({ stopped: 10, stoppedClean: true, lastCommitAt: 20 })) === "committed",
+);
+check(
+  "a clean stop after an earlier commit is stopped",
+  workspaceStatus(ws({ stopped: 30, stoppedClean: true, lastCommitAt: 20 })) === "stopped",
+);
+
 // Every status must be renderable: the maps are what the UI reads, and a key
 // missing from one of them is a blank chip rather than a type error at the call
 // site.

@@ -12,6 +12,10 @@ export interface Workspace {
    *  A decision field, like lastCommitAt: it is what lets a workspace leave the
    *  review queue without claiming its work was accepted. */
   discardedAt?: number;
+  /** The worktree had no changes when the run stopped. A clean stop has nothing
+   *  to review, so the status derivation files it as stopped. Undefined on runs
+   *  stopped before this was recorded. */
+  stoppedClean?: boolean;
   /** json payload given to the agent CLI at launch (may be absent) */
   payload?: string;
   /** owner's workspace root under their home; legacy records omit it and live
