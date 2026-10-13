@@ -63,13 +63,20 @@ export default function ConfirmDialog({
             </div>
           </div>
 
-          <div className="mt-4 flex justify-end gap-2">
+          <div className="mt-4 flex flex-col-reverse gap-2 md:flex-row md:justify-end">
             <Dialog.Close asChild>
-              <Button variant="secondary" size="sm">
+              <Button variant="secondary" size="sm" className="max-md:w-full">
                 cancel
               </Button>
             </Dialog.Close>
-            <Button variant={tone === "danger" ? "danger" : "primary"} size="sm" disabled={busy} aria-busy={busy} onClick={onConfirm}>
+            <Button
+              variant={tone === "danger" ? "danger" : "primary"}
+              size="sm"
+              className="max-md:w-full"
+              disabled={busy}
+              aria-busy={busy}
+              onClick={onConfirm}
+            >
               {busy ? "working…" : confirmLabel}
             </Button>
           </div>

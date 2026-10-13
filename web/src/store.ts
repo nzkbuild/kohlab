@@ -32,7 +32,10 @@ export interface AppState {
   advanced: boolean;
   /** The New project sheet. Opens over whatever page is showing, so the page under it stays put. */
   newOpen: boolean;
+  /** Phone and tablet drawer. Lives here so any page header can open it. */
+  navOpen: boolean;
 
+  setNavOpen: (value: boolean) => void;
   setNewOpen: (value: boolean) => void;
   setOpenShell: (id: string | null) => void;
   setAuthed: (value: boolean) => void;
@@ -57,7 +60,9 @@ export const useApp = create<AppState>((set) => ({
   openShell: null,
   advanced: false,
   newOpen: false,
+  navOpen: false,
 
+  setNavOpen: (value) => set({ navOpen: value }),
   setNewOpen: (value) => set({ newOpen: value }),
   setOpenShell: (id) => set({ openShell: id }),
   setAuthed: (value) => set({ authed: value }),

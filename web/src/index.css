@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Touch-first screens. Tailwind has no built-in variant for this. */
+@custom-variant pointer-coarse (@media (pointer: coarse));
+
 /* ============================================================================
    Kohlab design tokens
    ----------------------------------------------------------------------------
@@ -124,6 +127,12 @@
   --z-drawer: 50;
   --z-overlay: 100;
   --z-dialog: 101;
+
+  /* Device insets. 0 everywhere but a notched phone with viewport-fit=cover. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 /* --- light theme -----------------------------------------------------------
@@ -259,7 +268,7 @@
   --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9);
   --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);
 
-  --breakpoint-shell: 56.25rem; /* 900px, where the sidebar becomes a drawer */
+  --breakpoint-shell: 64rem; /* 1024px, where the sidebar becomes a fixed rail; below it, a drawer */
 }
 
 /* ============================ base ======================================= */
@@ -269,6 +278,25 @@ body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* A tap is not a highlight: the UA's grey flash is replaced by the pressed state below. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* No double-tap zoom delay on controls. Pinch zoom stays on everywhere. */
+button,
+a,
+summary,
+[role="button"],
+[role="menuitem"] {
+  touch-action: manipulation;
 }
 
 /* 100vh bleeds behind mobile browser chrome; the dvh line wins where supported. */
@@ -303,6 +331,15 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* iOS Safari zooms a page when a field under 16px takes focus. Phones and any touch screen (landscape phones are wider than 768px); desktop keeps 15px. */
+@media (max-width: 47.9375rem), (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
+  }
 }
 
 /* Focus: a real outline, not a box-shadow, forced-colors forces box-shadow to
@@ -430,12 +467,20 @@ input[type="radio"] {
     background: var(--accent);
     color: var(--text-on-accent);
   }
-  .btn-primary:hover:not(:disabled) {
-    background: var(--accent-hover);
-    border-color: var(--accent-hover);
+  @media (hover: hover) {
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
   }
   .btn-primary:active:not(:disabled) {
     background: var(--accent-press);
+  }
+  /* Touch has no hover, so the press itself is the feedback. */
+  @media (pointer: coarse) {
+    .btn:not(:disabled):active {
+      transform: scale(0.97);
+    }
   }
 
   .btn-secondary {
@@ -443,9 +488,11 @@ input[type="radio"] {
     background: var(--surface-hover);
     color: var(--text-primary);
   }
-  .btn-secondary:hover:not(:disabled) {
-    border-color: var(--neutral-600);
-    background: var(--surface-active);
+  @media (hover: hover) {
+    .btn-secondary:hover:not(:disabled) {
+      border-color: var(--neutral-600);
+      background: var(--surface-active);
+    }
   }
 
   .btn-quiet {
@@ -453,9 +500,11 @@ input[type="radio"] {
     background: transparent;
     color: var(--text-muted);
   }
-  .btn-quiet:hover:not(:disabled) {
-    background: var(--surface-hover);
-    color: var(--text-primary);
+  @media (hover: hover) {
+    .btn-quiet:hover:not(:disabled) {
+      background: var(--surface-hover);
+      color: var(--text-primary);
+    }
   }
 
   .btn-danger {
@@ -463,8 +512,10 @@ input[type="radio"] {
     background: color-mix(in oklch, var(--status-danger) 12%, transparent);
     color: var(--status-danger);
   }
-  .btn-danger:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--status-danger) 22%, transparent);
+  @media (hover: hover) {
+    .btn-danger:hover:not(:disabled) {
+      background: color-mix(in oklch, var(--status-danger) 22%, transparent);
+    }
   }
 
   /* --- fields ----------------------------------------------------------- */
@@ -690,7 +741,7 @@ input[type="radio"] {
    renders its own <h1>, so this bar would only repeat the page title while
    holding a menu button that no longer exists. Chrome is thin and quiet: drop
    it, and keep it for mobile where it is the only route context. */
-@media (min-width: 56.25rem) {
+@media (min-width: 64rem) {
   .app-topbar {
     display: none;
   }
@@ -709,6 +760,7 @@ input[type="radio"] {
   flex: 0 0 var(--sidebar-w);
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior: contain;
   border-inline-end: 1px solid var(--line-subtle);
   background: var(--surface-raised);
   /* No width transition: animating layout reflows the whole shell every frame.
@@ -735,9 +787,11 @@ input[type="radio"] {
     color var(--duration-fast-02) var(--ease-standard);
 }
 
-.sidebar-row:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
+@media (hover: hover) {
+  .sidebar-row:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
 }
 
 .sidebar-row[aria-current="page"],
@@ -864,23 +918,26 @@ input[type="radio"] {
 }
 
 /* --- mobile drawer ------------------------------------------------------- */
-@media (max-width: 56.25rem) {
+@media (max-width: 63.9375rem) {
   .sidebar {
     position: fixed;
     inset-block: 0;
     inset-inline-start: 0;
     z-index: var(--z-drawer);
-    width: min(19rem, 84vw);
+    width: min(85vw, 20rem);
     flex-basis: auto;
-    padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    padding-inline-start: var(--safe-left);
+    /* A horizontal swipe closes the drawer; vertical pans still scroll its list. */
+    touch-action: pan-y;
     transform: translateX(-100%);
     /* Translating an element does not remove it from the tab order or the
        accessibility tree, and the aside precedes <main>, so without this the
        first Tab on a phone lands inside an off-screen nav. Delay the visibility
        flip so the slide-out animation still plays. */
     visibility: hidden;
-    transition: transform var(--duration-moderate-02) var(--ease-standard),
-      visibility 0s linear var(--duration-moderate-02);
+    transition: transform 220ms ease-out, visibility 0s linear 220ms;
   }
   .sidebar[data-open="true"] {
     transform: translateX(0);
@@ -888,7 +945,7 @@ input[type="radio"] {
     transition-delay: 0s;
   }
   .sidebar[data-collapsed="true"] {
-    width: min(19rem, 84vw);
+    width: min(85vw, 20rem);
   }
   .sidebar[data-collapsed="true"] .sidebar-label,
   .sidebar[data-collapsed="true"] .sidebar-section-title {
@@ -900,6 +957,27 @@ input[type="radio"] {
   }
   .sidebar[data-collapsed="true"] .sidebar-badge {
     position: static;
+  }
+}
+
+/* Scrim under the open drawer fades in with it. */
+@media (prefers-reduced-motion: no-preference) {
+  .scrim {
+    animation: kohlab-fade 220ms ease-out;
+  }
+}
+@keyframes kohlab-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Phone top bar: clears the notch and the rounded corners in landscape. */
+@media (max-width: 47.9375rem) {
+  .app-topbar {
+    padding-top: calc(0.5rem + var(--safe-top));
+    padding-left: max(1rem, var(--safe-left));
+    padding-right: max(1rem, var(--safe-right));
   }
 }
 
@@ -1033,8 +1111,10 @@ input[type="radio"] {
   contain: layout paint;
 }
 
-.data-table tbody tr:hover {
-  background: var(--surface-hover);
+@media (hover: hover) {
+  .data-table tbody tr:hover {
+    background: var(--surface-hover);
+  }
 }
 
 /* ============================ cockpit ==================================== */
@@ -1081,8 +1161,10 @@ input[type="radio"] {
   transition: color var(--duration-fast-02) var(--ease-standard);
 }
 
-.tab:hover {
-  color: var(--text-primary);
+@media (hover: hover) {
+  .tab:hover {
+    color: var(--text-primary);
+  }
 }
 
 .tab[aria-selected="true"] {
@@ -1117,8 +1199,10 @@ input[type="radio"] {
   contain-intrinsic-size: auto 1.125rem;
 }
 
-.log-line:hover {
-  background: var(--surface-hover);
+@media (hover: hover) {
+  .log-line:hover {
+    background: var(--surface-hover);
+  }
 }
 
 .log-time {
@@ -1181,6 +1265,43 @@ input[type="radio"] {
   border-radius: var(--radius-lg);
   background: var(--surface-overlay);
   box-shadow: 0 1.5rem 4rem oklch(0.08 0.002 286 / 0.55);
+}
+
+/* Phone: every .dialog-content is a bottom sheet with a grab handle. The
+   LaunchSheet is not a .dialog-content, so it carries the same look in its
+   Tailwind max-md: classes. */
+@media (max-width: 47.9375rem) {
+  .dialog-content {
+    inset-inline: 0;
+    inset-block: auto 0;
+    width: 100%;
+    max-height: 90dvh;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0 1rem max(1rem, var(--safe-bottom));
+    border-width: 1px 0 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -0.75rem 2.5rem oklch(0.08 0.002 286 / 0.45);
+  }
+  .dialog-content::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 0.625rem auto 1rem;
+    border-radius: 999px;
+    background: var(--line-strong);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .dialog-content[data-state="open"] {
+      animation: kohlab-sheet-up 240ms ease-out;
+    }
+  }
+}
+@keyframes kohlab-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
 }
 
 /* --- launch sheet ----------------------------------------------------------- */
@@ -1266,8 +1387,10 @@ input[type="radio"] {
   color: var(--text-muted);
   transition: border-color var(--duration-fast-02) var(--ease-standard);
 }
-.source-card:hover .source-card-body {
-  border-color: var(--line-strong);
+@media (hover: hover) {
+  .source-card:hover .source-card-body {
+    border-color: var(--line-strong);
+  }
 }
 .source-card input:checked + .source-card-body {
   border-color: var(--accent);
@@ -1300,8 +1423,10 @@ input[type="radio"] {
   color: var(--text-secondary);
   text-align: start;
 }
-.gh-item:hover {
-  background: var(--surface-hover);
+@media (hover: hover) {
+  .gh-item:hover {
+    background: var(--surface-hover);
+  }
 }
 .gh-item[aria-pressed="true"] {
   background: var(--surface-active);
@@ -1418,9 +1543,11 @@ input[type="radio"] {
   color: var(--text-secondary);
   text-align: start;
 }
-.settings-nav-item:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
+@media (hover: hover) {
+  .settings-nav-item:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
 }
 .settings-nav-item[aria-current="page"] {
   background: var(--surface-active);
@@ -1475,8 +1602,10 @@ input[type="radio"] {
   text-align: start;
   transition: background-color var(--duration-fast-02) var(--ease-standard);
 }
-.running-row:hover {
-  background: var(--surface-hover);
+@media (hover: hover) {
+  .running-row:hover {
+    background: var(--surface-hover);
+  }
 }
 
 /* Alive, not decorative: the same three pulses as the running chip. */
@@ -1532,16 +1661,29 @@ input[type="radio"] {
 }
 
 /* The rail tooltip is a desktop affordance; the drawer shows full labels. */
-@media (max-width: 56.25rem) {
+@media (max-width: 63.9375rem) {
+  .tooltip {
+    display: none;
+  }
+}
+
+/* Touch has no hover: a tooltip would only flash on tap and hide the real label. */
+@media (pointer: coarse) {
   .tooltip {
     display: none;
   }
 }
 
 /* Collapsed rail: the count moves into the tooltip and accessible name. */
-@media (min-width: 56.25rem) {
+@media (min-width: 64rem) {
   .sidebar[data-collapsed="true"] .sidebar-row .chip {
     display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .menu-item {
+    font-size: 1rem;
   }
 }
 
@@ -1598,9 +1740,11 @@ input[type="radio"] {
   outline-offset: -4px;
 }
 
-.file-row:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
+@media (hover: hover) {
+  .file-row:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
 }
 
 .file-row[data-selected="true"] {
@@ -1626,9 +1770,11 @@ input[type="radio"] {
   transition: color var(--duration-fast-02) var(--ease-standard);
 }
 
-.row-link:hover {
-  color: var(--accent);
-  text-decoration-color: currentColor;
+@media (hover: hover) {
+  .row-link:hover {
+    color: var(--accent);
+    text-decoration-color: currentColor;
+  }
 }
 
 /* Row actions appear on focus as well as hover, hover must never be the only
@@ -1638,10 +1784,14 @@ input[type="radio"] {
   transition: opacity var(--duration-fast-02) var(--ease-standard);
 }
 
-*:hover > .row-actions,
 *:focus-within > .row-actions,
 .row-actions:focus-within {
   opacity: 1;
+}
+@media (hover: hover) {
+  *:hover > .row-actions {
+    opacity: 1;
+  }
 }
 
 @media (hover: none) {
@@ -1699,11 +1849,30 @@ input[type="radio"] {
 }
 
 /* --- touch ----------------------------------------------------------------- */
+/* Press feedback for rows: a finger has no hover, so :active carries the state. */
+@media (pointer: coarse) {
+  .sidebar-row:active,
+  .running-row:active,
+  .settings-nav-item:active,
+  .gh-item:active {
+    background: var(--surface-active);
+  }
+}
+
 /* Coarse pointers get a 44px minimum on every control and row (WCAG 2.5.5). */
 @media (pointer: coarse) {
   :root {
     --control-h: 2.75rem;
     --control-h-sm: 2.75rem;
     --row-h: 2.75rem;
+  }
+}
+
+/* "More options" is a disclosure on a touch screen: give it a finger-sized row. */
+@media (pointer: coarse) {
+  .launch-limits summary {
+    display: flex;
+    align-items: center;
+    min-height: 2.75rem;
   }
 }

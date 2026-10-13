@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.37.0] - 2026-10-14
+
+### Changed
+- Kohlab feels like a phone app on phones: one top bar per screen, content clear of the notch and home bar, no zooming when you tap a text box, and layouts that don't jump when the keyboard opens.
+- The menu slides in from the left (swipe from the edge in the installed app, swipe back to close); long-press a project to rename or delete it.
+- Windows open as sheets from the bottom on phones, with big full-width buttons.
+- The chat on phones: the message box stays above the keyboard, Enter starts a new line (send with the button), larger Allow and Keep buttons, and Preview opens full screen with a Back button (swipe down to close).
+- Tablets keep the slide-in menu; desktop is unchanged.
+
 ## [1.36.0] - 2026-10-14
 
 ### Added

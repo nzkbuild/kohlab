@@ -1,11 +1,13 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
-import { List } from "@phosphor-icons/react";
+import { List, Plus } from "@phosphor-icons/react";
 import { useApp, useCan } from "./store";
 import { useSync } from "./lib/useSync";
 import { ROUTE_LABEL } from "./lib/route";
 import { workspaceStatus } from "./lib/status";
 import { api } from "./api";
+import { useDrawerSwipe } from "./lib/drawerSwipe";
+import { cn } from "./lib/utils";
 import AuthGate from "./components/AuthGate";
 import JoinView from "./components/JoinView";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -31,9 +33,11 @@ export default function App() {
   const loadMe = useApp((s) => s.loadMe);
   const newOpen = useApp((s) => s.newOpen);
   const setNewOpen = useApp((s) => s.setNewOpen);
+  const navOpen = useApp((s) => s.navOpen);
+  const setNavOpen = useApp((s) => s.setNavOpen);
   const can = useCan();
 
-  const [navOpen, setNavOpen] = useState(false);
+  useDrawerSwipe(navOpen, setNavOpen);
 
   useSync();
 
@@ -105,7 +109,8 @@ export default function App() {
         ) : null}
 
         <main className="app-main">
-          <header className="app-topbar">
+          {/* On a project page the project's own header is the only bar on a phone. */}
+          <header className={cn("app-topbar", route.kind === "workspace" && "max-shell:!hidden")}>
             <Button
               variant="quiet"
               iconOnly
@@ -123,6 +128,12 @@ export default function App() {
             <span className="text-base font-semibold tracking-tight">kohlab</span>
 
             <div className="flex-1" />
+
+            {can.mutate ? (
+              <Button variant="quiet" iconOnly aria-label="New project" onClick={() => setNewOpen(true)}>
+                <Plus size={18} weight="bold" />
+              </Button>
+            ) : null}
           </header>
 
           {/* Silent while connected; the page only speaks up when it cannot

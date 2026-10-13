@@ -19,6 +19,7 @@ import { projectTitle } from "../lib/format";
 import { workspaceStatus } from "../lib/status";
 import { Button, Dialog, Field } from "./ui";
 import { projectNameFromIdea } from "./homeName";
+import { isPhone } from "../lib/viewport";
 
 /** A GitHub pick returns either "owner/name" or a full URL; clone needs the URL. */
 function asCloneUrl(repo: string): string {
@@ -172,12 +173,12 @@ function NewProjectForm({ onCancel }: { onCancel: () => void }) {
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-col-reverse gap-2 md:flex-row md:flex-wrap md:items-center md:justify-end">
         {missing && !busy ? <span className="mr-auto text-xs text-text-muted">{missing}</span> : null}
-        <Button variant="secondary" onClick={onCancel}>
+        <Button variant="secondary" className="max-md:w-full" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" variant="primary" disabled={busy || !!missing}>
+        <Button type="submit" variant="primary" className="max-md:w-full" disabled={busy || !!missing}>
           {busy ? <CircleNotch size={14} className="motion-safe:animate-spin" aria-hidden="true" /> : null}
           {busy ? "Creating…" : "Create project"}
         </Button>
@@ -192,7 +193,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
     <Dialog.Root open={open} onOpenChange={(o) => (o ? null : onClose())}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="fixed top-1/2 left-1/2 z-[var(--z-dialog)] max-h-[90vh] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[18px] border border-line-strong bg-surface-raised p-6 text-text-primary shadow-[0_1.5rem_4rem_oklch(0.08_0.002_286/0.55)]">
+        <Dialog.Content className="fixed top-1/2 left-1/2 z-[var(--z-dialog)] max-h-[90vh] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[18px] border border-line-strong bg-surface-raised p-6 text-text-primary shadow-[0_1.5rem_4rem_oklch(0.08_0.002_286/0.55)] max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:max-h-[90dvh] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-t-[18px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:px-4 max-md:pt-0 max-md:pb-[max(1rem,var(--safe-bottom))] max-md:before:mx-auto max-md:before:mt-2.5 max-md:before:mb-4 max-md:before:block max-md:before:h-1 max-md:before:w-9 max-md:before:rounded-full max-md:before:bg-line-strong max-md:before:content-[''] max-md:motion-safe:animate-[kohlab-sheet-up_240ms_ease-out]">
           <header className="flex items-center justify-between gap-4">
             <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">New project</Dialog.Title>
             <Dialog.Close asChild>
@@ -319,7 +320,7 @@ export function HomeScreen() {
               {needsYou.map((w) => (
                 <div
                   key={w.id}
-                  className="flex items-center gap-3 rounded-[14px] bg-surface-raised px-4 py-3 text-[15px] text-text-primary"
+                  className="flex items-center gap-3 rounded-[14px] bg-surface-raised px-4 py-3 text-[15px] text-text-primary max-md:px-3 max-md:py-2.5"
                 >
                   <BellRinging size={18} weight="fill" className="shrink-0 text-accent" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
@@ -343,13 +344,13 @@ export function HomeScreen() {
             </div>
           ) : null}
 
-          <h1 className="text-balance text-center text-[28px] leading-[34px] font-[620] tracking-[-0.022em] text-text-primary">
+          <h1 className="text-balance text-center text-[28px] leading-[34px] font-[620] tracking-[-0.022em] text-text-primary max-md:text-[24px] max-md:leading-[30px]">
             What do you want to build?
           </h1>
 
           {can.mutate ? (
             <>
-              <div className="relative mt-8 rounded-[18px] border border-line-strong bg-surface-raised focus-within:border-line-accent">
+              <div className="relative mt-8 rounded-[18px] border border-line-strong bg-surface-raised focus-within:border-line-accent focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-line-accent">
                 <label htmlFor="home-idea" className="sr-only">
                   Describe what you want to build
                 </label>
@@ -361,9 +362,13 @@ export function HomeScreen() {
                   readOnly={busy}
                   onChange={(e) => setIdea(e.target.value)}
                   onKeyDown={onComposerKeyDown}
+                  // The keyboard covers the lower half of a phone: bring the composer up into view.
+                  onFocus={(e) => {
+                    if (isPhone()) e.currentTarget.scrollIntoView({ block: "center" });
+                  }}
                   placeholder="Describe your idea in your own words…"
                   aria-describedby="home-hint"
-                  className="block min-h-[84px] w-full resize-none rounded-[18px] bg-transparent px-5 pt-4 pb-16 text-base leading-6 text-text-primary outline-none placeholder:text-text-muted"
+                  className="block min-h-[84px] w-full resize-none rounded-[18px] bg-transparent px-5 pt-4 pb-16 text-base leading-6 text-text-primary outline-none! placeholder:text-text-muted"
                 />
                 <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-4 pb-3">
                   <p id="home-hint" className="text-[13px] leading-5 text-text-muted">
@@ -401,7 +406,7 @@ export function HomeScreen() {
                       <button
                         type="button"
                         onClick={() => fill(text)}
-                        className="flex min-h-11 w-full items-center gap-3 rounded-[14px] border border-line-subtle px-4 py-3 text-left text-[15px] text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none"
+                        className="flex min-h-11 w-full items-center gap-3 rounded-[14px] border border-line-subtle px-4 py-3 text-left text-[15px] max-md:min-h-[52px] text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none"
                       >
                         <Icon size={18} className="shrink-0 text-text-secondary" aria-hidden="true" />
                         <span className="min-w-0 flex-1">{text}</span>

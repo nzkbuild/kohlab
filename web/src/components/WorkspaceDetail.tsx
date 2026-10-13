@@ -6,6 +6,7 @@ import {
   Files,
   GitDiff,
   Ghost,
+  List,
   Play,
   PencilSimple,
   Plus,
@@ -76,6 +77,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const loading = useApp((s) => s.loading);
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
+  const setNavOpen = useApp((s) => s.setNavOpen);
   const route = useApp((s) => s.route);
   const advanced = useApp((s) => s.advanced);
   const can = useCan();
@@ -299,7 +301,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     <>
       {/* A chat has no start/stop of its own: the server's start is a no-op, and Stop lives inside the chat. */}
       {chat ? null : (
-        <Button size="sm" variant={needsReview || running ? "secondary" : "primary"} onClick={() => run(running ? "stop" : "start")}>
+        <Button size="sm" variant={needsReview || running ? "secondary" : "primary"} className="max-md:min-h-11" onClick={() => run(running ? "stop" : "start")}>
           {running ? <Stop size={13} weight="fill" aria-hidden="true" /> : <Play size={13} weight="fill" aria-hidden="true" />}
           {running ? "stop" : "start"}
         </Button>
@@ -307,7 +309,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       <Menu
         label="More actions"
         trigger={
-          <Button size="sm" variant="secondary" iconOnly>
+          <Button size="sm" variant="secondary" iconOnly className="max-md:size-11 max-md:border-transparent max-md:bg-transparent">
             <DotsThree size={16} weight="bold" />
           </Button>
         }
@@ -337,15 +339,19 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   );
 
   return (
-    <div className="cockpit">
-      <header className="cockpit-head">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="cockpit max-md:overflow-hidden">
+      {/* On a phone this is the only top bar of the project page: menu, title, status, and the ⋯ menu in one 52px row. */}
+      <header className="cockpit-head max-md:!gap-1 max-md:!px-1 max-md:!py-0 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
+        <div className="flex min-w-0 flex-1 items-center gap-2 max-md:h-13 max-md:gap-1">
+          <Button variant="quiet" iconOnly aria-label="Open menu" title="Menu" className="shell:hidden size-11 shrink-0" onClick={() => setNavOpen(true)}>
+            <List size={20} aria-hidden="true" />
+          </Button>
           <h1 className="m-0 min-w-0 truncate text-base font-semibold text-text-primary">{projectTitle(w)}</h1>
           <StatusChip status={st} />
         </div>
 
         {can.mutate ? (
-          <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
+          <div className="flex shrink-0 items-center gap-1.5 max-md:gap-1">{actions}</div>
         ) : (
           <span className="chip chip-stopped" title="You can look at this project but not change it.">
             View only

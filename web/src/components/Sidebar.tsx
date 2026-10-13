@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { toast } from "sonner";
 import {
@@ -30,6 +30,7 @@ import { projectTitle, sidebarWhen } from "../lib/format";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
 import { cn } from "../lib/utils";
+import { isPhone } from "../lib/viewport";
 import ConfirmDialog from "./ConfirmDialog";
 import { disposeWorkspaceTerminals } from "./terminalCache";
 import { Button, BrandMark, Dialog, MenuItem, Tooltip } from "./ui";
@@ -164,13 +165,13 @@ export function RenameDialog({
               autoFocus
               onChange={(e) => setValue(e.target.value)}
             />
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end">
               <Dialog.Close asChild>
-                <Button variant="secondary" size="sm">
+                <Button variant="secondary" size="sm" className="max-md:w-full">
                   cancel
                 </Button>
               </Dialog.Close>
-              <Button type="submit" variant="primary" size="sm" disabled={busy} aria-busy={busy}>
+              <Button type="submit" variant="primary" size="sm" disabled={busy} aria-busy={busy} className="max-md:w-full">
                 {busy ? "saving…" : "save"}
               </Button>
             </div>
@@ -199,10 +200,19 @@ export default function Sidebar({ open, onClose }: Props) {
   // The project whose More menu is open, the project being renamed in place, and the one awaiting delete.
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  // On a phone, Rename opens the sheet rather than an inline field in the drawer.
+  const [sheetFor, setSheetFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   // Rename starts only once the menu has closed and released focus, or the field would lose it at once.
   const renameNext = useRef<string | null>(null);
+  // Touch has no right-click, and iOS Safari sends no contextmenu, so a held finger opens the More menu.
+  const holdTimer = useRef<number | null>(null);
+  const holdFired = useRef(false);
+
+  useEffect(() => () => {
+    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, String(collapsed));
@@ -246,6 +256,19 @@ export default function Sidebar({ open, onClose }: Props) {
     }
   };
 
+  const holdStart = (e: ReactPointerEvent<HTMLDivElement>, id: string) => {
+    if (e.pointerType !== "touch") return;
+    holdFired.current = false;
+    holdTimer.current = window.setTimeout(() => {
+      holdFired.current = true;
+      setMenuFor(id);
+    }, 500);
+  };
+  const holdEnd = () => {
+    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+
   // Already running as an app: there is nothing to install.
   const standalone = window.matchMedia("(display-mode: standalone)").matches;
 
@@ -254,6 +277,7 @@ export default function Sidebar({ open, onClose }: Props) {
     items: workspaces.filter((w) => sidebarGroup(w) === group.key).sort(bySidebarActivity),
   })).filter((group) => group.items.length > 0);
 
+  const sheetWorkspace = workspaces.find((w) => w.id === sheetFor) ?? null;
   const activeKind = route.kind === "workspace" ? "workspaces" : route.kind;
   const homeActive = activeKind === "workspaces";
   const settingsActive = activeKind === "settings";
@@ -360,6 +384,9 @@ export default function Sidebar({ open, onClose }: Props) {
                   >
                     <div
                       className="group flex items-center gap-0.5"
+                      onPointerDown={canMenu && !editing ? (e) => holdStart(e, workspace.id) : undefined}
+                      onPointerUp={holdEnd}
+                      onPointerCancel={holdEnd}
                       onContextMenu={
                         canMenu && !editing
                           ? (e) => {
@@ -390,7 +417,14 @@ export default function Sidebar({ open, onClose }: Props) {
                             data-selected={selected}
                             aria-current={selected ? "page" : undefined}
                             aria-label={`${title}, ${statusText}`}
-                            onClick={() => navigate({ kind: "workspace", id: workspace.id })}
+                            onClick={() => {
+                              // A long press has just opened the More menu: that press is not a visit.
+                              if (holdFired.current) {
+                                holdFired.current = false;
+                                return;
+                              }
+                              navigate({ kind: "workspace", id: workspace.id });
+                            }}
                           >
                             <span className="sidebar-lead" aria-hidden="true">
                               {GROUP_LEAD[group.key]}
@@ -422,7 +456,7 @@ export default function Sidebar({ open, onClose }: Props) {
                               "shrink-0 place-items-center text-text-muted opacity-0 transition-opacity duration-150",
                               "group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100",
                               // The collapsed rail is too narrow for it, but the menu still anchors to it.
-                                collapsed ? "shell:w-0 shell:overflow-hidden" : "grid size-9",
+                                collapsed ? "shell:w-0 shell:overflow-hidden" : "grid size-9 pointer-coarse:size-11",
                             )}
                           >
                             <span className="grid size-7 place-items-center rounded-md hover:bg-surface-active hover:text-text-primary">
@@ -442,7 +476,8 @@ export default function Sidebar({ open, onClose }: Props) {
                           onCloseAutoFocus={(e) => {
                             if (renameNext.current === null) return;
                             e.preventDefault();
-                            setRenaming(renameNext.current);
+                            if (isPhone()) setSheetFor(renameNext.current);
+                            else setRenaming(renameNext.current);
                             renameNext.current = null;
                           }}
                         >
@@ -491,6 +526,15 @@ export default function Sidebar({ open, onClose }: Props) {
           </button>
         </Tooltip>
       </div>
+
+      <RenameDialog
+        id={sheetFor ?? ""}
+        shown={sheetWorkspace ? projectTitle(sheetWorkspace) : ""}
+        open={sheetFor !== null}
+        onOpenChange={(next) => {
+          if (!next) setSheetFor(null);
+        }}
+      />
 
       <ConfirmDialog
         open={confirmDelete !== null}

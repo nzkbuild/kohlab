@@ -376,7 +376,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 max-md:p-3">
           <div className="mx-auto w-full max-w-[720px]">
             {loading && count === 0 ? <SkeletonRows rows={4} /> : null}
             {count > 0 ? (
@@ -392,7 +392,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                           aria-current={isCurrent ? "true" : undefined}
                           onClick={() => setSelected(file.name)}
                           className={cn(
-                            "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left hover:bg-surface-hover",
+                            "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left hover:bg-surface-hover max-md:min-h-13",
                             isCurrent && "bg-surface-active",
                           )}
                         >

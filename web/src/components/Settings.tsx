@@ -196,7 +196,7 @@ export default function Settings() {
         </div>
 
         <div className="border-t border-line-subtle pt-4">
-          <label className="flex cursor-pointer items-start gap-3" htmlFor="announce-paused">
+          <label className="flex min-h-11 cursor-pointer items-start gap-3" htmlFor="announce-paused">
             <input
               id="announce-paused"
               type="checkbox"

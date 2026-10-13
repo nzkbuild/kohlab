@@ -126,7 +126,7 @@ function CopyReply({ text, latest }: { text: string; latest: boolean }) {
           iconOnly
           aria-label="Copy reply"
           className={cn(
-            "size-8 text-text-muted hover:text-text-primary [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100",
+            "size-8 text-text-muted hover:text-text-primary max-md:size-11 [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100",
             "motion-safe:transition-opacity",
             latest ? "opacity-100" : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
           )}
@@ -151,7 +151,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           variant="quiet"
           size="sm"
           aria-label="Copy code"
-          className="text-[12px] text-text-secondary [@media(pointer:coarse)]:min-h-11"
+          className="text-[12px] text-text-secondary max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onClick={() => void copy(code)}
         >
           <Icon size={14} aria-hidden="true" />
@@ -168,7 +168,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 /** What Claude said, in a measure a person can read without losing their place. */
 function Prose({ text }: { text: string }) {
   return (
-    <div className="flex max-w-[66ch] flex-col gap-3 text-[15px] leading-6 text-text-primary">
+    <div className="flex max-w-[66ch] min-w-0 flex-col gap-3 text-[15px] leading-6 text-text-primary max-md:max-w-none max-md:w-full max-md:text-base">
       {parseBlocks(text).map((block, i) => {
         if (block.kind === "p") return <p key={i} className="whitespace-pre-line">{rich(block.lines.join("\n"))}</p>;
         if (block.kind === "h") return <p key={i} className="text-[16px] font-semibold text-text-primary">{rich(block.text)}</p>;
@@ -340,8 +340,12 @@ export default function ChatView({ workspaceId }: Props) {
   const [keeping, setKeeping] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
-  // Desktop: the preview opens beside the chat. Phones open it as a full-screen sheet.
-  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  // Wide (900px, the shell breakpoint): the preview opens beside the chat. Narrower
+  // screens (phones and small tablets) open it as a full-screen sheet.
+  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 56.25rem)").matches);
+  // iOS Safari does not shrink the layout viewport for the keyboard, so the composer
+  // would sit under it. While the composer is focused on a phone, the chat is lifted by the keyboard's height.
+  const [keyboard, setKeyboard] = useState(0);
   const [pane, setPane] = useState<{ url: string; t: number } | null>(null);
   const paneOpen = wide && pane !== null;
   const sheetOpen = !wide && pane !== null;
@@ -406,10 +410,24 @@ export default function ChatView({ workspaceId }: Props) {
   const repoll = () => setKick((k) => k + 1);
 
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
+    const mq = window.matchMedia("(min-width: 56.25rem)");
     const onChange = () => setWide(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const phone = window.matchMedia("(max-width: 767.98px)").matches;
+      const hidden = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+      const lift = phone && document.activeElement === taRef.current && hidden > 80 ? hidden : 0;
+      setKeyboard(lift);
+      if (lift && nearBottomRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    };
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
   }, []);
 
   // A cache-busting reload of the preview (the ?t= makes the browser fetch again).
@@ -508,7 +526,8 @@ export default function ChatView({ workspaceId }: Props) {
     const el = taRef.current;
     if (!el) return;
     el.style.height = "auto";
-    const max = (parseFloat(getComputedStyle(el).lineHeight) || 24) * 8;
+    const lines = window.matchMedia("(max-width: 767.98px)").matches ? 5 : 8;
+    const max = (parseFloat(getComputedStyle(el).lineHeight) || 24) * lines;
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
   }, [draft]);
@@ -534,7 +553,9 @@ export default function ChatView({ workspaceId }: Props) {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    // Touch keyboards have no Shift+Enter: Enter is a newline there, and the send button sends.
+    const touch = window.matchMedia("(pointer: coarse)").matches;
+    if (e.key === "Enter" && !touch && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send();
     }
@@ -620,7 +641,7 @@ export default function ChatView({ workspaceId }: Props) {
       case "user":
         return (
           <div className="flex justify-end" data-turn-start={e.n === lastUserN ? "" : undefined}>
-            <div className="max-w-[80%] whitespace-pre-wrap rounded-[18px] bg-bubble-user px-4 py-3 text-[15px] leading-6 text-text-primary">{e.text}</div>
+            <div className="max-w-[80%] break-words whitespace-pre-wrap rounded-[18px] bg-bubble-user px-4 py-3 text-[15px] leading-6 text-text-primary max-md:max-w-[85%] max-md:text-base">{e.text}</div>
           </div>
         );
       case "assistant":
@@ -638,7 +659,7 @@ export default function ChatView({ workspaceId }: Props) {
               <div className="mt-4 flex flex-col gap-2 shell:flex-row">
                 <Button
                   variant="primary"
-                  className="min-h-11 w-full rounded-[10px] shell:w-auto"
+                  className="min-h-11 w-full rounded-[10px] max-md:min-h-12 shell:w-auto"
                   disabled={answering !== null}
                   onClick={() => void answer(e.requestId, true)}
                 >
@@ -646,7 +667,7 @@ export default function ChatView({ workspaceId }: Props) {
                 </Button>
                 <Button
                   variant="secondary"
-                  className="min-h-11 w-full rounded-[10px] shell:w-auto"
+                  className="min-h-11 w-full rounded-[10px] max-md:min-h-12 shell:w-auto"
                   disabled={answering !== null}
                   onClick={() => void answer(e.requestId, false)}
                 >
@@ -675,15 +696,15 @@ export default function ChatView({ workspaceId }: Props) {
   const paneWidth = "w-[clamp(360px,42%,640px)]";
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <div className="relative min-h-0 flex-1">
-          <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto">
+          <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overscroll-contain">
             <div
               role="log"
               aria-live="polite"
               aria-label="Conversation with Claude"
-              className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pt-6 pb-8 shell:px-6"
+              className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pt-6 pb-8 max-md:gap-5 max-md:pt-4 max-md:pb-4 shell:px-6"
             >
               {events.length === 0 && !busy ? (
                 <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
@@ -696,7 +717,7 @@ export default function ChatView({ workspaceId }: Props) {
                 // Everything Claude wrote in this turn, as its markdown source, for Copy.
                 const replies = turn.flat().filter((e) => e.kind === "assistant").map((e) => e.text);
                 return (
-                  <div key={turn[0][0].n} className="group flex flex-col gap-3">
+                  <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
                     {turn.map((row, ri) => {
                       const live = working && row === lastVisible;
                       return (
@@ -729,7 +750,7 @@ export default function ChatView({ workspaceId }: Props) {
         </div>
 
         {can ? (
-          <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shell:px-6">
+          <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pb-[max(12px,var(--safe-bottom,env(safe-area-inset-bottom)))] shell:px-6">
             <div className="mx-auto w-full max-w-[720px]">
               {sendError ? (
                 <p role="alert" className="mb-2 text-[13px] text-status-danger">
@@ -740,9 +761,12 @@ export default function ChatView({ workspaceId }: Props) {
                 <div
                   role="region"
                   aria-label="Changes to check"
-                  className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[14px] border border-line-subtle bg-surface-raised px-4 py-3"
+                  className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[14px] border border-line-subtle bg-surface-raised px-4 py-3 max-md:gap-y-2 max-md:px-3 max-md:py-2.5"
                 >
-                  <p className="mr-auto min-w-0 text-[15px] text-text-primary">Look at the preview. If you like it, keep it. If not, undo it.</p>
+                  <p className="mr-auto min-w-0 text-[15px] text-text-primary max-md:w-full max-md:truncate">
+                    <span className="max-md:hidden">Look at the preview. If you like it, keep it. If not, undo it.</span>
+                    <span className="hidden max-md:inline">Like it? Keep it, or undo.</span>
+                  </p>
                   <div className="flex flex-wrap items-center gap-2">
                     {paneOpen ? null : (
                       <Button variant="secondary" size="sm" className="min-h-11 shell:min-h-9" disabled={previewing} onClick={() => void preview()}>
@@ -752,7 +776,8 @@ export default function ChatView({ workspaceId }: Props) {
                     )}
                     <Button variant="primary" size="sm" className="min-h-11 shell:min-h-9" disabled={keeping} onClick={() => void keep()}>
                       <Check size={14} aria-hidden="true" />
-                      Keep this version
+                      <span className="max-md:hidden">Keep this version</span>
+                      <span className="hidden max-md:inline">Keep</span>
                     </Button>
                     <Button variant="quiet" size="sm" className="min-h-11 text-text-secondary shell:min-h-9" disabled={undoing} onClick={() => setConfirmUndo(true)}>
                       <ArrowCounterClockwise size={14} aria-hidden="true" />
@@ -769,11 +794,11 @@ export default function ChatView({ workspaceId }: Props) {
                 </div>
               ) : null}
 
-              <div className="flex flex-col gap-2 rounded-[18px] border border-line-strong bg-surface-raised p-3 pl-4 focus-within:border-line-accent">
+              <div className="flex flex-col gap-2 rounded-[18px] border border-line-strong bg-surface-raised p-3 pl-4 focus-within:border-line-accent focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-line-accent">
                 <textarea
                   ref={taRef}
                   aria-label="Message Claude"
-                  className="block min-h-12 w-full resize-none bg-transparent text-[15px] leading-6 text-text-primary placeholder:text-text-muted outline-none disabled:cursor-not-allowed"
+                  className="block min-h-12 w-full resize-none bg-transparent text-[15px] leading-6 text-text-primary placeholder:text-text-muted outline-none! disabled:cursor-not-allowed max-md:text-base"
                   rows={1}
                   value={draft}
                   disabled={busy}
@@ -816,9 +841,7 @@ export default function ChatView({ workspaceId }: Props) {
       ) : null}
 
       {sheetOpen && pane ? (
-        <div className="fixed inset-0 z-(--z-overlay) flex flex-col bg-surface-raised pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-          <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} />
-        </div>
+        <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} />
       ) : null}
 
       <ConfirmDialog

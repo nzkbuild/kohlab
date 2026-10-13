@@ -86,7 +86,7 @@ export default function AuthGate() {
   };
 
   return (
-    <div className="auth-stage grid h-full place-items-center p-4">
+    <div className="auth-stage grid h-full place-items-center p-4 max-md:pt-[max(1rem,var(--safe-top))] max-md:pb-[max(1rem,var(--safe-bottom))]">
       <div className="auth-card w-full max-w-[26rem] p-7">
         <header className="flex items-center gap-3">
           <span

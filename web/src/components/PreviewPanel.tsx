@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import { ArrowClockwise, ArrowLeft, ArrowSquareOut, Globe, X } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { ArrowClockwise, ArrowSquareOut, CaretLeft, Globe, X } from "@phosphor-icons/react";
+import { cn } from "../lib/utils";
 import { Button } from "./ui";
 
 interface Props {
@@ -12,12 +13,19 @@ interface Props {
   onClose: () => void;
 }
 
+/** A downward drag from the sheet's top bar this far closes it. */
+const SWIPE_CLOSE_PX = 80;
+
 /**
  * The live preview of the project. The frame is sandboxed without allow-same-origin,
  * so the project's pages cannot reach the app. Keep the sandbox list as it is.
  */
 export default function PreviewPanel({ url, t, variant, onReload, onClose }: Props) {
   const sheet = variant === "sheet";
+  // The sheet slides up from the bottom on mount. Reduced motion skips the transition (see classes).
+  const [entered, setEntered] = useState(false);
+  const [dragY, setDragY] = useState(0);
+  const drag = useRef<{ y: number; dy: number; id: number; captured: boolean } | null>(null);
 
   // Escape backs out of the phone sheet, as a dialog would.
   useEffect(() => {
@@ -29,53 +37,121 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose }: Pro
     return () => window.removeEventListener("keydown", onKey);
   }, [sheet, onClose]);
 
-  const iconSize = sheet ? "size-11" : "size-8";
+  useEffect(() => {
+    if (!sheet) return;
+    const frame = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(frame);
+  }, [sheet]);
 
-  return (
-    <>
-      <div role="toolbar" aria-label="Preview actions" className="flex items-center gap-2 border-b border-line-subtle px-2 py-2">
-        {sheet ? (
-          <Button variant="quiet" className="min-h-11 px-2" onClick={onClose}>
-            <ArrowLeft size={16} aria-hidden="true" />
-            Back
+  // Swipe down from the top bar to close. Capture starts only once the pointer has
+  // moved, so a plain tap on Back or Reload still reaches its click handler.
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    drag.current = { y: e.clientY, dy: 0, id: e.pointerId, captured: false };
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    d.dy = Math.max(0, e.clientY - d.y);
+    if (d.dy > 8 && !d.captured) {
+      d.captured = true;
+      e.currentTarget.setPointerCapture(d.id);
+    }
+    setDragY(d.dy);
+  };
+  const endDrag = (close: boolean) => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d) return;
+    if (close && d.dy > SWIPE_CLOSE_PX) onClose();
+    else setDragY(0);
+  };
+
+  if (!sheet) {
+    return (
+      <>
+        <div role="toolbar" aria-label="Preview actions" className="flex items-center gap-2 border-b border-line-subtle px-2 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-sunken px-3 py-1.5 text-xs text-text-muted">
+            <Globe size={14} className="shrink-0" aria-hidden="true" />
+            <span className="truncate">Preview</span>
+          </div>
+          <Button variant="quiet" size="sm" iconOnly aria-label="Reload preview" title="Reload" className="size-8" onClick={onReload}>
+            <ArrowClockwise size={16} aria-hidden="true" />
           </Button>
-        ) : null}
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-sunken px-3 py-1.5 text-xs text-text-muted">
-          <Globe size={14} className="shrink-0" aria-hidden="true" />
-          <span className="truncate">Preview</span>
-        </div>
-        <Button variant="quiet" size="sm" iconOnly aria-label="Reload preview" title="Reload" className={iconSize} onClick={onReload}>
-          <ArrowClockwise size={16} aria-hidden="true" />
-        </Button>
-        {sheet ? null : (
           <Button
             variant="quiet"
             size="sm"
             iconOnly
             aria-label="Open the preview in a new tab"
             title="Open in a new tab"
-            className={iconSize}
+            className="size-8"
             onClick={() => window.open(location.origin + url, "_blank", "noopener")}
           >
             <ArrowSquareOut size={16} aria-hidden="true" />
           </Button>
-        )}
-        {sheet ? null : (
-          <Button variant="quiet" size="sm" iconOnly aria-label="Close preview" title="Close preview" className={iconSize} onClick={onClose}>
+          <Button variant="quiet" size="sm" iconOnly aria-label="Close preview" title="Close preview" className="size-8" onClick={onClose}>
             <X size={16} aria-hidden="true" />
           </Button>
-        )}
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col bg-surface-sunken p-2">
-        <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-line-subtle bg-white">
-          <iframe
-            src={`${url}?t=${t}`}
-            sandbox="allow-scripts allow-forms allow-popups allow-modals"
-            title="Preview of your project"
-            className="block size-full border-0 bg-white"
-          />
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col bg-surface-sunken p-2">
+          <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-line-subtle bg-white">
+            <iframe
+              src={`${url}?t=${t}`}
+              sandbox="allow-scripts allow-forms allow-popups allow-modals"
+              title="Preview of your project"
+              className="block size-full border-0 bg-white"
+            />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Preview"
+      className={cn(
+        "fixed inset-0 z-(--z-overlay) flex flex-col bg-surface-raised motion-safe:transition-transform motion-safe:duration-[240ms] motion-safe:ease-out",
+        entered ? "translate-y-0" : "translate-y-full",
+      )}
+      style={dragY > 0 ? { transform: `translateY(${dragY}px)`, transition: "none" } : undefined}
+    >
+      <div
+        className="shrink-0 touch-none border-b border-line-subtle pt-[var(--safe-top,env(safe-area-inset-top))]"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={() => endDrag(true)}
+        onPointerCancel={() => endDrag(false)}
+      >
+        <div role="toolbar" aria-label="Preview actions" className="flex h-13 items-center gap-1 px-2">
+          <Button variant="quiet" iconOnly aria-label="Back to chat" title="Back to chat" className="size-11 shrink-0" onClick={onClose}>
+            <CaretLeft size={20} aria-hidden="true" />
+          </Button>
+          <h2 className="min-w-0 flex-1 truncate px-1 text-base font-semibold text-text-primary">Preview</h2>
+          <Button variant="quiet" iconOnly aria-label="Reload preview" title="Reload" className="size-11 shrink-0" onClick={onReload}>
+            <ArrowClockwise size={20} aria-hidden="true" />
+          </Button>
+          <Button
+            variant="quiet"
+            iconOnly
+            aria-label="Open the preview in a new tab"
+            title="Open in a new tab"
+            className="size-11 shrink-0"
+            onClick={() => window.open(location.origin + url, "_blank", "noopener")}
+          >
+            <ArrowSquareOut size={20} aria-hidden="true" />
+          </Button>
         </div>
       </div>
-    </>
+      <div className="flex min-h-0 flex-1 flex-col bg-surface-sunken">
+        <iframe
+          src={`${url}?t=${t}`}
+          sandbox="allow-scripts allow-forms allow-popups allow-modals"
+          title="Preview of your project"
+          className="block min-h-0 flex-1 border-0 bg-white"
+        />
+      </div>
+    </div>
   );
 }
