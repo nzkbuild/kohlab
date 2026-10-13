@@ -17,6 +17,7 @@ import { spawn, spawnSync } from "child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { killDaemonOn } from "./kill-daemon.mjs";
 
 const PORT = 7805;
 const KEY = "review-gate-check-key";
@@ -351,6 +352,7 @@ try {
   if (s) console.log(s.getLog().split("\n").slice(-15).join("\n"));
 } finally {
   if (s) s.proc.kill("SIGKILL");
+  killDaemonOn(SOCKET);
   await wait(300);
   rmSync(dir, { recursive: true, force: true });
   rmSync(SOCKET, { force: true });

@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.37.1] - 2026-10-14
+
+### Fixed
+- Scrolling in Claude's terminal works again with a mouse wheel, a touchpad and on phones. Kohlab now starts agents with Claude Code's full-screen mode turned off (`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`), so the conversation lands in the terminal's own history. Sessions that were already running keep the old behaviour until they are restarted.
+- The agent daemon accepts only that one setting from the server, never other environment variables.
+- Three check scripts (push, push delivery, review gate) no longer leave their pty daemon running after they finish.
+
 ## [1.37.0] - 2026-10-14
 
 ### Changed

@@ -12,6 +12,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { killDaemonOn } from "./kill-daemon.mjs";
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -106,7 +107,7 @@ try {
   check("after unsubscribing, the test refuses", (await api("/api/push/test", { endpoint })).status === 404);
 } finally {
   proc.kill("SIGKILL");
-  spawnSync("pkill", ["-f", join(dir, "p.sock")]);
+  killDaemonOn(join(dir, "p.sock"));
   fake.close();
 }
 process.exit(failed ? 1 : 0);

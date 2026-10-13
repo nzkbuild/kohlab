@@ -338,6 +338,14 @@ export async function deprovisionOsUser(osUser: string): Promise<{ removed: bool
 }
 
 /**
+ * Env every agent PTY gets on top of the daemon's base allowlist; the keys must
+ * also be listed in pty-daemon.cjs REQUEST_ENV_KEYS. Claude Code's full-screen
+ * mode takes the mouse wheel, so the browser terminal cannot scroll it. Inline
+ * mode keeps the history in xterm's own scrollback instead.
+ */
+export const AGENT_PTY_ENV: Record<string, string> = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1" };
+
+/**
  * Open a workspace's agent PTY session on the daemon: the single spawn
  * choke point for both the CLI/API start path and the browser-attach path,
  * so the caps AND the owning user's identity handed to the daemon can never
@@ -371,6 +379,7 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
       cmd,
       cols,
       rows,
+      env: AGENT_PTY_ENV,
       meta: { workspace: ws.id, terminal: terminalId },
       limits: ws.limits ?? {},
       // the daemon spawns the agent as this user when present (v1.8)

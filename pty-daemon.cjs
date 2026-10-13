@@ -38,6 +38,10 @@ const SESSIONS = new Map(); // id -> { pty, buffer: Buffer[], screen, serializer
 // authenticate as the owner. A PTY only needs an ordinary shell's basics,
 // never the server's secrets, so build its environment from an allowlist.
 const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "SHELL", "USER", "LOGNAME", "EDITOR", "PAGER", "COLORTERM"];
+// The only keys an open request may add on top of that base (lib.ts AGENT_PTY_ENV):
+// Claude Code's alternate-screen switch. Any other key in `env` is dropped, so a
+// request can never set PATH, a loader variable or a secret.
+const REQUEST_ENV_KEYS = ["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"];
 
 /**
  * Last-resort containment.
@@ -154,7 +158,7 @@ function openSession(id, cwd, cmd, env, cols, rows, meta, limits, uid, gid, home
     // whole PTY process tree and $HOME points at the owner's home.
     const spawnEnv = {};
     for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) spawnEnv[k] = process.env[k];
-    Object.assign(spawnEnv, env || {});
+    for (const k of REQUEST_ENV_KEYS) if (typeof env?.[k] === "string") spawnEnv[k] = env[k];
     spawnEnv.HOME = home || os.homedir();
     const p = pty.spawn(argv[0], argv.slice(1), {
       name: "xterm-256color",

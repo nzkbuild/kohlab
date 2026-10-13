@@ -8,6 +8,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { killDaemonOn } from "./kill-daemon.mjs";
 let failed = 0;
 const check = (name, ok) => { console.log(`  ${ok ? "ok  " : "FAIL"} ${name}`); if (!ok) failed++; };
 const PORT = 7861, KEY = "dk", dir = mkdtempSync(join(tmpdir(), "done-"));
@@ -30,5 +31,5 @@ try {
   await new Promise(r => setTimeout(r, 8000));
   check("a terminal socket is not sent the done message", !termOut.includes("workspace.done"));
   check("a dashboard socket still is", pushOut.includes("workspace.done"));
-} finally { proc.kill("SIGKILL"); spawnSync("pkill", ["-f", `done-${process.pid}.sock`]); }
+} finally { proc.kill("SIGKILL"); killDaemonOn(join(tmpdir(), `done-${process.pid}.sock`)); }
 process.exit(failed ? 1 : 0);
