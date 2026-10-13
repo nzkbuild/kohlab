@@ -1,12 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowsClockwise, Bell, BellRinging, Cpu, HardDrives, SpeakerHigh, UserCircle, UsersThree, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, SignOut, Sparkle, UserCircle, WarningCircle } from "@phosphor-icons/react";
 import type { SettingsSection } from "../lib/route";
 import { useApp, useCan } from "../store";
+import { api, clearKey } from "../api";
 import { announce, setAnnouncementsPaused } from "../lib/announce";
 import { cn } from "../lib/utils";
-import Account from "./Account";
-import AgentInstaller from "./AgentInstaller";
-import Team from "./Team";
 import PushToggle from "./PushToggle";
 import UpdatePanel from "./UpdatePanel";
 import { Button, Chip, PageHeader, Panel } from "./ui";
@@ -16,10 +14,10 @@ const PAUSE_KEY = "kohlab_announce_paused";
 type Permission = "unsupported" | NotificationPermission;
 
 const PERMISSION_LABEL: Record<Permission, string> = {
-  unsupported: "not supported here",
-  default: "not asked yet",
-  granted: "granted",
-  denied: "blocked",
+  unsupported: "Not available here",
+  default: "Not asked yet",
+  granted: "On",
+  denied: "Blocked",
 };
 
 /** Chip class per permission state, static map, Tailwind cannot read a template. */
@@ -30,19 +28,96 @@ const PERMISSION_CHIP: Record<Permission, string> = {
   denied: "chip-danger",
 };
 
+/** Only the sections a non-technical person needs. Updates is owner-only. */
 const SECTIONS: { id: SettingsSection; label: string; hint: string; icon: typeof Bell }[] = [
-  { id: "account", label: "Account", hint: "Who you are on this server, and your access key.", icon: UserCircle },
-  { id: "team", label: "Team", hint: "People with access, invitations, and what they did.", icon: UsersThree },
-  { id: "agents", label: "Agents", hint: "Coding agents workspaces can run.", icon: Cpu },
-  { id: "notifications", label: "Notifications", hint: "What reaches you when the tab is hidden.", icon: Bell },
-  { id: "server", label: "Server", hint: "Where this kohlab runs and what it keeps.", icon: HardDrives },
-  { id: "updates", label: "Updates", hint: "New versions of kohlab for this server.", icon: ArrowsClockwise },
+  { id: "account", label: "Account", hint: "Who is signed in on this computer.", icon: UserCircle },
+  { id: "agents", label: "Claude", hint: "The AI that builds your projects.", icon: Sparkle },
+  { id: "notifications", label: "Notifications", hint: "What reaches you when Kohlab is in the background.", icon: Bell },
+  { id: "updates", label: "Updates", hint: "New versions of Kohlab.", icon: ArrowsClockwise },
 ];
+
+/** Account: sign out is the only thing here. Keys are not something people manage by hand. */
+function AccountPane() {
+  const signOut = () => {
+    clearKey();
+    location.reload();
+  };
+  return (
+    <Panel>
+      <div className="flex flex-col gap-4 p-4">
+        <p className="text-sm text-text-secondary">You are signed in on this computer.</p>
+        <div>
+          <Button variant="secondary" onClick={signOut}>
+            <SignOut size={14} aria-hidden="true" />
+            Sign out
+          </Button>
+        </div>
+        <p className="text-xs leading-relaxed text-text-muted">
+          Signing out removes Kohlab's access from this browser. Your projects stay as they are.
+        </p>
+      </div>
+    </Panel>
+  );
+}
+
+/** Claude: whether it is ready on this computer, read from the server's own check. */
+function ClaudePane() {
+  const [ready, setReady] = useState<boolean | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const check = () => {
+    setChecking(true);
+    setFailed(false);
+    api
+      .agentsStatus()
+      .then((status) => setReady(!!status.claude))
+      .catch(() => setFailed(true))
+      .finally(() => setChecking(false));
+  };
+  useEffect(check, []);
+
+  return (
+    <Panel>
+      <div className="flex flex-col gap-4 p-4">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary">
+          Claude
+          {ready === null ? (
+            <Chip>Checking</Chip>
+          ) : ready ? (
+            <span className={cn("chip", "chip-running")}>
+              <span className="chip-dot" aria-hidden="true" />
+              Ready
+            </span>
+          ) : (
+            <span className={cn("chip", "chip-danger")}>
+              <span className="chip-dot" aria-hidden="true" />
+              Not set up
+            </span>
+          )}
+        </div>
+        <p className="text-sm leading-relaxed text-text-secondary">
+          {failed
+            ? "Could not check Claude right now. Try again in a moment."
+            : ready
+              ? "Claude is set up on this computer. New projects start with it."
+              : ready === false
+                ? "Claude is not set up on this computer yet. Ask whoever installed Kohlab to set it up, then check again."
+                : "Checking whether Claude is set up on this computer."}
+        </p>
+        <div>
+          <Button variant="secondary" size="sm" disabled={checking} onClick={check}>
+            {checking ? "Checking…" : "Check again"}
+          </Button>
+        </div>
+      </div>
+    </Panel>
+  );
+}
 
 /** Settings: one section at a time, chosen from a side list (a row on phones). */
 export default function Settings() {
   const can = useCan();
-  const workspaceCount = useApp((s) => s.workspaces.length);
 
   // Read, never request: `Notification.permission` is free, and browsers only
   // honour a request from a user gesture.
@@ -65,10 +140,10 @@ export default function Settings() {
     try {
       const result = await Notification.requestPermission();
       setPermission(result);
-      announce(result === "granted" ? "notifications enabled" : `notifications ${result}`);
+      announce(result === "granted" ? "notifications turned on" : "notifications are off");
     } catch (e) {
       setPermission(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
-      announce(`notification permission failed: ${(e as Error).message}`);
+      announce(`Could not turn on notifications: ${(e as Error).message}`);
     } finally {
       setAsking(false);
     }
@@ -76,10 +151,8 @@ export default function Settings() {
 
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
-  const advanced = useApp((s) => s.advanced);
   // Updates are owner-only: nobody else is shown a page the server would refuse.
-  // Team and server are advanced: a hidden section falls back to the first one.
-  const sections = SECTIONS.filter((x) => (x.id !== "updates" || can.own) && (advanced || (x.id !== "team" && x.id !== "server")));
+  const sections = SECTIONS.filter((x) => x.id !== "updates" || can.own);
   const wanted = route.kind === "settings" ? route.section : undefined;
   const active = sections.find((x) => x.id === wanted) ?? sections[0];
 
@@ -92,27 +165,26 @@ export default function Settings() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-2 text-sm text-text-primary">
-              Browser notifications
+              Notifications in this browser
               <span className={cn("chip", PERMISSION_CHIP[permission])}>
                 <span className="chip-dot" aria-hidden="true" />
                 {PERMISSION_LABEL[permission]}
               </span>
             </p>
             <p className="mt-1 text-xs leading-relaxed text-text-muted">
-              A ping when an agent finishes and its workspace needs review while this tab is hidden. Nothing is sent
-              while the tab is in front of you, that is what the sidebar badge is for.
+              A ping when Claude needs you or a project is ready to check, while this tab is in the background. Nothing
+              is sent while you are looking at Kohlab.
             </p>
             {permission === "denied" ? (
               <p className="mt-1.5 flex items-start gap-1.5 text-xs text-status-danger">
                 <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
-                The browser will not ask again, allow notifications for this site in your browser settings, then
-                reload.
+                Your browser will not ask again. Allow notifications for this site in the browser settings, then reload.
               </p>
             ) : null}
-            {permission === "default" || permission === "unsupported" ? (
+            {permission === "default" ? (
               <div className="mt-2">
-                <Button variant="secondary" size="sm" disabled={asking || permission === "unsupported"} onClick={() => void askPermission()}>
-                  {asking ? "Asking…" : "Enable notifications"}
+                <Button variant="secondary" size="sm" disabled={asking} onClick={() => void askPermission()}>
+                  {asking ? "Asking…" : "Turn on notifications"}
                 </Button>
               </div>
             ) : null}
@@ -133,13 +205,9 @@ export default function Settings() {
               onChange={(e) => setPaused(e.target.checked)}
             />
             <span className="min-w-0">
-              <span className="flex items-center gap-1.5 text-sm text-text-primary">
-                <SpeakerHigh size={14} className="text-text-muted" aria-hidden="true" />
-                Pause screen-reader announcements
-              </span>
+              <span className="block text-sm text-text-primary">Pause screen reader announcements</span>
               <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
-                Stops the live region from announcing workspace state changes. The status chips keep updating; only
-                the speech stops. Remembered on this browser.
+                Stops spoken updates about your projects. Everything still shows on screen. Remembered on this browser.
               </span>
             </span>
           </label>
@@ -148,43 +216,10 @@ export default function Settings() {
     </Panel>
   );
 
-  const server = (
-    <Panel>
-      <table className="data-table w-full">
-        <caption className="sr-only">Server address, workspace count and persistence</caption>
-        <tbody>
-          <tr>
-            <td className="text-text-muted">Address</td>
-            <td className="mono text-text-primary">{location.host}</td>
-          </tr>
-          <tr>
-            <td className="text-text-muted">Workspaces</td>
-            <td className="tnum text-text-primary">{workspaceCount}</td>
-          </tr>
-          <tr>
-            <td className="text-text-muted">Persistence</td>
-            <td>
-              <Chip>state on disk</Chip>
-              <span className="ml-2 text-xs text-text-muted">workspaces, logs and keys survive a restart of this server</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </Panel>
-  );
-
-  const content: Record<SettingsSection, ReactNode> = {
-    account: <Account />,
-    team: <Team />,
-    agents: (
-      <Panel>
-        <div className="p-2">
-          <AgentInstaller />
-        </div>
-      </Panel>
-    ),
+  const content: Partial<Record<SettingsSection, ReactNode>> = {
+    account: <AccountPane />,
+    agents: <ClaudePane />,
     notifications,
-    server,
     updates: (
       <Panel>
         <UpdatePanel />
@@ -195,7 +230,7 @@ export default function Settings() {
   return (
     <div className="surface">
       <div className="surface-inner">
-        <PageHeader title="Settings" description="Stored on this server; nothing is sent anywhere else." />
+        <PageHeader title="Settings" description="Changes are saved as you make them." />
 
         <div className="settings-layout mt-6">
           <nav className="settings-nav" aria-label="Settings sections">
@@ -203,7 +238,7 @@ export default function Settings() {
               <button
                 key={id}
                 type="button"
-                className="settings-nav-item"
+                className="settings-nav-item !min-h-11"
                 aria-current={active.id === id ? "page" : undefined}
                 onClick={() => navigate({ kind: "settings", section: id }, { replace: true })}
               >
@@ -218,7 +253,6 @@ export default function Settings() {
               {active.label}
             </h2>
             <p className="mt-1 mb-4 text-sm text-text-muted">{active.hint}</p>
-            {/* Account and Team bring their own panels and spacing. */}
             <div className="settings-pane">{content[active.id]}</div>
           </section>
         </div>

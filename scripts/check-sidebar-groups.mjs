@@ -8,7 +8,7 @@
  * Run:  bun scripts/check-sidebar-groups.mjs
  */
 import { sidebarGroup, sidebarTime, bySidebarActivity } from "../web/src/lib/status.ts";
-import { sidebarWhen } from "../web/src/lib/format.ts";
+import { sidebarWhen, projectTitle } from "../web/src/lib/format.ts";
 
 let failures = 0;
 function check(name, got, want) {
@@ -47,6 +47,9 @@ const threeDays = sidebarWhen(NOW - 3 * 24 * 60 * MIN, NOW);
 check("within a week is a weekday", /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/.test(threeDays), true);
 const twelveDays = sidebarWhen(NOW - 12 * 24 * 60 * MIN, NOW);
 check("older is day and month", /^\d{1,2} [A-Z][a-z]{2}$/.test(twelveDays), true);
+
+check("slug id is humanised", projectTitle({ id: "bakery-website" }), "Bakery website");
+check("task text is shown as written", projectTitle({ task: "Wedding RSVP page", id: "wedding-rsvp" }), "Wedding RSVP page");
 
 if (failures) {
   console.log(`\n${failures} failed`);

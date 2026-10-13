@@ -38,7 +38,7 @@ export default function UpdatePanel() {
       setError(next.error);
       // announce the transition, not every poll
       if (wasRunning.current && !next.running && next.exit !== null) {
-        announce(next.exit === 0 ? `kohlab updated to v${next.latest}` : "the last update failed");
+        announce(next.exit === 0 ? `Kohlab updated to version ${next.latest}` : "The last update did not work");
       }
       wasRunning.current = next.running;
     } catch (e) {
@@ -70,11 +70,11 @@ export default function UpdatePanel() {
     setBusy(true);
     try {
       await api.applyUpdate();
-      announce("update started, agents keep running; this page reconnects on its own");
+      announce("Update started. Your projects keep running; this page reconnects on its own.");
       await load(true);
     } catch (e) {
       setError((e as Error).message);
-      announce(`could not start the update: ${(e as Error).message}`);
+      announce(`Could not start the update: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
@@ -91,69 +91,51 @@ export default function UpdatePanel() {
   const failed =
     status?.unfinished === true || (status?.exit !== null && status?.exit !== undefined && status.exit !== 0);
   const lastRun = status?.unfinished
-    ? { danger: true, text: "The last update did not finish, the log below is all it left" }
+    ? { danger: true, text: "The last update did not finish. The details are below." }
     : status?.finishedAt
       ? failed
-        ? { danger: true, text: `Last update ${relativeTime(status.finishedAt)} failed (exit ${status.exit})` }
-        : { danger: false, text: `Last update ${relativeTime(status.finishedAt)} succeeded` }
+        ? { danger: true, text: `The last update ${relativeTime(status.finishedAt)} did not work.` }
+        : { danger: false, text: `Last updated ${relativeTime(status.finishedAt)}.` }
       : null;
 
   return (
     <div className="flex flex-col gap-4 p-4 text-left">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-text-primary">
-        <span className="mono">v{status?.current ?? "?"}</span>
+      <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary">
+        <span>Kohlab version {status?.current ?? "?"}</span>
         {status?.running ? (
           <span className="chip chip-review">
             <span className="chip-dot" aria-hidden="true" />
-            updating to v{status.latest}
+            Updating to {status.latest}
           </span>
         ) : status?.available ? (
           <span className="chip chip-review">
             <span className="chip-dot" aria-hidden="true" />
-            v{status.latest} published
+            Update ready
           </span>
         ) : (
           <span className="chip chip-running">
             <span className="chip-dot" aria-hidden="true" />
-            up to date
+            Up to date
           </span>
         )}
-        {status?.upstream ? (
-          <span className="text-xs text-text-muted">
-            {status.upstream}
-            {status.head ? ` · at ${status.head}` : ""}
-            {status.checkedAt ? ` · checked ${relativeTime(status.checkedAt)}` : ""}
-          </span>
-        ) : null}
+        {status?.checkedAt ? <span className="text-sm text-text-muted">Checked {relativeTime(status.checkedAt)}</span> : null}
       </div>
 
+      {status?.available ? <p className="text-sm text-text-primary">A new version of Kohlab is ready.</p> : null}
+
       {error ? (
-        <p className="flex items-start gap-1.5 text-xs text-status-danger">
-          <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
+        <p className="flex items-start gap-1.5 text-sm text-status-danger">
+          <WarningCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
           {error}
         </p>
       ) : null}
 
-      {status?.available && status.commits.length > 0 ? (
+      {status?.available && status.notes ? (
         <div>
-          <p className="section-label mb-1.5">Coming in v{status.latest}</p>
-          {status.notes ? (
-            <div className="max-h-64 overflow-auto rounded-md border border-line-subtle bg-surface-sunken p-3">
-              <pre className="whitespace-pre-wrap text-xs leading-relaxed text-text-secondary">
-                {status.notes}
-              </pre>
-            </div>
-          ) : null}
-          <ul className="mt-2 flex flex-col gap-0.5">
-            {status.commits.slice(0, 12).map((c) => (
-              <li key={c} className="mono text-2xs text-text-muted">
-                {c}
-              </li>
-            ))}
-          </ul>
-          {status.commits.length > 12 ? (
-            <p className="mt-1 text-xs text-text-faint">+{status.commits.length - 12} more</p>
-          ) : null}
+          <p className="mb-1.5 text-sm font-semibold text-text-primary">What's new in {status.latest}</p>
+          <div className="max-h-64 overflow-auto rounded-[10px] border border-line-subtle bg-surface-sunken p-3">
+            <pre className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">{status.notes}</pre>
+          </div>
         </div>
       ) : null}
 
@@ -162,55 +144,53 @@ export default function UpdatePanel() {
           <Button variant="primary" size="sm" disabled={busy || status?.running} onClick={() => void apply()}>
             {status?.running ? (
               <>
-                <CircleNotch size={13} className="animate-spin" aria-hidden="true" />
-                updating…
+                <CircleNotch size={14} className="animate-spin" aria-hidden="true" />
+                Updating…
               </>
             ) : (
               <>
-                <DownloadSimple size={13} aria-hidden="true" />
-                {failed ? "retry update" : `update to v${status?.latest}`}
+                <DownloadSimple size={14} aria-hidden="true" />
+                {failed ? "Try again" : "Update now"}
               </>
             )}
           </Button>
         ) : (
           <Button variant="secondary" size="sm" disabled={busy} onClick={() => void load(true)}>
-            <ArrowsClockwise size={13} aria-hidden="true" />
-            check again
+            <ArrowsClockwise size={14} aria-hidden="true" />
+            Check again
           </Button>
         )}
         {status?.available ? (
           <Button variant="quiet" size="sm" disabled={busy || status?.running} onClick={() => void load(true)}>
-            re-check
+            Check again
           </Button>
         ) : null}
       </div>
 
-      <p className="text-xs leading-relaxed text-text-muted">
-        Agents are not interrupted: this restarts the server only, and every running session
-        survives. Your uncommitted changes are stashed first, and a release that fails to come up
-        is rolled back automatically.
+      <p className="text-sm leading-relaxed text-text-muted">
+        Your projects keep running during the update. Kohlab restarts for a moment, and goes back to the old version by itself if the new one does not start.
       </p>
 
       {lastRun ? (
         <p
           className={
             lastRun.danger
-              ? "flex items-center gap-1.5 text-xs text-status-danger"
-              : "flex items-center gap-1.5 text-xs text-text-muted"
+              ? "flex items-center gap-1.5 text-sm text-status-danger"
+              : "flex items-center gap-1.5 text-sm text-text-muted"
           }
         >
-          {lastRun.danger ? <WarningCircle size={13} aria-hidden="true" /> : <CheckCircle size={13} aria-hidden="true" />}
+          {lastRun.danger ? <WarningCircle size={14} aria-hidden="true" /> : <CheckCircle size={14} aria-hidden="true" />}
           {lastRun.text}
         </p>
       ) : null}
 
       {status?.log && (failed || status?.running) ? (
-        <div>
-          <p className="section-label mb-1.5">Update log</p>
-          <div className="max-h-56 overflow-auto rounded-md border border-line-subtle bg-surface-sunken p-3">
-            <pre className="whitespace-pre-wrap text-xs leading-relaxed text-text-muted">{status.log}</pre>
+        <details>
+          <summary className="min-h-11 cursor-pointer select-none py-2 text-sm text-text-muted hover:text-text-primary">Show details</summary>
+          <div className="max-h-56 overflow-auto rounded-[10px] border border-line-subtle bg-surface-sunken p-3">
+            <pre className="whitespace-pre-wrap text-sm leading-relaxed text-text-muted">{status.log}</pre>
           </div>
-        </div>
+        </details>
       ) : null}
     </div>
   );

@@ -21,7 +21,7 @@ async function currentSubscription(): Promise<PushSubscription | null> {
   return (await reg?.pushManager.getSubscription()) ?? null;
 }
 
-/** Push to this device: a finished agent reaches the phone even with the browser closed. */
+/** Notifications on this device: a finished agent reaches the phone even with the browser closed. */
 export default function PushToggle() {
   const [on, setOn] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,9 +45,9 @@ export default function PushToggle() {
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
       await api.pushSubscribe(sub.toJSON());
       setOn(true);
-      announce("push notifications on for this device");
+      announce("Notifications are on for this device");
     } catch (e) {
-      toast.error(`Could not turn push on: ${(e as Error).message}`);
+      toast.error(`Could not turn notifications on: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
@@ -62,9 +62,9 @@ export default function PushToggle() {
         await sub.unsubscribe();
       }
       setOn(false);
-      announce("push notifications off for this device");
+      announce("Notifications are off for this device");
     } catch (e) {
-      toast.error(`Could not turn push off: ${(e as Error).message}`);
+      toast.error(`Could not turn notifications off: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
@@ -73,11 +73,11 @@ export default function PushToggle() {
   const test = async () => {
     try {
       const sub = await currentSubscription();
-      if (!sub) throw new Error("this device is not subscribed");
+      if (!sub) throw new Error("This device is not set up for notifications");
       await api.pushTest(sub.endpoint);
       toast.success("Sent. It should arrive in a few seconds.");
     } catch (e) {
-      toast.error(`Test failed: ${(e as Error).message}`);
+      toast.error(`The test did not work: ${(e as Error).message}`);
     }
   };
 
@@ -85,10 +85,10 @@ export default function PushToggle() {
   if (!supported) {
     note =
       isIos && !standalone
-        ? "On iPhone, push only works from the Home Screen: tap Share, then Add to Home Screen, open Kohlab from that icon, and come back here."
-        : "This browser cannot receive push notifications.";
+        ? "On iPhone, notifications only work from the Home Screen: tap Share, then Add to Home Screen, open Kohlab from that icon, and come back here."
+        : "This browser cannot show notifications.";
   } else {
-    note = "Get a notification on this device when an agent finishes, even when the browser is closed.";
+    note = "Get a notification on this device when Claude finishes or needs you, even when the browser is closed.";
   }
 
   return (
@@ -97,8 +97,8 @@ export default function PushToggle() {
         <DeviceMobile size={16} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm text-text-primary">Push to this device</p>
-        <p className="mt-1 text-xs leading-relaxed text-text-muted">{note}</p>
+        <p className="text-sm text-text-primary">Notifications on this device</p>
+        <p className="mt-1 text-sm leading-relaxed text-text-muted">{note}</p>
         {supported ? (
           <div className="mt-2 flex flex-wrap gap-2">
             {on ? (
@@ -112,7 +112,7 @@ export default function PushToggle() {
               </>
             ) : (
               <Button variant="secondary" size="sm" disabled={busy || on === null} onClick={() => void enable()}>
-                {busy ? "Turning on…" : "Turn on push"}
+                {busy ? "Turning on…" : "Turn on notifications"}
               </Button>
             )}
           </div>

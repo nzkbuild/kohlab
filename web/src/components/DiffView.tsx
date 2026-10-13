@@ -4,8 +4,10 @@ import { MONACO_THEME, baseOptions, defineKohlabTheme } from "../lib/monaco";
 import {
   ArrowUUpLeft,
   ArrowsClockwise,
+  CaretRight,
   CheckSquare,
   Files,
+  FileText,
   GitCommit,
   GitMerge,
   WarningCircle,
@@ -23,6 +25,8 @@ import ConfirmDialog from "./ConfirmDialog";
 
 interface Props {
   workspaceId: string;
+  /** Chat projects: a plain list of changed files, the code one disclosure away, and no commit controls. */
+  simple?: boolean;
 }
 
 type Filter = "all" | "unreviewed" | "reviewed";
@@ -58,6 +62,48 @@ const LIST_CLASS =
 /** The diff/verdict pane. */
 const PANE_CLASS = "flex min-h-72 min-w-0 flex-1 flex-col shell:min-h-0";
 
+/** One file's diff: Monaco side by side, or the plain text when the file is Not a text file. */
+function FileDiff({ name, diff }: { name: string; diff: string }) {
+  const stats = diffStats(diff);
+  // The API returns a unified diff (a patch), not two documents. Splitting it is
+  // what lets the editor show the actual change instead of patch syntax.
+  const split = splitUnifiedDiff(diff);
+  if (!stats) {
+    return (
+      <div className="h-full overflow-y-auto overscroll-contain p-4">
+        <p className="flex items-center gap-1.5 text-xs font-medium text-status-review">
+          <WarningCircle size={14} aria-hidden="true" />
+          Not a text file
+        </p>
+        <pre className="mono mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-text-secondary">{diff || "Nothing to show"}</pre>
+      </div>
+    );
+  }
+  return (
+    <DiffEditor
+      height="100%"
+      language={languageForFile(name)}
+      original={split.original}
+      modified={split.modified}
+      beforeMount={defineKohlabTheme}
+      theme={MONACO_THEME}
+      onMount={(editor) => editor.getOriginalEditor().updateOptions({ ariaLabel: `original version of ${name}` })}
+      options={{
+        ...baseOptions(),
+        // Monaco's hidden textareas are the screen-reader entry
+        // point; unnamed they fail SC 4.1.2.
+        ariaLabel: `changed version of ${name}`,
+        originalAriaLabel: `original version of ${name}`,
+        // Side-by-side on a wide pane, inline when it narrows,
+        // Monaco decides, so there is no breakpoint to maintain.
+        renderSideBySide: true,
+        useInlineViewWhenSpaceIsLimited: true,
+        renderOverviewRuler: false,
+      }}
+    />
+  );
+}
+
 function Totals({ added, removed }: { added: number; removed: number }) {
   return (
     <span className="tnum shrink-0 text-xs">
@@ -76,7 +122,7 @@ function Totals({ added, removed }: { added: number; removed: number }) {
  * diff, and those must be rendered as text: handing the stub to Monaco shows a
  * broken editor.
  */
-export default function DiffView({ workspaceId }: Props) {
+export default function DiffView({ workspaceId, simple = false }: Props) {
   const task = useApp((s) => s.workspaces.find((w) => w.id === workspaceId)?.task ?? "");
   const workspace = useApp((s) => s.workspaces.find((w) => w.id === workspaceId) ?? null);
   const refresh = useApp((s) => s.refresh);
@@ -94,6 +140,7 @@ export default function DiffView({ workspaceId }: Props) {
     }
   }, [storageKey, reviewed]);
   const [filter, setFilter] = useState<Filter>("all");
+  const [showCode, setShowCode] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -161,9 +208,6 @@ export default function DiffView({ workspaceId }: Props) {
   const current = files.find((f) => f.name === selected) ?? files[0] ?? null;
   const currentStats = current ? diffStats(current.diff) : null;
   const currentReviewed = current ? reviewed.has(current.name) : false;
-  // The API returns a unified diff (a patch), not two documents. Splitting it is
-  // what lets the editor show the actual change instead of patch syntax.
-  const split = current ? splitUnifiedDiff(current.diff) : { original: "", modified: "" };
 
   const defaultMessage = task.trim() ? task.trim().replace(/\s+/g, " ").slice(0, 72) : `${workspaceId} changes`;
   const message = draft ?? defaultMessage;
@@ -174,7 +218,7 @@ export default function DiffView({ workspaceId }: Props) {
   // typed into a field or a control keep their own meaning.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.altKey || confirming) return;
+      if (simple || e.defaultPrevented || e.altKey || confirming) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         if (!canCommit) return;
         e.preventDefault();
@@ -302,6 +346,91 @@ export default function DiffView({ workspaceId }: Props) {
       setConfirming(null);
     }
   };
+
+  if (simple) {
+    const count = files.length;
+    const heading =
+      loading && count === 0
+        ? "Loading…"
+        : error && count === 0
+          ? "Could not load the changes"
+          : count === 0
+            ? "Claude has not changed any files since you last kept"
+            : `Claude has changed ${count} file${count === 1 ? "" : "s"} since you last kept`;
+    return (
+      <div className="cockpit">
+        <header className="cockpit-head">
+          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">{heading}</h2>
+          <Button variant="quiet" size="sm" iconOnly aria-label="Refresh changes" disabled={loading} onClick={() => void load()}>
+            <ArrowsClockwise size={13} />
+          </Button>
+        </header>
+
+        {error ? (
+          <div role="alert" className="flex items-center gap-2 border-b border-line-subtle px-3 py-2 text-xs text-status-danger">
+            <WarningCircle size={14} className="shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1 break-words">{error}</span>
+            <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
+              Try again
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+          <div className="mx-auto w-full max-w-[720px]">
+            {loading && count === 0 ? <SkeletonRows rows={4} /> : null}
+            {count > 0 ? (
+              <>
+                <ul className="flex flex-col">
+                  {files.map((file) => {
+                    const stats = diffStats(file.diff);
+                    const isCurrent = current?.name === file.name;
+                    return (
+                      <li key={file.name}>
+                        <button
+                          type="button"
+                          aria-current={isCurrent ? "true" : undefined}
+                          onClick={() => setSelected(file.name)}
+                          className={cn(
+                            "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left hover:bg-surface-hover",
+                            isCurrent && "bg-surface-active",
+                          )}
+                        >
+                          <FileText size={16} className="shrink-0 text-text-muted" aria-hidden="true" />
+                          <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary" title={file.name}>
+                            {file.name}
+                          </span>
+                          {stats ? (
+                            <span className="tnum shrink-0 text-sm text-text-muted">
+                              +{stats.added} −{stats.removed}
+                            </span>
+                          ) : (
+                            <span className="shrink-0 text-sm text-text-muted">Changed</span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {/* The code is mounted only once opened: the editor is the heavy part. */}
+                <details className="group mt-4" onToggle={(e) => setShowCode(e.currentTarget.open)}>
+                  <summary className="flex min-h-11 w-fit cursor-pointer list-none select-none items-center gap-1.5 rounded-lg px-3 text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary [&::-webkit-details-marker]:hidden">
+                    <CaretRight size={14} weight="bold" aria-hidden="true" className="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+                    Show the code
+                  </summary>
+                  {showCode && current ? (
+                    <div className="dark-pane mt-2 h-[min(60vh,32rem)] min-h-64 overflow-hidden rounded-xl border border-line-subtle bg-surface-sunken">
+                      <FileDiff name={current.name} diff={current.diff} />
+                    </div>
+                  ) : null}
+                </details>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="cockpit">
@@ -517,41 +646,7 @@ export default function DiffView({ workspaceId }: Props) {
                 </div>
 
                 <div className="dark-pane min-h-0 flex-1 overflow-hidden bg-surface-sunken">
-                  {currentStats ? (
-                    <DiffEditor
-                      height="100%"
-                      language={languageForFile(current.name)}
-                      original={split.original}
-                      modified={split.modified}
-                      beforeMount={defineKohlabTheme}
-                      theme={MONACO_THEME}
-                      onMount={(editor) =>
-                        editor.getOriginalEditor().updateOptions({ ariaLabel: `original version of ${current.name}` })
-                      }
-                      options={{
-                        ...baseOptions(),
-                        // Monaco's hidden textareas are the screen-reader entry
-                        // point; unnamed they fail SC 4.1.2.
-                        ariaLabel: `changed version of ${current.name}`,
-                        originalAriaLabel: `original version of ${current.name}`,
-                        // Side-by-side on a wide pane, inline when it narrows,
-                        // Monaco decides, so there is no breakpoint to maintain.
-                        renderSideBySide: true,
-                        useInlineViewWhenSpaceIsLimited: true,
-                        renderOverviewRuler: false,
-                      }}
-                    />
-                  ) : (
-                    <div className="h-full overflow-y-auto overscroll-contain p-4">
-                      <p className="flex items-center gap-1.5 text-xs font-medium text-status-review">
-                        <WarningCircle size={14} aria-hidden="true" />
-                        not a text diff
-                      </p>
-                      <pre className="mono mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-text-secondary">
-                        {current.diff || "empty diff"}
-                      </pre>
-                    </div>
-                  )}
+                  <FileDiff name={current.name} diff={current.diff} />
                 </div>
               </>
             ) : (

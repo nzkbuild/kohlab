@@ -22,6 +22,7 @@ import { announce } from "../lib/announce";
 import { useApp, useCan } from "../store";
 import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
+import { projectTitle } from "../lib/format";
 import { cn } from "../lib/utils";
 import BrowseView from "./BrowseView";
 import ConfirmDialog from "./ConfirmDialog";
@@ -49,7 +50,7 @@ const TABS: { id: TabId; label: string; icon: typeof Terminal }[] = [
 
 /** Simple mode: the agent and the changes, nothing else. */
 const SIMPLE_TABS = TABS.filter(({ id }) => id === "terminal" || id === "review").map((t) =>
-  t.id === "terminal" ? { ...t, label: "Agent" } : t,
+  t.id === "terminal" ? { ...t, label: "Claude" } : t,
 );
 
 /** Tab count badges, noun included so the tab's name reads as a sentence. */
@@ -147,7 +148,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       disposeWorkspaceTerminals(workspaceId);
       await toastAction(workspaceId, "delete");
       await refresh();
-      announce(`${workspaceId} deleted`);
+      announce("Project deleted");
       setConfirming(false);
       navigate({ kind: "workspaces" });
     } catch (e) {
@@ -254,11 +255,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <div className="surface-inner">
           <EmptyState
             icon={<Ghost size={18} />}
-            title="Workspace not found"
+            title="Project not found"
             description={`${workspaceId} is not on this server. It may have been deleted, or the link may be stale.`}
             action={
               <Button variant="primary" onClick={() => navigate({ kind: "workspaces" })}>
-                back to workspaces
+                Back to Home
               </Button>
             }
           />
@@ -290,28 +291,18 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // One primary per state: a workspace waiting for review asks for a review,
   // not for its agent to be started again. The rest live in the overflow menu,
   // which also keeps the row inside a 320px viewport.
+  // No primary button here: the one primary action of a chat lives in the chat.
   const actions = (
     <>
-      {needsReview && tab !== "review" ? (
-        <Button size="sm" variant="primary" className="flex-1 shell:flex-none" onClick={() => setTab("review")}>
-          <GitDiff size={13} aria-hidden="true" />
-          {reviewCount > 0 ? `See changes (${reviewCount} file${reviewCount === 1 ? "" : "s"})` : "See changes"}
-        </Button>
-      ) : null}
       {/* A chat has no start/stop of its own: the server's start is a no-op, and Stop lives inside the chat. */}
       {chat ? null : (
-        <Button
-          size="sm"
-          variant={needsReview || running ? "secondary" : "primary"}
-          className={tab === "review" ? "hidden shell:inline-flex" : "flex-1 shell:flex-none"}
-          onClick={() => run(running ? "stop" : "start")}
-        >
+        <Button size="sm" variant={needsReview || running ? "secondary" : "primary"} onClick={() => run(running ? "stop" : "start")}>
           {running ? <Stop size={13} weight="fill" aria-hidden="true" /> : <Play size={13} weight="fill" aria-hidden="true" />}
           {running ? "stop" : "start"}
         </Button>
       )}
       <Menu
-        label={`more actions for ${w.id}`}
+        label="More actions"
         trigger={
           <Button size="sm" variant="secondary" iconOnly>
             <DotsThree size={16} weight="bold" />
@@ -332,7 +323,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         ) : null}
         <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
           <Trash size={14} aria-hidden="true" />
-          delete workspace
+          Delete project…
         </MenuItem>
       </Menu>
     </>
@@ -340,34 +331,23 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
   return (
     <div className="cockpit">
-      <header className="cockpit-head flex-wrap">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            {/* The task is what the person named; the id is only a handle, so the
-                task carries the single <h1> and the id drops to the line below. */}
-            <h1 className="m-0 min-w-0 line-clamp-2 break-words text-lg font-semibold text-text-primary shell:truncate" title={w.task || w.id}>
-              {w.task || w.id}
-            </h1>
-            <StatusChip status={st} />
-          </div>
-          {advanced ? (
-            <p className="mono min-w-0 truncate text-2xs text-text-faint" title={`${w.id} · ${w.path}`}>
-              {w.id} · …/{w.path.split("/").slice(-2).join("/")}
-            </p>
-          ) : null}
+      <header className="cockpit-head">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h1 className="m-0 min-w-0 truncate text-base font-semibold text-text-primary">{projectTitle(w)}</h1>
+          <StatusChip status={st} />
         </div>
 
         {can.mutate ? (
-          <div className="hidden items-center gap-1.5 shell:flex">{actions}</div>
+          <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
         ) : (
-          <span className="chip chip-stopped" title="Your role can watch this workspace but not change it.">
-            view only
+          <span className="chip chip-stopped" title="You can look at this project but not change it.">
+            View only
           </span>
         )}
       </header>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
-      <TabList label="Workspace panes">
+      <TabList label="Project tabs">
         {visibleTabs.map(({ id, label, icon: Icon }) => {
           const badge = badges[id];
           const TabIcon = chat && id === "terminal" ? ChatCircleDots : Icon;
@@ -424,7 +404,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             <Menu
               label="new terminal"
               trigger={
-                <Button variant="quiet" size="sm" title="Open another terminal in this workspace's folder">
+                <Button variant="quiet" size="sm" title="Open another terminal in this project's folder">
                   <Plus size={13} aria-hidden="true" />
                   new
                 </Button>
@@ -461,7 +441,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
                       <span className="min-w-0 flex-1 text-xs text-text-muted">
                         {can.mutate
-                          ? `Agent exited, showing the last screen. Restart it${advanced ? ", or open a shell" : ""}.`
+                          ? `Claude stopped, showing the last screen. Restart it${advanced ? ", or open a shell" : ""}.`
                           : "Not running, showing the last screen."}
                       </span>
                       {can.mutate ? (
@@ -501,7 +481,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <TabPanel value="review" className="h-full min-h-0" tabIndex={-1}>
           <ErrorBoundary label="Review">
             <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
-              {tab === "review" ? <DiffView key={workspaceId} workspaceId={workspaceId} /> : null}
+              {tab === "review" ? <DiffView key={workspaceId} workspaceId={workspaceId} simple={chat} /> : null}
             </Suspense>
           </ErrorBoundary>
         </TabPanel>
@@ -516,19 +496,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       </div>
       </Tabs>
 
-      {/* Phones: the actions sit under the thumb, not in a wrapped header. */}
-      {can.mutate ? (
-        <div className="flex items-center gap-2 border-t border-line-subtle bg-surface-raised px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shell:hidden">
-          {actions}
-        </div>
-      ) : null}
-
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title={`Delete ${w.id}?`}
-        description={`The worktree at ${w.path} and any uncommitted changes are removed. This cannot be undone.`}
-        confirmLabel="delete workspace"
+        title="Delete this project?"
+        description="Its files and chat are removed from the server."
+        confirmLabel="Delete project"
         busy={deleting}
         onConfirm={() => void onDelete()}
       />

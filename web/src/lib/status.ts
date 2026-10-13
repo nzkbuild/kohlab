@@ -4,11 +4,12 @@ import type { Workspace } from "../types";
  * Workspace lifecycle: the product model:
  *   create → running → needs-review → committed   (or → stopped clean)
  *
- * Derivation is pure and cheap: running wins, then needs-review (the agent
+ * Derivation is pure and cheap: a pending question (waiting) wins, then running,
+ * then needs-review (the agent
  * finished with changes and nothing has been committed since), then committed,
  * then stopped. A run that finished clean is stopped: it has nothing to review.
  */
-export type WorkspaceStatus = "running" | "needs-review" | "committed" | "discarded" | "stopped";
+export type WorkspaceStatus = "needs-you" | "running" | "needs-review" | "committed" | "discarded" | "stopped";
 
 /**
  * Two decisions end a run: accept (commit) and reject (discard). Whichever one
@@ -23,6 +24,7 @@ export type WorkspaceStatus = "running" | "needs-review" | "committed" | "discar
  * report rejected work as accepted.
  */
 export function workspaceStatus(w: Workspace): WorkspaceStatus {
+  if (w.waiting) return "needs-you";
   if (w.running) return "running";
   if (!w.stopped) return "stopped";
   const committed = w.lastCommitAt ?? -Infinity;
@@ -32,14 +34,16 @@ export function workspaceStatus(w: Workspace): WorkspaceStatus {
 }
 
 export const STATUS_LABEL: Record<WorkspaceStatus, string> = {
+  "needs-you": "Needs you",
   running: "Working",
   "needs-review": "Ready to check",
-  committed: "Committed",
-  discarded: "Discarded",
-  stopped: "Stopped",
+  committed: "Kept",
+  discarded: "Undone",
+  stopped: "Paused",
 };
 
 export const STATUS_CHIP: Record<WorkspaceStatus, string> = {
+  "needs-you": "chip-review",
   running: "chip-running",
   "needs-review": "chip-review",
   committed: "chip-committed",
@@ -53,6 +57,7 @@ export const STATUS_CHIP: Record<WorkspaceStatus, string> = {
  * silently produces no CSS at all.
  */
 export const STATUS_TEXT: Record<WorkspaceStatus, string> = {
+  "needs-you": "text-status-review",
   running: "text-status-running",
   "needs-review": "text-status-review",
   committed: "text-status-committed",
@@ -62,11 +67,12 @@ export const STATUS_TEXT: Record<WorkspaceStatus, string> = {
 
 /** Sort weight for the workspace table: review first, then live, then rest. */
 export const STATUS_ORDER: Record<WorkspaceStatus, number> = {
-  "needs-review": 0,
-  running: 1,
-  committed: 2,
-  stopped: 3,
-  discarded: 4,
+  "needs-you": 0,
+  "needs-review": 1,
+  running: 2,
+  committed: 3,
+  stopped: 4,
+  discarded: 5,
 };
 
 export function byReviewFirst(a: Workspace, b: Workspace): number {
@@ -89,9 +95,10 @@ export const SIDEBAR_GROUPS: { key: SidebarGroup; label: string }[] = [
 ];
 
 export function sidebarGroup(w: Workspace): SidebarGroup {
-  if (w.waiting) return "needs";
-  if (workspaceStatus(w) === "running") return "working";
-  if (workspaceStatus(w) === "needs-review") return "review";
+  const status = workspaceStatus(w);
+  if (status === "needs-you") return "needs";
+  if (status === "running") return "working";
+  if (status === "needs-review") return "review";
   return "earlier";
 }
 

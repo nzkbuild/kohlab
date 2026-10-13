@@ -80,6 +80,7 @@ try {
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);
   run("sidebar groups", "bun", ["scripts/check-sidebar-groups.mjs"]);
+  run("home name", "bun", ["scripts/check-home-name.ts"]);
   run("token contrast (WCAG 2.2 AA)", "node", ["scripts/check-contrast.mjs"]);
   run("screen model", "node", ["scripts/check-screen.mjs"]);
   run("corruption handling", "node", ["scripts/check-corruption.mjs"]);

@@ -2,7 +2,15 @@ import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "re
 import * as RadixTabs from "@radix-ui/react-tabs";
 import * as RadixMenu from "@radix-ui/react-dropdown-menu";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
-import { CaretRight, Check, Diamond, Play, Square, X } from "@phosphor-icons/react";
+import {
+  ArrowCounterClockwise,
+  BellRinging,
+  CaretRight,
+  CheckCircle,
+  CircleNotch,
+  Eye,
+  PauseCircle,
+} from "@phosphor-icons/react";
 import { cn } from "../lib/utils";
 import { subscribeAnnouncements } from "../lib/announce";
 import { STATUS_CHIP, STATUS_LABEL, type WorkspaceStatus } from "../lib/status";
@@ -13,11 +21,12 @@ export * as Dialog from "@radix-ui/react-dialog";
 
 /** Shape cue per status, drawn from the icon set rather than text glyphs. */
 const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
-  running: <Play size={9} weight="fill" />,
-  "needs-review": <Diamond size={9} weight="fill" />,
-  committed: <Check size={10} weight="bold" />,
-  discarded: <X size={10} weight="bold" />,
-  stopped: <Square size={8} weight="fill" />,
+  "needs-you": <BellRinging size={14} weight="fill" />,
+  running: <CircleNotch size={14} weight="bold" className="status-spin" />,
+  "needs-review": <Eye size={14} weight="bold" />,
+  committed: <CheckCircle size={14} weight="fill" />,
+  discarded: <ArrowCounterClockwise size={14} weight="bold" />,
+  stopped: <PauseCircle size={14} weight="fill" />,
 };
 
 /* ------------------------------------------------------------------ button -- */
@@ -232,8 +241,8 @@ export function EmptyState({
             {icon}
           </div>
         ) : null}
-        <p className="text-base font-semibold text-text-primary">{title}</p>
-        <p className="mt-1.5 text-sm leading-relaxed text-text-muted">{description}</p>
+        <p className="text-lg font-semibold text-text-primary">{title}</p>
+        <p className="mt-1.5 text-base leading-relaxed text-text-muted">{description}</p>
         {action ? <div className="mt-4 flex justify-center gap-2">{action}</div> : null}
       </div>
     </div>

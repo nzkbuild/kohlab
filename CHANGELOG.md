@@ -9,6 +9,20 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.35.0] - 2026-10-13
+
+### Changed
+- A full design pass so Kohlab feels like a modern consumer app. Home asks "What do you want to build?" with starter ideas and shows what needs you; New project is a small centred window that only asks for a name; the chat has a Claude label, comfortable reading width, real lists, a ChatGPT-style message box and one clear main button; answered permissions shrink to one line (several in a row become one); the preview panel has proper controls and opens inside the app on phones; Changes is a plain list of changed files.
+- One status everywhere: Needs you, Working, Ready to check, Kept, Undone, Paused, with drawn icons and one bell icon for Needs you.
+- Larger text (15px) and controls (40px, 44px on touch screens); themed scrollbars, selection and focus; your own messages stand out in dark mode.
+- Settings shows Account, Claude, Notifications and Updates in plain words.
+
+### Fixed
+- Work Claude did before a question could stay hidden in the chat after the question went away.
+
+### Removed
+- The old developer dashboard on Home, the code-review controls, and unused team and key screens.
+
 ## [1.34.0] - 2026-10-13
 
 ### Added

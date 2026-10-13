@@ -131,8 +131,8 @@ export default function App() {
             <div role="status" className="conn-banner" data-state={connection}>
               <span className="chip-dot" aria-hidden="true" />
               {connection === "reconnecting"
-                ? "Reconnecting to the server… agents keep running."
-                : "Can't reach the server. Agents keep running there; this page catches up when it reconnects."}
+                ? "Reconnecting to the server… your projects keep running."
+                : "Can't reach the server. Your projects keep running there; this page catches up when it reconnects."}
             </div>
           ) : null}
 

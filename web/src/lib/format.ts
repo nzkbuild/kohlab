@@ -73,3 +73,17 @@ export function timeoutLabel(sec?: number): string | null {
   if (!sec) return null;
   return sec >= 3600 ? `${Math.round(sec / 3600)}h` : sec >= 60 ? `${Math.round(sec / 60)}m` : `${sec}s`;
 }
+
+/**
+ * Display name for a project. Uses the task text when there is one. A bare slug
+ * (lowercase, digits, dashes, no spaces) is humanised: "bakery-website" becomes
+ * "Bakery website".
+ */
+export function projectTitle(w: { task?: string; id: string }): string {
+  const text = w.task || w.id;
+  if (/^[a-z0-9-]+$/.test(text)) {
+    const spaced = text.replace(/-/g, " ");
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  }
+  return text;
+}

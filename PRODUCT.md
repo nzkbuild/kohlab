@@ -8,30 +8,33 @@ web
 
 ## Users
 
-Two, in the order the product serves them:
+In the order the product serves them:
 
-- **The solo operator with a VPS.** One developer, one box, several agents. Their
-  complaint is the one Kohlab was built for: the session dies when the SSH
-  connection does.
-- **A small team sharing one box (2–10).** People who want shared agent
-  infrastructure without a per-seat service, and without handing their repository
-  to someone else's cloud.
+- **The non-technical builder.** Someone with an idea (a small-business website, an
+  RSVP page, a tool for a boring job) who uses Kohlab as an installed app, on
+  their own server, to build it with Claude. The owner and a few friends they
+  invite. They never see a terminal, a repository or a branch.
+- **The developer or small team (secondary, legacy).** A developer with a VPS, or
+  2-10 people sharing one box, who want agent infrastructure without a per-seat
+  service. The terminal, files, log and review tools they were built for still
+  exist for older projects, but they are no longer the main path.
 
-Both are the same install. The difference is one command (`kohlab user add`) and
-whether per-user isolation matters to them.
+All are the same install. The difference is one command (`kohlab user add`) and
+whether per-user isolation matters.
 
 ## Product Purpose
 
-Kohlab is a self-hosted control plane for AI coding agents.
+Kohlab is a place to build things by talking to Claude, on a server you own.
 
-Agents run on a box you own, in a workspace you own, and they keep running when
-your laptop closes, your SSH drops, or your phone screen sleeps. You attach from
-any browser to see what they did and decide what to keep.
+You describe what you want. Claude builds it, and asks before any risky step
+(creating or changing a file, running a command). You look at the preview, then
+keep this version or undo it. Work keeps running when your laptop closes or your
+phone screen sleeps, and you come back to it from any device.
 
-What it refuses to be is a terminal multiplexer. `tmux` keeps a session alive and
-stops there, no review, no isolation, no account for the second person. Kohlab
-keeps the session alive and then closes the loop: the agent's work arrives as a
-diff on its own branch, and accepting it is a decision you make.
+Underneath, Claude's work stays on its own copy of the project until you keep it,
+so nothing lands without a decision. What Kohlab refuses to be is a terminal
+multiplexer or a code-review tool: the person in front of it should never need to
+know either word.
 
 ## Positioning
 
@@ -48,7 +51,7 @@ Three mechanisms, which the alternatives do not combine:
    and their agents run as them. "Alice cannot read Bob's repositories" is
    enforced by the kernel, not by a role check or a promise.
 
-One browser tab, self-hosted, no database, no containers, no desktop app.
+Self-hosted, no database, no containers. Opens in a browser tab or as an installed app.
 
 ## Operating Context
 
@@ -57,10 +60,11 @@ One browser tab, self-hosted, no database, no containers, no desktop app.
 key: `kohlab pair` mints a short one-time code, and the browser trades it for
 access. A server that is reachable is never keyless.
 
-**Daily.** The owner creates a workspace from a repository, launches an agent,
-watches its terminal from a laptop or phone, disconnects, comes back, reads the
-diff, and accepts or discards it, then merges what it accepted. Workspaces queue up as *needs review* until
-they are dealt with.
+**Daily.** The loop is: describe what you want in Home or in a project's chat,
+Claude builds it and asks before risky steps, you open the preview, then press
+Keep this version or Undo. Projects that need an answer sit at the top of the
+sidebar under Needs you; finished work waits under Ready to check. Developers
+can still launch terminal agents, read diffs and merge.
 
 **Team.** Teammates are *invited*, not handed a secret out of band: the owner
 creates a single-use, expiring invite link (`/join#token`), Kohlab provisions
@@ -110,9 +114,10 @@ Constraints, stated plainly rather than discovered by a user:
 ## Brand Commitments
 
 - Product name: Kohlab.
-- Calm, precise, developer-native, operational, an instrument panel, not a
-  landing page. The v1.10 frontend is the standard, not a one-off.
-- Plain language in every string a user reads.
+- Calm, friendly, plain English; consumer-grade like Claude desktop. Not a
+  landing page, not an instrument panel.
+- Plain language in every string a user reads: no commits, branches, diffs,
+  repositories or agents in the main path.
 - No invented metrics, customers, benchmarks or pricing claims.
 
 ## Evidence on Hand
@@ -126,10 +131,10 @@ Constraints, stated plainly rather than discovered by a user:
 ## Product Principles
 
 1. Show what is happening now before explaining the system.
-2. Make the review queue the center of gravity when agent work is ready.
+2. Make "what needs me" the center of gravity: questions first, then work ready to check.
 3. Preserve work through disconnects without making persistence feel complex.
 4. Keep destructive and irreversible actions explicit.
-5. Prefer dense, legible operational surfaces over decorative chrome.
+5. Prefer calm, legible surfaces with one clear main action over decorative chrome.
 6. Nobody arrives uninvited: access is granted by the person who owns the
    server, never by being first to reach the port.
 

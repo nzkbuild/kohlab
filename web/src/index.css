@@ -48,6 +48,7 @@
   --surface-overlay: var(--neutral-900);    /* dialogs, palette, popovers */
   --surface-hover: var(--neutral-900);
   --surface-active: var(--neutral-800);
+  --bubble-user: var(--neutral-800);  /* the user's own message in the chat */
 
   /* --- semantic: text ----------------------------------------------------- */
   --text-primary: var(--neutral-100);
@@ -97,8 +98,13 @@
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+
+  /* Scrollbar thumb: a 22% tint of the primary text colour, so it is quiet on a
+     white plane and on a near-black one alike. */
+  --scroll-thumb: color-mix(in oklch, var(--text-primary) 22%, transparent);
 
   /* Layout constants shared by JS and CSS (mobile drawer + sticky chrome). */
   --topbar-h: 3.25rem;
@@ -107,8 +113,8 @@
 
   /* Density: one place to tune how tight the console sits. Always min-height,
      never height, so text-spacing overrides (SC 1.4.12) never clip. */
-  --control-h: 2.125rem;
-  --control-h-sm: 1.75rem;
+  --control-h: 2.5rem;
+  --control-h-sm: 2rem;
   --row-h: 2.25rem;
   --tab-h: 2.75rem;
 
@@ -128,11 +134,12 @@
     color-scheme: light;
 
     --surface-base: oklch(0.985 0.001 286);
-    --surface-sunken: oklch(0.965 0.002 286);
+    --surface-sunken: oklch(0.955 0.003 286);
     --surface-raised: oklch(1 0 0);
     --surface-overlay: oklch(1 0 0);
-    --surface-hover: oklch(0.955 0.002 286);
+    --surface-hover: oklch(0.965 0.002 286);
     --surface-active: oklch(0.93 0.003 286);
+    --bubble-user: oklch(0.955 0.003 286);
 
     --text-primary: oklch(0.2 0.003 286);
     --text-secondary: oklch(0.37 0.004 286);
@@ -204,6 +211,7 @@
   --color-surface-overlay: var(--surface-overlay);
   --color-surface-hover: var(--surface-hover);
   --color-surface-active: var(--surface-active);
+  --color-bubble-user: var(--bubble-user);
 
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
@@ -229,6 +237,7 @@
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
 
   /* rem-based type scale (Resize Text / SC 1.4.4, never px, never clamp()). */
   --text-2xs: 0.75rem;
@@ -237,8 +246,8 @@
   --text-xs--line-height: 1.0625rem;
   --text-sm: 0.8125rem;
   --text-sm--line-height: 1.1875rem;
-  --text-base: 0.875rem;
-  --text-base--line-height: 1.3125rem;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.375rem;
   --text-lg: 1rem;
   --text-lg--line-height: 1.5rem;
   --text-xl: 1.25rem;
@@ -273,6 +282,8 @@ body {
   background: var(--surface-base);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  font-size: 0.9375rem; /* 15px body: the reading size, not a console size */
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -283,7 +294,7 @@ select,
 textarea,
 a {
   font: inherit;
-  font-size: 0.875rem; /* 14px control floor */
+  font-size: 0.9375rem; /* 15px control floor */
 }
 
 button {
@@ -306,13 +317,41 @@ button:disabled {
 }
 
 ::selection {
-  background: color-mix(in oklch, var(--accent) 32%, transparent);
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
   color: var(--text-primary);
 }
 
+/* Text entry carries the accent as its caret, so it reads as the same product in both themes. */
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: var(--accent);
+}
+
+/* Native checkboxes and radios take the primary colour instead of the OS blue. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+/* Thin scrollbars themed from the palette. scrollbar-color covers Firefox and
+   current Chromium; the ::-webkit rules cover older WebKit and Safari. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--neutral-700) transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scroll-thumb);
+  background-clip: content-box;
 }
 
 /* Only transform/opacity/colour-ish properties may animate. */
@@ -361,9 +400,9 @@ button:disabled {
     gap: 0.4375rem;
     border: 1px solid transparent;
     border-radius: var(--radius-md);
-    padding: 0.375rem 0.75rem;
-    font-size: 0.8125rem;
-    font-weight: 550;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.9375rem;
+    font-weight: 500;
     line-height: 1.2;
     transition: background-color var(--duration-fast-02) var(--ease-standard),
       border-color var(--duration-fast-02) var(--ease-standard),
@@ -372,8 +411,8 @@ button:disabled {
 
   .btn-sm {
     min-height: var(--control-h-sm);
-    padding: 0.25rem 0.5625rem;
-    font-size: 0.75rem;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.8125rem;
   }
   /* Icon-only controls keep a 24x24 minimum hit area (SC 2.5.8 AA). */
   .btn-icon {
@@ -435,7 +474,7 @@ button:disabled {
     gap: 0.375rem;
   }
   .field-label {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     font-weight: 500;
     color: var(--text-secondary);
   }
@@ -444,13 +483,13 @@ button:disabled {
   .field-textarea {
     width: 100%;
     box-sizing: border-box;
-    min-height: 2.25rem;
+    min-height: var(--control-h);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-md);
     background: var(--surface-sunken);
-    padding: 0.4375rem 0.625rem;
+    padding: 0.5rem 0.75rem;
     color: var(--text-primary);
-    font-size: 0.8125rem;
+    font-size: 0.9375rem;
     outline: none;
     transition: border-color var(--duration-fast-02) var(--ease-standard);
   }
@@ -464,7 +503,7 @@ button:disabled {
     border-color: var(--accent);
   }
   .field-help {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     line-height: 1.45;
     color: var(--text-muted);
   }
@@ -478,8 +517,8 @@ button:disabled {
     gap: 0.375rem;
     border: 1px solid var(--line-strong);
     border-radius: 999px;
-    padding: 0.1875rem 0.5rem;
-    font-size: 0.75rem;
+    padding: 0.25rem 0.625rem 0.25rem 0.5rem;
+    font-size: 0.8125rem;
     font-weight: 500;
     line-height: 1.25;
     white-space: nowrap;
@@ -576,6 +615,18 @@ button:disabled {
   }
 }
 
+/* Working status glyph: a slow spin. Reduced motion keeps the glyph still. */
+@keyframes kohlab-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .status-spin {
+    animation: kohlab-spin 1.6s linear infinite;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -596,6 +647,9 @@ button:disabled {
     border-color: CanvasText;
   }
   .chip-dot {
+    background: CanvasText;
+  }
+  .sidebar-live-dot {
     background: CanvasText;
   }
   :focus-visible {
@@ -691,6 +745,50 @@ button:disabled {
   border-color: var(--line-subtle);
   background: var(--surface-active);
   color: var(--text-primary);
+}
+
+/* Working marker in the sidebar: the lime dot that means an agent is alive. */
+.sidebar-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--status-running);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-live-dot {
+    animation: kohlab-pulse 1.6s var(--ease-standard) infinite;
+  }
+}
+
+/* Leading mark in a row: 14px, so an empty slot keeps titles aligned. */
+.sidebar-lead {
+  display: inline-flex;
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Collapsed rail only: the project's initial stands in for the title. */
+.sidebar-initial {
+  display: none;
+}
+.sidebar[data-collapsed="true"] .sidebar-initial {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.sidebar[data-collapsed="true"] .sidebar-lead {
+  display: none;
 }
 
 .sidebar-divider {
@@ -1597,5 +1695,15 @@ button:disabled {
   }
   .data-table .field-select {
     min-width: 6.5rem;
+  }
+}
+
+/* --- touch ----------------------------------------------------------------- */
+/* Coarse pointers get a 44px minimum on every control and row (WCAG 2.5.5). */
+@media (pointer: coarse) {
+  :root {
+    --control-h: 2.75rem;
+    --control-h-sm: 2.75rem;
+    --row-h: 2.75rem;
   }
 }

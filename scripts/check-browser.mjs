@@ -141,7 +141,8 @@ try {
           surfaceOverflow: [...document.querySelectorAll(".surface")].reduce((n, s) => Math.max(n, s.scrollWidth - s.clientWidth), 0),
           small,
           form: !!document.querySelector(".launch-form"),
-          queue: [...document.querySelectorAll("h2")].some((h) => /Waiting for you/.test(h.textContent)),
+          // Home is one question and one composer, the same screen for every project count.
+          composer: !!document.querySelector("textarea[placeholder^='Describe your idea']"),
           // Radix generates the trigger id; the pane name is its suffix.
           tab: document.querySelector("[role=tab][aria-selected=true]")?.id.replace(/^.*-trigger-/, "tab-") ?? null,
         };
@@ -150,7 +151,7 @@ try {
       check(`${at}: one h1`, m.h1 === 1, `${m.h1}`);
       check(`${at}: no horizontal scroll`, m.overflow <= 0 && m.surfaceOverflow <= 0, `page ${m.overflow}px, surface ${m.surfaceOverflow}px`);
       check(`${at}: controls at least 24px`, m.small.length === 0, m.small.slice(0, 4).join(", "));
-      if (name === "home") check(`${at}: review queue leads`, m.queue);
+      if (name === "home") check(`${at}: home asks what to build`, m.composer);
       if (name === "new") check(`${at}: /new opens the form`, m.form);
       if (name === "workspace") {
         check(`${at}: needs-review opens on Review`, m.tab === "tab-review", `${m.tab}`);

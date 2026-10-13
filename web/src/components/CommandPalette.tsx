@@ -6,28 +6,27 @@ import {
   ArrowUp,
   ArrowsClockwise,
   GearSix,
+  House,
   MagnifyingGlass,
   Plus,
-  Stack,
-  TerminalWindow,
+  Sparkle,
   X,
 } from "@phosphor-icons/react";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
-import { ROUTE_LABEL } from "../lib/route";
-import { byReviewFirst, STATUS_LABEL, workspaceStatus, type WorkspaceStatus } from "../lib/status";
+import { projectTitle } from "../lib/format";
+import { byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
 import { Button, Kbd, StatusChip } from "./ui";
 
-type PaletteGroup = "Views" | "Workspaces" | "Actions";
+type PaletteGroup = "Views" | "Projects" | "Actions";
 
 /** Heading order is fixed: where you are, what you have, what you can do. */
-const GROUP_ORDER: readonly PaletteGroup[] = ["Views", "Workspaces", "Actions"];
+const GROUP_ORDER: readonly PaletteGroup[] = ["Views", "Projects", "Actions"];
 
 type PaletteItem = {
   id: string;
   label: string;
   group: PaletteGroup;
-  subtitle?: string;
   icon: ReactNode;
   keywords?: string[];
   status?: WorkspaceStatus;
@@ -63,7 +62,6 @@ export default function CommandPalette() {
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
   const can = useCan();
-  const advanced = useApp((s) => s.advanced);
   const refresh = useApp((s) => s.refresh);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -100,16 +98,19 @@ export default function CommandPalette() {
     if (open) void refresh();
   }, [open, refresh]);
 
+  const current = route.kind === "workspace" ? workspaces.find((w) => w.id === route.id) : undefined;
+  const scope = current ? projectTitle(current) : route.kind === "settings" ? "Settings" : "Home";
+
   const q = query.trim().toLowerCase();
   const match = (s: string) => !q || s.toLowerCase().includes(q) || s.toLowerCase().includes(q.replace(/\s+/g, "-"));
 
   const items: PaletteItem[] = [
     {
-      id: "view-workspaces",
-      label: "Workspaces",
+      id: "view-home",
+      label: "Home",
       group: "Views",
-      icon: <Stack size={16} />,
-      keywords: ["all", "list", "queue", "review", "home", "dashboard"],
+      icon: <House size={16} />,
+      keywords: ["projects", "list", "dashboard", "start"],
       onAction: () => navigate({ kind: "workspaces" }),
     },
     {
@@ -117,41 +118,38 @@ export default function CommandPalette() {
       label: "Settings",
       group: "Views",
       icon: <GearSix size={16} />,
-      keywords: ["agents", "users", "team", "audit", "preferences"],
+      keywords: ["claude", "account", "notifications", "updates", "preferences"],
       onAction: () => navigate({ kind: "settings" }),
     },
-    // One entry per workspace, ordered review → running → committed → stopped
-    // and tagged with its status chip, so the group reads as a lifecycle.
+    // One entry per project, review first, tagged with its status so the group reads as a queue.
     ...[...workspaces].sort(byReviewFirst).map((w) => {
       const status = workspaceStatus(w);
+      const title = projectTitle(w);
       return {
-        id: `workspace-${w.id}`,
-        label: w.id,
-        group: "Workspaces" as const,
-        subtitle: w.task,
-        icon: <TerminalWindow size={16} />,
+        id: `project-${w.id}`,
+        label: title,
+        group: "Projects" as const,
+        icon: <Sparkle size={16} />,
         status,
-        keywords: [w.task, w.agent, w.repo, STATUS_LABEL[status], status],
+        keywords: [w.id],
         onAction: () => navigate({ kind: "workspace", id: w.id }),
       };
     }),
-    // `/new` arrives with the form already open. Before, this landed on the
-    // list with the form closed, so the most direct command needed a second press.
     ...(can.mutate
       ? [
           {
             id: "action-new",
-            label: advanced ? "new workspace" : "new project",
+            label: "New project",
             group: "Actions" as const,
             icon: <Plus size={16} />,
-            keywords: ["create", "launch", "start", "task", "clone"],
+            keywords: ["create", "start", "clone", "github"],
             onAction: () => setNewOpen(true),
           },
         ]
       : []),
     {
       id: "action-refresh",
-      label: "refresh workspaces",
+      label: "Refresh",
       group: "Actions",
       icon: <ArrowsClockwise size={16} />,
       keywords: ["reload", "sync", "update"],
@@ -212,8 +210,6 @@ export default function CommandPalette() {
     }
   };
 
-  const scope = route.kind === "workspace" ? route.id : ROUTE_LABEL[route.kind];
-
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
@@ -221,8 +217,7 @@ export default function CommandPalette() {
         <Dialog.Content className="dialog-content">
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>
           <Dialog.Description className="sr-only">
-            Search views, workspaces and actions. Move through the results with the arrow keys and press Enter to run
-            the highlighted one.
+            Search pages, projects and actions. Use the arrow keys to move and Enter to run the highlighted one.
           </Dialog.Description>
 
           <div className="flex items-center gap-2 border-b border-line-subtle px-3">
@@ -238,17 +233,17 @@ export default function CommandPalette() {
               }}
               onKeyDown={onInputKeyDown}
               role="combobox"
-              aria-label="Search views, workspaces and actions"
+              aria-label="Search pages, projects and actions"
               aria-autocomplete="list"
               aria-expanded={open}
               aria-controls={listId}
               aria-activedescendant={activeOptionId}
-              placeholder="search workspaces, or run a command…"
+              placeholder="Search projects, or run a command…"
               className="min-w-0 flex-1 bg-transparent py-3 text-sm text-text-primary outline-none placeholder:text-text-faint"
             />
             <Kbd>⌘K</Kbd>
             <Dialog.Close asChild>
-              <Button variant="quiet" iconOnly size="sm" aria-label="close command palette">
+              <Button variant="quiet" iconOnly size="sm" aria-label="Close">
                 <X size={13} />
               </Button>
             </Dialog.Close>
@@ -282,9 +277,6 @@ export default function CommandPalette() {
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate">{entry.label}</span>
-                        {entry.subtitle ? (
-                          <span className="block truncate text-xs text-text-muted">{entry.subtitle}</span>
-                        ) : null}
                       </span>
                       {entry.status ? <StatusChip status={entry.status} /> : null}
                     </div>
@@ -292,22 +284,22 @@ export default function CommandPalette() {
                 </div>
               ))}
             </div>
-            {filtered.length === 0 ? <p className="px-3 py-8 text-center text-sm text-text-muted">no matches</p> : null}
+            {filtered.length === 0 ? <p className="px-3 py-8 text-center text-sm text-text-muted">No matches</p> : null}
           </div>
 
           <div className="flex items-center gap-2 border-t border-line-subtle px-3 py-2 text-xs text-text-muted">
-            <span className="section-label">scope</span>
+            <span className="section-label">Current</span>
             <span className="mono text-2xs text-text-secondary">{scope}</span>
             <span className="ml-auto flex items-center gap-3">
               <span className="flex items-center gap-1">
                 <ArrowUp size={12} aria-hidden="true" />
-                <ArrowDown size={12} aria-hidden="true" /> move
+                <ArrowDown size={12} aria-hidden="true" /> Move
               </span>
               <span className="flex items-center gap-1">
-                <ArrowElbowDownLeft size={12} aria-hidden="true" /> run
+                <ArrowElbowDownLeft size={12} aria-hidden="true" /> Run
               </span>
               <span className="flex items-center gap-1">
-                <Kbd>esc</Kbd> close
+                <Kbd>esc</Kbd> Close
               </span>
             </span>
           </div>
