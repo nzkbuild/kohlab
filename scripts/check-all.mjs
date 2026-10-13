@@ -76,7 +76,9 @@ try {
 
   banner("static checks");
   run("chat lines (describeTool, describeAsk)", "bun", ["scripts/check-chat.mjs"]);
+  run("project names (rename rules, notification titles)", "bun", ["scripts/check-rename.mjs"]);
   run("web preview paths (no escape from the worktree)", "bun", ["scripts/check-preview.mjs"]);
+  run("chat markdown (code, links, lists, headings)", "bun", ["scripts/check-markdown.mjs"]);
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);
   run("sidebar groups", "bun", ["scripts/check-sidebar-groups.mjs"]);

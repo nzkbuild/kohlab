@@ -1788,6 +1788,27 @@ export function projectsDir(): string {
   return join(WORKS_DIR, "projects");
 }
 
+/** True only when `child` is strictly below `parent` (both already real paths). Never the parent itself. */
+export function strictlyInside(child: string, parent: string): boolean {
+  const p = parent.endsWith("/") ? parent : parent + "/";
+  return child.length > p.length && child.startsWith(p) && !child.slice(p.length).split("/").includes("..");
+}
+
+/** The repo folder to remove with a deleted project: only one Kohlab made inside its own projects folder, and no other workspace still uses it. */
+async function ownProjectFolder(ws: Workspace, others: Workspace[]): Promise<string | null> {
+  if (!ws.repo) return null;
+  try {
+    const repo = await realpath(ws.repo);
+    if (!strictlyInside(repo, await realpath(projectsDir()))) return null;
+    for (const o of others) {
+      if (o.repo && (await realpath(o.repo).catch(() => o.repo)) === repo) return null;
+    }
+    return repo;
+  } catch {
+    return null;
+  }
+}
+
 export async function newProject(name: string, parent?: string): Promise<string> {
   const slug = slugify(name);
   if (!slug) throw new Error("name the project");
@@ -1813,6 +1834,30 @@ export async function listBranches(source: string): Promise<string[]> {
   const out = await runOut(repo, "git", ["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin"]);
   const names = out.stdout.split("\n").map((l) => l.replace(/^origin\//, "").trim()).filter((l) => l && l !== "HEAD" && l !== "origin");
   return [...new Set(names)].sort();
+}
+
+// --- renaming ------------------------------------------------------------
+
+/** A project name typed by a person: trimmed, 1 to 80 characters, no control characters. */
+export function checkProjectTitle(raw: unknown): { ok: true; title: string } | { ok: false; error: string } {
+  if (typeof raw !== "string") return { ok: false, error: "the name must be text" };
+  const title = raw.trim();
+  if (!title) return { ok: false, error: "the name cannot be empty" };
+  if ([...title].length > 80) return { ok: false, error: "the name must be 80 characters or fewer" };
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(title)) return { ok: false, error: "the name cannot contain control characters" };
+  return { ok: true, title };
+}
+
+/** Sets the project's name (ws.task). The title is shown in the UI; commit messages made later use it too. */
+export async function renameWorkspace(id: string, raw: unknown) {
+  const checked = checkProjectTitle(raw);
+  if (!checked.ok) throw new Error(checked.error);
+  return mutateState((s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    ws.task = checked.title;
+    return ws;
+  });
 }
 
 // --- sharing -------------------------------------------------------------
@@ -1935,10 +1980,14 @@ export async function deleteWorkspace(id: string) {
   if (ws.dir) await rm(ws.dir, { recursive: true, force: true });
   else await rm(join(WORKS_DIR, "images", id), { recursive: true, force: true });
   markIntentionallyStopped(id);
-  return mutateState(async (st) => {
+  const folder = await ownProjectFolder(ws, s.workspaces.filter((w) => w.id !== id));
+  const result = await mutateState(async (st) => {
     st.workspaces = st.workspaces.filter((w) => w.id !== id);
     return { ok: true };
   });
+  // the project folder Kohlab created (so the name can be used again); root removes agent-owned files too
+  if (folder) await rm(folder, { recursive: true, force: true }).catch((e) => console.warn(`project folder remove failed: ${(e as Error).message}`));
+  return result;
 }
 
 /**

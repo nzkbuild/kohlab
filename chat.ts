@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import type { Workspace } from "./types";
+import { notifyNeedsYou } from "./push";
 import {
   WORKS_DIR,
   chatBusy,
@@ -187,6 +188,13 @@ function stop(id: string) {
   }
 }
 
+/** Tell the phone that Claude is waiting on a question. A failed push must never stall the chat. */
+function pingNeedsYou(id: string, question: string) {
+  getWorkspace(id)
+    .then((ws) => notifyNeedsYou(ws, question))
+    .catch((e) => console.warn(`[chat] needs-you push failed: ${(e as Error).message}`));
+}
+
 /** Mark the run finished, as the watcher does for a PTY: stop time, cleanliness, then notify. */
 async function finish(id: string): Promise<void> {
   const clean = await worktreeIsClean(id);
@@ -234,14 +242,16 @@ function onLine(id: string, live: Live, line: string) {
     const input = (m.request.input ?? {}) as Record<string, unknown>;
     live.asks.set(m.request_id, input);
     const { text, detail, why } = describeAsk(m.request.tool_name, input as Record<string, any>, live.cwd);
+    const wasWaiting = chatWaiting.has(id);
     chatWaiting.add(id);
     emit(id, { kind: "ask", requestId: m.request_id, text, ...(detail !== undefined ? { detail } : {}), ...(why !== undefined ? { why } : {}) });
+    if (!wasWaiting) pingNeedsYou(id, text);
     return;
   }
   if (m.type === "result") {
     if (m.subtype !== "success" && resumeFailed(id, live)) return;
     if (m.subtype !== "success") {
-      emit(id, { kind: "error", text: `The AI hit a problem: ${String(m.result ?? m.subtype ?? "unknown").slice(0, 200)}` });
+      emit(id, { kind: "error", text: `Claude hit a problem: ${String(m.result ?? m.subtype ?? "unknown").slice(0, 200)}` });
     }
     emit(id, { kind: "done" });
     chatBusy.delete(id);
@@ -260,7 +270,7 @@ function onExit(id: string, live: Live) {
   if (live.stopping || !chatBusy.has(id)) return;
   if (resumeFailed(id, live)) return;
   const last = live.stderr.trim().split("\n").pop()?.trim();
-  emit(id, { kind: "error", text: `The AI stopped unexpectedly. Send a message to continue.${last ? ` (${last.slice(0, 200)})` : ""}` });
+  emit(id, { kind: "error", text: `Claude stopped unexpectedly. Send a message to continue.${last ? ` (${last.slice(0, 200)})` : ""}` });
   finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
 }
 
@@ -272,7 +282,7 @@ function resumeFailed(id: string, live: Live): boolean {
   if (procs.get(id) === live) procs.delete(id);
   retryFresh(id, live.msg).catch((e) => {
     chatBusy.delete(id);
-    emit(id, { kind: "error", text: `The AI could not start: ${(e as Error).message}` });
+    emit(id, { kind: "error", text: `Claude could not start: ${(e as Error).message}` });
     finish(id).catch(() => {});
   });
   return true;
@@ -349,7 +359,7 @@ export async function send(id: string, text: string): Promise<void> {
     live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
   } catch (e) {
     chatBusy.delete(id);
-    emit(id, { kind: "error", text: `The AI could not start: ${(e as Error).message}` });
+    emit(id, { kind: "error", text: `Claude could not start: ${(e as Error).message}` });
     await finish(id);
   }
 }

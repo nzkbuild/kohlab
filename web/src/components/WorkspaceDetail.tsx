@@ -7,6 +7,7 @@ import {
   GitDiff,
   Ghost,
   Play,
+  PencilSimple,
   Plus,
   Scroll,
   ShareNetwork,
@@ -26,6 +27,7 @@ import { projectTitle } from "../lib/format";
 import { cn } from "../lib/utils";
 import BrowseView from "./BrowseView";
 import ConfirmDialog from "./ConfirmDialog";
+import { RenameDialog } from "./Sidebar";
 import ErrorBoundary from "./ErrorBoundary";
 import LogView from "./LogView";
 import { disposeWorkspaceTerminals } from "./terminalCache";
@@ -91,6 +93,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [terminals, setTerminals] = useState([{ id: "main", label: "agent" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
   const [confirming, setConfirming] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [focusTick, setFocusTick] = useState(0);
   const [reviewCount, setReviewCount] = useState(0);
@@ -321,6 +324,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             copy share link
           </MenuItem>
         ) : null}
+        <MenuItem onSelect={() => setRenaming(true)}>
+          <PencilSimple size={14} aria-hidden="true" />
+          Rename
+        </MenuItem>
         <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
           <Trash size={14} aria-hidden="true" />
           Delete project…
@@ -496,6 +503,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       </div>
       </Tabs>
 
+      <RenameDialog id={workspaceId} shown={projectTitle(w)} open={renaming} onOpenChange={setRenaming} />
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}

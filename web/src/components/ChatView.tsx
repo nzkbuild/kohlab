@@ -1,16 +1,18 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowUp, CaretRight, Check, Eye, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowUp, CaretRight, Check, Copy, Eye, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
+import { copyText } from "../lib/clipboard";
 import { findWorkspace, useApp, useCan } from "../store";
 import { workspaceStatus } from "../lib/status";
+import { inline, parseBlocks, type Inline } from "../lib/markdown";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
 import PreviewPanel from "./PreviewPanel";
-import { Button } from "./ui";
+import { Button, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
 type ChatEvent = StoredChatEvent & { why?: string };
@@ -61,55 +63,117 @@ function mergeEvents(prev: ChatEvent[], next: ChatEvent[]): ChatEvent[] {
   return [...prev, ...fresh].sort((a, b) => a.n - b.n);
 }
 
-/** **bold** and `code` as elements, never as HTML. Anything else stays plain text. */
-function inlineMarkdown(text: string): ReactNode[] {
-  return text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/).map((part, i) => {
-    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) return <strong key={i}>{part.slice(2, -2)}</strong>;
-    if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) {
-      return (
-        <code key={i} className="mono rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">
-          {part.slice(1, -1)}
-        </code>
-      );
+/** Inline pieces as elements, never as HTML: bold, `code`, links. Anything else stays plain text. */
+function renderInline(nodes: Inline[]): ReactNode[] {
+  return nodes.map((node, i) => {
+    switch (node.kind) {
+      case "text":
+        return node.text;
+      case "strong":
+        return <strong key={i}>{renderInline(node.children)}</strong>;
+      case "code":
+        return (
+          <code key={i} className="mono rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">
+            {node.text}
+          </code>
+        );
+      case "link":
+        return (
+          <a
+            key={i}
+            href={node.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-text-primary underline decoration-line-strong underline-offset-[3px] hover:decoration-line-accent"
+          >
+            {node.text}
+          </a>
+        );
     }
-    return part;
   });
 }
 
-/** Prose blocks: paragraphs, "- " or "* " bullets, and "1. " numbers. */
-type Block = { kind: "p"; lines: string[] } | { kind: "ul" | "ol"; items: string[] };
+const rich = (text: string) => renderInline(inline(text));
 
-function blocksOf(text: string): Block[] {
-  const blocks: Block[] = [];
-  let para: string[] | null = null;
-  for (const line of text.split("\n")) {
-    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
-    const number = /^\s*\d+\.\s+(.*)$/.exec(line);
-    if (bullet || number) {
-      para = null;
-      const kind = bullet ? "ul" : "ol";
-      const item = (bullet ?? number)?.[1] ?? "";
-      const last = blocks[blocks.length - 1];
-      if (last && last.kind !== "p" && last.kind === kind) last.items.push(item);
-      else blocks.push({ kind, items: [item] });
-    } else if (line.trim() === "") {
-      para = null;
-    } else if (para) {
-      para.push(line);
-    } else {
-      para = [line];
-      blocks.push({ kind: "p", lines: para });
+/** Copy with a check mark for 1.5 s. A failed copy says so. */
+function useCopied(): [boolean, (text: string) => Promise<void>] {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = async (text: string) => {
+    try {
+      await copyText(text);
+      setCopied(true);
+      announce("Copied");
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("could not copy");
     }
-  }
-  return blocks;
+  };
+  return [copied, copy];
+}
+
+/** The action row under a reply. Hidden until the reply is hovered or focused; always shown on touch and on the latest reply. */
+function CopyReply({ text, latest }: { text: string; latest: boolean }) {
+  const [copied, copy] = useCopied();
+  const Icon = copied ? Check : Copy;
+  return (
+    <div className="-ml-2.5 -mt-1 flex">
+      <Tooltip content="Copy">
+        <Button
+          variant="quiet"
+          iconOnly
+          aria-label="Copy reply"
+          className={cn(
+            "size-8 text-text-muted hover:text-text-primary [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100",
+            "motion-safe:transition-opacity",
+            latest ? "opacity-100" : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+          )}
+          onClick={() => void copy(text)}
+        >
+          <Icon size={16} aria-hidden="true" />
+        </Button>
+      </Tooltip>
+    </div>
+  );
+}
+
+/** A fenced block: mono code that scrolls sideways, with its language and a Copy of the code only. */
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const [copied, copy] = useCopied();
+  const Icon = copied ? Check : Copy;
+  return (
+    <div className="overflow-hidden rounded-[10px] border border-line-subtle bg-surface-sunken">
+      <div className="flex items-center justify-between gap-3 border-b border-line-subtle py-0.5 pr-1 pl-3.5">
+        <span className="mono min-w-0 truncate text-[12px] text-text-muted">{lang}</span>
+        <Button
+          variant="quiet"
+          size="sm"
+          aria-label="Copy code"
+          className="text-[12px] text-text-secondary [@media(pointer:coarse)]:min-h-11"
+          onClick={() => void copy(code)}
+        >
+          <Icon size={14} aria-hidden="true" />
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <pre className="mono overflow-x-auto px-3.5 py-3 text-[13px] leading-5 text-text-primary">
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
 }
 
 /** What Claude said, in a measure a person can read without losing their place. */
 function Prose({ text }: { text: string }) {
   return (
     <div className="flex max-w-[66ch] flex-col gap-3 text-[15px] leading-6 text-text-primary">
-      {blocksOf(text).map((block, i) => {
-        if (block.kind === "p") return <p key={i} className="whitespace-pre-line">{inlineMarkdown(block.lines.join("\n"))}</p>;
+      {parseBlocks(text).map((block, i) => {
+        if (block.kind === "p") return <p key={i} className="whitespace-pre-line">{rich(block.lines.join("\n"))}</p>;
+        if (block.kind === "h") return <p key={i} className="text-[16px] font-semibold text-text-primary">{rich(block.text)}</p>;
+        if (block.kind === "hr") return <hr key={i} className="border-line-subtle" />;
+        if (block.kind === "code") return <CodeBlock key={i} lang={block.lang} code={block.code} />;
         if (block.kind === "ul") {
           return (
             <ul key={i} className="space-y-1.5">
@@ -118,7 +182,7 @@ function Prose({ text }: { text: string }) {
                   key={j}
                   className="relative pl-[18px] before:absolute before:top-[10px] before:left-[4px] before:size-[5px] before:rounded-full before:bg-text-muted before:content-['']"
                 >
-                  {inlineMarkdown(item)}
+                  {rich(item)}
                 </li>
               ))}
             </ul>
@@ -127,7 +191,7 @@ function Prose({ text }: { text: string }) {
         return (
           <ol key={i} className="list-decimal space-y-1.5 pl-[18px] marker:text-text-muted">
             {block.items.map((item, j) => (
-              <li key={j}>{inlineMarkdown(item)}</li>
+              <li key={j}>{rich(item)}</li>
             ))}
           </ol>
         );
@@ -627,10 +691,12 @@ export default function ChatView({ workspaceId }: Props) {
                   <p className="text-[15px] text-text-muted">Describe it in your own words. Claude will ask before changing anything important.</p>
                 </div>
               ) : null}
-              {turns.map((turn) => {
+              {turns.map((turn, ti) => {
                 const firstReply = turn.findIndex((row) => row[0].kind !== "user");
+                // Everything Claude wrote in this turn, as its markdown source, for Copy.
+                const replies = turn.flat().filter((e) => e.kind === "assistant").map((e) => e.text);
                 return (
-                  <div key={turn[0][0].n} className="flex flex-col gap-3">
+                  <div key={turn[0][0].n} className="group flex flex-col gap-3">
                     {turn.map((row, ri) => {
                       const live = working && row === lastVisible;
                       return (
@@ -646,6 +712,7 @@ export default function ChatView({ workspaceId }: Props) {
                         </Fragment>
                       );
                     })}
+                    {replies.length > 0 ? <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} /> : null}
                   </div>
                 );
               })}

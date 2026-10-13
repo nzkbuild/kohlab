@@ -126,6 +126,13 @@ export const api = {
     }),
   share: (id: string) =>
     json<{ id: string; share: string }>(`/api/workspaces/${id}/share`, { method: "POST" }),
+  /** Give a project a new name (its title in the UI). The server checks the name. */
+  rename: (id: string, title: string) =>
+    json<Workspace>(`/api/workspaces/${encodeURIComponent(id)}/rename`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    }),
   preview: (id: string) => json<{ url: string }>(`/api/workspaces/${id}/preview`, { method: "POST" }),
   diff: (id: string) => json<DiffFile[]>(`/api/workspaces/${id}/diff`),
   commit: (id: string, message: string) =>

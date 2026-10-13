@@ -1,15 +1,21 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { toast } from "sonner";
 import {
   CaretDoubleLeft,
   CaretDoubleRight,
+  DotsThree,
   DownloadSimple,
   Eye,
   GearSix,
   BellRinging,
   House,
+  PencilSimple,
   Plus,
+  Trash,
   X,
 } from "@phosphor-icons/react";
+import { api } from "../api";
 import { useApp, useCan } from "../store";
 import {
   bySidebarActivity,
@@ -21,8 +27,12 @@ import {
   type SidebarGroup,
 } from "../lib/status";
 import { projectTitle, sidebarWhen } from "../lib/format";
+import { toastAction } from "../lib/actions";
+import { announce } from "../lib/announce";
 import { cn } from "../lib/utils";
-import { Button, BrandMark, Tooltip } from "./ui";
+import ConfirmDialog from "./ConfirmDialog";
+import { disposeWorkspaceTerminals } from "./terminalCache";
+import { Button, BrandMark, Dialog, MenuItem, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -37,6 +47,140 @@ const GROUP_LEAD: Record<SidebarGroup, ReactNode> = {
   earlier: null,
 };
 
+/**
+ * Saves a project's name. A blank or unchanged name is not sent. Returns false
+ * only when the server refused the name; the toast says why.
+ */
+export async function saveProjectName(id: string, next: string, shown: string): Promise<boolean> {
+  const name = next.trim();
+  if (!name || name === shown) return true;
+  try {
+    await api.rename(id, name);
+    await useApp.getState().refresh();
+    announce(`Project renamed to ${name}`);
+    return true;
+  } catch (e) {
+    toast.error(`could not rename, ${(e as Error).message}`);
+    return false;
+  }
+}
+
+/** A name edited in place. Enter or leaving the field saves; Escape cancels (`onDone(null)`). */
+export function RenameField({
+  initial,
+  className,
+  onDone,
+}: {
+  initial: string;
+  className?: string;
+  onDone: (next: string | null) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const field = useRef<HTMLInputElement>(null);
+  const settled = useRef(false);
+
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, []);
+
+  // Enter and blur can both arrive as the field unmounts: only the first counts.
+  const settle = (next: string | null) => {
+    if (settled.current) return;
+    settled.current = true;
+    onDone(next);
+  };
+
+  return (
+    <input
+      ref={field}
+      type="text"
+      aria-label="Project name"
+      className={cn("field-input min-w-0 flex-1", className)}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          settle(value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          settle(null);
+        }
+      }}
+      onBlur={() => settle(value)}
+    />
+  );
+}
+
+/** Rename from the project header. A small dialog, so focus stays put while the header menu closes. */
+export function RenameDialog({
+  id,
+  shown,
+  open,
+  onOpenChange,
+}: {
+  id: string;
+  shown: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [value, setValue] = useState(shown);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) setValue(shown);
+  }, [open, shown]);
+
+  const submit = async () => {
+    setBusy(true);
+    const saved = await saveProjectName(id, value, shown);
+    setBusy(false);
+    if (saved) onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content p-4">
+          <Dialog.Title className="text-base font-semibold text-text-primary">Rename project</Dialog.Title>
+          <Dialog.Description className="mt-1 text-xs leading-5 text-text-muted">
+            This is the name shown in the project list and at the top of the project.
+          </Dialog.Description>
+          <form
+            className="mt-4 flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
+            }}
+          >
+            <input
+              type="text"
+              aria-label="Project name"
+              className="field-input"
+              value={value}
+              autoFocus
+              onChange={(e) => setValue(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Dialog.Close asChild>
+                <Button variant="secondary" size="sm">
+                  cancel
+                </Button>
+              </Dialog.Close>
+              <Button type="submit" variant="primary" size="sm" disabled={busy} aria-busy={busy}>
+                {busy ? "saving…" : "save"}
+              </Button>
+            </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 interface Props {
   /** Mobile drawer visibility. On desktop the rail is always present. */
   open: boolean;
@@ -48,9 +192,17 @@ export default function Sidebar({ open, onClose }: Props) {
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
+  const refresh = useApp((s) => s.refresh);
   const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
   const [installEvent, setInstallEvent] = useState<InstallEvent | null>(null);
+  // The project whose More menu is open, the project being renamed in place, and the one awaiting delete.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // Rename starts only once the menu has closed and released focus, or the field would lose it at once.
+  const renameNext = useRef<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, String(collapsed));
@@ -75,6 +227,23 @@ export default function Sidebar({ open, onClose }: Props) {
     if (!installEvent) return;
     await installEvent.prompt();
     setInstallEvent(null);
+  };
+
+  // Same path as the project header's delete: drop the open terminals, delete, refresh.
+  const removeProject = async (id: string) => {
+    setDeleting(true);
+    try {
+      disposeWorkspaceTerminals(id);
+      await toastAction(id, "delete");
+      await refresh();
+      announce("Project deleted");
+      setConfirmDelete(null);
+      if (route.kind === "workspace" && route.id === id) navigate({ kind: "workspaces" });
+    } catch (e) {
+      toast.error(`delete failed, ${(e as Error).message}`);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // Already running as an app: there is nothing to install.
@@ -180,33 +349,119 @@ export default function Sidebar({ open, onClose }: Props) {
                 const title = projectTitle(workspace);
                 const statusText = STATUS_LABEL[status];
                 const selected = route.kind === "workspace" && route.id === workspace.id;
+                const editing = renaming === workspace.id;
+                // Viewers get no menu, so right-click keeps the browser's own.
+                const canMenu = can.mutate;
                 return (
-                  <Tooltip key={workspace.id} content={`${title}, ${statusText}`} disabled={!collapsed}>
-                    <button
-                      type="button"
-                      className="sidebar-row"
-                      data-selected={selected}
-                      aria-current={selected ? "page" : undefined}
-                      aria-label={`${title}, ${statusText}`}
-                      onClick={() => navigate({ kind: "workspace", id: workspace.id })}
+                  <DropdownMenu.Root
+                    key={workspace.id}
+                    open={canMenu && menuFor === workspace.id}
+                    onOpenChange={(next) => setMenuFor(next ? workspace.id : null)}
+                  >
+                    <div
+                      className="group flex items-center gap-0.5"
+                      onContextMenu={
+                        canMenu && !editing
+                          ? (e) => {
+                              e.preventDefault();
+                              setMenuFor(workspace.id);
+                            }
+                          : undefined
+                      }
                     >
-                      <span className="sidebar-lead" aria-hidden="true">
-                        {GROUP_LEAD[group.key]}
-                      </span>
-                      <span
-                        className={cn("sidebar-initial", needsYou && "border-accent text-text-primary")}
-                        aria-hidden="true"
-                      >
-                        {title.charAt(0).toUpperCase()}
-                      </span>
-                      <span className="sidebar-label min-w-0 flex-1 truncate text-base text-text-primary" title={workspace.id}>
-                        {title}
-                      </span>
-                      <span className="sidebar-label shrink-0 text-sm text-text-faint tnum">
-                        {sidebarWhen(sidebarTime(workspace))}
-                      </span>
-                    </button>
-                  </Tooltip>
+                      {editing ? (
+                        <div className="sidebar-row min-w-0 flex-1" data-selected={selected}>
+                          <span className="sidebar-lead" aria-hidden="true">
+                            {GROUP_LEAD[group.key]}
+                          </span>
+                          <RenameField
+                            initial={title}
+                            onDone={(next) => {
+                              setRenaming(null);
+                              if (next !== null) void saveProjectName(workspace.id, next, title);
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <Tooltip content={`${title}, ${statusText}`} disabled={!collapsed}>
+                          <button
+                            type="button"
+                            className="sidebar-row min-w-0 flex-1"
+                            data-selected={selected}
+                            aria-current={selected ? "page" : undefined}
+                            aria-label={`${title}, ${statusText}`}
+                            onClick={() => navigate({ kind: "workspace", id: workspace.id })}
+                          >
+                            <span className="sidebar-lead" aria-hidden="true">
+                              {GROUP_LEAD[group.key]}
+                            </span>
+                            <span
+                              className={cn("sidebar-initial", needsYou && "border-accent text-text-primary")}
+                              aria-hidden="true"
+                            >
+                              {title.charAt(0).toUpperCase()}
+                            </span>
+                            <span className="sidebar-label min-w-0 flex-1 truncate text-base text-text-primary" title={workspace.id}>
+                              {title}
+                            </span>
+                            <span className="sidebar-label shrink-0 text-sm text-text-faint tnum">
+                              {sidebarWhen(sidebarTime(workspace))}
+                            </span>
+                          </button>
+                        </Tooltip>
+                      )}
+                      {canMenu && !editing ? (
+                        // 36px hit area, 28px visible. Hidden until the row is hovered or focused;
+                        // always shown on touch screens, which have no hover.
+                        <DropdownMenu.Trigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`More actions for ${title}`}
+                              tabIndex={collapsed ? -1 : undefined}
+                            className={cn(
+                              "shrink-0 place-items-center text-text-muted opacity-0 transition-opacity duration-150",
+                              "group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100",
+                              // The collapsed rail is too narrow for it, but the menu still anchors to it.
+                                collapsed ? "shell:w-0 shell:overflow-hidden" : "grid size-9",
+                            )}
+                          >
+                            <span className="grid size-7 place-items-center rounded-md hover:bg-surface-active hover:text-text-primary">
+                              <DotsThree size={16} weight="bold" aria-hidden="true" />
+                            </span>
+                          </button>
+                        </DropdownMenu.Trigger>
+                      ) : null}
+                    </div>
+                    {canMenu ? (
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content
+                          className="menu"
+                          align="end"
+                          sideOffset={4}
+                          collisionPadding={8}
+                          onCloseAutoFocus={(e) => {
+                            if (renameNext.current === null) return;
+                            e.preventDefault();
+                            setRenaming(renameNext.current);
+                            renameNext.current = null;
+                          }}
+                        >
+                          <MenuItem
+                            onSelect={() => {
+                              renameNext.current = workspace.id;
+                            }}
+                          >
+                            <PencilSimple size={14} aria-hidden="true" />
+                            Rename
+                          </MenuItem>
+                          <MenuItem tone="danger" onSelect={() => setConfirmDelete(workspace.id)}>
+                            <Trash size={14} aria-hidden="true" />
+                            Delete project…
+                          </MenuItem>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    ) : null}
+                  </DropdownMenu.Root>
                 );
               })}
             </div>
@@ -236,6 +491,20 @@ export default function Sidebar({ open, onClose }: Props) {
           </button>
         </Tooltip>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmDelete(null);
+        }}
+        title="Delete this project?"
+        description="Its files and chat are removed from the server."
+        confirmLabel="Delete project"
+        busy={deleting}
+        onConfirm={() => {
+          if (confirmDelete) void removeProject(confirmDelete);
+        }}
+      />
     </aside>
   );
 }

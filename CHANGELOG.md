@@ -9,6 +9,20 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.36.0] - 2026-10-14
+
+### Added
+- A notification when Claude needs your answer ("Bakery needs you"), not only when it finishes. Repeat questions replace each other instead of stacking.
+- Rename and delete projects from the sidebar (the ⋯ button or right-click) and from the project's menu.
+- A Copy button under each Claude reply; code shows in its own box with a Copy button; web links in replies are clickable (only http and https).
+
+### Changed
+- Finished-work notifications say what happened: "<project> is ready to check" or "<project>: Claude replied".
+
+### Fixed
+- Deleting a project now also removes its folder, so its name can be used again. Folders outside Kohlab's own projects folder are never removed.
+- Leftover "the AI" wording now says "Claude".
+
 ## [1.35.0] - 2026-10-13
 
 ### Changed

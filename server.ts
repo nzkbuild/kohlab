@@ -42,6 +42,7 @@ import {
   shareWorkspace,
   workspaceByShare,
   previewWorkspace,
+  renameWorkspace,
   workspaceByPreview,
   authRequired,
   authenticate,
@@ -245,11 +246,20 @@ async function handlePreview(token: string, rest: string, req: Request): Promise
   const file = await resolvePreviewFile(worktreePath(ws), rest);
   if (!file) {
     if (rest === "" || rest.endsWith("/")) {
-      return notFound('<!doctype html><meta charset="utf-8"><title>Nothing to preview yet</title><p style="font-family:sans-serif;padding:2rem">Nothing to preview yet. Ask the AI to build a web page, then press Preview again.</p>');
+      return notFound('<!doctype html><meta charset="utf-8"><title>Nothing to preview yet</title><p style="font-family:sans-serif;padding:2rem">Nothing to preview yet. Ask Claude to build a web page, then press Preview again.</p>');
     }
     return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
   }
   return new Response(req.method === "HEAD" ? null : Bun.file(file), { headers });
+}
+
+async function handleRename(id: string, req: Request): Promise<Response> {
+  try {
+    const body = (await req.json()) as { title?: unknown };
+    return json(await renameWorkspace(id, body.title));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
 }
 
 async function handlePreviewCreate(id: string): Promise<Response> {
@@ -1047,7 +1057,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
       return handlePreview(previewM[1], previewM[2], req);
     }
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|log)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|rename|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -1183,6 +1193,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
           return handleImageUpload(id, req);
         case "share": containFailure(audit(actor, "share", id), "audit"); return handleShare(id);
         case "preview": containFailure(audit(actor, "preview", id), "audit"); return handlePreviewCreate(id);
+        case "rename": containFailure(audit(actor, "rename", id), "audit"); return handleRename(id, req);
       }
     }
 

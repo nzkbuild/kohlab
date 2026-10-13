@@ -147,20 +147,51 @@ export async function sendPush(sub: PushSub, payload: object): Promise<boolean> 
   return true;
 }
 
-/** Everyone who may see this workspace hears that it needs review. */
-export async function notifyDone(ws: Workspace): Promise<void> {
-  const payload = {
-    title: "kohlab, ready for review",
-    body: ws.task || `${ws.id} finished`,
-    // the same tag the open tab uses, so one ping replaces the other
-    tag: `kohlab-${ws.id}`,
-    url: `/w/${ws.id}`,
-  };
+/** Everyone who may see this workspace hears about it: owner, legacy key, or an open server. */
+async function fanOut(ws: Workspace, payload: object): Promise<void> {
   for (const sub of readSubs()) {
     const mayHear = !sub.userId || sub.role === "owner" || ws.ownerId === sub.userId;
     if (!mayHear) continue;
     await sendPush(sub, payload).catch((e) => console.warn(`push to a device failed: ${(e as Error).message}`));
   }
+}
+
+/** The project's name as the UI shows it. Same rule as web/src/lib/format.ts projectTitle: "bakery-website" is "Bakery website". */
+export function projectTitleOf(w: { task?: string; id: string }): string {
+  const text = w.task || w.id;
+  if (/^[a-z0-9-]+$/.test(text)) {
+    const spaced = text.replace(/-/g, " ");
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  }
+  return text;
+}
+
+/** A turn finished. `stoppedClean` says whether it left changes to check (chat.ts and the PTY watcher both set it). */
+export async function notifyDone(ws: Workspace): Promise<void> {
+  const title = projectTitleOf(ws);
+  const payload = {
+    title:
+      ws.stoppedClean === false
+        ? `${title} is ready to check`
+        : ws.stoppedClean === true
+          ? `${title}: Claude replied`
+          : `Claude finished working on ${title}`,
+    body: ws.task || "",
+    // the same tag the open tab uses, so one ping replaces the other
+    tag: `kohlab-${ws.id}`,
+    url: `/w/${ws.id}`,
+  };
+  await fanOut(ws, payload);
+}
+
+/** Claude is waiting on a permission question. One tag per project: a second question replaces the first. */
+export async function notifyNeedsYou(ws: Workspace, question: string): Promise<void> {
+  await fanOut(ws, {
+    title: `${projectTitleOf(ws)} needs you`,
+    body: question,
+    tag: `needs-${ws.id}`,
+    url: `/w/${ws.id}`,
+  });
 }
 
 export function findSub(endpoint: string): PushSub | undefined {
