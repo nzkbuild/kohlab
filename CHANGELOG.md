@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.28.0] - 2026-10-13
+
+### Added
+- Agent-user workspaces get the operator's Claude Code setup. Every time one starts, the operator's `CLAUDE.md`, settings, statusline, agents, skills and plugins are mirrored into the agent account's `~/.claude`, so a session there looks like one run as the operator. Credentials, history and projects are never copied, and settings that point into the operator's home are left out. Root only writes to its own staging copy, and the agent account does the final copy into its home.
+
 ## [1.27.0] - 2026-10-08
 
 ### Added

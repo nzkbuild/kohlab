@@ -3,11 +3,12 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
 import { randomBytes } from "crypto";
 import { spawn, spawnSync } from "child_process";
+import { homedir } from "os";
 import { cwd } from "process";
 
 /**
@@ -174,6 +175,81 @@ export function agentIdentity(): { name: string; uid: number; gid: number; home:
   return u ? { name: AGENT_USER, ...u } : null;
 }
 
+/**
+ * Mirror the operator's Claude Code config into an agent account's ~/.claude, so
+ * the agent sees the same CLAUDE.md, settings, statusline, agents, skills and
+ * plugins. Credentials, history, projects and sessions are never included. The
+ * excluded names are not deleted on the dest either (no --delete-excluded), so
+ * the agent's own files and Claude Code's `synced/` dirs survive.
+ *
+ * Root never writes inside the agent's home (the agent controls it and could plant
+ * symlinks): root stages and rewrites a root-owned copy, then the copy into the
+ * home is made by rsync running AS the agent, which can only touch what it
+ * could already write.
+ */
+export function syncAgentClaudeConfig(
+  srcClaudeDir: string,
+  destHome: string,
+  who: { name: string; uid: number; gid: number },
+  stage = join(WORKS_DIR, "agent-claude"),
+): void {
+  const dest = join(destHome, ".claude");
+  const filters = [
+    "--include=/CLAUDE.md",
+    "--include=/settings.json",
+    "--include=/statusline.sh",
+    "--include=/keybindings.json",
+    "--include=/agents/***",
+    "--exclude=/skills/synced",
+    "--include=/skills/***",
+    "--exclude=/plugins/synced",
+    "--include=/plugins/***",
+    "--exclude=*",
+  ];
+  // ponytail: concurrent spawns may rewrite the same stage at once; serialize if it ever matters.
+  mkdirSync(stage, { recursive: true });
+  chmodSync(stage, 0o755);
+  runCmd("rsync", ["-a", "--delete", "--chmod=go+rX", ...filters, `${srcClaudeDir}/`, `${stage}/`]);
+  chmodSync(stage, 0o755);
+  // Absolute paths in the copied config would still point into the operator's home.
+  for (const f of ["settings.json", "plugins/installed_plugins.json", "plugins/known_marketplaces.json"]) {
+    const file = join(stage, f);
+    if (existsSync(file)) writeFileSync(file, readFileSync(file, "utf8").replaceAll(srcClaudeDir, dest));
+  }
+  const settingsFile = join(stage, "settings.json");
+  if (existsSync(settingsFile)) {
+    let s: any;
+    try {
+      s = JSON.parse(readFileSync(settingsFile, "utf8"));
+    } catch {}
+    if (s) {
+      // Root's user bus is wrong for the agent; anything still under the operator's home is unreachable for it.
+      if (s.env && typeof s.env === "object") {
+        delete s.env.XDG_RUNTIME_DIR;
+        delete s.env.DBUS_SESSION_BUS_ADDRESS;
+      }
+      const away = dirname(srcClaudeDir) + "/";
+      if (s.hooks && typeof s.hooks === "object") {
+        for (const event of Object.keys(s.hooks)) {
+          const groups = s.hooks[event];
+          if (!Array.isArray(groups)) continue;
+          for (const g of groups) {
+            if (Array.isArray(g?.hooks)) g.hooks = g.hooks.filter((h: any) => !(typeof h?.command === "string" && h.command.includes(away)));
+          }
+          s.hooks[event] = groups.filter((g: any) => !Array.isArray(g?.hooks) || g.hooks.length > 0);
+          if (s.hooks[event].length === 0) delete s.hooks[event];
+        }
+      }
+      if (typeof s.statusLine?.command === "string" && s.statusLine.command.includes(away)) delete s.statusLine;
+      writeFileSync(settingsFile, JSON.stringify(s, null, 2));
+    }
+  }
+  // The agent must be able to walk to the stage (the state dir is often 0700).
+  if (who.uid !== process.getuid?.()) grantTraverse(who.name, stage);
+  const r = spawnSync("rsync", ["-a", "--delete", ...filters, `${stage}/`, `${dest}/`], { uid: who.uid, gid: who.gid, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`rsync into ${dest} failed: ${(r.stderr || r.error?.message || "").trim()}`);
+}
+
 /** Whose uid/gid a workspace's agent runs as, and who owns the files kohlab writes for it. */
 export function identityOf(ws: Workspace): { uid: number; gid: number; home: string } | undefined {
   if (ws.ownerId) {
@@ -277,6 +353,15 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
     ? [Bun.which("bash") ? "bash" : "sh", ...(Bun.which("bash") ? ["-l"] : [])]
     : (s.agents[extra?.[1] ?? ws.agent] || "sh").split(/\s+/);
   const who = identityOf(ws);
+  // The shared agent account gets the operator's Claude config; a named member's home is never touched.
+  const agent = who && !ws.ownerId ? agentIdentity() : null;
+  if (who && agent) {
+    try {
+      syncAgentClaudeConfig(join(homedir(), ".claude"), who.home, agent);
+    } catch (e) {
+      console.warn(`agent claude config sync failed: ${(e as Error).message}`);
+    }
+  }
   const sessId = sessionId(ws.id, terminalId);
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
     "open",

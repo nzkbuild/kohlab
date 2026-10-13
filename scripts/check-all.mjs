@@ -99,6 +99,7 @@ try {
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);
   run("agent user (root)", "bun", ["scripts/check-agent-user.ts"]);
+  run("agent claude config sync", "bun", ["scripts/check-agent-config-sync.ts"]);
   run("invitations (root)", "node", ["scripts/check-invite.mjs"]);
   run("backend types", join(ROOT, "node_modules/.bin/tsc"), ["--noEmit"]);
   run("frontend types", join(ROOT, "web/node_modules/.bin/tsc"), ["--noEmit"], join(ROOT, "web"));

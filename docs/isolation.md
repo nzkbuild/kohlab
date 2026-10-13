@@ -111,3 +111,8 @@ sudo systemctl restart kohlab
   commit and merge in trees the account owns.
 - **Turning it off** (unset the variable) puts new workspaces back on the server
   user. Workspaces already flagged fall back to the server user too.
+
+The agent account also gets the operator's Claude config (CLAUDE.md, settings, statusline,
+agents, skills, plugins) mirrored into its `~/.claude` at every spawn. Credentials, history,
+projects and settings that point into the operator's home are never copied, so the agent
+keeps its own login.
