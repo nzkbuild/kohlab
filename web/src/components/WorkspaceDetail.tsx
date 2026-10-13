@@ -45,6 +45,11 @@ const TABS: { id: TabId; label: string; icon: typeof Terminal }[] = [
   { id: "log", label: "Log", icon: Scroll },
 ];
 
+/** Simple mode: the agent and the changes, nothing else. */
+const SIMPLE_TABS = TABS.filter(({ id }) => id === "terminal" || id === "review").map((t) =>
+  t.id === "terminal" ? { ...t, label: "Agent" } : t,
+);
+
 /** Tab count badges, noun included so the tab's name reads as a sentence. */
 interface Badge {
   count: number;
@@ -67,7 +72,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
   const route = useApp((s) => s.route);
+  const advanced = useApp((s) => s.advanced);
   const can = useCan();
+  const visibleTabs = advanced ? TABS : SIMPLE_TABS;
 
   // The pane lives in the URL (/w/:id/review), so a refresh, a shared link or
   // Back returns to it. Switching panes replaces the entry rather than pushing
@@ -152,9 +159,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // Work waiting for a decision opens on that decision, not on a finished
   // terminal. The default is written into the URL once, so a workspace that
   // flips to needs-review while you watch it does not yank you off the terminal.
-  const tab: TabId = routeTab ?? (needsReview ? "review" : "terminal");
+  // A hidden pane in the URL (files or log, while simple) falls back like no pane.
+  const hiddenTab = !advanced && (routeTab === "files" || routeTab === "log");
+  const tab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview ? "review" : "terminal");
   useEffect(() => {
-    if (w && !routeTab) setTab(tab);
+    if (w && tab !== routeTab) setTab(tab);
   }, [w === undefined, routeTab]);
   useEffect(() => {
     if (!needsReview) {
@@ -192,14 +201,14 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         return;
       }
       const index = Number(e.key) - 1;
-      if (Number.isInteger(index) && index >= 0 && index < TABS.length) {
+      if (Number.isInteger(index) && index >= 0 && index < visibleTabs.length) {
         e.preventDefault();
-        setTab(TABS[index].id);
+        setTab(visibleTabs[index].id);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [workspaceId]);
+  }, [workspaceId, advanced]);
 
   // The terminal bundle may still be in flight on the first `.`, so the focus
   // request retries briefly instead of silently doing nothing.
@@ -305,10 +314,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <ArrowsClockwise size={14} aria-hidden="true" />
           restart
         </MenuItem>
-        <MenuItem onSelect={() => void share()}>
-          <ShareNetwork size={14} aria-hidden="true" />
-          copy share link
-        </MenuItem>
+        {advanced ? (
+          <MenuItem onSelect={() => void share()}>
+            <ShareNetwork size={14} aria-hidden="true" />
+            copy share link
+          </MenuItem>
+        ) : null}
         <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
           <Trash size={14} aria-hidden="true" />
           delete workspace
@@ -345,7 +356,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
       <TabList label="Workspace panes">
-        {TABS.map(({ id, label, icon: Icon }) => {
+        {visibleTabs.map(({ id, label, icon: Icon }) => {
           const badge = badges[id];
           return (
             <Tab key={id} value={id} aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}>
@@ -396,26 +407,28 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               </span>
             );
           })}
-          <Menu
-            label="new terminal"
-            trigger={
-              <Button variant="quiet" size="sm" title="Open another terminal in this workspace's folder">
-                <Plus size={13} aria-hidden="true" />
-                new
-              </Button>
-            }
-          >
-            <MenuItem onSelect={() => addTerminal("shell")}>
-              <Terminal size={14} aria-hidden="true" />
-              plain shell
-            </MenuItem>
-            {installedAgents.map((name) => (
-              <MenuItem key={name} onSelect={() => addTerminal(name)}>
-                <Play size={14} aria-hidden="true" />
-                {name}
+          {advanced ? (
+            <Menu
+              label="new terminal"
+              trigger={
+                <Button variant="quiet" size="sm" title="Open another terminal in this workspace's folder">
+                  <Plus size={13} aria-hidden="true" />
+                  new
+                </Button>
+              }
+            >
+              <MenuItem onSelect={() => addTerminal("shell")}>
+                <Terminal size={14} aria-hidden="true" />
+                plain shell
               </MenuItem>
-            ))}
-          </Menu>
+              {installedAgents.map((name) => (
+                <MenuItem key={name} onSelect={() => addTerminal(name)}>
+                  <Play size={14} aria-hidden="true" />
+                  {name}
+                </MenuItem>
+              ))}
+            </Menu>
+          ) : null}
         </div>
       ) : null}
 
@@ -434,7 +447,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
                       <span className="min-w-0 flex-1 text-xs text-text-muted">
                         {can.mutate
-                          ? "Agent exited, showing the last screen. Restart it, or open a shell."
+                          ? `Agent exited, showing the last screen. Restart it${advanced ? ", or open a shell" : ""}.`
                           : "Not running, showing the last screen."}
                       </span>
                       {can.mutate ? (
@@ -442,7 +455,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                           restart agent
                         </Button>
                       ) : null}
-                      {can.mutate ? (
+                      {can.mutate && advanced ? (
                         <Button variant="secondary" size="sm" onClick={() => addTerminal("shell")}>
                           open shell
                         </Button>
@@ -463,11 +476,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </ErrorBoundary>
         </TabPanel>
 
-        <TabPanel value="files" className="h-full min-h-0" tabIndex={-1}>
-          <ErrorBoundary label="Files">
-            {tab === "files" ? <BrowseView workspaceId={workspaceId} /> : null}
-          </ErrorBoundary>
-        </TabPanel>
+        {advanced ? (
+          <TabPanel value="files" className="h-full min-h-0" tabIndex={-1}>
+            <ErrorBoundary label="Files">
+              {tab === "files" ? <BrowseView workspaceId={workspaceId} /> : null}
+            </ErrorBoundary>
+          </TabPanel>
+        ) : null}
 
         <TabPanel value="review" className="h-full min-h-0" tabIndex={-1}>
           <ErrorBoundary label="Review">
@@ -477,11 +492,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </ErrorBoundary>
         </TabPanel>
 
-        <TabPanel value="log" className="h-full min-h-0" tabIndex={-1}>
-          <ErrorBoundary label="Log">
-            {tab === "log" ? <LogView key={workspaceId} workspaceId={workspaceId} /> : null}
-          </ErrorBoundary>
-        </TabPanel>
+        {advanced ? (
+          <TabPanel value="log" className="h-full min-h-0" tabIndex={-1}>
+            <ErrorBoundary label="Log">
+              {tab === "log" ? <LogView key={workspaceId} workspaceId={workspaceId} /> : null}
+            </ErrorBoundary>
+          </TabPanel>
+        ) : null}
       </div>
       </Tabs>
 

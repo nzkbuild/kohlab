@@ -27,8 +27,11 @@ export interface AppState {
   me: Me | null;
   /** Workspace that should open a fresh shell tab on arrival (Home's Open menu). */
   openShell: string | null;
+  /** Developer tools (files, log, share links, extra terminals, team, server). Off by default. */
+  advanced: boolean;
 
   setOpenShell: (id: string | null) => void;
+  setAdvanced: (value: boolean) => void;
   setAuthed: (value: boolean) => void;
   setConnection: (value: Connection) => void;
   refresh: () => Promise<void>;
@@ -37,6 +40,16 @@ export interface AppState {
   navigate: (route: Route, opts?: { replace?: boolean }) => void;
   /** Adopt the current URL without touching history (Back/Forward). */
   adoptRoute: (route: Route) => void;
+}
+
+const ADVANCED_KEY = "kohlab_advanced";
+
+function readAdvanced(): boolean {
+  try {
+    return localStorage.getItem(ADVANCED_KEY) === "true";
+  } catch {
+    return false;
+  }
 }
 
 export const useApp = create<AppState>((set) => ({
@@ -49,8 +62,17 @@ export const useApp = create<AppState>((set) => ({
   connection: "connecting",
   me: null,
   openShell: null,
+  advanced: readAdvanced(),
 
   setOpenShell: (id) => set({ openShell: id }),
+  setAdvanced: (value) => {
+    try {
+      localStorage.setItem(ADVANCED_KEY, String(value));
+    } catch {
+      /* private mode: the switch still works for this visit */
+    }
+    set({ advanced: value });
+  },
   setAuthed: (value) => set({ authed: value }),
   setConnection: (value) => set({ connection: value }),
 

@@ -62,6 +62,7 @@ export default function CommandPalette() {
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
   const can = useCan();
+  const advanced = useApp((s) => s.advanced);
   const refresh = useApp((s) => s.refresh);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -139,7 +140,7 @@ export default function CommandPalette() {
       ? [
           {
             id: "action-new",
-            label: "new workspace",
+            label: advanced ? "new workspace" : "new project",
             group: "Actions" as const,
             icon: <Plus size={16} />,
             keywords: ["create", "launch", "start", "task", "clone"],

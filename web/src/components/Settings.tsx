@@ -76,8 +76,10 @@ export default function Settings() {
 
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
+  const advanced = useApp((s) => s.advanced);
   // Updates are owner-only: nobody else is shown a page the server would refuse.
-  const sections = SECTIONS.filter((x) => x.id !== "updates" || can.own);
+  // Team and server are advanced: a hidden section falls back to the first one.
+  const sections = SECTIONS.filter((x) => (x.id !== "updates" || can.own) && (advanced || (x.id !== "team" && x.id !== "server")));
   const wanted = route.kind === "settings" ? route.section : undefined;
   const active = sections.find((x) => x.id === wanted) ?? sections[0];
 

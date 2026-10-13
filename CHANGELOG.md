@@ -9,6 +9,14 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.29.0] - 2026-10-13
+
+### Added
+- Simple mode: technical tools (files, log, share links, extra terminals, team, server settings, branches and limits) hide behind one Advanced tools switch in the sidebar. New: Install app button so Kohlab opens in its own window.
+
+### Changed
+- Simple mode speaks plain English: projects instead of workspaces, "What should the AI build?", a one-step start with no install commands, and a project shows just Agent and Changes. Turn on Advanced tools for the full developer view.
+
 ## [1.28.0] - 2026-10-13
 
 ### Added

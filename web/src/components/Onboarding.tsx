@@ -17,7 +17,7 @@ function Step({
   children,
   onSkip,
 }: {
-  n: number;
+  n?: number;
   title: string;
   description: string;
   children: ReactNode;
@@ -26,9 +26,11 @@ function Step({
   return (
     <Panel className="p-4">
       <div className="flex items-start gap-3">
-        <span className="tnum inline-flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-line-strong px-1.5 text-2xs font-semibold text-text-secondary">
-          {n}
-        </span>
+        {n !== undefined ? (
+          <span className="tnum inline-flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-line-strong px-1.5 text-2xs font-semibold text-text-secondary">
+            {n}
+          </span>
+        ) : null}
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
           <p className="mt-0.5 text-xs leading-relaxed text-text-muted">{description}</p>
@@ -54,6 +56,7 @@ export default function Onboarding() {
   const route = useApp((s) => s.route);
   const [guide, setGuide] = useState(route.kind === "workspaces" && !!route.create);
   const can = useCan();
+  const advanced = useApp((s) => s.advanced);
 
   // There is nowhere else to "skip to": this is home. Closing the guide leaves
   // the empty state, which already has the way forward.
@@ -65,17 +68,25 @@ export default function Onboarding() {
         {/* A route must expose exactly one <h1>; with no workspaces the surface
             below is an empty state, so the heading lives here. */}
         <PageHeader
-          title="Workspaces"
-          description="One task, one repository, one agent, each in its own isolated worktree."
+          title={advanced ? "Workspaces" : "Projects"}
+          description={
+            advanced
+              ? "One task, one repository, one agent, each in its own isolated worktree."
+              : "Each project is a folder where the AI builds things for you."
+          }
         />
 
         <EmptyArt className="mx-auto mt-10 block h-28 text-text-primary" />
         <EmptyState
-          title="No workspaces yet"
+          title={advanced ? "No workspaces yet" : "No projects yet"}
           description={
             can.mutate
-              ? "A workspace is one task, one repository and one agent. The three steps below take about two minutes."
-              : "A workspace is one task, one repository and one agent. Your role can look but not create, so an owner or member starts the first one."
+              ? advanced
+                ? "A workspace is one task, one repository and one agent. The three steps below take about two minutes."
+                : "Tell the AI what to build and it gets to work."
+              : advanced
+                ? "A workspace is one task, one repository and one agent. Your role can look but not create, so an owner or member starts the first one."
+                : "Nothing here yet. The owner hasn't shared any projects."
           }
           action={
             can.mutate ? (
@@ -96,19 +107,25 @@ export default function Onboarding() {
 
         {guide ? (
           <div id="onboarding-steps" className="flex flex-col gap-3">
-            <Step
-              n={1}
-              title="Install an agent"
-              description="Kohlab runs the CLI agent you already trust. Install one here, or skip this step if you already have one on this server."
-              onSkip={skip}
-            >
-              <AgentInstaller />
-            </Step>
+            {advanced ? (
+              <Step
+                n={1}
+                title="Install an agent"
+                description="Kohlab runs the CLI agent you already trust. Install one here, or skip this step if you already have one on this server."
+                onSkip={skip}
+              >
+                <AgentInstaller />
+              </Step>
+            ) : null}
 
             <Step
-              n={2}
-              title="Create a workspace"
-              description="One task, one repository, one agent. Creating the workspace starts the agent, there is nothing to launch afterwards."
+              n={advanced ? 2 : undefined}
+              title={advanced ? "Create a workspace" : "Start a project"}
+              description={
+                advanced
+                  ? "One task, one repository, one agent. Creating the workspace starts the agent, there is nothing to launch afterwards."
+                  : "Give it a name and tell the AI what you want."
+              }
               onSkip={skip}
             >
               {/* No cancel here: the step's own skip and "hide the guide" are the
@@ -116,32 +133,34 @@ export default function Onboarding() {
               <NewWorkspaceForm />
             </Step>
 
-            <Step
-              n={3}
-              title="Monitor and commit"
-              description="What you do with a running agent, in one place."
-              onSkip={skip}
-            >
-              <ul className="flex flex-col gap-1.5 text-sm leading-relaxed text-text-secondary">
-                <li>
-                  <span className="text-text-primary">The terminal is the agent, live.</span> The log tab keeps the full
-                  tail; the file tree shows what it touched.
-                </li>
-                <li>
-                  <span className="text-text-primary">Finishing lands it in the review queue.</span> The workspace shows
-                  its diff, so you read the change before anything else happens to it.
-                </li>
-                <li>
-                  <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically,
-                  you write the message and press commit.
-                </li>
-              </ul>
-              <div className="mt-3">
-                <Button variant="primary" onClick={skip}>
-                  done
-                </Button>
-              </div>
-            </Step>
+            {advanced ? (
+              <Step
+                n={3}
+                title="Monitor and commit"
+                description="What you do with a running agent, in one place."
+                onSkip={skip}
+              >
+                <ul className="flex flex-col gap-1.5 text-sm leading-relaxed text-text-secondary">
+                  <li>
+                    <span className="text-text-primary">The terminal is the agent, live.</span> The log tab keeps the full
+                    tail; the file tree shows what it touched.
+                  </li>
+                  <li>
+                    <span className="text-text-primary">Finishing lands it in the review queue.</span> The workspace shows
+                    its diff, so you read the change before anything else happens to it.
+                  </li>
+                  <li>
+                    <span className="text-text-primary">Committing is yours.</span> Nothing is committed automatically,
+                    you write the message and press commit.
+                  </li>
+                </ul>
+                <div className="mt-3">
+                  <Button variant="primary" onClick={skip}>
+                    done
+                  </Button>
+                </div>
+              </Step>
+            ) : null}
 
             <div className="flex justify-end">
               <Button variant="quiet" size="sm" onClick={() => setGuide(false)}>

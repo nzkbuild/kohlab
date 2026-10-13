@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import {
   CaretDoubleLeft,
   CaretDoubleRight,
+  DownloadSimple,
   GearSix,
   Plus,
   House,
+  Wrench,
   X,
 } from "@phosphor-icons/react";
 import { useApp, useCan } from "../store";
@@ -13,6 +15,9 @@ import { cn } from "../lib/utils";
 import { Button, BrandMark, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
+
+/** Chromium's install prompt. Not in the DOM typings, so the one member used is spelled out. */
+type InstallEvent = Event & { prompt: () => Promise<void> };
 
 interface Props {
   /** Mobile drawer visibility. On desktop the rail is always present. */
@@ -24,12 +29,39 @@ export default function Sidebar({ open, onClose }: Props) {
   const route = useApp((s) => s.route);
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
+  const advanced = useApp((s) => s.advanced);
+  const setAdvanced = useApp((s) => s.setAdvanced);
   const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
+  const [installEvent, setInstallEvent] = useState<InstallEvent | null>(null);
 
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, String(collapsed));
   }, [collapsed]);
+
+  // The browser offers the install prompt once; hold it until the button uses it.
+  useEffect(() => {
+    const onPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallEvent(e as InstallEvent);
+    };
+    const onInstalled = () => setInstallEvent(null);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  const install = async () => {
+    if (!installEvent) return;
+    await installEvent.prompt();
+    setInstallEvent(null);
+  };
+
+  // Already running as an app: there is nothing to install.
+  const standalone = window.matchMedia("(display-mode: standalone)").matches;
 
   const ordered = [...workspaces].sort(byReviewFirst);
   const reviewCount = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
@@ -85,11 +117,11 @@ export default function Sidebar({ open, onClose }: Props) {
           <Button
             variant="primary"
             className={cn("w-full", collapsed && "shell:px-0")}
-            aria-label="new workspace"
+            aria-label={advanced ? "new workspace" : "new project"}
             onClick={() => navigate({ kind: "workspaces", create: true })}
           >
             <Plus size={14} />
-            <span className="sidebar-label">new workspace</span>
+            <span className="sidebar-label">{advanced ? "New workspace" : "New project"}</span>
           </Button>
         </div>
       ) : null}
@@ -115,11 +147,11 @@ export default function Sidebar({ open, onClose }: Props) {
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
         {/* Every row is a workspace: one task, one branch, one agent; it can
             hold several terminal sessions inside. */}
-        <p className="sidebar-section-title section-label mb-1.5 mt-1 px-2">Workspaces</p>
+        <p className="sidebar-section-title section-label mb-1.5 mt-1 px-2">{advanced ? "Workspaces" : "Projects"}</p>
 
         {ordered.length === 0 ? (
           <p className="sidebar-label px-2 text-xs leading-relaxed text-text-muted">
-            Nothing yet. Create a workspace and its agent starts immediately.
+            {advanced ? "Nothing yet. Create a workspace and its agent starts immediately." : "Nothing yet. Start a new project and the AI gets to work."}
           </p>
         ) : (
           ordered.map((workspace) => {
@@ -155,6 +187,30 @@ export default function Sidebar({ open, onClose }: Props) {
         )}
       </nav>
 
+      <div className="flex flex-col gap-0.5 border-t border-line-subtle p-2.5">
+        {installEvent && !standalone ? (
+          <Tooltip content="Install app" disabled={!collapsed}>
+            <button type="button" className="sidebar-row" aria-label="Install app" onClick={() => void install()}>
+              <DownloadSimple size={17} className="shrink-0" />
+              <span className="sidebar-label flex-1">Install app</span>
+            </button>
+          </Tooltip>
+        ) : null}
+        <Tooltip content="Advanced tools" disabled={!collapsed}>
+          <button
+            type="button"
+            role="switch"
+            className="sidebar-row"
+            aria-checked={advanced}
+            aria-label="Advanced tools"
+            onClick={() => setAdvanced(!advanced)}
+          >
+            <Wrench size={17} className="shrink-0" />
+            <span className="sidebar-label flex-1">Advanced tools</span>
+            <span className="sidebar-label text-xs text-text-muted">{advanced ? "on" : "off"}</span>
+          </button>
+        </Tooltip>
+      </div>
     </aside>
   );
 }

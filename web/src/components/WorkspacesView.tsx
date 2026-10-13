@@ -101,17 +101,29 @@ const SOURCES: { id: Source; title: string; hint: string; icon: typeof Rocket }[
   { id: "continue", title: "Continue", hint: "a workspace you already have", icon: ArrowBendDownRight },
 ];
 
+/** Simple mode words the two source cards for what the user gets. */
+const SIMPLE_SOURCE: Partial<Record<Source, { title: string; hint: string }>> = {
+  new: { title: "New project", hint: "start from an empty folder" },
+  clone: { title: "Copy from GitHub", hint: "paste a GitHub link" },
+};
+
 export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
   const workspaces = useApp((s) => s.workspaces);
+  const advanced = useApp((s) => s.advanced);
   const can = useCan();
   const { names: agentNames, reported } = useAgentOptions();
 
   // Members work only from URLs (their agent runs in their own home), so host
   // paths and new projects are owner choices.
-  const sources = SOURCES.filter((src) => (src.id === "server" || src.id === "new" ? can.own : src.id === "continue" ? workspaces.length > 0 : true));
-  const [source, setSource] = useState<Source>(sources[0]?.id ?? "clone");
+  const offered = SOURCES.filter((src) => (src.id === "server" || src.id === "new" ? can.own : src.id === "continue" ? workspaces.length > 0 : true));
+  // Simple mode offers a new project or a clone; the full list if neither is allowed.
+  const simple = [...offered.filter((src) => src.id === "new"), ...offered.filter((src) => src.id === "clone")];
+  const sources = !advanced && simple.length > 0 ? simple : offered;
+  const [source, setSource] = useState<Source>(
+    sources.find((src) => !advanced && src.id === "new")?.id ?? sources[0]?.id ?? "clone",
+  );
 
   const [task, setTask] = useState("");
   const [repo, setRepo] = useState("");
@@ -137,7 +149,9 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const [ghQuery, setGhQuery] = useState("");
   const [ghNote, setGhNote] = useState<string | null>(null);
 
-  const chosenAgent = agent || agentNames[0] || "";
+  // Simple mode starts on claude when the server reports it installed.
+  const defaultAgent = !advanced && reported && agentNames.includes("claude") ? "claude" : agentNames[0];
+  const chosenAgent = agent || defaultAgent || "";
   // Recognition over recall: every repo this server already works in, newest first.
   const recentRepos = useMemo(() => {
     const seen = new Set<string>();
@@ -188,7 +202,9 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   }, [branchSource]);
 
   const missing = !task.trim()
-    ? "Describe the task first."
+    ? advanced
+      ? "Describe the task first."
+      : "Tell the AI what to build first."
     : source === "clone" && !url.trim()
       ? "Pick a repository or paste a URL."
       : source === "new" && !projectName.trim()
@@ -240,16 +256,19 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
     <form className="launch-form" onSubmit={submit} aria-describedby={error ? "launch-error" : undefined}>
       <fieldset className="source-grid">
         <legend className="field-label mb-2">Start from</legend>
-        {sources.map(({ id, title, hint, icon: Icon }) => (
-          <label key={id} className="source-card">
-            <input type="radio" name="launch-source" value={id} checked={source === id} onChange={() => setSource(id)} />
-            <span className="source-card-body">
-              <Icon size={18} aria-hidden="true" />
-              <span className="text-sm font-semibold text-text-primary">{title}</span>
-              <span className="text-xs text-text-muted">{hint}</span>
-            </span>
-          </label>
-        ))}
+        {sources.map(({ id, title, hint, icon: Icon }) => {
+          const copy = advanced ? undefined : SIMPLE_SOURCE[id];
+          return (
+            <label key={id} className="source-card">
+              <input type="radio" name="launch-source" value={id} checked={source === id} onChange={() => setSource(id)} />
+              <span className="source-card-body">
+                <Icon size={18} aria-hidden="true" />
+                <span className="text-sm font-semibold text-text-primary">{copy?.title ?? title}</span>
+                <span className="text-xs text-text-muted">{copy?.hint ?? hint}</span>
+              </span>
+            </label>
+          );
+        })}
       </fieldset>
 
       {source === "server" ? (
@@ -274,7 +293,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
       {source === "clone" ? (
         <div className="field">
           <label className="field-label" htmlFor="launch-gh">
-            Repository
+            {advanced ? "Repository" : "GitHub link"}
           </label>
           {ghRepos && ghRepos.length > 0 ? (
             <>
@@ -284,10 +303,10 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
                 className="field-input"
                 value={ghQuery}
                 onChange={(e) => setGhQuery(e.target.value)}
-                placeholder="search your GitHub repositories"
+                placeholder={advanced ? "search your GitHub repositories" : "search your GitHub projects"}
                 autoComplete="off"
               />
-              <ul className="gh-list" aria-label="GitHub repositories">
+              <ul className="gh-list" aria-label={advanced ? "GitHub repositories" : "GitHub projects"}>
                 {ghMatches.map((name) => {
                   const cloneUrl = asCloneUrl(name);
                   return (
@@ -316,14 +335,20 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
             autoComplete="off"
           />
           <p className="field-help">
-            {ghNote ?? (ghRepos === null || (ghRepos.length === 0 && !ghNote) ? "Loading your GitHub repositories… or paste any git URL." : "Pick one, or paste any git URL. A repository cloned before is reused, not downloaded again.")}
+            {advanced
+              ? (ghNote ?? (ghRepos === null || (ghRepos.length === 0 && !ghNote) ? "Loading your GitHub repositories… or paste any git URL." : "Pick one, or paste any git URL. A repository cloned before is reused, not downloaded again."))
+              : "Paste the link of the GitHub project to copy."}
           </p>
         </div>
       ) : null}
 
       {source === "new" ? (
         <>
-          <Field label="Project name" htmlFor="launch-project" help="A new folder with an empty git repository, then the agent starts in it.">
+          <Field
+            label="Project name"
+            htmlFor="launch-project"
+            help={advanced ? "A new folder with an empty git repository, then the agent starts in it." : "A new folder for your work."}
+          >
             <input
               id="launch-project"
               className="field-input"
@@ -333,26 +358,28 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
               autoComplete="off"
             />
           </Field>
-          <Field
-            label="Create in"
-            htmlFor="launch-location"
-            help={`Any folder on this server. Leave empty for ${projectsHome ?? "kohlab's projects folder"}.${projectName.trim() ? ` The project will be ${(location.trim() || projectsHome || "…").replace(/\/+$/, "")}/${projectName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}` : ""}`}
-          >
-            <input
-              id="launch-location"
-              className="field-input mono"
-              list="launch-location-options"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder={projectsHome ?? "/srv/repos"}
-              autoComplete="off"
-            />
-            <datalist id="launch-location-options">
-              {[...new Set(recentRepos.map((r) => r.replace(/\/[^/]+\/?$/, "")))].map((d) => (
-                <option key={d} value={d} />
-              ))}
-            </datalist>
-          </Field>
+          {advanced ? (
+            <Field
+              label="Create in"
+              htmlFor="launch-location"
+              help={`Any folder on this server. Leave empty for ${projectsHome ?? "kohlab's projects folder"}.${projectName.trim() ? ` The project will be ${(location.trim() || projectsHome || "…").replace(/\/+$/, "")}/${projectName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}` : ""}`}
+            >
+              <input
+                id="launch-location"
+                className="field-input mono"
+                list="launch-location-options"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder={projectsHome ?? "/srv/repos"}
+                autoComplete="off"
+              />
+              <datalist id="launch-location-options">
+                {[...new Set(recentRepos.map((r) => r.replace(/\/[^/]+\/?$/, "")))].map((d) => (
+                  <option key={d} value={d} />
+                ))}
+              </datalist>
+            </Field>
+          ) : null}
         </>
       ) : null}
 
@@ -372,20 +399,28 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         </Field>
       ) : null}
 
-      <Field label="What should the agent do?" htmlFor="launch-task">
+      <Field label={advanced ? "What should the agent do?" : "What should the AI build?"} htmlFor="launch-task">
         <textarea
           id="launch-task"
           className="field-textarea launch-task"
           rows={3}
           value={task}
           onChange={(e) => setTask(e.target.value)}
-          placeholder={source === "continue" ? "now add tests for the retry path" : source === "new" ? "scaffold a CLI that parses invoices" : "fix the billing rounding bug"}
+          placeholder={
+            source === "continue"
+              ? "now add tests for the retry path"
+              : source === "new"
+                ? advanced
+                  ? "scaffold a CLI that parses invoices"
+                  : "a simple website for my bakery with a menu page"
+                : "fix the billing rounding bug"
+          }
         />
       </Field>
 
-      {source !== "continue" ? (
+      {source !== "continue" && (advanced || !reported || agentNames.length > 1) ? (
         <fieldset className="field">
-          <legend className="field-label">Agent</legend>
+          <legend className="field-label">{advanced ? "Agent" : "AI"}</legend>
           <div className="segmented mt-1.5">
             {agentNames.map((name) => (
               <label key={name}>
@@ -394,11 +429,13 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
               </label>
             ))}
           </div>
-          <p className="field-help">{reported ? "Installed on this server." : "None reported as installed, showing every known agent."}</p>
+          {advanced ? (
+            <p className="field-help">{reported ? "Installed on this server." : "None reported as installed, showing every known agent."}</p>
+          ) : null}
         </fieldset>
       ) : null}
 
-      {source !== "continue" ? (
+      {source !== "continue" && advanced ? (
         <details className="launch-limits">
           <summary>More: branch, first message, limits</summary>
           <div className="mt-3 flex flex-col gap-4">
@@ -482,7 +519,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         ) : null}
         <Button type="submit" variant="primary" disabled={busy || !!missing}>
           <Rocket size={14} weight="fill" />
-          {busy ? (source === "clone" ? "Cloning…" : "Starting…") : source === "continue" ? "Continue" : "Start agent"}
+          {busy ? (source === "clone" ? "Cloning…" : "Starting…") : source === "continue" ? "Continue" : advanced ? "Start agent" : "Start"}
         </Button>
       </div>
     </form>
@@ -491,13 +528,14 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
 
 /** /new: a side sheet on desktop, full screen on phones. */
 export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const advanced = useApp((s) => s.advanced);
   return (
     <Dialog.Root open={open} onOpenChange={(o) => (o ? null : onClose())}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="sheet" aria-describedby={undefined}>
           <header className="sheet-head">
-            <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">New workspace</Dialog.Title>
+            <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">{advanced ? "New workspace" : "New project"}</Dialog.Title>
             <Dialog.Close asChild>
               <Button variant="quiet" iconOnly aria-label="close">
                 <X size={16} />
@@ -731,6 +769,7 @@ export default function WorkspacesView() {
   const navigate = useApp((s) => s.navigate);
   const refresh = useApp((s) => s.refresh);
   const route = useApp((s) => s.route);
+  const advanced = useApp((s) => s.advanced);
   const can = useCan();
 
   const [query, setQuery] = useState("");
@@ -854,7 +893,7 @@ export default function WorkspacesView() {
               ? `${queue.length} waiting for you. Everything an agent has been given on this server is below.`
               : "Nothing is waiting for review. Everything an agent has been given on this server is below."
           }
-          actions={can.mutate && workspaces.length > 0 ? <OpenMenu workspaces={workspaces} /> : undefined}
+          actions={can.mutate && advanced && workspaces.length > 0 ? <OpenMenu workspaces={workspaces} /> : undefined}
         />
 
         {/* The form sits directly under the button that opened it, not between
@@ -865,7 +904,7 @@ export default function WorkspacesView() {
         {running.length > 0 ? <RunningList items={running} /> : null}
 
         <div className="mt-10">
-          <h2 className="section-title">All workspaces</h2>
+          <h2 className="section-title">All projects</h2>
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -904,12 +943,12 @@ export default function WorkspacesView() {
             <Panel>
               <EmptyState
                 icon={<Plus size={18} />}
-                title="No workspaces on this server"
+                title={advanced ? "No workspaces on this server" : "No projects on this server"}
                 description="The setup steps walk through installing an agent and creating the first one."
                 action={
                   can.mutate ? (
                     <Button variant="primary" onClick={() => setCreating(true)}>
-                      new workspace
+                      {advanced ? "new workspace" : "new project"}
                     </Button>
                   ) : undefined
                 }
@@ -976,15 +1015,17 @@ export default function WorkspacesView() {
                               >
                                 {w.running ? <Stop size={13} /> : <Play size={13} />}
                               </Button>
-                              <Button
-                                variant="quiet"
-                                iconOnly
-                                size="sm"
-                                aria-label={`copy share link for ${w.id}`}
-                                onClick={() => void share(w)}
-                              >
-                                <LinkSimple size={13} />
-                              </Button>
+                              {advanced ? (
+                                <Button
+                                  variant="quiet"
+                                  iconOnly
+                                  size="sm"
+                                  aria-label={`copy share link for ${w.id}`}
+                                  onClick={() => void share(w)}
+                                >
+                                  <LinkSimple size={13} />
+                                </Button>
+                              ) : null}
                               <Button
                                 variant="quiet"
                                 iconOnly
@@ -1042,10 +1083,12 @@ export default function WorkspacesView() {
                             {w.running ? <Stop size={14} /> : <Play size={14} />}
                             {w.running ? "stop" : "start"}
                           </MenuItem>
-                          <MenuItem onSelect={() => void share(w)}>
-                            <LinkSimple size={14} />
-                            copy share link
-                          </MenuItem>
+                          {advanced ? (
+                            <MenuItem onSelect={() => void share(w)}>
+                              <LinkSimple size={14} />
+                              copy share link
+                            </MenuItem>
+                          ) : null}
                           <MenuItem tone="danger" onSelect={() => setPendingDelete(w)}>
                             <Trash size={14} />
                             delete
