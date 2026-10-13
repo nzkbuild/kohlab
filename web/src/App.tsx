@@ -78,7 +78,7 @@ export default function App() {
       <CommandPalette />
       <Announcer />
       <Toaster
-        theme="dark"
+        theme="system"
         position="bottom-right"
         mobileOffset={{ bottom: "4.75rem" }}
         toastOptions={{

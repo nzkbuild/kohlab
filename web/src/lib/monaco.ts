@@ -26,7 +26,11 @@ export const MONACO_THEME = "kohlab";
 
 /** Colours from the same tokens as the terminal, so the panes read as one surface. */
 export function defineKohlabTheme(m: Monaco) {
-  const el = document.documentElement;
+  // The editor is dark in both modes: read the pinned .dark-pane tokens, not the
+  // page's (which flip with the OS setting). The probe is attached only to be read.
+  const el = document.createElement("div");
+  el.className = "dark-pane";
+  document.body.appendChild(el);
   const c = (token: string, alpha?: number) => tokenColor(el, token, alpha) ?? "#000000";
   m.editor.defineTheme(MONACO_THEME, {
     base: "vs-dark",
@@ -53,6 +57,7 @@ export function defineKohlabTheme(m: Monaco) {
       "scrollbarSlider.hoverBackground": c("--line-strong", 0.8),
     },
   });
+  el.remove();
 }
 
 /** Options both read-only views share. */

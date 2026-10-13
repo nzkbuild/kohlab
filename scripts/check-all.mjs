@@ -75,6 +75,7 @@ try {
   banner("kohlab, full check suite");
 
   banner("static checks");
+  run("chat lines (describeTool, describeAsk)", "bun", ["scripts/check-chat.mjs"]);
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);
   run("token contrast (WCAG 2.2 AA)", "node", ["scripts/check-contrast.mjs"]);

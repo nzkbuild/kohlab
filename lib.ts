@@ -1047,6 +1047,10 @@ export async function updateRunState(): Promise<UpdateRun> {
 /** Completion callbacks (webhook + browser push). Set by the server. */
 type NotifyFn = (ws: Workspace) => void;
 let notifyDone: NotifyFn[] = [];
+/** Fire the completion callbacks for a workspace (used by chat.ts per finished turn). */
+export function notifyWorkspaceDone(ws: Workspace) {
+  notifyDone.forEach((fn) => fn(ws));
+}
 export function onWorkspaceDone(fn: NotifyFn) {
   notifyDone.push(fn);
 }
@@ -1266,7 +1270,13 @@ export function sessionId(workspaceId: string, terminalId = "main") {
 }
 
 /** True if the workspace's main PTY session is alive. */
+/** Chat workspaces with a turn in flight. chat.ts keeps this current. */
+export const chatBusy = new Set<string>();
+/** Per chat workspace: stop its claude process. chat.ts registers these. */
+export const chatKillers = new Map<string, () => void>();
+
 export async function isRunning(ws: Workspace): Promise<boolean> {
+  if (ws.chat) return chatBusy.has(ws.id);
   const sessions = (await ptyList()) ?? [];
   if (!sessions) return false;
   const sess = sessions.find((s) => s.id === sessionId(ws.id));
@@ -1423,7 +1433,7 @@ async function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Load state inside the lock, mutate, save. Convenience for one-shot writes. */
-async function mutateState<T>(fn: (s: State) => T | Promise<T>): Promise<T> {
+export async function mutateState<T>(fn: (s: State) => T | Promise<T>): Promise<T> {
   return withStateLock(async () => {
     const s = await loadState();
     const res = await fn(s);
@@ -1460,7 +1470,7 @@ export function startWatcher() {
     // so match the exact main-session id (or the legacy id-without-terminal)
     const s = loadStateSync();
     const main = s.workspaces.find((w) => msg.id === sessionId(w.id) || msg.id === `works-${w.id}`);
-    if (!main) return;
+    if (!main || main.chat) return; // chat workspaces have no main PTY
     const wid = main.id;
     if (intentionallyStopped.has(wid)) return;
     void (async () => {
@@ -1488,6 +1498,7 @@ export function startWatcher() {
       const running = new Set<string>();
       const finished = new Set<string>();
       for (const w of s.workspaces) {
+        if (w.chat) continue; // chat workspaces have no main PTY; chat.ts reports their turns
         const sess = sessions.find((x) => x.id === sessionId(w.id));
         const alive = !!sess && !sess.exited;
         if (alive) {
@@ -1642,6 +1653,8 @@ export async function createWorkspace(opts: {
   limits?: WorkspaceLimits;
   ownerId?: string;
   url?: string;
+  /** Talk through chat.ts: no PTY, and the payload is not used (the first chat message is the task). */
+  chat?: boolean;
 }): Promise<Workspace & { running: boolean; path: string }> {
   if (opts.branch !== undefined && !(await validBranch(opts.branch))) throw new Error(`not a valid branch name: ${opts.branch}`);
   // `opts.url` reaches `git clone --bare` as root with safe.directory=*.
@@ -1681,8 +1694,9 @@ export async function createWorkspace(opts: {
       ownerId,
       dir,
       asAgent: !isolated && !!agentIdentity() ? true : undefined,
-      payload: opts.payload,
+      payload: opts.chat ? undefined : opts.payload,
       limits: opts.limits,
+      chat: opts.chat ? true : undefined,
     };
     s.workspaces.push(w);
     return w;
@@ -1826,6 +1840,8 @@ export async function startWorkspace(id: string) {
   const s = await loadState();
   const ws = s.workspaces.find((w) => w.id === id);
   if (!ws) throw new Error(`no workspace '${id}'`);
+  // a chat workspace has no PTY: its claude process starts with the next message
+  if (ws.chat) return { ...ws, running: false, path: worktreePath(ws) };
 
   // spawn the main PTY session now so the agent actually starts, not just on
   // first browser attach. spawnAgentSession applies caps AND the owner's uid.
@@ -1845,7 +1861,7 @@ export async function startWorkspace(id: string) {
  * ponytail: asks for the full diff just to learn it is empty; `git status
  * --porcelain` is cheaper if stops ever get frequent.
  */
-async function worktreeIsClean(id: string): Promise<boolean> {
+export async function worktreeIsClean(id: string): Promise<boolean> {
   try {
     return (await getDiff(id)).length === 0;
   } catch {
@@ -1854,6 +1870,7 @@ async function worktreeIsClean(id: string): Promise<boolean> {
 }
 
 export async function stopWorkspace(id: string) {
+  chatKillers.get(id)?.();
   // close every named PTY session for this workspace (main + extra terminals)
   const sessions = (await ptyList()) ?? [];
   for (const sess of sessions ?? []) {
@@ -1877,6 +1894,8 @@ export async function deleteWorkspace(id: string) {
   const s = await loadState();
   const ws = s.workspaces.find((w) => w.id === id);
   if (!ws) throw new Error(`no workspace '${id}'`);
+  chatKillers.get(id)?.();
+  if (ws.chat) await rm(join(WORKS_DIR, "chats", `${id}.jsonl`), { force: true });
   // close every named PTY session for this workspace
   const sessions = (await ptyList()) ?? [];
   for (const sess of sessions) {

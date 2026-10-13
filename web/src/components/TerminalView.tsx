@@ -403,7 +403,7 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
   const reconnecting = socket === "reconnecting" || socket === "offline";
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="dark-pane flex h-full min-h-0 flex-col">
       {/* Same pane-header geometry as the other panes: a 2rem-min row with 12px
           text, like every pane header. No h2 title: this pane's identity
           is the tab and the instance strip rendered directly above it by

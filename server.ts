@@ -71,6 +71,7 @@ import {
   canProvisionOsUsers,
 } from "./lib";
 import { findSub, notifyDone, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
+import { ChatError, answer as answerChat, send as sendChat, snapshot as chatSnapshot } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -185,21 +186,25 @@ startWatcher();
 
 async function handleClone(req: Request, actorUserId?: string): Promise<Response> {
   try {
-    const body = (await req.json()) as { url?: string; task?: string; agent?: string; branch?: string; payload?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } };
+    const body = (await req.json()) as { url?: string; task?: string; agent?: string; branch?: string; payload?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } };
+    const chat = body.chat === true;
     const url = (body.url ?? "").trim();
     const task = (body.task ?? "work on " + url).trim();
     if (!url) return json({ error: "url is required" }, 400);
     if (!validGitUrl(url)) return json({ error: "use an https://, ssh:// or git@ URL" }, 400);
+    if (chat && task.length > 20000) return json({ error: "task is over 20000 characters" }, 400);
     const branch = body.branch?.trim() || undefined;
     if (actorUserId) {
       // a named member clones into their own isolated workspace (server does
       // the git work as root, then hands the tree to the member's OS user)
-      const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, ownerId: actorUserId });
+      const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, ownerId: actorUserId, chat });
+      if (chat) await sendChat(ws.id, task);
       return json(ws);
     }
     // owner/legacy path: one clone per URL under WORKS_DIR/clones, reused
     const dest = await cloneOrReuse(url);
-    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits });
+    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, chat });
+    if (chat) await sendChat(ws.id, task);
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -227,6 +232,33 @@ async function shareId(req: Request): Promise<string | null> {
   }
 }
 
+/** Chat workspaces: the task is the first chat message, sent once the workspace exists. */
+async function handleChatGet(id: string, req: Request): Promise<Response> {
+  try {
+    const after = Math.max(0, Number(new URL(req.url).searchParams.get("after")) || 0);
+    return json(await chatSnapshot(id, after));
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof ChatError ? e.status : 400);
+  }
+}
+
+async function handleChatPost(id: string, req: Request, actor: string, isAnswer: boolean): Promise<Response> {
+  try {
+    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown };
+    if (isAnswer) {
+      if (typeof body.requestId !== "string" || typeof body.allow !== "boolean") return json({ error: "requestId and allow are required" }, 400);
+      containFailure(audit(actor, "chat.answer", id), "audit");
+      await answerChat(id, body.requestId, body.allow);
+    } else {
+      containFailure(audit(actor, "chat", id), "audit");
+      await sendChat(id, typeof body.text === "string" ? body.text : "");
+    }
+    return json({ ok: true });
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof ChatError ? e.status : 400);
+  }
+}
+
 async function handleCreate(req: Request, actorUserId?: string): Promise<Response> {
   const body = (await req.json()) as {
     repo?: string;
@@ -239,15 +271,21 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
     /** Folder the new project is created in; defaults to kohlab's projects folder. */
     location?: string;
     limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number };
+    /** Talk through the claude chat mode (chat.ts) instead of a terminal. */
+    chat?: boolean;
   };
   const task = (body.task ?? "").trim();
   if (!task) return json({ error: "task is required" }, 400);
+  const chat = body.chat === true;
+  if (chat && task.length > 20000) return json({ error: "task is over 20000 characters" }, 400);
   if (body.newProject !== undefined) {
     // A new project is a host path; members work from URLs only.
     if (actorUserId) return json({ error: "members start from a git URL" }, 403);
     try {
       const repo = await newProject(body.newProject, body.location);
-      return json(await createWorkspace({ repo, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits }));
+      const ws = await createWorkspace({ repo, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits, chat });
+      if (chat) await sendChat(ws.id, task);
+      return json(ws);
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
     }
@@ -274,7 +312,9 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
       payload: body.payload,
       limits: body.limits,
       ownerId: actorUserId,
+      chat,
     });
+    if (chat) await sendChat(ws.id, task);
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -1021,6 +1061,20 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       // that opened the connection, not just "some caller passed `denied`".
       const upgradeOpts = { data: { auth, canMutate }, ...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
       if (server.upgrade(req, upgradeOpts)) return undefined;
+    }
+
+    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer)?$/);
+    if (chatM) {
+      const [, chatId, answerPath] = chatM;
+      if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, chatId))) return json({ error: "forbidden, not your workspace" }, 403);
+      if (req.method === "GET" && !answerPath) {
+        if (denied) return json({ error: "unauthorized" }, 401);
+        return handleChatGet(chatId, req);
+      }
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      const refused = gate(canMutate, "forbidden, viewer cannot chat");
+      if (refused) return refused;
+      return handleChatPost(chatId, req, actor, !!answerPath);
     }
 
     if (m) {

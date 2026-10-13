@@ -176,8 +176,14 @@ export default function Sidebar({ open, onClose }: Props) {
                     {workspace.task || workspace.id}
                   </span>
                   <span className="block truncate text-xs text-text-muted">
-                    {workspace.agent}
-                    {status === "running" ? "" : ` · ${STATUS_LABEL[status]}`}
+                    {advanced ? (
+                      <>
+                        {workspace.agent}
+                        {status === "running" ? "" : ` · ${STATUS_LABEL[status]}`}
+                      </>
+                    ) : (
+                      status === "running" ? "working" : STATUS_LABEL[status]
+                    )}
                   </span>
                 </span>
               </button>

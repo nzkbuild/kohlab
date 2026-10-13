@@ -1,6 +1,7 @@
 import { lazy, Suspense, startTransition, useEffect, useOptimistic, useState } from "react";
 import {
   ArrowsClockwise,
+  ChatCircleDots,
   DotsThree,
   Files,
   GitDiff,
@@ -34,6 +35,7 @@ import { copyText } from "../lib/clipboard";
 // import through lazy() defers the fetch. A static import here: even one that
 // only wants a helper: would pull the whole chunk into first paint.
 const TerminalView = lazy(() => import("./TerminalView"));
+const ChatView = lazy(() => import("./ChatView"));
 const DiffView = lazy(() => import("./DiffView"));
 
 type TabId = WorkspaceTab;
@@ -93,6 +95,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [reviewCount, setReviewCount] = useState(0);
 
   const w = workspaces.find((x) => x.id === workspaceId);
+  // A chat workspace drives the AI through a conversation: its "terminal" pane is the chat.
+  const chat = w?.chat === true;
 
   // Lifecycle toggles are bounded single-object mutations, so they may show
   // their outcome before the server confirms it. Deleting and committing never do.
@@ -161,7 +165,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // flips to needs-review while you watch it does not yank you off the terminal.
   // A hidden pane in the URL (files or log, while simple) falls back like no pane.
   const hiddenTab = !advanced && (routeTab === "files" || routeTab === "log");
-  const tab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview ? "review" : "terminal");
+  // A chat workspace opens on its chat even when it needs review; the review button is still there.
+  const tab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
   useEffect(() => {
     if (w && tab !== routeTab) setTab(tab);
   }, [w === undefined, routeTab]);
@@ -266,7 +271,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const running = optimisticRunning;
 
   const badges: Partial<Record<TabId, Badge>> = {};
-  if (terminals.length > 1) badges.terminal = { count: terminals.length, noun: "open terminals", chip: "chip-stopped" };
+  if (terminals.length > 1 && !chat) badges.terminal = { count: terminals.length, noun: "open terminals", chip: "chip-stopped" };
   if (reviewCount > 0)
     badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files", chip: "chip-review" };
 
@@ -293,15 +298,18 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           {reviewCount > 0 ? `review ${reviewCount} file${reviewCount === 1 ? "" : "s"}` : "review"}
         </Button>
       ) : null}
-      <Button
-        size="sm"
-        variant={needsReview || running ? "secondary" : "primary"}
-        className={tab === "review" ? "hidden shell:inline-flex" : "flex-1 shell:flex-none"}
-        onClick={() => run(running ? "stop" : "start")}
-      >
-        {running ? <Stop size={13} weight="fill" aria-hidden="true" /> : <Play size={13} weight="fill" aria-hidden="true" />}
-        {running ? "stop" : "start"}
-      </Button>
+      {/* A chat has no start/stop of its own: the server's start is a no-op, and Stop lives inside the chat. */}
+      {chat ? null : (
+        <Button
+          size="sm"
+          variant={needsReview || running ? "secondary" : "primary"}
+          className={tab === "review" ? "hidden shell:inline-flex" : "flex-1 shell:flex-none"}
+          onClick={() => run(running ? "stop" : "start")}
+        >
+          {running ? <Stop size={13} weight="fill" aria-hidden="true" /> : <Play size={13} weight="fill" aria-hidden="true" />}
+          {running ? "stop" : "start"}
+        </Button>
+      )}
       <Menu
         label={`more actions for ${w.id}`}
         trigger={
@@ -310,10 +318,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </Button>
         }
       >
-        <MenuItem onSelect={() => run("restart")}>
-          <ArrowsClockwise size={14} aria-hidden="true" />
-          restart
-        </MenuItem>
+        {chat ? null : (
+          <MenuItem onSelect={() => run("restart")}>
+            <ArrowsClockwise size={14} aria-hidden="true" />
+            restart
+          </MenuItem>
+        )}
         {advanced ? (
           <MenuItem onSelect={() => void share()}>
             <ShareNetwork size={14} aria-hidden="true" />
@@ -340,9 +350,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             </h1>
             <StatusChip status={st} />
           </div>
-          <p className="mono min-w-0 truncate text-2xs text-text-faint" title={`${w.id} · ${w.path}`}>
-            {w.id} · …/{w.path.split("/").slice(-2).join("/")}
-          </p>
+          {advanced ? (
+            <p className="mono min-w-0 truncate text-2xs text-text-faint" title={`${w.id} · ${w.path}`}>
+              {w.id} · …/{w.path.split("/").slice(-2).join("/")}
+            </p>
+          ) : null}
         </div>
 
         {can.mutate ? (
@@ -358,10 +370,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       <TabList label="Workspace panes">
         {visibleTabs.map(({ id, label, icon: Icon }) => {
           const badge = badges[id];
+          const TabIcon = chat && id === "terminal" ? ChatCircleDots : Icon;
           return (
             <Tab key={id} value={id} aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}>
-              <Icon size={14} aria-hidden="true" />
-              {label}
+              <TabIcon size={14} aria-hidden="true" />
+              {chat && id === "terminal" ? "Chat" : label}
               {badge ? (
                 <span className={cn("chip", badge.chip, "tnum")} aria-hidden="true">
                   {badge.count}
@@ -372,7 +385,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         })}
       </TabList>
 
-      {tab === "terminal" ? (
+      {tab === "terminal" && !chat ? (
         <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5" role="group" aria-label="Terminal instances">
           {terminals.map((term) => {
             const active = activeTerminal === term.id;
@@ -407,7 +420,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               </span>
             );
           })}
-          {advanced ? (
+          {advanced && !chat ? (
             <Menu
               label="new terminal"
               trigger={
@@ -436,7 +449,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <TabPanel value="terminal" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
           <ErrorBoundary label="Terminal">
             <Suspense fallback={<SkeletonRows rows={8} className="p-4" />}>
-              {tab === "terminal" ? (
+              {tab === "terminal" && chat ? <ChatView key={workspaceId} workspaceId={workspaceId} /> : null}
+              {tab === "terminal" && !chat ? (
                 <>
                   {/* The terminal is mounted even when the workspace is not
                       running, because the daemon retains the final screen of a

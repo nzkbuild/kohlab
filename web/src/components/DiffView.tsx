@@ -516,7 +516,7 @@ export default function DiffView({ workspaceId }: Props) {
                   </label>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-hidden bg-surface-sunken">
+                <div className="dark-pane min-h-0 flex-1 overflow-hidden bg-surface-sunken">
                   {currentStats ? (
                     <DiffEditor
                       height="100%"

@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.30.0] - 2026-10-13
+
+### Added
+- Chat with Claude. In simple mode a new project (or one copied from GitHub) opens a chat instead of a terminal: Kohlab drives the `claude` CLI in its JSON mode, shows each action as a plain line ("Created index.html"), and asks before risky steps with Allow / Don't allow. Conversations are saved and resume after a server restart; a reply in progress during a restart is lost.
+- Light theme. The app follows the computer's light or dark setting. The terminal and code editor stay dark.
+
+### Changed
+- Chat projects open on the chat, have no start/stop buttons, and hide the folder path in simple mode. The sidebar shows only the status in simple mode.
+
 ## [1.29.0] - 2026-10-13
 
 ### Added

@@ -120,6 +120,80 @@
   --z-dialog: 101;
 }
 
+/* --- light theme -----------------------------------------------------------
+   The page follows the OS setting. Only semantic tokens are overridden here;
+   primitives and the dark :root above stay as they are. */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --surface-base: oklch(0.985 0.001 286);
+    --surface-sunken: oklch(0.965 0.002 286);
+    --surface-raised: oklch(1 0 0);
+    --surface-overlay: oklch(1 0 0);
+    --surface-hover: oklch(0.955 0.002 286);
+    --surface-active: oklch(0.93 0.003 286);
+
+    --text-primary: oklch(0.2 0.003 286);
+    --text-secondary: oklch(0.37 0.004 286);
+    --text-muted: oklch(0.48 0.005 286);
+    --text-faint: oklch(0.53 0.005 286);
+    --text-on-accent: oklch(0.985 0 0);
+
+    --line-subtle: oklch(0.91 0.003 286);
+    --line-strong: oklch(0.6 0.005 286);
+    --line-accent: oklch(0.2 0.003 286);
+
+    --status-running: oklch(0.5 0.14 130);
+    --status-review: var(--text-primary);
+    --status-committed: var(--text-muted);
+    --status-stopped: var(--text-faint);
+    --status-danger: oklch(0.5 0.19 25);
+
+    --accent: oklch(0.2 0.003 286);
+    --accent-hover: oklch(0.28 0.003 286);
+    --accent-press: oklch(0.35 0.004 286);
+  }
+}
+
+/* Terminal and code editor are dev tools and stay dark in both modes. In light
+   mode this pins the dark token values on the pane; in dark mode the page
+   already is dark, so the block is not emitted for it. Keep in step with :root. */
+@media (prefers-color-scheme: light) {
+  .dark-pane {
+    color-scheme: dark;
+
+    --surface-base: var(--neutral-1000);
+    --surface-sunken: oklch(0.125 0.002 286);
+    --surface-raised: var(--neutral-950);
+    --surface-overlay: var(--neutral-900);
+    --surface-hover: var(--neutral-900);
+    --surface-active: var(--neutral-800);
+
+    --text-primary: var(--neutral-100);
+    --text-secondary: var(--neutral-300);
+    --text-muted: var(--neutral-400);
+    --text-faint: var(--neutral-500);
+    --text-on-accent: oklch(0.18 0.002 286);
+
+    --line-subtle: var(--neutral-800);
+    --line-strong: var(--neutral-600);
+    --line-accent: var(--neutral-100);
+
+    --status-running: oklch(0.9 0.17 124);
+    --status-review: var(--neutral-100);
+    --status-committed: var(--neutral-400);
+    --status-stopped: var(--neutral-500);
+    --status-danger: oklch(0.82 0.14 25);
+
+    --accent: var(--neutral-100);
+    --accent-hover: oklch(1 0 0);
+    --accent-press: var(--neutral-300);
+
+    background: var(--surface-sunken);
+  }
+}
+
 /* Bridge the semantic tier into Tailwind utilities. `inline` is REQUIRED for
    every token that references another variable, without it the utility body
    carries the alias name and resolves at the point of use, not to the token. */

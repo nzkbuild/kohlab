@@ -106,7 +106,7 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
       ) : loading ? (
         <SkeletonRows rows={12} className="p-4" />
       ) : (
-        <div className="min-h-0 flex-1">
+        <div className="dark-pane min-h-0 flex-1">
           <Editor
             height="100%"
             language={lang}

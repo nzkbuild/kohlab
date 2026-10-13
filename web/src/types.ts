@@ -17,7 +17,21 @@ export interface Workspace {
   discardedAt?: number;
   /** Mirrors the server's stoppedClean: a run that changed nothing is not queued. */
   stoppedClean?: boolean;
+  /** A chat workspace: the AI is driven through a chat screen, not a terminal. */
+  chat?: boolean;
+  chatSession?: string;
 }
+
+/** One entry in a chat workspace's conversation. `n` is the sequence number used for polling. */
+export type ChatEvent = { n: number; at: number } & (
+  | { kind: "user"; text: string }
+  | { kind: "assistant"; text: string }
+  | { kind: "tool"; text: string }
+  | { kind: "ask"; requestId: string; text: string; detail?: string }
+  | { kind: "answer"; requestId: string; allow: boolean }
+  | { kind: "done" }
+  | { kind: "error"; text: string }
+);
 
 export interface TreeNode {
   name: string;

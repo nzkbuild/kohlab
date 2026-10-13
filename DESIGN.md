@@ -187,9 +187,9 @@ components:
 
 **Creative North Star: "The Instrument Panel"**
 
-Kohlab is operated, not browsed. The console is a dense, dark-only instrument: zinc planes stacked by lightness, a white fill for the one thing to do next, and a single lime signal that means exactly one thing, an agent is alive right now. Every surface answers "what needs me, and what is it doing" before anything else, which is why Home is an inbox: decisions waiting on you first, live agents second, the full list last.
+Kohlab is operated, not browsed. The console is a dense instrument that follows the OS setting: light when the OS is in light mode, dark otherwise (light tokens live in the `prefers-color-scheme: light` block of `index.css`). The terminal and code editor stay dark in both modes. Zinc planes are stacked by lightness, a white fill (black in light mode) marks the one thing to do next, and a single lime signal that means exactly one thing, an agent is alive right now. Every surface answers "what needs me, and what is it doing" before anything else, which is why Home is an inbox: decisions waiting on you first, live agents second, the full list last.
 
-Type is Geist, self-hosted, one voice on every platform. Geist Mono carries whole machine values (ids, agent names, paths, hashes, ages, terminal output) and nothing else. Status reads in monochrome by construction: glyph plus label first, hue only for live and danger. There is no light theme, no hero, no summary tiles and no decoration; density is tuned from four tokens rather than per component.
+Type is Geist, self-hosted, one voice on every platform. Geist Mono carries whole machine values (ids, agent names, paths, hashes, ages, terminal output) and nothing else. Status reads in monochrome by construction: glyph plus label first, hue only for live and danger. No hero, no summary tiles and no decoration; density is tuned from four tokens rather than per component.
 
 **Key Characteristics:**
 - Zinc OKLCH neutrals (hue 286, chroma at most 0.005) in distinct planes, never one flat black.

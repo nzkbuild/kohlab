@@ -18,6 +18,10 @@ export interface Workspace {
   stoppedClean?: boolean;
   /** json payload given to the agent CLI at launch (may be absent) */
   payload?: string;
+  /** Talks through the claude CLI's chat mode (chat.ts), not a main PTY. */
+  chat?: boolean;
+  /** claude session id, for --resume on the next message. */
+  chatSession?: string;
   /** owner's workspace root under their home; legacy records omit it and live
    *  under the shared store */
   dir?: string;

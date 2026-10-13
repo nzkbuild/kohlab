@@ -235,12 +235,14 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
               }
             : undefined;
         const common = { task: task.trim(), agent: chosenAgent, limits, payload: payload.trim() || undefined, branch: branch || undefined };
+        // The simple view talks to Claude through a chat screen; advanced keeps the terminal.
+        const chat = !advanced && chosenAgent === "claude" ? true : undefined;
         const created =
           source === "clone"
-            ? await api.clone({ url: url.trim(), ...common })
+            ? await api.clone({ url: url.trim(), ...common, chat })
             : source === "new"
-              ? await api.create({ ...common, branch: undefined, newProject: projectName.trim(), location: location.trim() || undefined })
-              : await api.create({ ...common, repo: chosenRepo || undefined });
+              ? await api.create({ ...common, branch: undefined, newProject: projectName.trim(), location: location.trim() || undefined, chat })
+              : await api.create({ ...common, repo: chosenRepo || undefined, chat });
         await refresh();
         announce(`${created.id} created, the agent is starting`);
         navigate({ kind: "workspace", id: created.id });

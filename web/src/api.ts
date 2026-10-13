@@ -1,4 +1,4 @@
-import type { AgentStatus, DiffFile, ReleaseStatus, TreeNode, Workspace } from "./types";
+import type { AgentStatus, ChatEvent, DiffFile, ReleaseStatus, TreeNode, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -74,7 +74,7 @@ export const api = {
   },
   workspaces: () => json<Workspace[]>("/api/workspaces"),
   agentsStatus: () => json<AgentStatus>("/api/agents-status"),
-  create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; location?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
+  create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; location?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   paths: () => json<{ projects: string }>("/api/paths"),
   /** Create a folder or an empty file in a workspace's tree. */
@@ -102,13 +102,28 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(href), 30_000);
   },
   branches: (source: string) => json<{ branches: string[] }>(`/api/branches?source=${encodeURIComponent(source)}`),
-  clone: (body: { url: string; task: string; agent: string; branch?: string; payload?: string; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
+  clone: (body: { url: string; task: string; agent: string; branch?: string; payload?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   /** Same worktree and branch, new task: the agent restarts on it. */
   continue: (id: string, task: string) =>
     json<Workspace>(`/api/workspaces/${id}/continue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task }) }),
   action: (id: string, action: string) =>
     json<Workspace>(`/api/workspaces/${id}/${action}`, { method: "POST" }),
+  /** Chat events after sequence number `after`, plus whether the AI is working and which question it waits on. */
+  chat: (id: string, after: number) =>
+    json<{ events: ChatEvent[]; busy: boolean; waiting: string | null }>(`/api/workspaces/${encodeURIComponent(id)}/chat?after=${after}`),
+  chatSend: (id: string, text: string) =>
+    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  chatAnswer: (id: string, requestId: string, allow: boolean) =>
+    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/answer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId, allow }),
+    }),
   share: (id: string) =>
     json<{ id: string; share: string }>(`/api/workspaces/${id}/share`, { method: "POST" }),
   diff: (id: string) => json<DiffFile[]>(`/api/workspaces/${id}/diff`),
