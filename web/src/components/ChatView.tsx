@@ -98,6 +98,8 @@ export default function ChatView({ workspaceId }: Props) {
         if (!primedRef.current) {
           announcedRef.current = top;
           primedRef.current = true;
+          // A brand-new chat has no history: the composer is where the user starts.
+          if (res.events.length === 0) taRef.current?.focus();
         }
         if (res.events.length > 0) setEvents((prev) => mergeEvents(prev, res.events));
         setBusy(res.busy);

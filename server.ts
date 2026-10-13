@@ -8,7 +8,7 @@ import { promisify } from "util";
 import { brotliCompress, constants as zlibConstants, gzip as gzipCb } from "zlib";
 import { chown, mkdir, open, readdir, readFile, realpath, stat, writeFile } from "fs/promises";
 import { dirname } from "path";
-import { isAbsolute, join, relative, resolve } from "path";
+import { basename, isAbsolute, join, relative, resolve } from "path";
 import {
   createWorkspace,
   deleteWorkspace,
@@ -71,6 +71,7 @@ import {
   PAIR_TTL_MS,
   setUserRole,
   canProvisionOsUsers,
+  repoNameFromUrl,
 } from "./lib";
 import { findSub, notifyDone, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 import { resolvePreviewFile } from "./preview";
@@ -192,22 +193,24 @@ async function handleClone(req: Request, actorUserId?: string): Promise<Response
     const body = (await req.json()) as { url?: string; task?: string; agent?: string; branch?: string; payload?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } };
     const chat = body.chat === true;
     const url = (body.url ?? "").trim();
-    const task = (body.task ?? "work on " + url).trim();
+    const typed = (body.task ?? "").trim();
     if (!url) return json({ error: "url is required" }, 400);
     if (!validGitUrl(url)) return json({ error: "use an https://, ssh:// or git@ URL" }, 400);
+    // A chat project needs no typed task: the repo name stands in as its title.
+    const task = chat && !typed ? repoNameFromUrl(url) : (body.task ?? "work on " + url).trim();
     if (chat && task.length > 20000) return json({ error: "task is over 20000 characters" }, 400);
     const branch = body.branch?.trim() || undefined;
     if (actorUserId) {
       // a named member clones into their own isolated workspace (server does
       // the git work as root, then hands the tree to the member's OS user)
       const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, ownerId: actorUserId, chat });
-      if (chat) await sendChat(ws.id, task);
+      if (chat && typed) await sendChat(ws.id, typed);
       return json(ws);
     }
     // owner/legacy path: one clone per URL under WORKS_DIR/clones, reused
     const dest = await cloneOrReuse(url);
     const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, chat });
-    if (chat) await sendChat(ws.id, task);
+    if (chat && typed) await sendChat(ws.id, typed);
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -311,17 +314,19 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
     /** Talk through the claude chat mode (chat.ts) instead of a terminal. */
     chat?: boolean;
   };
-  const task = (body.task ?? "").trim();
-  if (!task) return json({ error: "task is required" }, 400);
+  const typed = (body.task ?? "").trim();
   const chat = body.chat === true;
-  if (chat && task.length > 20000) return json({ error: "task is over 20000 characters" }, 400);
+  // A chat project needs no typed task: the project name stands in as its title.
+  if (!typed && !chat) return json({ error: "task is required" }, 400);
+  if (chat && typed.length > 20000) return json({ error: "task is over 20000 characters" }, 400);
   if (body.newProject !== undefined) {
     // A new project is a host path; members work from URLs only.
     if (actorUserId) return json({ error: "members start from a git URL" }, 403);
     try {
+      const name = (body.newProject ?? "").trim();
       const repo = await newProject(body.newProject, body.location);
-      const ws = await createWorkspace({ repo, task, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits, chat });
-      if (chat) await sendChat(ws.id, task);
+      const ws = await createWorkspace({ repo, task: typed || name, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits, chat });
+      if (chat && typed) await sendChat(ws.id, typed);
       return json(ws);
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
@@ -339,6 +344,8 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
   // the agent in the legacy root-owned flow (privilege escalation) or reach
   // outside the member's home. Owners/anonymous keep the host-path flow.
   if (actorUserId && !url) return json({ error: "members create workspaces from a git URL" }, 403);
+  // Chat projects with no typed task are titled by their repo: the URL's name, or the folder's.
+  const task = typed || (url ? repoNameFromUrl(url) : basename(repo));
   try {
     const ws = await createWorkspace({
       repo,
@@ -351,7 +358,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
       ownerId: actorUserId,
       chat,
     });
-    if (chat) await sendChat(ws.id, task);
+    if (chat && typed) await sendChat(ws.id, typed);
     return json(ws);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);

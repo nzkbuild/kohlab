@@ -29,6 +29,7 @@ export default function Sidebar({ open, onClose }: Props) {
   const route = useApp((s) => s.route);
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
+  const setNewOpen = useApp((s) => s.setNewOpen);
   const advanced = useApp((s) => s.advanced);
   const setAdvanced = useApp((s) => s.setAdvanced);
   const can = useCan();
@@ -118,7 +119,10 @@ export default function Sidebar({ open, onClose }: Props) {
             variant="primary"
             className={cn("w-full", collapsed && "shell:px-0")}
             aria-label={advanced ? "new workspace" : "new project"}
-            onClick={() => navigate({ kind: "workspaces", create: true })}
+            onClick={() => {
+              setNewOpen(true);
+              onClose();
+            }}
           >
             <Plus size={14} />
             <span className="sidebar-label">{advanced ? "New workspace" : "New project"}</span>

@@ -9,6 +9,12 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.32.0] - 2026-10-13
+
+### Changed
+- New project opens over the page you are on instead of going back to Home, and lands in the new project's chat when it is created.
+- Chat projects only need a name: tell the AI what to build in the chat. Advanced mode still asks for a task.
+
 ## [1.31.0] - 2026-10-13
 
 ### Added

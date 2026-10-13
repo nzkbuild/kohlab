@@ -110,6 +110,7 @@ const SIMPLE_SOURCE: Partial<Record<Source, { title: string; hint: string }>> = 
 export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
+  const setNewOpen = useApp((s) => s.setNewOpen);
   const workspaces = useApp((s) => s.workspaces);
   const advanced = useApp((s) => s.advanced);
   const can = useCan();
@@ -153,6 +154,10 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const simpleClaude = !advanced && reported && agentNames.includes("claude");
   const defaultAgent = simpleClaude ? "claude" : agentNames[0];
   const chosenAgent = simpleClaude ? "claude" : agent || defaultAgent || "";
+  // Simple mode talks to Claude through a chat screen; advanced keeps the terminal.
+  const chat = !advanced && chosenAgent === "claude";
+  // Installed Claude in simple mode is a chat: its first message is optional, so there is no task field.
+  const taskOptional = chat && simpleClaude && source !== "continue";
   // Recognition over recall: every repo this server already works in, newest first.
   const recentRepos = useMemo(() => {
     const seen = new Set<string>();
@@ -202,7 +207,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
     setBranchNote(null);
   }, [branchSource]);
 
-  const missing = !task.trim()
+  const missing = !taskOptional && !task.trim()
     ? advanced
       ? "Describe the task first."
       : "Tell the AI what to build first."
@@ -235,19 +240,18 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
                 maxMemoryMb: memoryMb ? Number(memoryMb) : undefined,
               }
             : undefined;
-        const common = { task: task.trim(), agent: chosenAgent, limits, payload: payload.trim() || undefined, branch: branch || undefined };
-        // The simple view talks to Claude through a chat screen; advanced keeps the terminal.
-        const chat = !advanced && chosenAgent === "claude" ? true : undefined;
+        const common = { task: taskOptional ? "" : task.trim(), agent: chosenAgent, limits, payload: payload.trim() || undefined, branch: branch || undefined };
         const created =
           source === "clone"
-            ? await api.clone({ url: url.trim(), ...common, chat })
+            ? await api.clone({ url: url.trim(), ...common, chat: chat || undefined })
             : source === "new"
-              ? await api.create({ ...common, branch: undefined, newProject: projectName.trim(), location: location.trim() || undefined, chat })
-              : await api.create({ ...common, repo: chosenRepo || undefined, chat });
+              ? await api.create({ ...common, branch: undefined, newProject: projectName.trim(), location: location.trim() || undefined, chat: chat || undefined })
+              : await api.create({ ...common, repo: chosenRepo || undefined, chat: chat || undefined });
         await refresh();
         announce(`${created.id} created, the agent is starting`);
         navigate({ kind: "workspace", id: created.id });
       }
+      setNewOpen(false);
     } catch (e) {
       // Kept next to the button, not in a toast that vanishes before it is read.
       setError((e as Error).message);
@@ -402,24 +406,26 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         </Field>
       ) : null}
 
-      <Field label={advanced ? "What should the agent do?" : "What should the AI build?"} htmlFor="launch-task">
-        <textarea
-          id="launch-task"
-          className="field-textarea launch-task"
-          rows={3}
-          value={task}
-          onChange={(e) => setTask(e.target.value)}
-          placeholder={
-            source === "continue"
-              ? "now add tests for the retry path"
-              : source === "new"
-                ? advanced
-                  ? "scaffold a CLI that parses invoices"
-                  : "a simple website for my bakery with a menu page"
-                : "fix the billing rounding bug"
-          }
-        />
-      </Field>
+      {!taskOptional ? (
+        <Field label={advanced ? "What should the agent do?" : "What should the AI build?"} htmlFor="launch-task">
+          <textarea
+            id="launch-task"
+            className="field-textarea launch-task"
+            rows={3}
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            placeholder={
+              source === "continue"
+                ? "now add tests for the retry path"
+                : source === "new"
+                  ? advanced
+                    ? "scaffold a CLI that parses invoices"
+                    : "a simple website for my bakery with a menu page"
+                  : "fix the billing rounding bug"
+            }
+          />
+        </Field>
+      ) : null}
 
       {source !== "continue" && !simpleClaude && (advanced || !reported || agentNames.length > 1) ? (
         <fieldset className="field">
@@ -777,17 +783,15 @@ export default function WorkspacesView() {
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  // `/new` (the sidebar button, the palette) arrives with the form open, and a
-  // second arrival while already here opens it too: the route object is new.
+  // `/new` (an old bookmark) opens the sheet over this page, then drops the flag
+  // from the URL. The sheet itself lives in App, so it stays over whatever is showing.
   const wantsCreate = route.kind === "workspaces" && !!route.create;
-  const [creating, setCreating] = useState(wantsCreate);
+  const setNewOpen = useApp((s) => s.setNewOpen);
   useEffect(() => {
-    if (wantsCreate) setCreating(true);
-  }, [route, wantsCreate]);
-  const closeForm = () => {
-    setCreating(false);
-    if (wantsCreate) navigate({ kind: "workspaces" }, { replace: true });
-  };
+    if (!wantsCreate) return;
+    setNewOpen(true);
+    navigate({ kind: "workspaces" }, { replace: true });
+  }, [route, wantsCreate, setNewOpen, navigate]);
 
   const queue = useMemo(
     () =>
@@ -899,10 +903,6 @@ export default function WorkspacesView() {
           actions={can.mutate && advanced && workspaces.length > 0 ? <OpenMenu workspaces={workspaces} /> : undefined}
         />
 
-        {/* The form sits directly under the button that opened it, not between
-            the filter tabs and the list they control. */}
-        <LaunchSheet open={creating && can.mutate} onClose={closeForm} />
-
         {queue.length > 0 ? <ReviewQueue items={queue} /> : null}
         {running.length > 0 ? <RunningList items={running} /> : null}
 
@@ -950,7 +950,7 @@ export default function WorkspacesView() {
                 description="The setup steps walk through installing an agent and creating the first one."
                 action={
                   can.mutate ? (
-                    <Button variant="primary" onClick={() => setCreating(true)}>
+                    <Button variant="primary" onClick={() => setNewOpen(true)}>
                       {advanced ? "new workspace" : "new project"}
                     </Button>
                   ) : undefined

@@ -1591,7 +1591,7 @@ export function imagesDir(ws: Workspace) {
 }
 
 /** Last path segment of a git URL ("git@h:a/b.git" → "b", "https://h/a.git" → "a"). */
-function repoNameFromUrl(url: string): string {
+export function repoNameFromUrl(url: string): string {
   const clean = url.replace(/\.git$/, "").replace(/\/+$/, "");
   return clean.split(/[\/:]/).filter(Boolean).pop() ?? "repo";
 }

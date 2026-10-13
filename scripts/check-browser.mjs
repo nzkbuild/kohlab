@@ -140,7 +140,7 @@ try {
           overflow: document.scrollingElement.scrollWidth - innerWidth,
           surfaceOverflow: [...document.querySelectorAll(".surface")].reduce((n, s) => Math.max(n, s.scrollWidth - s.clientWidth), 0),
           small,
-          form: !!document.querySelector("#launch-task"),
+          form: !!document.querySelector(".launch-form"),
           queue: [...document.querySelectorAll("h2")].some((h) => /Waiting for you/.test(h.textContent)),
           // Radix generates the trigger id; the pane name is its suffix.
           tab: document.querySelector("[role=tab][aria-selected=true]")?.id.replace(/^.*-trigger-/, "tab-") ?? null,

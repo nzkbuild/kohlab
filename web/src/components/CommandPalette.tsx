@@ -61,6 +61,7 @@ export default function CommandPalette() {
   const workspaces = useApp((s) => s.workspaces);
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
+  const setNewOpen = useApp((s) => s.setNewOpen);
   const can = useCan();
   const advanced = useApp((s) => s.advanced);
   const refresh = useApp((s) => s.refresh);
@@ -144,7 +145,7 @@ export default function CommandPalette() {
             group: "Actions" as const,
             icon: <Plus size={16} />,
             keywords: ["create", "launch", "start", "task", "clone"],
-            onAction: () => navigate({ kind: "workspaces", create: true }),
+            onAction: () => setNewOpen(true),
           },
         ]
       : []),

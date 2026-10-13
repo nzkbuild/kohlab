@@ -29,7 +29,10 @@ export interface AppState {
   openShell: string | null;
   /** Developer tools (files, log, share links, extra terminals, team, server). Off by default. */
   advanced: boolean;
+  /** The New project sheet. Opens over whatever page is showing, so the page under it stays put. */
+  newOpen: boolean;
 
+  setNewOpen: (value: boolean) => void;
   setOpenShell: (id: string | null) => void;
   setAdvanced: (value: boolean) => void;
   setAuthed: (value: boolean) => void;
@@ -63,7 +66,9 @@ export const useApp = create<AppState>((set) => ({
   me: null,
   openShell: null,
   advanced: readAdvanced(),
+  newOpen: false,
 
+  setNewOpen: (value) => set({ newOpen: value }),
   setOpenShell: (id) => set({ openShell: id }),
   setAdvanced: (value) => {
     try {

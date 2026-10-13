@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { List } from "@phosphor-icons/react";
-import { useApp } from "./store";
+import { useApp, useCan } from "./store";
 import { useSync } from "./lib/useSync";
 import { ROUTE_LABEL } from "./lib/route";
 import { workspaceStatus } from "./lib/status";
@@ -11,7 +11,7 @@ import JoinView from "./components/JoinView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import CommandPalette from "./components/CommandPalette";
-import WorkspacesView from "./components/WorkspacesView";
+import WorkspacesView, { LaunchSheet } from "./components/WorkspacesView";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 import { Announcer, Button, SkeletonRows, TooltipProvider } from "./components/ui";
@@ -29,6 +29,9 @@ export default function App() {
   const error = useApp((s) => s.error);
   const connection = useApp((s) => s.connection);
   const loadMe = useApp((s) => s.loadMe);
+  const newOpen = useApp((s) => s.newOpen);
+  const setNewOpen = useApp((s) => s.setNewOpen);
+  const can = useCan();
 
   const [navOpen, setNavOpen] = useState(false);
 
@@ -76,6 +79,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={300}>
       <CommandPalette />
+      <LaunchSheet open={newOpen && can.mutate} onClose={() => setNewOpen(false)} />
       <Announcer />
       <Toaster
         theme="system"
