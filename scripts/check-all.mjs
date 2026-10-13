@@ -79,6 +79,7 @@ try {
   run("web preview paths (no escape from the worktree)", "bun", ["scripts/check-preview.mjs"]);
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);
+  run("sidebar groups", "bun", ["scripts/check-sidebar-groups.mjs"]);
   run("token contrast (WCAG 2.2 AA)", "node", ["scripts/check-contrast.mjs"]);
   run("screen model", "node", ["scripts/check-screen.mjs"]);
   run("corruption handling", "node", ["scripts/check-corruption.mjs"]);

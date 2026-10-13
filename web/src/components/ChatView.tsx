@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, Eye, PaperPlaneRight, Check, Stop, Warning } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowCounterClockwise, ArrowSquareOut, Eye, PaperPlaneRight, Check, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
-import type { ChatEvent } from "../types";
+import type { ChatEvent as StoredChatEvent } from "../types";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
 import { findWorkspace, useApp, useCan } from "../store";
@@ -10,9 +10,44 @@ import { workspaceStatus } from "../lib/status";
 import ConfirmDialog from "./ConfirmDialog";
 import { Button } from "./ui";
 
+/** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
+type ChatEvent = StoredChatEvent & { why?: string };
+
 interface Props {
   workspaceId: string;
 }
+
+/** The tool lines of one run, as one plain sentence: "looked at 3 files, wrote 2 and ran 1 command". Prefixes come from describeTool in chat.ts. */
+function summarizeTools(lines: string[]): string {
+  let read = 0;
+  let ran = 0;
+  let searched = 0;
+  let looked = 0;
+  let helped = 0;
+  let other = 0;
+  const wrote = new Set<string>();
+  for (const t of lines) {
+    if (t.startsWith("Created ") || t.startsWith("Edited ")) wrote.add(t.slice(t.indexOf(" ") + 1));
+    else if (t.startsWith("Read ")) read++;
+    else if (t.startsWith("Ran: ")) ran++;
+    else if (t.startsWith("Searched the web") || t.startsWith("Opened ")) looked++;
+    else if (t.startsWith("Searched")) searched++;
+    else if (t.startsWith("Asked a helper")) helped++;
+    else other++;
+  }
+  const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+  const parts: string[] = [];
+  if (read) parts.push(`looked at ${n(read, "file", "files")}`);
+  if (wrote.size) parts.push(`wrote ${n(wrote.size, "file", "files")}`);
+  if (ran) parts.push(`ran ${n(ran, "command", "commands")}`);
+  if (searched) parts.push(`searched ${n(searched, "time", "times")}`);
+  if (looked) parts.push(`looked up ${n(looked, "page", "pages")}`);
+  if (helped) parts.push(`asked ${n(helped, "helper", "helpers")}`);
+  if (other) parts.push(`did ${n(other, "other thing", "other things")}`);
+  return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Merge a fresh batch into the list by sequence number, so a repeated event never shows twice. */
 function mergeEvents(prev: ChatEvent[], next: ChatEvent[]): ChatEvent[] {
@@ -68,6 +103,10 @@ export default function ChatView({ workspaceId }: Props) {
   const [keeping, setKeeping] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
+  // Desktop: the preview opens beside the chat. Phones keep the new-tab preview.
+  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  const [pane, setPane] = useState<{ url: string; t: number } | null>(null);
+  const paneOpen = wide && pane !== null;
 
   const afterRef = useRef(0);
   const primedRef = useRef(false);
@@ -127,9 +166,23 @@ export default function ChatView({ workspaceId }: Props) {
 
   const repoll = () => setKick((k) => k + 1);
 
-  // A turn that just ended may have changed files: refresh so the Keep / Undo bar sees it.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => setWide(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // A cache-busting reload of the preview pane (the ?t= makes the browser fetch again).
+  const reloadPane = () => setPane((p) => (p ? { ...p, t: Date.now() } : p));
+
+  // A turn that just ended may have changed files: refresh so the Keep / Undo bar sees it,
+  // and reload the preview pane so it shows the new version.
+  const wasBusy = useRef(busy);
   useEffect(() => {
     if (!busy) void refresh();
+    if (wasBusy.current && !busy) reloadPane();
+    wasBusy.current = busy;
   }, [busy, refresh]);
 
   // Announce new assistant text. Bursts are coalesced by announce() itself.
@@ -221,6 +274,8 @@ export default function ChatView({ workspaceId }: Props) {
   };
 
   const working = busy && waiting === null;
+  // The newest tool group already reads "Working…", so the bottom row then only carries Stop.
+  const lastIsTool = rows.length > 0 && rows[rows.length - 1][0].kind === "tool";
 
   // Keep / Undo only while the AI's changes are waiting to be kept or undone.
   const ws = findWorkspace(workspaces, workspaceId);
@@ -231,6 +286,17 @@ export default function ChatView({ workspaceId }: Props) {
 
   const preview = async () => {
     setPreviewing(true);
+    if (wide) {
+      try {
+        const { url } = await api.preview(workspaceId);
+        setPane({ url, t: Date.now() });
+      } catch (e) {
+        toast.error(`could not open the preview, ${(e as Error).message}`);
+      } finally {
+        setPreviewing(false);
+      }
+      return;
+    }
     // Opened inside the click so popup blockers allow it; pointed at the page once the server answers.
     const tab = window.open("", "_blank");
     try {
@@ -297,14 +363,18 @@ export default function ChatView({ workspaceId }: Props) {
         return (
           <div className="rounded-xl border border-line-strong bg-surface-raised p-4">
             <p className="text-sm font-semibold text-text-primary">{e.text}</p>
+            {e.why ? <p className="mt-1 text-sm leading-relaxed text-text-secondary">{e.why}</p> : null}
             {e.detail ? (
-              <pre className="mono mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-md border border-line-subtle bg-surface-sunken px-3 py-2 text-xs text-text-secondary">
-                {e.detail}
-              </pre>
+              <details className="mt-2 text-xs text-text-muted">
+                <summary className="cursor-pointer select-none">Show details</summary>
+                <pre className="mono mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-md border border-line-subtle bg-surface-sunken px-3 py-2 text-xs text-text-secondary">
+                  {e.detail}
+                </pre>
+              </details>
             ) : null}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {answered !== undefined ? (
-                <span className="text-sm text-text-muted">{answered ? "Allowed" : "Not allowed"}</span>
+                <span className="text-sm text-text-muted">{answered ? "You allowed it." : "You didn't allow it."}</span>
               ) : pending && can ? (
                 <>
                   <Button variant="primary" disabled={answering !== null} onClick={() => void answer(e.requestId, true)}>
@@ -336,7 +406,8 @@ export default function ChatView({ workspaceId }: Props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
         <div
           role="log"
@@ -345,21 +416,30 @@ export default function ChatView({ workspaceId }: Props) {
           className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-6"
         >
           {events.length === 0 ? <p className="py-12 text-center text-sm text-text-muted">Tell the AI what to build.</p> : null}
-          {rows.map((row) =>
-            row[0].kind === "tool" ? (
-              <div key={row[0].n} className="flex flex-col gap-1">
-                {row.map((e) => (
-                  <div key={e.n}>{renderEvent(e)}</div>
-                ))}
-              </div>
-            ) : (
-              <div key={row[0].n}>{renderEvent(row[0])}</div>
-            ),
-          )}
+          {rows.map((row, i) => {
+            if (row[0].kind !== "tool") return <div key={row[0].n}>{renderEvent(row[0])}</div>;
+            // One line for the run of tool actions; click it to see each one.
+            const lines = row.flatMap((e) => (e.kind === "tool" ? [e] : []));
+            const summary = summarizeTools(lines.map((e) => e.text));
+            const live = working && i === rows.length - 1;
+            return (
+              <details key={row[0].n} className="group text-xs text-text-muted">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 select-none [&::-webkit-details-marker]:hidden">
+                  <Check size={12} aria-hidden="true" />
+                  {live ? `Working… ${summary}` : cap(summary)}
+                </summary>
+                <div className="mt-1 flex flex-col gap-1 pl-[18px]">
+                  {lines.map((e) => (
+                    <p key={e.n}>{e.text}</p>
+                  ))}
+                </div>
+              </details>
+            );
+          })}
           {working ? (
             <div className="flex items-center gap-2 text-sm text-text-muted">
               <span className="size-2 shrink-0 rounded-full bg-text-muted motion-safe:animate-pulse" aria-hidden="true" />
-              <span className="min-w-0 flex-1">Working…</span>
+              <span className="min-w-0 flex-1">{lastIsTool ? "" : "Working…"}</span>
               {can ? (
                 <Button variant="quiet" size="sm" onClick={() => void stop()}>
                   <Stop size={13} weight="fill" aria-hidden="true" />
@@ -381,7 +461,7 @@ export default function ChatView({ workspaceId }: Props) {
           ) : null}
           {!busy ? (
             <div role="toolbar" aria-label="Project actions" className="mb-2 flex flex-wrap items-center gap-2">
-              {hasChanges ? <p className="mr-auto min-w-0 text-sm text-text-secondary">The AI changed your project.</p> : null}
+              {hasChanges ? <p className="min-w-0 basis-full text-sm text-text-secondary">Look at the preview. If you like it, keep it. If not, undo it.</p> : null}
               <Button variant="secondary" size="sm" className="min-h-11" disabled={previewing} onClick={() => void preview()}>
                 <Eye size={14} aria-hidden="true" />
                 Preview
@@ -390,7 +470,7 @@ export default function ChatView({ workspaceId }: Props) {
                 <>
                   <Button variant="primary" size="sm" className="min-h-11" disabled={keeping} onClick={() => void keep()}>
                     <Check size={14} aria-hidden="true" />
-                    Keep
+                    Keep this version
                   </Button>
                   <Button variant="quiet" size="sm" className="min-h-11 text-status-danger" disabled={undoing} onClick={() => setConfirmUndo(true)}>
                     <ArrowCounterClockwise size={14} aria-hidden="true" />
@@ -425,6 +505,32 @@ export default function ChatView({ workspaceId }: Props) {
           </div>
         </div>
       </div>
+      ) : null}
+    </div>
+      {paneOpen && pane ? (
+        <aside aria-label="Preview" className="flex h-full min-h-0 w-[45%] shrink-0 flex-col border-l border-line-subtle bg-surface-raised">
+          <div role="toolbar" aria-label="Preview actions" className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-3 py-2">
+            <p className="mr-auto text-sm font-semibold text-text-primary">Preview</p>
+            <Button variant="quiet" size="sm" onClick={reloadPane}>
+              <ArrowClockwise size={14} aria-hidden="true" />
+              Reload
+            </Button>
+            <Button variant="quiet" size="sm" onClick={() => window.open(location.origin + pane.url, "_blank", "noopener")}>
+              <ArrowSquareOut size={14} aria-hidden="true" />
+              Open in new tab
+            </Button>
+            <Button variant="quiet" size="sm" onClick={() => setPane(null)}>
+              <X size={14} aria-hidden="true" />
+              Close
+            </Button>
+          </div>
+          <iframe
+            src={`${pane.url}?t=${pane.t}`}
+            sandbox="allow-scripts allow-forms allow-popups allow-modals"
+            title="Preview of your project"
+            className="min-h-0 w-full flex-1 bg-white"
+          />
+        </aside>
       ) : null}
       <ConfirmDialog
         open={confirmUndo}

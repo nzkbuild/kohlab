@@ -1269,6 +1269,8 @@ export function sessionId(workspaceId: string, terminalId = "main") {
 /** True if the workspace's main PTY session is alive. */
 /** Chat workspaces with a turn in flight. chat.ts keeps this current. */
 export const chatBusy = new Set<string>();
+/** Chat workspaces with a permission question waiting for an answer. chat.ts keeps this current. */
+export const chatWaiting = new Set<string>();
 /** Per chat workspace: stop its claude process. chat.ts registers these. */
 export const chatKillers = new Map<string, () => void>();
 
@@ -1623,13 +1625,14 @@ export async function findRepoRoot(dir: string): Promise<string | null> {
 // --- workspace lifecycle -------------------------------------------------
 
 export async function listWorkspaces(): Promise<
-  (Workspace & { running: boolean; path: string })[]
+  (Workspace & { running: boolean; waiting: boolean; path: string })[]
 > {
   const s = await loadState();
   return Promise.all(
     s.workspaces.map(async (w) => ({
       ...w,
       running: await isRunning(w),
+      waiting: chatWaiting.has(w.id),
       path: worktreePath(w),
     })),
   );

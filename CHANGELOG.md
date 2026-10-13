@@ -9,6 +9,20 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.34.0] - 2026-10-13
+
+### Added
+- Preview opens beside the chat on a computer screen (it reloads when Claude finishes); phones still open a new tab.
+- The sidebar groups projects as Needs you, Working, Ready to check and Earlier, with how long ago each changed.
+
+### Changed
+- Claude's questions are plain English ("Claude wants to run a command", with its reason); the command itself is behind "Show details".
+- Claude's actions are summarised in one line ("Looked at 3 files, wrote 2 and ran 1 command") that expands to the details.
+- Plain words throughout: "Ready to check", "See changes", "Changes" tab, "Keep this version".
+
+### Fixed
+- The home page no longer downloads the code editor: the first load is about 194 kB instead of 827 kB.
+
 ## [1.33.0] - 2026-10-13
 
 ### Removed

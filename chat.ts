@@ -17,6 +17,7 @@ import {
   WORKS_DIR,
   chatBusy,
   chatKillers,
+  chatWaiting,
   getWorkspace,
   identityOf,
   loadState,
@@ -35,14 +36,15 @@ const CHAT_SYSTEM_PROMPT =
   "The person you are working with is not a programmer. Use plain, friendly language and avoid jargon. Write short plain sentences; avoid Markdown headings and tables. " +
   "When they ask for something visual (a website, page, game or small tool), build it with plain HTML, CSS and JavaScript " +
   "and put an index.html at the project root, so it works by opening that file; use another technology only if they ask for it. " +
-  "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes.";
+  "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes. " +
+  "When you run a command, always give it a short plain-English description of what it does and why.";
 const MAX_TEXT = 20000;
 
 type Body =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string }
-  | { kind: "ask"; requestId: string; text: string; detail?: string }
+  | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string }
   | { kind: "answer"; requestId: string; allow: boolean }
   | { kind: "done" }
   | { kind: "error"; text: string };
@@ -64,7 +66,9 @@ function rel(p: unknown, cwd: string): string {
   return s;
 }
 
-/** A plain-English one-liner of an action the agent took. */
+/** A plain-English one-liner of an action the agent took.
+ *  ChatView parses these prefixes to group the lines ("Read ", "Created ", "Edited ", "Ran: ",
+ *  "Searched", "Opened ", "Asked a helper"): keep them in step with its classifier. */
 export function describeTool(name: string, input: Record<string, any>, cwd: string): string {
   switch (name) {
     case "Write":
@@ -92,23 +96,24 @@ export function describeTool(name: string, input: Record<string, any>, cwd: stri
   }
 }
 
-/** The permission question for a risky action: what it asks, and the detail to show under it. */
-export function describeAsk(name: string, input: Record<string, any>, cwd: string): { text: string; detail?: string } {
+/** The permission question for a risky action: what it asks, the detail to show under it, and why (the model's own words, for a command). */
+export function describeAsk(name: string, input: Record<string, any>, cwd: string): { text: string; detail?: string; why?: string } {
   switch (name) {
     case "Write":
-      return { text: `Create the file ${rel(input.file_path, cwd)}?` };
+      return { text: `Claude wants to create the file ${rel(input.file_path, cwd)}` };
     case "Edit":
     case "MultiEdit":
-      return { text: `Change the file ${rel(input.file_path, cwd)}?` };
+      return { text: `Claude wants to change the file ${rel(input.file_path, cwd)}` };
     case "Bash":
       return {
-        text: "Run a command?",
-        detail: input.description ? `${input.description}\n${input.command ?? ""}` : String(input.command ?? ""),
+        text: "Claude wants to run a command",
+        detail: String(input.command ?? ""),
+        ...(input.description ? { why: String(input.description) } : {}),
       };
     case "WebFetch":
-      return { text: `Open ${input.url ?? ""}?` };
+      return { text: `Claude wants to open ${input.url ?? ""}` };
     default:
-      return { text: `Use ${name}?`, detail: JSON.stringify(input).slice(0, 300) };
+      return { text: `Claude wants to use ${name}`, detail: JSON.stringify(input).slice(0, 300) };
   }
 }
 
@@ -175,6 +180,7 @@ function stop(id: string) {
   procs.delete(id);
   chats.delete(id);
   chatBusy.delete(id);
+  chatWaiting.delete(id);
   if (live) {
     live.stopping = true;
     live.child.kill("SIGTERM");
@@ -227,8 +233,9 @@ function onLine(id: string, live: Live, line: string) {
   if (m.type === "control_request" && m.request?.subtype === "can_use_tool") {
     const input = (m.request.input ?? {}) as Record<string, unknown>;
     live.asks.set(m.request_id, input);
-    const { text, detail } = describeAsk(m.request.tool_name, input as Record<string, any>, live.cwd);
-    emit(id, { kind: "ask", requestId: m.request_id, text, ...(detail !== undefined ? { detail } : {}) });
+    const { text, detail, why } = describeAsk(m.request.tool_name, input as Record<string, any>, live.cwd);
+    chatWaiting.add(id);
+    emit(id, { kind: "ask", requestId: m.request_id, text, ...(detail !== undefined ? { detail } : {}), ...(why !== undefined ? { why } : {}) });
     return;
   }
   if (m.type === "result") {
@@ -245,7 +252,10 @@ function onLine(id: string, live: Live, line: string) {
 function onExit(id: string, live: Live) {
   if (live.closed) return;
   live.closed = true;
-  if (procs.get(id) === live) procs.delete(id);
+  if (procs.get(id) === live) {
+    procs.delete(id);
+    chatWaiting.delete(id);
+  }
   live.asks.clear();
   if (live.stopping || !chatBusy.has(id)) return;
   if (resumeFailed(id, live)) return;
@@ -350,6 +360,7 @@ export async function answer(id: string, requestId: string, allow: boolean): Pro
   if (!live || !live.asks.has(requestId)) throw new ChatError(404, "no such pending question");
   const input = live.asks.get(requestId)!;
   live.asks.delete(requestId);
+  if (live.asks.size === 0) chatWaiting.delete(id);
   const response = allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "The user said no." };
   live.child.stdin!.write(JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: requestId, response } }) + "\n");
   emit(id, { kind: "answer", requestId, allow });

@@ -32,11 +32,11 @@ export function workspaceStatus(w: Workspace): WorkspaceStatus {
 }
 
 export const STATUS_LABEL: Record<WorkspaceStatus, string> = {
-  running: "running",
-  "needs-review": "needs review",
-  committed: "committed",
-  discarded: "discarded",
-  stopped: "stopped",
+  running: "Working",
+  "needs-review": "Ready to check",
+  committed: "Committed",
+  discarded: "Discarded",
+  stopped: "Stopped",
 };
 
 export const STATUS_CHIP: Record<WorkspaceStatus, string> = {
@@ -73,6 +73,43 @@ export function byReviewFirst(a: Workspace, b: Workspace): number {
   const d = STATUS_ORDER[workspaceStatus(a)] - STATUS_ORDER[workspaceStatus(b)];
   if (d !== 0) return d;
   return (b.started ?? b.created) - (a.started ?? a.created);
+}
+
+/**
+ * Sidebar groups, in the order the rail shows them. "needs" is the only group
+ * waiting on the owner: a chat permission question is unanswered.
+ */
+export type SidebarGroup = "needs" | "working" | "review" | "earlier";
+
+export const SIDEBAR_GROUPS: { key: SidebarGroup; label: string }[] = [
+  { key: "needs", label: "Needs you" },
+  { key: "working", label: "Working" },
+  { key: "review", label: "Ready to check" },
+  { key: "earlier", label: "Earlier" },
+];
+
+export function sidebarGroup(w: Workspace): SidebarGroup {
+  if (w.waiting) return "needs";
+  if (workspaceStatus(w) === "running") return "working";
+  if (workspaceStatus(w) === "needs-review") return "review";
+  return "earlier";
+}
+
+/** The time a row shows: when it started while live, when it stopped once it awaits review, else its latest end. */
+export function sidebarTime(w: Workspace): number {
+  const group = sidebarGroup(w);
+  if (group === "needs" || group === "working") return w.started ?? w.created;
+  if (group === "review") return w.stopped ?? w.created;
+  return w.stopped ?? w.started ?? w.created;
+}
+
+function lastActivity(w: Workspace): number {
+  return Math.max(w.created, w.started ?? 0, w.stopped ?? 0);
+}
+
+/** Newest activity first. */
+export function bySidebarActivity(a: Workspace, b: Workspace): number {
+  return lastActivity(b) - lastActivity(a);
 }
 
 /** Kind tag for the activity timeline. */

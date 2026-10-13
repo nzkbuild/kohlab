@@ -28,13 +28,15 @@ check("WebSearch names the query", describeTool("WebSearch", { query: "cats" }, 
 check("unknown tool falls back", describeTool("Frobnicate", {}, cwd), "Used Frobnicate");
 
 // what the agent asks before doing it
-check("Bash ask: text", describeAsk("Bash", { command: "rm -rf x", description: "Clean up" }, cwd).text, "Run a command?");
-check("Bash ask: description on its own line first", describeAsk("Bash", { command: "rm -rf x", description: "Clean up" }, cwd).detail, "Clean up\nrm -rf x");
+check("Bash ask: text", describeAsk("Bash", { command: "rm -rf x", description: "Clean up" }, cwd).text, "Claude wants to run a command");
+check("Bash ask: detail is the command", describeAsk("Bash", { command: "rm -rf x", description: "Clean up" }, cwd).detail, "rm -rf x");
+check("Bash ask: description is the why", describeAsk("Bash", { command: "rm -rf x", description: "Clean up" }, cwd).why, "Clean up");
 check("Bash ask without description: detail is the command", describeAsk("Bash", { command: "ls" }, cwd).detail, "ls");
-check("Write ask", describeAsk("Write", { file_path: `${cwd}/a.txt` }, cwd).text, "Create the file a.txt?");
-check("Edit ask", describeAsk("Edit", { file_path: `${cwd}/a.ts` }, cwd).text, "Change the file a.ts?");
-check("WebFetch ask", describeAsk("WebFetch", { url: "https://example.com" }, cwd).text, "Open https://example.com?");
-check("unknown tool ask: text", describeAsk("Foo", { a: 1 }, cwd).text, "Use Foo?");
+check("Bash ask without description: no why", describeAsk("Bash", { command: "ls" }, cwd).why, undefined);
+check("Write ask", describeAsk("Write", { file_path: `${cwd}/a.txt` }, cwd).text, "Claude wants to create the file a.txt");
+check("Edit ask", describeAsk("Edit", { file_path: `${cwd}/a.ts` }, cwd).text, "Claude wants to change the file a.ts");
+check("WebFetch ask", describeAsk("WebFetch", { url: "https://example.com" }, cwd).text, "Claude wants to open https://example.com");
+check("unknown tool ask: text", describeAsk("Foo", { a: 1 }, cwd).text, "Claude wants to use Foo");
 check("unknown tool ask: detail is the input as JSON", describeAsk("Foo", { a: 1 }, cwd).detail, '{"a":1}');
 check("unknown tool ask: detail trimmed to 300", describeAsk("Foo", { big: "y".repeat(1000) }, cwd).detail.length, 300);
 

@@ -43,7 +43,7 @@ type TabId = WorkspaceTab;
 const TABS: { id: TabId; label: string; icon: typeof Terminal }[] = [
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "files", label: "Files", icon: Files },
-  { id: "review", label: "Review", icon: GitDiff },
+  { id: "review", label: "Changes", icon: GitDiff },
   { id: "log", label: "Log", icon: Scroll },
 ];
 
@@ -295,7 +295,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       {needsReview && tab !== "review" ? (
         <Button size="sm" variant="primary" className="flex-1 shell:flex-none" onClick={() => setTab("review")}>
           <GitDiff size={13} aria-hidden="true" />
-          {reviewCount > 0 ? `review ${reviewCount} file${reviewCount === 1 ? "" : "s"}` : "review"}
+          {reviewCount > 0 ? `See changes (${reviewCount} file${reviewCount === 1 ? "" : "s"})` : "See changes"}
         </Button>
       ) : null}
       {/* A chat has no start/stop of its own: the server's start is a no-op, and Stop lives inside the chat. */}

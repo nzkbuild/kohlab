@@ -20,6 +20,8 @@ export interface Workspace {
   /** A chat workspace: the AI is driven through a chat screen, not a terminal. */
   chat?: boolean;
   chatSession?: string;
+  /** From the listing: a chat permission question is pending (unanswered). */
+  waiting?: boolean;
 }
 
 /** One entry in a chat workspace's conversation. `n` is the sequence number used for polling. */

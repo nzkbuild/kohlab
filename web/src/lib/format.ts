@@ -9,6 +9,21 @@ export function relativeTime(ts: number, now = Date.now()): string {
   return `${Math.round(s / 86400)}d`;
 }
 
+const WEEKDAY = new Intl.DateTimeFormat("en-GB", { weekday: "short" });
+const DAY_MONTH = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
+
+/** Sidebar row time: "now", "5 min", "3 hr", "Mon" within a week, else "12 Oct". */
+export function sidebarWhen(ts: number, now = Date.now()): string {
+  const ms = Math.max(0, now - ts);
+  const min = Math.floor(ms / 60_000);
+  if (min < 1) return "now";
+  if (min < 60) return `${min} min`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hr`;
+  if (ms < 7 * 86_400_000) return WEEKDAY.format(ts);
+  return DAY_MONTH.format(ts);
+}
+
 /** "4m 12s", for elapsed run time. */
 export function elapsed(from: number, to: number): string {
   const s = Math.max(0, Math.round((to - from) / 1000));

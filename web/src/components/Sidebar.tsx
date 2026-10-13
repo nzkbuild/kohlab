@@ -9,7 +9,16 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useApp, useCan } from "../store";
-import { byReviewFirst, STATUS_LABEL, STATUS_TEXT, workspaceStatus } from "../lib/status";
+import {
+  bySidebarActivity,
+  SIDEBAR_GROUPS,
+  sidebarGroup,
+  sidebarTime,
+  STATUS_LABEL,
+  STATUS_TEXT,
+  workspaceStatus,
+} from "../lib/status";
+import { sidebarWhen } from "../lib/format";
 import { cn } from "../lib/utils";
 import { Button, BrandMark, Tooltip } from "./ui";
 
@@ -62,11 +71,17 @@ export default function Sidebar({ open, onClose }: Props) {
   // Already running as an app: there is nothing to install.
   const standalone = window.matchMedia("(display-mode: standalone)").matches;
 
-  const ordered = [...workspaces].sort(byReviewFirst);
-  const reviewCount = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
+  const groups = SIDEBAR_GROUPS.map((group) => ({
+    ...group,
+    items: workspaces.filter((w) => sidebarGroup(w) === group.key).sort(bySidebarActivity),
+  })).filter((group) => group.items.length > 0);
+  const attentionCount = workspaces.filter((w) => {
+    const group = sidebarGroup(w);
+    return group === "needs" || group === "review";
+  }).length;
 
   const nav = [
-    { kind: "workspaces" as const, label: "Home", icon: House, badge: reviewCount },
+    { kind: "workspaces" as const, label: "Home", icon: House, badge: attentionCount },
     { kind: "settings" as const, label: "Settings", icon: GearSix, badge: 0 },
   ];
 
@@ -130,12 +145,12 @@ export default function Sidebar({ open, onClose }: Props) {
 
       <nav className="flex flex-col gap-0.5 p-2.5" aria-label="Views">
         {nav.map(({ kind, label, icon: Icon, badge }) => (
-          <Tooltip key={kind} content={badge > 0 ? `${label}, ${badge} waiting for review` : label} disabled={!collapsed}>
+          <Tooltip key={kind} content={badge > 0 ? `${label}, ${badge} need you` : label} disabled={!collapsed}>
           <button
             type="button"
             className="sidebar-row"
             aria-current={activeKind === kind ? "page" : undefined}
-            aria-label={badge > 0 ? `${label}, ${badge} waiting for review` : label}
+            aria-label={badge > 0 ? `${label}, ${badge} need you` : label}
             onClick={() => navigate({ kind })}
           >
             <Icon size={17} className="shrink-0" weight={activeKind === kind ? "fill" : "regular"} />
@@ -149,49 +164,49 @@ export default function Sidebar({ open, onClose }: Props) {
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Workspaces">
         {/* Every row is a workspace: one task, one branch, one agent; it can
             hold several terminal sessions inside. */}
-        <p className="sidebar-section-title section-label mb-1.5 mt-1 px-2">{advanced ? "Workspaces" : "Projects"}</p>
-
-        {ordered.length === 0 ? (
+        {workspaces.length === 0 ? (
           <p className="sidebar-label px-2 text-xs leading-relaxed text-text-muted">
             {advanced ? "Nothing yet. Create a workspace and its agent starts immediately." : "Nothing yet. Start a new project and the AI gets to work."}
           </p>
         ) : (
-          ordered.map((workspace) => {
-            const status = workspaceStatus(workspace);
-            const selected = route.kind === "workspace" && route.id === workspace.id;
-            return (
-              <Tooltip key={workspace.id} content={`${workspace.task || workspace.id}, ${STATUS_LABEL[status]}`} disabled={!collapsed}>
-              <button
-                type="button"
-                className="sidebar-row"
-                data-selected={selected}
-                aria-current={selected ? "page" : undefined}
-                aria-label={`${workspace.task || workspace.id}, ${STATUS_LABEL[status]}`}
-                onClick={() => navigate({ kind: "workspace", id: workspace.id })}
-              >
-                <span
-                  className={cn("chip-dot shrink-0", STATUS_TEXT[status])}
-                  aria-hidden="true"
-                />
-                <span className="sidebar-label flex-1">
-                  <span className="block truncate text-xs text-text-primary" title={workspace.id}>
-                    {workspace.task || workspace.id}
-                  </span>
-                  <span className="block truncate text-xs text-text-muted">
-                    {advanced ? (
-                      <>
-                        {workspace.agent}
-                        {status === "running" ? "" : ` · ${STATUS_LABEL[status]}`}
-                      </>
-                    ) : (
-                      status === "running" ? "working" : STATUS_LABEL[status]
-                    )}
-                  </span>
-                </span>
-              </button>
-              </Tooltip>
-            );
-          })
+          groups.map((group) => (
+            <div key={group.key} className="mb-2">
+              <p className="sidebar-section-title section-label mb-1.5 mt-1 flex items-center justify-between px-2">
+                <span>{group.label}</span>
+                <span className="tnum">{group.items.length}</span>
+              </p>
+              {group.items.map((workspace) => {
+                const status = workspaceStatus(workspace);
+                const needsYou = group.key === "needs";
+                const title = workspace.task || workspace.id;
+                const statusText = needsYou ? "waiting for you" : STATUS_LABEL[status];
+                const selected = route.kind === "workspace" && route.id === workspace.id;
+                return (
+                  <Tooltip key={workspace.id} content={`${title}, ${statusText}`} disabled={!collapsed}>
+                  <button
+                    type="button"
+                    className="sidebar-row"
+                    data-selected={selected}
+                    aria-current={selected ? "page" : undefined}
+                    aria-label={`${title}, ${statusText}`}
+                    onClick={() => navigate({ kind: "workspace", id: workspace.id })}
+                  >
+                    <span
+                      className={cn("chip-dot shrink-0", needsYou ? "text-accent" : STATUS_TEXT[status])}
+                      aria-hidden="true"
+                    />
+                    <span className="sidebar-label min-w-0 flex-1 truncate text-xs text-text-primary" title={workspace.id}>
+                      {title}
+                    </span>
+                    <span className="sidebar-label shrink-0 text-xs text-text-muted tnum">
+                      {sidebarWhen(sidebarTime(workspace))}
+                    </span>
+                  </button>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          ))
         )}
       </nav>
 

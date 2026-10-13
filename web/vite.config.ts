@@ -24,12 +24,12 @@ export default defineConfig({
     outDir: "dist",
     rollupOptions: {
       output: {
-        // xterm + Monaco are the heavy per-view deps; they are also lazy()
-        // imports, so keeping them out of the entry lets the shell paint first.
-        // A function, not a package list: Monaco is imported by deep path
-        // (lib/monaco.ts), which a package-name entry would not catch.
+        // xterm is a heavy per-view dep; it is also a lazy() import. Monaco is
+        // deliberately NOT grouped here: a manual chunk made Rollup hoist the
+        // shared Vite preload helper into it, so the entry statically imported
+        // the whole Monaco chunk and modulepreloaded it on first paint.
+        // A function, not a package list: xterm is imported by deep path.
         manualChunks(id) {
-          if (id.includes("/node_modules/monaco-editor/") || id.includes("/node_modules/@monaco-editor/")) return "monaco-editor";
           if (id.includes("/node_modules/@xterm/")) return "terminal";
           if (id.includes("/node_modules/@phosphor-icons/")) return "icons";
         },
