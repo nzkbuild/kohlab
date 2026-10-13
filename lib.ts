@@ -1206,12 +1206,9 @@ export async function ptyRequest<T extends Record<string, unknown>>(
     }
   };
   daemonHandlers.push(handler);
-  try {
-    await ptySend({ type, ...payload });
-  } catch (e) {
-    fail(e as Error);
-    return promise;
-  }
+  // Not awaited: if the send hangs past the timeout, fail() rejects `promise`
+  // while nobody awaits it, which is an unhandled rejection that kills the server.
+  ptySend({ type, ...payload }).catch((e) => fail(e as Error));
   return promise;
 }
 
@@ -1834,6 +1831,24 @@ export async function workspaceByShare(token: string) {
   const ws = s.workspaces.find((w) => w.share === token);
   if (!ws) throw new Error("invalid share link");
   return ws;
+}
+
+/** Make (once) the unguessable token that serves a workspace's web preview. */
+export async function previewWorkspace(id: string) {
+  return mutateState(async (s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    if (!ws.previewToken) {
+      ws.previewToken = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
+    }
+    return { url: `/p/${ws.previewToken}/` };
+  });
+}
+
+/** The workspace a preview token belongs to, or null. The token is the credential. */
+export async function workspaceByPreview(token: string): Promise<Workspace | null> {
+  const s = await loadState();
+  return s.workspaces.find((w) => w.previewToken === token) ?? null;
 }
 
 export async function startWorkspace(id: string) {

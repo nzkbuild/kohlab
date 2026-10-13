@@ -126,6 +126,7 @@ export const api = {
     }),
   share: (id: string) =>
     json<{ id: string; share: string }>(`/api/workspaces/${id}/share`, { method: "POST" }),
+  preview: (id: string) => json<{ url: string }>(`/api/workspaces/${id}/preview`, { method: "POST" }),
   diff: (id: string) => json<DiffFile[]>(`/api/workspaces/${id}/diff`),
   commit: (id: string, message: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${id}/commit`, {

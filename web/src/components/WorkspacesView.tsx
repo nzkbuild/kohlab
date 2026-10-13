@@ -149,9 +149,10 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
   const [ghQuery, setGhQuery] = useState("");
   const [ghNote, setGhNote] = useState<string | null>(null);
 
-  // Simple mode starts on claude when the server reports it installed.
-  const defaultAgent = !advanced && reported && agentNames.includes("claude") ? "claude" : agentNames[0];
-  const chosenAgent = agent || defaultAgent || "";
+  // Simple mode is Claude only when the server reports it installed: no agent picker, always chat.
+  const simpleClaude = !advanced && reported && agentNames.includes("claude");
+  const defaultAgent = simpleClaude ? "claude" : agentNames[0];
+  const chosenAgent = simpleClaude ? "claude" : agent || defaultAgent || "";
   // Recognition over recall: every repo this server already works in, newest first.
   const recentRepos = useMemo(() => {
     const seen = new Set<string>();
@@ -420,7 +421,7 @@ export function NewWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
         />
       </Field>
 
-      {source !== "continue" && (advanced || !reported || agentNames.length > 1) ? (
+      {source !== "continue" && !simpleClaude && (advanced || !reported || agentNames.length > 1) ? (
         <fieldset className="field">
           <legend className="field-label">{advanced ? "Agent" : "AI"}</legend>
           <div className="segmented mt-1.5">

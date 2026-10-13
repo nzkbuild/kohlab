@@ -9,6 +9,20 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.31.0] - 2026-10-13
+
+### Added
+- Preview. The chat's Preview button opens the project's index.html in a new tab through an unguessable link (`/p/<token>/`). Preview pages are sandboxed (opaque origin), so the AI's JavaScript cannot read Kohlab's stored key; dot-files, `.git` and symlinks out of the project are never served.
+- Keep / Undo under the chat when the AI changed the project. Keep saves (commits) the changes, Undo removes everything since the last Keep after a confirmation.
+
+### Changed
+- Chat Claude starts clean: it does not load the operator's CLAUDE.md, plugins, hooks, skills or MCP servers, but uses the same login. It is told to speak plainly and to build visual things as plain HTML with an index.html, so Preview works.
+- Simple mode always uses Claude when it is installed; the AI picker shows only in Advanced tools.
+- Assistant replies render **bold** and `code`.
+
+### Fixed
+- The server no longer crashes when the agent daemon stops answering mid-request (an unhandled rejection in ptyRequest).
+
 ## [1.30.0] - 2026-10-13
 
 ### Added

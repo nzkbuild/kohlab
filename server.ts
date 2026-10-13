@@ -41,6 +41,8 @@ import {
   notifyWebhook,
   shareWorkspace,
   workspaceByShare,
+  previewWorkspace,
+  workspaceByPreview,
   authRequired,
   authenticate,
   listUsers,
@@ -71,6 +73,7 @@ import {
   canProvisionOsUsers,
 } from "./lib";
 import { findSub, notifyDone, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
+import { resolvePreviewFile } from "./preview";
 import { ChatError, answer as answerChat, send as sendChat, snapshot as chatSnapshot } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -215,6 +218,40 @@ async function handleShare(id: string): Promise<Response> {
   try {
     const res = await shareWorkspace(id);
     return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/**
+ * The AI's web preview. Unauthenticated by design: the unguessable token in the
+ * path is the credential, the same as a share link. The page gets an opaque origin
+ * (sandbox without allow-same-origin), so its JavaScript cannot read Kohlab's
+ * stored key or call the API as the user.
+ */
+async function handlePreview(token: string, rest: string, req: Request): Promise<Response> {
+  const headers = {
+    "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads",
+    "x-content-type-options": "nosniff",
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+  };
+  const notFound = (html: string) => new Response(html, { status: 404, headers: { ...headers, "content-type": "text/html; charset=utf-8" } });
+  const ws = await workspaceByPreview(token);
+  if (!ws) return notFound("<!doctype html><title>Not found</title><p>This preview link is not valid.</p>");
+  const file = await resolvePreviewFile(worktreePath(ws), rest);
+  if (!file) {
+    if (rest === "" || rest.endsWith("/")) {
+      return notFound('<!doctype html><meta charset="utf-8"><title>Nothing to preview yet</title><p style="font-family:sans-serif;padding:2rem">Nothing to preview yet. Ask the AI to build a web page, then press Preview again.</p>');
+    }
+    return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+  }
+  return new Response(req.method === "HEAD" ? null : Bun.file(file), { headers });
+}
+
+async function handlePreviewCreate(id: string): Promise<Response> {
+  try {
+    return json(await previewWorkspace(id));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -997,7 +1034,13 @@ async function ensurePtySession(id: string, terminalId = "main") {
 async function handle(req: Request, server: Server<WSData>): Promise<Response | undefined> {
     const url = new URL(req.url);
     const path = url.pathname;
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|log)$/);
+    // Web preview: before the auth gate and the SPA fallback. Read-only.
+    const previewM = path.match(/^\/p\/([A-Za-z0-9_-]+)\/(.*)$/);
+    if (previewM) {
+      if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+      return handlePreview(previewM[1], previewM[2], req);
+    }
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -1132,6 +1175,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
           containFailure(audit(actor, "image", id), "audit");
           return handleImageUpload(id, req);
         case "share": containFailure(audit(actor, "share", id), "audit"); return handleShare(id);
+        case "preview": containFailure(audit(actor, "preview", id), "audit"); return handlePreviewCreate(id);
       }
     }
 
@@ -1540,7 +1584,12 @@ serve({
   // bound anywhere but loopback with no key and no users, the server generates
   // itself one (see resolveAccessKey in lib.ts).
   hostname: HOST,
-  fetch: async (req, server) => secured(await handle(req, server)),
+  // A preview page carries its own sandbox CSP. secured() would overwrite it with
+  // the app's policy, which blocks the page's inline scripts.
+  fetch: async (req, server) => {
+    const res = await handle(req, server);
+    return new URL(req.url).pathname.startsWith("/p/") ? res : secured(res);
+  },
   websocket: socketHandlers,
 });
 

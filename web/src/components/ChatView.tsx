@@ -1,11 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { PaperPlaneRight, Check, Stop, Warning } from "@phosphor-icons/react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowCounterClockwise, Eye, PaperPlaneRight, Check, Stop, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import type { ChatEvent } from "../types";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
-import { useApp, useCan } from "../store";
+import { findWorkspace, useApp, useCan } from "../store";
+import { workspaceStatus } from "../lib/status";
+import ConfirmDialog from "./ConfirmDialog";
 import { Button } from "./ui";
 
 interface Props {
@@ -24,6 +26,21 @@ function mergeEvents(prev: ChatEvent[], next: ChatEvent[]): ChatEvent[] {
  * Tool lines group tightly; every other entry stands alone. `done` and `answer`
  * never render as rows: `done` only ends a turn, and `answer` is shown on its ask.
  */
+/** **bold** and `code` as elements, never as HTML. Anything else stays plain text. */
+function inlineMarkdown(text: string): ReactNode[] {
+  return text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/).map((part, i) => {
+    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) return <strong key={i}>{part.slice(2, -2)}</strong>;
+    if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code key={i} className="mono rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return part;
+  });
+}
+
 function groupRows(events: ChatEvent[]): ChatEvent[][] {
   const rows: ChatEvent[][] = [];
   for (const e of events) {
@@ -37,6 +54,7 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
 
 export default function ChatView({ workspaceId }: Props) {
   const refresh = useApp((s) => s.refresh);
+  const workspaces = useApp((s) => s.workspaces);
   const can = useCan().mutate;
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
@@ -46,6 +64,10 @@ export default function ChatView({ workspaceId }: Props) {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [answering, setAnswering] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [keeping, setKeeping] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const [confirmUndo, setConfirmUndo] = useState(false);
 
   const afterRef = useRef(0);
   const primedRef = useRef(false);
@@ -102,6 +124,11 @@ export default function ChatView({ workspaceId }: Props) {
   }, [workspaceId, kick]);
 
   const repoll = () => setKick((k) => k + 1);
+
+  // A turn that just ended may have changed files: refresh so the Keep / Undo bar sees it.
+  useEffect(() => {
+    if (!busy) void refresh();
+  }, [busy, refresh]);
 
   // Announce new assistant text. Bursts are coalesced by announce() itself.
   useEffect(() => {
@@ -193,6 +220,58 @@ export default function ChatView({ workspaceId }: Props) {
 
   const working = busy && waiting === null;
 
+  // Keep / Undo only while the AI's changes are waiting to be kept or undone.
+  const ws = findWorkspace(workspaces, workspaceId);
+  const hasChanges = ws !== null && workspaceStatus(ws) === "needs-review";
+  // The commit message is the user's last request: its first line, cut to 72 characters.
+  const lastRequest = [...events].reverse().find((e) => e.kind === "user")?.text ?? "";
+  const keepMessage = (lastRequest.split("\n")[0] ?? "").trim().slice(0, 72).trim() || "Changes from chat";
+
+  const preview = async () => {
+    setPreviewing(true);
+    // Opened inside the click so popup blockers allow it; pointed at the page once the server answers.
+    const tab = window.open("", "_blank");
+    try {
+      const { url } = await api.preview(workspaceId);
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = location.origin + url;
+      } else window.open(location.origin + url, "_blank", "noopener");
+    } catch (e) {
+      tab?.close();
+      toast.error(`could not open the preview, ${(e as Error).message}`);
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const keep = async () => {
+    setKeeping(true);
+    try {
+      await api.commit(workspaceId, keepMessage);
+      await refresh();
+      toast.success("Saved");
+    } catch (e) {
+      toast.error(`could not save, ${(e as Error).message}`);
+    } finally {
+      setKeeping(false);
+    }
+  };
+
+  const undo = async () => {
+    setUndoing(true);
+    try {
+      await api.action(workspaceId, "discard");
+      await refresh();
+      toast.success("Changes undone");
+    } catch (e) {
+      toast.error(`could not undo, ${(e as Error).message}`);
+    } finally {
+      setUndoing(false);
+      setConfirmUndo(false);
+    }
+  };
+
   const renderEvent = (e: ChatEvent) => {
     switch (e.kind) {
       case "user":
@@ -202,7 +281,7 @@ export default function ChatView({ workspaceId }: Props) {
           </div>
         );
       case "assistant":
-        return <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-primary">{e.text}</p>;
+        return <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-primary">{inlineMarkdown(e.text)}</p>;
       case "tool":
         return (
           <p className="flex items-center gap-1.5 text-xs text-text-muted">
@@ -298,6 +377,27 @@ export default function ChatView({ workspaceId }: Props) {
               {sendError}
             </p>
           ) : null}
+          {!busy ? (
+            <div role="toolbar" aria-label="Project actions" className="mb-2 flex flex-wrap items-center gap-2">
+              {hasChanges ? <p className="mr-auto min-w-0 text-sm text-text-secondary">The AI changed your project.</p> : null}
+              <Button variant="secondary" size="sm" className="min-h-11" disabled={previewing} onClick={() => void preview()}>
+                <Eye size={14} aria-hidden="true" />
+                Preview
+              </Button>
+              {hasChanges ? (
+                <>
+                  <Button variant="primary" size="sm" className="min-h-11" disabled={keeping} onClick={() => void keep()}>
+                    <Check size={14} aria-hidden="true" />
+                    Keep
+                  </Button>
+                  <Button variant="quiet" size="sm" className="min-h-11 text-status-danger" disabled={undoing} onClick={() => setConfirmUndo(true)}>
+                    <ArrowCounterClockwise size={14} aria-hidden="true" />
+                    Undo
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex items-end gap-2">
             <textarea
               ref={taRef}
@@ -324,6 +424,17 @@ export default function ChatView({ workspaceId }: Props) {
         </div>
       </div>
       ) : null}
+      <ConfirmDialog
+        open={confirmUndo}
+        onOpenChange={(v) => {
+          if (!v) setConfirmUndo(false);
+        }}
+        title="Undo the changes?"
+        description="Everything the AI changed since you last pressed Keep will be removed. This can't be reversed."
+        confirmLabel="Undo"
+        busy={undoing}
+        onConfirm={() => void undo()}
+      />
     </div>
   );
 }

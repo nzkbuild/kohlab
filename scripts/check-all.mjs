@@ -76,6 +76,7 @@ try {
 
   banner("static checks");
   run("chat lines (describeTool, describeAsk)", "bun", ["scripts/check-chat.mjs"]);
+  run("web preview paths (no escape from the worktree)", "bun", ["scripts/check-preview.mjs"]);
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);
   run("token contrast (WCAG 2.2 AA)", "node", ["scripts/check-contrast.mjs"]);

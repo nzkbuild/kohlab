@@ -15,7 +15,6 @@ import { createInterface } from "node:readline";
 import type { Workspace } from "./types";
 import {
   WORKS_DIR,
-  agentIdentity,
   chatBusy,
   chatKillers,
   getWorkspace,
@@ -24,7 +23,6 @@ import {
   markStarted,
   mutateState,
   notifyWorkspaceDone,
-  syncAgentClaudeConfig,
   worktreeIsClean,
   worktreePath,
 } from "./lib";
@@ -32,6 +30,12 @@ import {
 /** The only keys copied into the claude process, never the server's secrets (KOHLAB_KEY and friends).
  *  Same allowlist as the PTY daemon: see SAFE_ENV_KEYS in pty-daemon.cjs for why. */
 const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USER", "LOGNAME"];
+/** Appended to claude's system prompt: who it talks to, and the Preview / Keep / Undo buttons it can rely on. */
+const CHAT_SYSTEM_PROMPT =
+  "The person you are working with is not a programmer. Use plain, friendly language and avoid jargon. Write short plain sentences; avoid Markdown headings and tables. " +
+  "When they ask for something visual (a website, page, game or small tool), build it with plain HTML, CSS and JavaScript " +
+  "and put an index.html at the project root, so it works by opening that file; use another technology only if they ask for it. " +
+  "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes.";
 const MAX_TEXT = 20000;
 
 type Body =
@@ -117,6 +121,10 @@ interface Live {
   /** killed on purpose (stop or delete): its exit is not an error */
   stopping: boolean;
   closed: boolean;
+  /** session id passed to --resume, until the CLI confirms it with its init line */
+  resuming?: string;
+  /** the message being answered, kept to retry once if the resume fails */
+  msg?: string;
 }
 
 interface Chat {
@@ -202,6 +210,7 @@ function onLine(id: string, live: Live, line: string) {
     return; // not JSON: ignore
   }
   if (m.type === "system" && m.subtype === "init") {
+    live.resuming = undefined;
     if (typeof m.session_id === "string") persistSession(id, m.session_id);
     return;
   }
@@ -223,6 +232,7 @@ function onLine(id: string, live: Live, line: string) {
     return;
   }
   if (m.type === "result") {
+    if (m.subtype !== "success" && resumeFailed(id, live)) return;
     if (m.subtype !== "success") {
       emit(id, { kind: "error", text: `The AI hit a problem: ${String(m.result ?? m.subtype ?? "unknown").slice(0, 200)}` });
     }
@@ -238,10 +248,34 @@ function onExit(id: string, live: Live) {
   if (procs.get(id) === live) procs.delete(id);
   live.asks.clear();
   if (live.stopping || !chatBusy.has(id)) return;
-  chatBusy.delete(id);
+  if (resumeFailed(id, live)) return;
   const last = live.stderr.trim().split("\n").pop()?.trim();
   emit(id, { kind: "error", text: `The AI stopped unexpectedly. Send a message to continue.${last ? ` (${last.slice(0, 200)})` : ""}` });
   finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+}
+
+/** The old session could not be resumed (e.g. it lived under another config dir): forget it and answer in a fresh one. Quiet for the user. */
+function resumeFailed(id: string, live: Live): boolean {
+  if (!live.resuming || live.msg === undefined) return false;
+  live.stopping = true;
+  live.child.kill("SIGTERM");
+  if (procs.get(id) === live) procs.delete(id);
+  retryFresh(id, live.msg).catch((e) => {
+    chatBusy.delete(id);
+    emit(id, { kind: "error", text: `The AI could not start: ${(e as Error).message}` });
+    finish(id).catch(() => {});
+  });
+  return true;
+}
+
+async function retryFresh(id: string, msg: string) {
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (w) w.chatSession = undefined;
+  });
+  const live = await start(await getWorkspace(id), id);
+  live.msg = msg;
+  live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: msg }, parent_tool_use_id: null }) + "\n");
 }
 
 async function start(ws: Workspace, id: string): Promise<Live> {
@@ -250,24 +284,21 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   const bin = Bun.which(cmd);
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
   const who = identityOf(ws);
-  // The shared agent account gets the operator's Claude config; a named member's home is never touched.
-  const agent = who && !ws.ownerId ? agentIdentity() : null;
-  if (who && agent) {
-    try {
-      syncAgentClaudeConfig(join(homedir(), ".claude"), who.home, agent);
-    } catch (e) {
-      console.warn(`agent claude config sync failed: ${(e as Error).message}`);
-    }
-  }
+  const home = who?.home || homedir();
+  // Chat users get a clean Claude with the same login: no user settings, skills, MCP servers or CLAUDE.md.
+  // CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies.
   // No --include-partial-messages and no --model: the account default model.
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
+  args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
+  args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
   if (ws.chatSession) args.push("--resume", ws.chatSession);
   const env: Record<string, string> = {};
   for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
-  env.HOME = who?.home || homedir();
+  env.HOME = home;
+  env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "1";
   const cwd = worktreePath(ws);
   const child = spawn(bin, args, { cwd, uid: who?.uid, gid: who?.gid, env, stdio: ["pipe", "pipe", "pipe"] });
-  const live: Live = { child, cwd, asks: new Map(), stderr: "", stopping: false, closed: false };
+  const live: Live = { child, cwd, asks: new Map(), stderr: "", stopping: false, closed: false, resuming: ws.chatSession };
   procs.set(id, live);
   child.stdin!.on("error", () => {}); // a dead process: its exit event reports it
   child.stderr!.on("data", (d) => {
@@ -304,6 +335,7 @@ export async function send(id: string, text: string): Promise<void> {
   try {
     await markStarted(id);
     const live = procs.get(id) ?? (await start(ws, id));
+    live.msg = t;
     live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
   } catch (e) {
     chatBusy.delete(id);
