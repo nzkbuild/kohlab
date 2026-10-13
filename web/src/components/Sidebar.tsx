@@ -6,7 +6,6 @@ import {
   GearSix,
   Plus,
   House,
-  Wrench,
   X,
 } from "@phosphor-icons/react";
 import { useApp, useCan } from "../store";
@@ -31,7 +30,6 @@ export default function Sidebar({ open, onClose }: Props) {
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
   const advanced = useApp((s) => s.advanced);
-  const setAdvanced = useApp((s) => s.setAdvanced);
   const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
   const [installEvent, setInstallEvent] = useState<InstallEvent | null>(null);
@@ -197,30 +195,16 @@ export default function Sidebar({ open, onClose }: Props) {
         )}
       </nav>
 
-      <div className="flex flex-col gap-0.5 border-t border-line-subtle p-2.5">
-        {installEvent && !standalone ? (
+      {installEvent && !standalone ? (
+        <div className="flex flex-col gap-0.5 border-t border-line-subtle p-2.5">
           <Tooltip content="Install app" disabled={!collapsed}>
             <button type="button" className="sidebar-row" aria-label="Install app" onClick={() => void install()}>
               <DownloadSimple size={17} className="shrink-0" />
               <span className="sidebar-label flex-1">Install app</span>
             </button>
           </Tooltip>
-        ) : null}
-        <Tooltip content="Advanced tools" disabled={!collapsed}>
-          <button
-            type="button"
-            role="switch"
-            className="sidebar-row"
-            aria-checked={advanced}
-            aria-label="Advanced tools"
-            onClick={() => setAdvanced(!advanced)}
-          >
-            <Wrench size={17} className="shrink-0" />
-            <span className="sidebar-label flex-1">Advanced tools</span>
-            <span className="sidebar-label text-xs text-text-muted">{advanced ? "on" : "off"}</span>
-          </button>
-        </Tooltip>
-      </div>
+        </div>
+      ) : null}
     </aside>
   );
 }

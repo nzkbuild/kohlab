@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.33.0] - 2026-10-13
+
+### Removed
+- The Advanced tools switch. Kohlab shows only the simple view: projects, chat, Preview, Keep / Undo. Team (`kohlab user add` / `user rm`), server (`kohlab serve` / `update`) and agent launchers (`kohlab agents`) stay available from the `kohlab` command line.
+
 ## [1.32.0] - 2026-10-13
 
 ### Changed
