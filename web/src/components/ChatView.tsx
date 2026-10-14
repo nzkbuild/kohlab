@@ -108,7 +108,7 @@ function useCopied(): [boolean, (text: string) => Promise<void>] {
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast.error("could not copy");
+      toast.error("Could not copy");
     }
   };
   return [copied, copy];
@@ -567,7 +567,7 @@ export default function ChatView({ workspaceId }: Props) {
       await api.chatAnswer(workspaceId, requestId, allow);
       repoll();
     } catch (e) {
-      toast.error(`could not answer, ${(e as Error).message}`);
+      toast.error(`Could not answer, ${(e as Error).message}`);
     } finally {
       setAnswering(null);
     }
@@ -603,7 +603,7 @@ export default function ChatView({ workspaceId }: Props) {
       const { url } = await api.preview(workspaceId);
       setPane({ url, t: Date.now() });
     } catch (e) {
-      toast.error(`could not open the preview, ${(e as Error).message}`);
+      toast.error(`Could not open the preview, ${(e as Error).message}`);
     } finally {
       setPreviewing(false);
     }
@@ -616,7 +616,7 @@ export default function ChatView({ workspaceId }: Props) {
       await refresh();
       toast.success("Saved");
     } catch (e) {
-      toast.error(`could not save, ${(e as Error).message}`);
+      toast.error(`Could not save, ${(e as Error).message}`);
     } finally {
       setKeeping(false);
     }
@@ -629,7 +629,7 @@ export default function ChatView({ workspaceId }: Props) {
       await refresh();
       toast.success("Changes undone");
     } catch (e) {
-      toast.error(`could not undo, ${(e as Error).message}`);
+      toast.error(`Could not undo, ${(e as Error).message}`);
     } finally {
       setUndoing(false);
       setConfirmUndo(false);

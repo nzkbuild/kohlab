@@ -19,8 +19,8 @@ import { STATUS_CHIP, STATUS_LABEL, type WorkspaceStatus } from "../lib/status";
  *  surfaces import every Radix primitive through this file. */
 export * as Dialog from "@radix-ui/react-dialog";
 
-/** Shape cue per status, drawn from the icon set rather than text glyphs. */
-const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
+/** Shape cue per status, drawn from the icon set rather than text glyphs. The one source for status icons: StatusChip and the sidebar both use it. */
+export const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
   "needs-you": <BellRinging size={14} weight="fill" />,
   running: <CircleNotch size={14} weight="bold" className="status-spin" />,
   "needs-review": <Eye size={14} weight="bold" />,

@@ -456,7 +456,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
           variant="quiet"
           size="sm"
           iconOnly
-          aria-label="refresh diff"
+          aria-label="Refresh diff"
           disabled={loading}
           onClick={() => void load()}
         >
@@ -612,7 +612,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                           <span className="text-status-danger">−{stats.removed}</span>
                         </span>
                       ) : (
-                        <span className="shrink-0 text-2xs text-text-faint" title="no line stats">
+                        <span className="shrink-0 text-2xs text-text-faint" title="No line stats">
                           n/a
                         </span>
                       )}

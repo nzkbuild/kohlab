@@ -35,6 +35,8 @@ export interface Workspace {
   share?: string;
   /** secret token for the web preview at /p/<token>/ (created on first Preview) */
   previewToken?: string;
+  /** secret for the agent's hook callbacks (POST /api/hook/<id>), written into its Claude settings */
+  hookToken?: string;
   /** optional resource caps applied to the agent's PTY session */
   limits?: WorkspaceLimits;
 }

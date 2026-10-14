@@ -700,9 +700,6 @@ input[type="radio"] {
   .chip-dot {
     background: CanvasText;
   }
-  .sidebar-live-dot {
-    background: CanvasText;
-  }
   :focus-visible {
     outline-color: Highlight;
   }
@@ -799,20 +796,6 @@ input[type="radio"] {
   border-color: var(--line-subtle);
   background: var(--surface-active);
   color: var(--text-primary);
-}
-
-/* Working marker in the sidebar: the lime dot that means an agent is alive. */
-.sidebar-live-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  flex: none;
-  border-radius: 999px;
-  background: var(--status-running);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .sidebar-live-dot {
-    animation: kohlab-pulse 1.6s var(--ease-standard) infinite;
-  }
 }
 
 /* Leading mark in a row: 14px, so an empty slot keeps titles aligned. */
@@ -1180,12 +1163,37 @@ input[type="radio"] {
 /* --- terminal ------------------------------------------------------------ */
 .terminal-wrap {
   height: 100%;
-  background: var(--surface-sunken);
+  background: var(--surface-base);
 }
 
 .terminal-wrap .xterm {
   height: 100%;
-  padding: 0.625rem;
+  padding: 0.5rem;
+}
+
+/* xterm paints its viewport black; let the pane colour show so the padding is not a frame. */
+.terminal-wrap .xterm-viewport {
+  background-color: transparent !important;
+}
+
+/* Attach and Copy float over the terminal: hidden until the area is hovered or a
+   button is focused on a mouse, always shown on touch (no hover there). */
+.terminal-tools {
+  opacity: 0;
+  transition: opacity var(--duration-fast-02) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .terminal-area:hover .terminal-tools,
+  .terminal-tools:focus-within {
+    opacity: 1;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .terminal-tools {
+    opacity: 1;
+  }
 }
 
 /* --- log ----------------------------------------------------------------- */

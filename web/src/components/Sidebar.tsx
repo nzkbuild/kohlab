@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { toast } from "sonner";
 import {
@@ -6,9 +6,7 @@ import {
   CaretDoubleRight,
   DotsThree,
   DownloadSimple,
-  Eye,
   GearSix,
-  BellRinging,
   House,
   PencilSimple,
   Plus,
@@ -24,7 +22,6 @@ import {
   sidebarTime,
   STATUS_LABEL,
   workspaceStatus,
-  type SidebarGroup,
 } from "../lib/status";
 import { projectTitle, sidebarWhen } from "../lib/format";
 import { toastAction } from "../lib/actions";
@@ -33,20 +30,12 @@ import { cn } from "../lib/utils";
 import { isPhone } from "../lib/viewport";
 import ConfirmDialog from "./ConfirmDialog";
 import { disposeWorkspaceTerminals } from "./terminalCache";
-import { Button, BrandMark, Dialog, MenuItem, Tooltip } from "./ui";
+import { Button, BrandMark, Dialog, MenuItem, STATUS_ICON, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
 /** Chromium's install prompt. Not in the DOM typings, so the one member used is spelled out. */
 type InstallEvent = Event & { prompt: () => Promise<void> };
-
-/** The leading mark on each row, by group. Earlier rows keep the slot empty so titles line up. */
-const GROUP_LEAD: Record<SidebarGroup, ReactNode> = {
-  needs: <BellRinging size={14} weight="fill" className="text-accent" />,
-  working: <span className="sidebar-live-dot" />,
-  review: <Eye size={14} weight="bold" className="text-text-muted" />,
-  earlier: null,
-};
 
 /**
  * Saves a project's name. A blank or unchanged name is not sent. Returns false
@@ -61,7 +50,7 @@ export async function saveProjectName(id: string, next: string, shown: string): 
     announce(`Project renamed to ${name}`);
     return true;
   } catch (e) {
-    toast.error(`could not rename, ${(e as Error).message}`);
+    toast.error(`Could not rename, ${(e as Error).message}`);
     return false;
   }
 }
@@ -250,7 +239,7 @@ export default function Sidebar({ open, onClose }: Props) {
       setConfirmDelete(null);
       if (route.kind === "workspace" && route.id === id) navigate({ kind: "workspaces" });
     } catch (e) {
-      toast.error(`delete failed, ${(e as Error).message}`);
+      toast.error(`Delete failed, ${(e as Error).message}`);
     } finally {
       setDeleting(false);
     }
@@ -399,7 +388,7 @@ export default function Sidebar({ open, onClose }: Props) {
                       {editing ? (
                         <div className="sidebar-row min-w-0 flex-1" data-selected={selected}>
                           <span className="sidebar-lead" aria-hidden="true">
-                            {GROUP_LEAD[group.key]}
+                            {STATUS_ICON[status]}
                           </span>
                           <RenameField
                             initial={title}
@@ -427,7 +416,7 @@ export default function Sidebar({ open, onClose }: Props) {
                             }}
                           >
                             <span className="sidebar-lead" aria-hidden="true">
-                              {GROUP_LEAD[group.key]}
+                              {STATUS_ICON[status]}
                             </span>
                             <span
                               className={cn("sidebar-initial", needsYou && "border-accent text-text-primary")}

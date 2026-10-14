@@ -81,6 +81,7 @@ try {
   run("chat markdown (code, links, lists, headings)", "bun", ["scripts/check-markdown.mjs"]);
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);
+  run("agent hooks (status from the agent, not the process)", "node", ["scripts/check-hooks.mjs"]);
   run("sidebar groups", "bun", ["scripts/check-sidebar-groups.mjs"]);
   run("home name", "bun", ["scripts/check-home-name.ts"]);
   run("token contrast (WCAG 2.2 AA)", "node", ["scripts/check-contrast.mjs"]);

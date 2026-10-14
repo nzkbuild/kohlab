@@ -332,12 +332,19 @@ Softly rounded: 0.375rem for small parts (tooltips, kbd, segments), 0.625rem (10
 Header cells are sentence case, 0.75rem weight 600, muted. Body cells are 0.8125rem with `line-subtle` row dividers and a hover fill. The id is a mono row-link, underlined at rest. Row actions show on hover and focus-within, always on touch.
 
 ### Terminal
-xterm on sunken zinc with Geist Mono, a white cursor and a 32% white selection; the ANSI palette stays xterm's own. The pane header carries the socket chip, a one-line hint, and quiet **copy** (selection) and **copy screen** actions; every copy confirms with a toast. Agent TUIs may write the clipboard through OSC 52; clipboard reads are refused.
+xterm on the page surface (`--surface-base`, so the terminal runs edge to edge with no inset panel). The terminal is always dark, in light mode too (`.dark-pane` pins the dark tokens, because Claude Code's colours assume a dark background) with Geist Mono, a white cursor and a 32% white selection; the ANSI palette stays xterm's own. The pane has no header: a one-line bar shows only while the socket is down, with Reconnect now. **Attach** and **Copy** float over the top-right corner; Copy takes the selection, or the whole screen when nothing is selected. Every copy confirms with a toast.
 
 ### Named Rules
 **The Wrap-Once Rule.** Radix primitives are styled once in `web/src/components/ui.tsx` (Tabs/TabList/Tab/TabPanel, Menu/MenuSub/MenuItem, Tooltip, and Dialog re-exported for the `.dialog-*` and `.sheet` classes) alongside the house primitives (Button, StatusChip, Chip, Panel/PanelHead, PageHeader, EmptyState, Field, Skeleton, Kbd, BrandMark, Wordmark, EmptyArt). Surfaces import from `ui.tsx`, never from `@radix-ui/*`.
 
 **The Three Pulses Rule.** The only decorative motion is the live dot, on the running chip and the running row: three 1.6s opacity pulses, then still, and static under reduced motion. Everything else moves only to show a state change, at 70-240ms (the launch sheet slides 2rem in at 240ms on the entrance ease).
+
+## Consistency rules
+
+- Sentence case everywhere: buttons, menu items, labels, toasts, tooltips. Proper nouns and key names (Esc, Tab) keep their own case.
+- One top row per project page: title, status, the tabs (Claude, Changes, Preview), and the ⋯ menu. Nothing stacks above Claude's output.
+- The status icon comes only from `STATUS_ICON` in `ui.tsx`, used by StatusChip and by every sidebar row.
+- Terminal chrome appears only when something is wrong: the reconnect bar. A healthy terminal shows just Claude's output.
 
 ## Do's and Don'ts
 

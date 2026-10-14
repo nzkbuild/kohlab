@@ -3,10 +3,10 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { chmodSync, chownSync, rmSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
-import { randomBytes } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
 import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { cwd } from "process";
@@ -345,6 +345,45 @@ export async function deprovisionOsUser(osUser: string): Promise<{ removed: bool
  */
 export const AGENT_PTY_ENV: Record<string, string> = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1" };
 
+/** Where Claude Code's hooks call back, e.g. http://127.0.0.1:7676. Set by server.ts at startup. */
+let hookBase = "";
+export function setHookBase(url: string) {
+  hookBase = url;
+}
+
+const HOOK_EVENTS = ["UserPromptSubmit", "Notification", "PostToolUse", "Stop"];
+
+/**
+ * Write the Claude Code hook settings for a terminal workspace, outside its
+ * worktree, and return the file. Null when hooks cannot run here: the agent then
+ * starts without them, which only costs the status, never the spawn.
+ */
+async function writeHookSettings(ws: Workspace, who: ReturnType<typeof identityOf>): Promise<string | null> {
+  if (!hookBase || !Bun.which("curl") || !/^[\w.-]+$/.test(ws.id)) return null;
+  try {
+    const token = await mutateState((st) => {
+      const w = st.workspaces.find((x) => x.id === ws.id);
+      if (!w) throw new Error(`no workspace '${ws.id}'`);
+      w.hookToken ??= randomBytes(24).toString("base64url");
+      return w.hookToken;
+    });
+    ws.hookToken = token;
+    const command = `curl -fsS -m 3 -X POST -H 'content-type: application/json' -H 'x-kohlab-hook: ${token}' --data-binary @- '${hookBase}/api/hook/${ws.id}' >/dev/null 2>&1 || true`;
+    const entry = [{ hooks: [{ type: "command", command }] }];
+    const hooks = Object.fromEntries(HOOK_EVENTS.map((e) => [e, entry]));
+    const file = join(wsDir(ws), "kohlab-hooks.json");
+    // wsDir can be writable by the agent's user: never write through a planted symlink.
+    // unlink, then O_EXCL (which also refuses a symlink) with the final mode from the start.
+    rmSync(file, { force: true });
+    writeFileSync(file, JSON.stringify({ hooks }, null, 2), { flag: "wx", mode: 0o600 }); // carries the token
+    if (who) chownSync(file, who.uid, who.gid);
+    return file;
+  } catch (e) {
+    console.warn(`agent hooks not installed, starting without them: ${(e as Error).message}`);
+    return null;
+  }
+}
+
 /**
  * Open a workspace's agent PTY session on the daemon: the single spawn
  * choke point for both the CLI/API start path and the browser-attach path,
@@ -371,12 +410,14 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
     }
   }
   const sessId = sessionId(ws.id, terminalId);
+  // Claude Code reports idle, waiting and done to us through its hooks (handleHook).
+  const hookFile = terminalId === "main" && basename(cmd[0]) === "claude" ? await writeHookSettings(ws, who) : null;
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
     "open",
     {
       id: sessId,
       cwd: worktreePath(ws),
-      cmd,
+      cmd: hookFile ? [...cmd, "--settings", hookFile] : cmd,
       cols,
       rows,
       env: AGENT_PTY_ENV,
@@ -1278,17 +1319,25 @@ export function sessionId(workspaceId: string, terminalId = "main") {
 /** True if the workspace's main PTY session is alive. */
 /** Chat workspaces with a turn in flight. chat.ts keeps this current. */
 export const chatBusy = new Set<string>();
-/** Chat workspaces with a permission question waiting for an answer. chat.ts keeps this current. */
+/** Workspaces with a permission question waiting for an answer. chat.ts keeps this current; hooks (handleHook) do it for terminal projects. */
 export const chatWaiting = new Set<string>();
 /** Per chat workspace: stop its claude process. chat.ts registers these. */
 export const chatKillers = new Map<string, () => void>();
 
+/** Whether the workspace's agent process is alive. The truth lifecycle code (start, discard, watcher) acts on. */
+export async function isAlive(ws: Workspace): Promise<boolean> {
+  if (ws.chat) return chatBusy.has(ws.id);
+  const sess = ((await ptyList()) ?? []).find((s) => s.id === sessionId(ws.id));
+  return !!sess && !sess.exited;
+}
+
+/**
+ * What the UI shows as Working. A Stop hook ends a run while its Claude process
+ * stays alive, idle at the prompt, so a live process after Stop is not running.
+ */
 export async function isRunning(ws: Workspace): Promise<boolean> {
   if (ws.chat) return chatBusy.has(ws.id);
-  const sessions = (await ptyList()) ?? [];
-  if (!sessions) return false;
-  const sess = sessions.find((s) => s.id === sessionId(ws.id));
-  return !!sess && !sess.exited;
+  return !ws.stopped && (await isAlive(ws));
 }
 
 export async function markStarted(id: string): Promise<Workspace> {
@@ -1299,6 +1348,63 @@ export async function markStarted(id: string): Promise<Workspace> {
     ws.stopped = null;
     return ws;
   });
+}
+
+/** Mark a started run stopped, with whether its worktree is clean, then notify. A run already stopped is left alone. */
+export async function finishRun(id: string): Promise<void> {
+  const clean = await worktreeIsClean(id);
+  const w = await mutateState((st) => {
+    const found = st.workspaces.find((x) => x.id === id);
+    if (!found || !found.started || found.stopped) return null;
+    found.stopped = Date.now();
+    found.stoppedClean = clean;
+    return found;
+  });
+  if (w) notifyDone.forEach((fn) => fn(w));
+}
+
+/**
+ * A Claude Code hook event from a terminal workspace (POST /api/hook/:id). Returns
+ * false unless the token matches that workspace's hookToken. `needsYou` is set
+ * when a question has just started waiting, and the caller pushes it.
+ */
+export async function handleHook(
+  id: string,
+  token: string,
+  body: { hook_event_name?: string; notification_type?: string; message?: unknown },
+): Promise<false | { ws: Workspace; needsYou?: string }> {
+  const ws = (await loadState()).workspaces.find((w) => w.id === id);
+  if (!ws || ws.chat || !ws.hookToken) return false;
+  const given = Buffer.from(token);
+  const want = Buffer.from(ws.hookToken);
+  if (given.length !== want.length || !timingSafeEqual(given, want)) return false;
+
+  switch (body.hook_event_name) {
+    case "UserPromptSubmit":
+      chatWaiting.delete(id);
+      await markStarted(id);
+      return { ws };
+    case "Notification": {
+      const message = typeof body.message === "string" ? body.message : "";
+      const asks =
+        body.notification_type === "permission_prompt" ||
+        body.notification_type === "elicitation_dialog" ||
+        (!body.notification_type && /permission|needs your/i.test(message));
+      if (!asks) return { ws };
+      const wasWaiting = chatWaiting.has(id);
+      chatWaiting.add(id);
+      return { ws, needsYou: wasWaiting ? undefined : message || "Claude needs your answer" };
+    }
+    case "PostToolUse":
+      chatWaiting.delete(id);
+      return { ws };
+    case "Stop":
+      chatWaiting.delete(id);
+      await finishRun(id);
+      return { ws };
+    default:
+      return { ws };
+  }
 }
 
 
@@ -1481,20 +1587,7 @@ export function startWatcher() {
     if (!main || main.chat) return; // chat workspaces have no main PTY
     const wid = main.id;
     if (intentionallyStopped.has(wid)) return;
-    void (async () => {
-      const clean = await worktreeIsClean(wid);
-      const w = await mutateState(async (st) => {
-        const found = st.workspaces.find((x) => x.id === wid);
-        if (!found) return null;
-        if (found.started && !found.stopped) {
-          found.stopped = Date.now();
-          found.stoppedClean = clean;
-          return found;
-        }
-        return null;
-      });
-      if (w) notifyDone.forEach((fn) => fn(w));
-    })();
+    void finishRun(wid);
   });
 
   // Polling fallback: catches sessions that exited before the server was up.
@@ -1525,17 +1618,22 @@ export function startWatcher() {
         for (const wid of finished) clean.set(wid, await worktreeIsClean(wid));
         // apply the completion marks under the state lock so concurrent API
         // writes can't be lost-updated
-        await mutateState((st) => {
+        // Only a run this tick actually marked is notified: one a Stop hook
+        // already ended (and notified) must not be reported a second time.
+        const marked = await mutateState((st) => {
+          const done: string[] = [];
           for (const wid of finished) {
             const w = st.workspaces.find((x) => x.id === wid);
             if (w && w.started && !w.stopped) {
               w.stopped = Date.now();
               w.stoppedClean = clean.get(wid);
+              done.push(wid);
             }
           }
+          return done;
         });
         const st = await loadState();
-        for (const wid of finished) {
+        for (const wid of marked) {
           const w = st.workspaces.find((x) => x.id === wid);
           if (w) notifyDone.forEach((fn) => fn(w));
         }
@@ -1917,7 +2015,8 @@ export async function startWorkspace(id: string) {
 
   // spawn the main PTY session now so the agent actually starts, not just on
   // first browser attach. spawnAgentSession applies caps AND the owner's uid.
-  await spawnAgentSession(ws);
+  // A live agent that a Stop hook marked stopped is already running: adopt it.
+  if (!(ws.stopped && (await isAlive(ws)))) await spawnAgentSession(ws);
   return mutateState(async (st) => {
     const w = st.workspaces.find((x) => x.id === id);
     if (!w) throw new Error(`no workspace '${id}'`);
@@ -2113,7 +2212,7 @@ export async function discardWorkspace(id: string): Promise<{ ok: true }> {
   const ws = await getWorkspace(id);
   // Ask the daemon, not a stored flag: the flag can be stale after a crash, and
   // a reset under a live agent is the one outcome worse than either choice.
-  if (await isRunning(ws)) throw new Error("stop the workspace before discarding, its agent is still running");
+  if (await isAlive(ws)) throw new Error("stop the workspace before discarding, its agent is still running");
   const tree = worktreePath(ws);
   await run(tree, "git", ["reset", "--hard", "HEAD"]);
   await run(tree, "git", ["clean", "-fd"]);

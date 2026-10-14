@@ -9,6 +9,19 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.38.0] - 2026-10-14
+
+### Added
+- Terminal projects now know when Claude is done or needs you. When Claude finishes a reply the project moves to Ready to check (or Paused if nothing changed) instead of showing "Working" forever; when Claude asks permission it shows Needs you and your phone gets a notification, same as chat projects. Projects already open pick this up after Restart Claude (in the ⋯ menu).
+- Preview for terminal projects: beside Claude on a computer, full screen on a phone.
+
+### Changed
+- One top row on every project page: name, status, Claude, Changes, Preview and ⋯. Claude's text now starts right under it instead of below four rows of buttons.
+- The terminal fills the page. "connected" only appears when the connection has a problem; Attach and Copy are two small buttons in the corner (Copy takes your selection, or the whole screen if nothing is selected). Stop and Restart Claude moved into the ⋯ menu.
+- The same words and icons everywhere: buttons and menus in sentence case, the conversation tab is called Claude in every project, and every sidebar row shows its status icon.
+
+### Security
+- The address Claude uses to report its status accepts only that project's own secret, is size-limited, and its settings file can't be used to overwrite other files.
 ## [1.37.2] - 2026-10-14
 
 ### Fixed

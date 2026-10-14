@@ -152,8 +152,8 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
     reveal(targetDir);
     setBusy(false);
     if (done) {
-      toast.success(`uploaded ${done} file${done === 1 ? "" : "s"} to ${where}`);
-      announce(`uploaded ${done} files`);
+      toast.success(`Uploaded ${done} file${done === 1 ? "" : "s"} to ${where}`);
+      announce(`Uploaded ${done} files`);
     }
   };
 
@@ -162,7 +162,7 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
     try {
       await api.download(workspaceId, path);
     } catch (e) {
-      toast.error(`could not download: ${(e as Error).message}`);
+      toast.error(`Could not download: ${(e as Error).message}`);
     }
   };
 
@@ -224,16 +224,16 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
         <div className="flex-1" />
         {can.mutate ? (
           <>
-            <Button variant="quiet" size="sm" iconOnly aria-label="new file" title="new file" onClick={() => setCreating("file")}>
+            <Button variant="quiet" size="sm" iconOnly aria-label="New file" title="New file" onClick={() => setCreating("file")}>
               <FilePlus size={14} />
             </Button>
-            <Button variant="quiet" size="sm" iconOnly aria-label="new folder" title="new folder" onClick={() => setCreating("folder")}>
+            <Button variant="quiet" size="sm" iconOnly aria-label="New folder" title="New folder" onClick={() => setCreating("folder")}>
               <FolderPlus size={14} />
             </Button>
-            <Button variant="quiet" size="sm" iconOnly aria-label="upload files" title="upload files (or drop them on the tree)" disabled={busy} onClick={() => fileInput.current?.click()}>
+            <Button variant="quiet" size="sm" iconOnly aria-label="Upload files" title="Upload files (or drop them on the tree)" disabled={busy} onClick={() => fileInput.current?.click()}>
               <UploadSimple size={14} />
             </Button>
-            <Button variant="quiet" size="sm" iconOnly aria-label="upload a folder" title="upload a folder" disabled={busy} onClick={() => folderInput.current?.click()}>
+            <Button variant="quiet" size="sm" iconOnly aria-label="Upload a folder" title="Upload a folder" disabled={busy} onClick={() => folderInput.current?.click()}>
               <FolderOpen size={14} />
             </Button>
           </>
@@ -242,13 +242,13 @@ export default function FileTree({ workspaceId, onOpenFile }: Props) {
           variant="quiet"
           size="sm"
           iconOnly
-          aria-label={activePath ? `download ${activePath}` : "download the whole workspace"}
-          title={activePath ? (activeType === "dir" ? `download ${activePath} as .tar.gz` : `download ${activePath}`) : "download the whole workspace as .tar.gz"}
+          aria-label={activePath ? `Download ${activePath}` : "Download the whole workspace"}
+          title={activePath ? (activeType === "dir" ? `Download ${activePath} as .tar.gz` : `Download ${activePath}`) : "Download the whole workspace as .tar.gz"}
           onClick={() => void download()}
         >
           <DownloadSimple size={14} />
         </Button>
-        <Button variant="quiet" size="sm" iconOnly aria-label="refresh file tree" onClick={() => void load()}>
+        <Button variant="quiet" size="sm" iconOnly aria-label="Refresh file tree" onClick={() => void load()}>
           <ArrowsClockwise size={13} />
         </Button>
         <input ref={fileInput} type="file" multiple className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />

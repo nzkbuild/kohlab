@@ -73,8 +73,10 @@ import {
   setUserRole,
   canProvisionOsUsers,
   repoNameFromUrl,
+  handleHook,
+  setHookBase,
 } from "./lib";
-import { findSub, notifyDone, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
+import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 import { resolvePreviewFile } from "./preview";
 import { ChatError, answer as answerChat, send as sendChat, snapshot as chatSnapshot } from "./chat";
 
@@ -83,6 +85,8 @@ const PORT = Number(process.env.PORT ?? 7676);
  *  tailnet or the LAN, which is why a keyless server there generates one. */
 const HOST = process.env.HOST ?? "0.0.0.0";
 const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
+// Claude Code's hooks call back on the loopback address; a wildcard bind still answers there.
+setHookBase(`http://${HOST === "0.0.0.0" || HOST === "::" ? "127.0.0.1" : HOST.includes(":") ? `[${HOST}]` : HOST}:${PORT}`);
 
 /** Reported by /api/health. Read once; the file does not change under a running server. */
 const VERSION = (() => {
@@ -1017,6 +1021,48 @@ function containFailure(promise: Promise<unknown>, what: string): void {
   });
 }
 
+const MAX_HOOK_BYTES = 64 * 1024;
+
+/** Read a request body up to `max` bytes, or null when it is bigger (chunked bodies have no length to check). */
+async function readCapped(req: Request, max: number): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * A Claude Code hook event (POST /api/hook/:id), from the hook settings
+ * spawnAgentSession writes. Sits before the auth gate: the workspace's hook token
+ * in x-kohlab-hook is the credential, and a bad id or token gets the same 404.
+ */
+async function handleHookPost(id: string, req: Request): Promise<Response> {
+  const text = await readCapped(req, MAX_HOOK_BYTES);
+  if (text === null) return json({ error: "hook body exceeds 64 KiB" }, 413);
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return json({ error: "hook body must be JSON" }, 400);
+  }
+  if (!body || typeof body !== "object") return json({ error: "hook body must be a JSON object" }, 400);
+  const result = await handleHook(id, req.headers.get("x-kohlab-hook") ?? "", body as Parameters<typeof handleHook>[2]);
+  if (!result) return json({ error: "not found" }, 404);
+  if (result.needsYou !== undefined) containFailure(notifyNeedsYou(result.ws, result.needsYou), `needs-you push ${id}`);
+  return new Response(null, { status: 204 });
+}
+
 /** Ensure a workspace's named PTY session exists (spawn the agent if not). */
 async function ensurePtySession(id: string, terminalId = "main") {
   const ws = await getWorkspace(id);
@@ -1056,6 +1102,12 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (previewM) {
       if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
       return handlePreview(previewM[1], previewM[2], req);
+    }
+    // Claude Code hook callbacks: before the auth gate, the hook token is the credential.
+    const hookM = path.match(/^\/api\/hook\/([^/]+)$/);
+    if (hookM) {
+      if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+      return handleHookPost(hookM[1], req);
     }
     const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|rename|log)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;

@@ -56,7 +56,7 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
       await copyText(value);
       toast.success(`${what} copied`);
     } catch {
-      toast.error(`could not copy the ${what}`);
+      toast.error(`Could not copy the ${what}`);
     }
   };
 
@@ -77,7 +77,7 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
           size="sm"
           variant="quiet"
           iconOnly
-          aria-label="copy file path"
+          aria-label="Copy file path"
           disabled={loading || !!error}
           onClick={() => void copy(filePath, "path")}
         >
@@ -87,7 +87,7 @@ export default function CodeView({ workspaceId, filePath, onBack }: Props) {
           size="sm"
           variant="quiet"
           iconOnly
-          aria-label="copy file contents"
+          aria-label="Copy file contents"
           disabled={loading || !!error}
           onClick={() => void copy(content, "contents")}
         >

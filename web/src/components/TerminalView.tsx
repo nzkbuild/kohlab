@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, socketProtocol } from "../api";
-import { cn } from "../lib/utils";
 import { Button } from "./ui";
-import { Copy, Monitor, Paperclip } from "@phosphor-icons/react";
+import { Copy, Paperclip } from "@phosphor-icons/react";
 import { cacheTerminal, termCache } from "./terminalCache";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -27,19 +26,12 @@ interface Props {
  */
 type SocketState = "connecting" | "live" | "reconnecting" | "offline";
 
+/** Shown only while the socket is not live: a live terminal has no chrome at all. */
 const SOCKET_LABEL: Record<SocketState, string> = {
-  connecting: "connecting",
-  live: "connected",
-  reconnecting: "reconnecting",
-  offline: "offline",
-};
-
-/** Static map: an interpolated class name produces no CSS. */
-const SOCKET_CHIP: Record<SocketState, string> = {
-  connecting: "chip-stopped",
-  live: "", // connected is neutral: lime is for a running agent only
-  reconnecting: "chip-review",
-  offline: "chip-danger",
+  connecting: "Connecting…",
+  live: "",
+  reconnecting: "Reconnecting…",
+  offline: "Offline",
 };
 
 const BASE_RETRY_MS = 500;
@@ -48,16 +40,15 @@ const MAX_RETRY_MS = 10000;
 const OFFLINE_AFTER_ATTEMPTS = 4;
 
 /** Copy and say so: a silent copy reads as a broken one. */
-function copyWithFeedback(text: string, what = "copied"): Promise<void> {
+function copyWithFeedback(text: string, what = "Copied"): Promise<void> {
   if (!text) return Promise.resolve();
-  const n = text.length;
   return copyText(text).then(
     () => {
-      toast.success(`${what}, ${n} character${n === 1 ? "" : "s"}`);
+      toast.success(what);
       announce(what);
     },
     () => {
-      toast.error("could not copy, select the text and use the browser's copy menu");
+      toast.error("Could not copy. Select the text and use the browser's copy menu.");
     },
   );
 }
@@ -94,7 +85,8 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
     macOptionClickForcesSelection: true,
     scrollback: 10000,
     theme: {
-      background: tokenColor(el, "--surface-sunken"),
+      // The page surface: the terminal is edge to edge in the pane, not an inset panel.
+      background: tokenColor(el, "--surface-base"),
       foreground: tokenColor(el, "--text-primary"),
       cursor: tokenColor(el, "--accent"),
       selectionBackground: tokenColor(el, "--accent", 0.32),
@@ -123,7 +115,7 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
   term.loadAddon(
     new ClipboardAddon(undefined, {
       readText: () => "",
-      writeText: (_selection, text) => copyWithFeedback(text, "copied from the agent"),
+      writeText: (_selection, text) => copyWithFeedback(text, "Copied from the agent"),
     }),
   );
   term.loadAddon(new ImageAddon({ sixelSupport: true, iipSupport: true, storageLimit: 64, pixelLimit: 8388608 }));
@@ -139,9 +131,9 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
 
 /** [label, bytes, accessible name] */
 const TERMINAL_KEYS: [string, string, string][] = [
-  ["esc", "\x1b", "Escape"],
-  ["tab", "\t", "Tab"],
-  ["⇧tab", "\x1b[Z", "Shift Tab"],
+  ["Esc", "\x1b", "Escape"],
+  ["Tab", "\t", "Tab"],
+  ["⇧Tab", "\x1b[Z", "Shift Tab"],
   ["^C", "\x03", "Control C"],
   ["↑", "\x1b[A", "Up arrow"],
   ["↓", "\x1b[B", "Down arrow"],
@@ -192,13 +184,14 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
         try {
           paths.push((await api.uploadImage(workspaceId, file)).path);
         } catch (e) {
-          toast.error(`could not attach ${file.name || "the file"}: ${(e as Error).message}`);
+          toast.error(`Could not attach ${file.name || "the file"}: ${(e as Error).message}`);
         }
       }
       if (paths.length === 0) return;
       sendInput(bracketedPaste(paths.join(" ")));
-      toast.success(`attached ${paths.length} file${paths.length === 1 ? "" : "s"}`);
-      announce(`attached ${paths.length} file${paths.length === 1 ? "" : "s"}`);
+      const said = `Attached ${paths.length} file${paths.length === 1 ? "" : "s"}`;
+      toast.success(said);
+      announce(said);
     };
     attachRef.current = (files) => void sendFiles(files);
     keyRef.current = sendInput;
@@ -260,7 +253,7 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
         e.stopImmediatePropagation();
         void imagesFromClipboard().then((found) => {
           if (found.length) void sendFiles(found);
-          else toast("nothing to paste: copy text or a screenshot first, or use attach");
+          else toast("Nothing to paste: copy text or a screenshot first, or use Attach");
         });
       }
     };
@@ -404,79 +397,33 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
 
   return (
     <div className="dark-pane flex h-full min-h-0 flex-col">
-      {/* Same pane-header geometry as the other panes: a 2rem-min row with 12px
-          text, like every pane header. No h2 title: this pane's identity
-          is the tab and the instance strip rendered directly above it by
-          WorkspaceDetail, and the chip plus this line already carry its state. */}
-      <header className="cockpit-head text-2xs text-text-muted">
-        <span className={cn("chip", SOCKET_CHIP[socket])}>
-          <span className="chip-dot" aria-hidden="true" />
-          {SOCKET_LABEL[socket]}
-        </span>
-        {socket === "live" ? null : (
-          <span className="truncate">
-            {socket === "connecting" ? "opening socket…" : "pty output paused until the socket returns"}
-          </span>
-        )}
-        <div className="flex-1" />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="sr-only"
-          tabIndex={-1}
-          aria-hidden="true"
-          onChange={(e) => {
-            attachRef.current(Array.from(e.target.files ?? []));
-            e.target.value = "";
-          }}
-        />
-        <Button
-          variant="quiet"
-          size="sm"
-          className="shrink-0"
-          title="send a file or screenshot to the agent (or paste / drop it on the terminal)"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Paperclip size={13} aria-hidden="true" />
-          attach
-        </Button>
-        <Button
-          variant="quiet"
-          size="sm"
-          className="shrink-0"
-          title="copy the selection (ctrl+shift+c)"
-          onClick={() => {
-            const term = termRef.current;
-            if (!term?.hasSelection()) {
-              toast("select text first: shift+drag, or use copy screen");
-              return;
-            }
-            void copyWithFeedback(term.getSelection());
-          }}
-        >
-          <Copy size={13} aria-hidden="true" />
-          copy
-        </Button>
-        <Button
-          variant="quiet"
-          size="sm"
-          className="shrink-0"
-          onClick={() => termRef.current && void copyWithFeedback(screenText(termRef.current), "screen copied")}
-        >
-          <Monitor size={13} aria-hidden="true" />
-          copy screen
-        </Button>
-        {reconnecting ? (
-          <Button variant="quiet" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => reconnectRef.current()} aria-describedby={descId}>
-            reconnect now
-          </Button>
-        ) : null}
-      </header>
+      {/* A live terminal has no chrome. The bar shows only while the socket is down. */}
+      {socket === "live" ? null : (
+        <div className="flex items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5 text-xs text-text-muted">
+          <span className="min-w-0 flex-1 truncate">{SOCKET_LABEL[socket]}</span>
+          {reconnecting ? (
+            <Button variant="secondary" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => reconnectRef.current()} aria-describedby={descId}>
+              Reconnect now
+            </Button>
+          ) : null}
+        </div>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(e) => {
+          attachRef.current(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
 
       {/* Not a live region: a screen reader would read every line the agent
-          prints. The connection chip above carries the state that matters. */}
-      <div className="min-h-0 flex-1">
+          prints. The bar above carries the state that matters. */}
+      <div className="terminal-area relative min-h-0 flex-1">
         <div
           ref={containerRef}
           data-terminal-root=""
@@ -485,6 +432,35 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
           aria-describedby={descId}
           className="terminal-wrap"
         />
+        <div className="terminal-tools absolute top-2 right-2 z-10 flex gap-1">
+          <Button
+            variant="quiet"
+            size="sm"
+            iconOnly
+            className="bg-surface-raised"
+            aria-label="Attach a file"
+            title="Attach a file (or paste / drop it on the terminal)"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip size={14} aria-hidden="true" />
+          </Button>
+          <Button
+            variant="quiet"
+            size="sm"
+            iconOnly
+            className="bg-surface-raised"
+            aria-label="Copy"
+            title="Copy the selection, or the whole screen if nothing is selected"
+            onClick={() => {
+              const term = termRef.current;
+              if (!term) return;
+              if (term.hasSelection()) void copyWithFeedback(term.getSelection());
+              else void copyWithFeedback(screenText(term), "Screen copied");
+            }}
+          >
+            <Copy size={14} aria-hidden="true" />
+          </Button>
+        </div>
       </div>
       {/* Phones have no Esc, Tab or arrows, and an agent's TUI needs all of them.
           Shown on touch devices only; pressing a key must not take focus from the
