@@ -85,8 +85,8 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
     macOptionClickForcesSelection: true,
     scrollback: 10000,
     theme: {
-      // The page surface: the terminal is edge to edge in the pane, not an inset panel.
-      background: tokenColor(el, "--surface-base"),
+      // The terminal panel colour: #181818 in both modes.
+      background: tokenColor(el, "--surface-terminal"),
       foreground: tokenColor(el, "--text-primary"),
       cursor: tokenColor(el, "--accent"),
       selectionBackground: tokenColor(el, "--accent", 0.32),

@@ -7,30 +7,23 @@ import {
   DotsThree,
   DownloadSimple,
   GearSix,
-  House,
+  MagnifyingGlass,
   PencilSimple,
-  Plus,
   Trash,
   X,
 } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
-import {
-  bySidebarActivity,
-  SIDEBAR_GROUPS,
-  sidebarGroup,
-  sidebarTime,
-  STATUS_LABEL,
-  workspaceStatus,
-} from "../lib/status";
-import { projectTitle, sidebarWhen } from "../lib/format";
+import { STATUS_LABEL, workspaceStatus } from "../lib/status";
+import { sidebarOrder } from "../lib/sidebarOrder";
+import { projectTitle } from "../lib/format";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
 import { cn } from "../lib/utils";
 import { isPhone } from "../lib/viewport";
 import ConfirmDialog from "./ConfirmDialog";
 import { disposeWorkspaceTerminals } from "./terminalCache";
-import { Button, BrandMark, Dialog, MenuItem, STATUS_ICON, Tooltip } from "./ui";
+import { Button, Dialog, MenuItem, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -199,9 +192,12 @@ export default function Sidebar({ open, onClose }: Props) {
   const holdTimer = useRef<number | null>(null);
   const holdFired = useRef(false);
 
-  useEffect(() => () => {
-    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, String(collapsed));
@@ -254,36 +250,40 @@ export default function Sidebar({ open, onClose }: Props) {
     }, 500);
   };
   const holdEnd = () => {
-    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
     holdTimer.current = null;
   };
 
   // Already running as an app: there is nothing to install.
   const standalone = window.matchMedia("(display-mode: standalone)").matches;
 
-  const groups = SIDEBAR_GROUPS.map((group) => ({
-    ...group,
-    items: workspaces.filter((w) => sidebarGroup(w) === group.key).sort(bySidebarActivity),
-  })).filter((group) => group.items.length > 0);
+  // Me carries no display name yet, so the account row shows the owner.
+  const accountName = "Owner";
+  const accountInitial = accountName.charAt(0).toUpperCase();
 
+  const projects = sidebarOrder(workspaces);
   const sheetWorkspace = workspaces.find((w) => w.id === sheetFor) ?? null;
-  const activeKind = route.kind === "workspace" ? "workspaces" : route.kind;
-  const homeActive = activeKind === "workspaces";
-  const settingsActive = activeKind === "settings";
 
   return (
-    <aside
-      className="sidebar"
-      data-open={open}
-      data-collapsed={collapsed}
-      aria-label="Primary navigation"
-    >
-      <div className="sidebar-head flex min-h-[3.25rem] items-center gap-2.5 px-3">
-        <span className="sidebar-brand grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent">
-          <BrandMark size={16} />
-        </span>
-        <span className="sidebar-label text-base font-semibold tracking-tight text-text-primary">kohlab</span>
+    <aside className="sidebar" data-open={open} data-collapsed={collapsed} aria-label="Primary navigation">
+      <div className="sidebar-head flex min-h-[3.25rem] items-center gap-1 px-3">
+        <button
+          type="button"
+          className="sidebar-label min-h-8 min-w-0 truncate rounded-md text-start text-base font-semibold tracking-tight text-text-primary"
+          onClick={() => navigate({ kind: "workspaces" })}
+        >
+          kohlab
+        </button>
         <div className="sidebar-head-fill flex-1" />
+        <Button
+          variant="quiet"
+          iconOnly
+          size="sm"
+          className={cn("sidebar-search", collapsed && "shell:hidden")}
+          aria-label="Search projects"
+          onClick={() => useApp.getState().setPaletteOpen(true)}
+        >
+          <MagnifyingGlass size={16} />
+        </Button>
         {/* Desktop: collapse the rail. Mobile: dismiss the drawer. The collapsed
             rail has room for one control, so this one is the survivor: see
             .sidebar[data-collapsed="true"] .sidebar-head in index.css. */}
@@ -311,209 +311,197 @@ export default function Sidebar({ open, onClose }: Props) {
       </div>
 
       {can.mutate ? (
-        <div className="px-2.5 pb-2 pt-1">
-          <Button
-            variant="primary"
-            className={cn("w-full", collapsed && "shell:px-0")}
-            aria-label="New project"
-            onClick={() => {
-              setNewOpen(true);
-              onClose();
-            }}
-          >
-            <Plus size={16} weight="bold" />
-            <span className="sidebar-label">New project</span>
-          </Button>
+        <div className="px-2.5 pb-1 pt-2">
+          <Tooltip content="New project" disabled={!collapsed}>
+            <button
+              type="button"
+              className="sidebar-row"
+              aria-label="New project"
+              onClick={() => {
+                setNewOpen(true);
+                onClose();
+              }}
+            >
+              <PencilSimple size={18} className="shrink-0" aria-hidden="true" />
+              <span className="sidebar-label flex-1 text-base">New project</span>
+            </button>
+          </Tooltip>
         </div>
       ) : null}
 
-      <nav className="flex flex-col gap-0.5 px-2.5 pb-2" aria-label="Views">
-        <Tooltip content="Home" disabled={!collapsed}>
-          <button
-            type="button"
-            className="sidebar-row"
-            aria-current={homeActive ? "page" : undefined}
-            aria-label="Home"
-            onClick={() => navigate({ kind: "workspaces" })}
-          >
-            <House size={18} className="shrink-0" weight={homeActive ? "fill" : "regular"} />
-            <span className="sidebar-label flex-1 text-base">Home</span>
-          </button>
-        </Tooltip>
-      </nav>
-
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2.5" aria-label="Projects">
-        {/* Every row is a workspace: one task, one branch, one agent; it can
-            hold several terminal sessions inside. */}
+        <p className="sidebar-section-title px-2.5 pb-1.5 pt-5 text-sm text-text-faint">Projects</p>
         {workspaces.length === 0 ? (
           <p className="sidebar-label px-2 pt-2 text-sm leading-relaxed text-text-muted">
             Nothing yet. Start a new project and Claude gets to work.
           </p>
         ) : (
-          groups.map((group) => (
-            <div key={group.key} className="mb-4">
-              <p className="sidebar-section-title section-label mb-1 flex items-center justify-between px-2.5">
-                <span>{group.label}</span>
-                <span className="tnum">{group.items.length}</span>
-              </p>
-              {group.items.map((workspace) => {
-                const status = workspaceStatus(workspace);
-                const needsYou = group.key === "needs";
-                const title = projectTitle(workspace);
-                const statusText = STATUS_LABEL[status];
-                const selected = route.kind === "workspace" && route.id === workspace.id;
-                const editing = renaming === workspace.id;
-                // Viewers get no menu, so right-click keeps the browser's own.
-                const canMenu = can.mutate;
-                return (
-                  <DropdownMenu.Root
-                    key={workspace.id}
-                    open={canMenu && menuFor === workspace.id}
-                    onOpenChange={(next) => setMenuFor(next ? workspace.id : null)}
-                  >
-                    <div
-                      className="group flex items-center gap-0.5"
-                      onPointerDown={canMenu && !editing ? (e) => holdStart(e, workspace.id) : undefined}
-                      onPointerUp={holdEnd}
-                      onPointerCancel={holdEnd}
-                      onContextMenu={
-                        canMenu && !editing
-                          ? (e) => {
-                              e.preventDefault();
-                              setMenuFor(workspace.id);
-                            }
-                          : undefined
-                      }
-                    >
-                      {editing ? (
-                        <div className="sidebar-row min-w-0 flex-1" data-selected={selected}>
-                          <span className="sidebar-lead" aria-hidden="true">
-                            {STATUS_ICON[status]}
-                          </span>
-                          <RenameField
-                            initial={title}
-                            onDone={(next) => {
-                              setRenaming(null);
-                              if (next !== null) void saveProjectName(workspace.id, next, title);
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <Tooltip content={`${title}, ${statusText}`} disabled={!collapsed}>
-                          <button
-                            type="button"
-                            className="sidebar-row min-w-0 flex-1"
-                            data-selected={selected}
-                            aria-current={selected ? "page" : undefined}
-                            aria-label={`${title}, ${statusText}`}
-                            onClick={() => {
-                              // A long press has just opened the More menu: that press is not a visit.
-                              if (holdFired.current) {
-                                holdFired.current = false;
-                                return;
-                              }
-                              navigate({ kind: "workspace", id: workspace.id });
-                            }}
-                          >
-                            <span className="sidebar-lead" aria-hidden="true">
-                              {STATUS_ICON[status]}
-                            </span>
-                            <span
-                              className={cn("sidebar-initial", needsYou && "border-accent text-text-primary")}
-                              aria-hidden="true"
-                            >
-                              {title.charAt(0).toUpperCase()}
-                            </span>
-                            <span className="sidebar-label min-w-0 flex-1 truncate text-base text-text-primary" title={workspace.id}>
-                              {title}
-                            </span>
-                            <span className="sidebar-label shrink-0 text-sm text-text-faint tnum">
-                              {sidebarWhen(sidebarTime(workspace))}
-                            </span>
-                          </button>
-                        </Tooltip>
-                      )}
-                      {canMenu && !editing ? (
-                        // 36px hit area, 28px visible. Hidden until the row is hovered or focused;
-                        // always shown on touch screens, which have no hover.
-                        <DropdownMenu.Trigger asChild>
-                          <button
-                            type="button"
-                            aria-label={`More actions for ${title}`}
-                              tabIndex={collapsed ? -1 : undefined}
-                            className={cn(
-                              "shrink-0 place-items-center text-text-muted opacity-0 transition-opacity duration-150",
-                              "group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100",
-                              // The collapsed rail is too narrow for it, but the menu still anchors to it.
-                                collapsed ? "shell:w-0 shell:overflow-hidden" : "grid size-9 pointer-coarse:size-11",
-                            )}
-                          >
-                            <span className="grid size-7 place-items-center rounded-md hover:bg-surface-active hover:text-text-primary">
-                              <DotsThree size={16} weight="bold" aria-hidden="true" />
-                            </span>
-                          </button>
-                        </DropdownMenu.Trigger>
-                      ) : null}
-                    </div>
-                    {canMenu ? (
-                      <DropdownMenu.Portal>
-                        <DropdownMenu.Content
-                          className="menu"
-                          align="end"
-                          sideOffset={4}
-                          collisionPadding={8}
-                          onCloseAutoFocus={(e) => {
-                            if (renameNext.current === null) return;
+          <div className="flex flex-col gap-0.5">
+            {/* Every row is a workspace: one task, one branch, one agent; it can
+                hold several terminal sessions inside. */}
+            {projects.map((workspace) => {
+              const status = workspaceStatus(workspace);
+              const needsYou = status === "needs-you";
+              // The only status the rail shows: a dot for needs you, or ready to check.
+              const dotLabel = status === "needs-you" || status === "needs-review" ? STATUS_LABEL[status] : null;
+              const title = projectTitle(workspace);
+              const selected = route.kind === "workspace" && route.id === workspace.id;
+              const editing = renaming === workspace.id;
+              // Viewers get no menu, so right-click keeps the browser's own.
+              const canMenu = can.mutate;
+              return (
+                <DropdownMenu.Root
+                  key={workspace.id}
+                  open={canMenu && menuFor === workspace.id}
+                  onOpenChange={(next) => setMenuFor(next ? workspace.id : null)}
+                >
+                  <div
+                    className="group flex items-center gap-0.5"
+                    onPointerDown={canMenu && !editing ? (e) => holdStart(e, workspace.id) : undefined}
+                    onPointerUp={holdEnd}
+                    onPointerCancel={holdEnd}
+                    onContextMenu={
+                      canMenu && !editing
+                        ? (e) => {
                             e.preventDefault();
-                            if (isPhone()) setSheetFor(renameNext.current);
-                            else setRenaming(renameNext.current);
-                            renameNext.current = null;
+                            setMenuFor(workspace.id);
+                          }
+                        : undefined
+                    }
+                  >
+                    {editing ? (
+                      <div className="sidebar-row min-w-0 flex-1" data-selected={selected}>
+                        <RenameField
+                          initial={title}
+                          onDone={(next) => {
+                            setRenaming(null);
+                            if (next !== null) void saveProjectName(workspace.id, next, title);
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <Tooltip content={title} disabled={!collapsed}>
+                        <button
+                          type="button"
+                          className="sidebar-row min-w-0 flex-1"
+                          data-selected={selected}
+                          aria-current={selected ? "page" : undefined}
+                          onClick={() => {
+                            // A long press has just opened the More menu: that press is not a visit.
+                            if (holdFired.current) {
+                              holdFired.current = false;
+                              return;
+                            }
+                            navigate({ kind: "workspace", id: workspace.id });
                           }}
                         >
-                          <MenuItem
-                            onSelect={() => {
-                              renameNext.current = workspace.id;
-                            }}
+                          <span
+                            className={cn("sidebar-initial", needsYou && "border-accent text-text-primary")}
+                            aria-hidden="true"
                           >
-                            <PencilSimple size={14} aria-hidden="true" />
-                            Rename
-                          </MenuItem>
-                          <MenuItem tone="danger" onSelect={() => setConfirmDelete(workspace.id)}>
-                            <Trash size={14} aria-hidden="true" />
-                            Delete project…
-                          </MenuItem>
-                        </DropdownMenu.Content>
-                      </DropdownMenu.Portal>
+                            {title.charAt(0).toUpperCase()}
+                          </span>
+                          <span className="sidebar-label min-w-0 flex-1 truncate text-base text-text-primary" title={workspace.id}>
+                            {title}
+                          </span>
+                          {dotLabel ? (
+                            <>
+                              <span className="sidebar-dot sidebar-label" aria-hidden="true" />
+                              <span className="sr-only">{dotLabel}</span>
+                            </>
+                          ) : null}
+                        </button>
+                      </Tooltip>
+                    )}
+                    {canMenu && !editing ? (
+                      // 36px hit area, 28px visible. Hidden until the row is hovered or focused;
+                      // always shown on touch screens, which have no hover.
+                      <DropdownMenu.Trigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`More actions for ${title}`}
+                          tabIndex={collapsed ? -1 : undefined}
+                          className={cn(
+                            "shrink-0 place-items-center text-text-muted opacity-0 transition-opacity duration-150",
+                            "group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100",
+                            // The collapsed rail is too narrow for it, but the menu still anchors to it.
+                            collapsed ? "shell:w-0 shell:overflow-hidden" : "grid size-9 pointer-coarse:size-11",
+                          )}
+                        >
+                          <span className="grid size-7 place-items-center rounded-md hover:bg-surface-active hover:text-text-primary">
+                            <DotsThree size={16} weight="bold" aria-hidden="true" />
+                          </span>
+                        </button>
+                      </DropdownMenu.Trigger>
                     ) : null}
-                  </DropdownMenu.Root>
-                );
-              })}
-            </div>
-          ))
+                  </div>
+                  {canMenu ? (
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content
+                        className="menu"
+                        align="end"
+                        sideOffset={4}
+                        collisionPadding={8}
+                        onCloseAutoFocus={(e) => {
+                          if (renameNext.current === null) return;
+                          e.preventDefault();
+                          if (isPhone()) setSheetFor(renameNext.current);
+                          else setRenaming(renameNext.current);
+                          renameNext.current = null;
+                        }}
+                      >
+                        <MenuItem
+                          onSelect={() => {
+                            renameNext.current = workspace.id;
+                          }}
+                        >
+                          <PencilSimple size={14} aria-hidden="true" />
+                          Rename
+                        </MenuItem>
+                        <MenuItem tone="danger" onSelect={() => setConfirmDelete(workspace.id)}>
+                          <Trash size={14} aria-hidden="true" />
+                          Delete project…
+                        </MenuItem>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  ) : null}
+                </DropdownMenu.Root>
+              );
+            })}
+          </div>
         )}
       </nav>
 
-      <div className="flex flex-col gap-0.5 border-t border-line-subtle p-2.5">
-        {installEvent && !standalone ? (
-          <Tooltip content="Install app" disabled={!collapsed}>
-            <button type="button" className="sidebar-row" aria-label="Install app" onClick={() => void install()}>
-              <DownloadSimple size={18} className="shrink-0" />
-              <span className="sidebar-label flex-1 text-base">Install app</span>
-            </button>
+      <div className="p-2.5">
+        <DropdownMenu.Root>
+          <Tooltip content={accountName} disabled={!collapsed}>
+            <DropdownMenu.Trigger asChild>
+              <button type="button" className="sidebar-row" aria-label={`Account, ${accountName}`}>
+                <span
+                  className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-active text-xs font-semibold text-text-primary"
+                  aria-hidden="true"
+                >
+                  {accountInitial}
+                </span>
+                <span className="sidebar-label min-w-0 flex-1 truncate text-base text-text-primary">{accountName}</span>
+              </button>
+            </DropdownMenu.Trigger>
           </Tooltip>
-        ) : null}
-        <Tooltip content="Settings" disabled={!collapsed}>
-          <button
-            type="button"
-            className="sidebar-row"
-            aria-current={settingsActive ? "page" : undefined}
-            aria-label="Settings"
-            onClick={() => navigate({ kind: "settings" })}
-          >
-            <GearSix size={18} className="shrink-0" weight={settingsActive ? "fill" : "regular"} />
-            <span className="sidebar-label flex-1 text-base">Settings</span>
-          </button>
-        </Tooltip>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
+              <MenuItem onSelect={() => navigate({ kind: "settings" })}>
+                <GearSix size={14} aria-hidden="true" />
+                Settings
+              </MenuItem>
+              {installEvent && !standalone ? (
+                <MenuItem onSelect={() => void install()}>
+                  <DownloadSimple size={14} aria-hidden="true" />
+                  Install app
+                </MenuItem>
+              ) : null}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </div>
 
       <RenameDialog

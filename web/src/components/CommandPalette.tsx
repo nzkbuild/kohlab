@@ -53,7 +53,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
  * arrowing through results cannot steal the caret out of the filter field.
  */
 export default function CommandPalette() {
-  const [open, setOpen] = useState(false);
+  const open = useApp((s) => s.paletteOpen);
+  const setOpen = useApp((s) => s.setPaletteOpen);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -84,12 +85,17 @@ export default function CommandPalette() {
         setOpen(false);
         return;
       }
-      setQuery("");
-      setActiveIndex(0);
       setOpen(true);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, setOpen]);
+
+  // Every open (key or search button) starts with a clean filter.
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setActiveIndex(0);
   }, [open]);
 
   // Workspace data is store-owned (visibility-gated poll + push socket), so the

@@ -17,11 +17,11 @@ const CSS = readFileSync(new URL("../web/src/index.css", import.meta.url), "utf8
 
 /* ---------------------------------------------------------------- parsing -- */
 
-/** Collect `--name: value;` declarations from the :root block only. */
-function readRootTokens(css) {
-  const start = css.indexOf(":root {");
-  if (start === -1) throw new Error("no :root block found in index.css");
-  const end = css.indexOf("\n}", start);
+/** Collect `--name: value;` declarations from one block, from its marker up to its closer. */
+function readTokens(css, marker, closer) {
+  const start = css.indexOf(marker);
+  if (start === -1) throw new Error(`no ${JSON.stringify(marker)} block found in index.css`);
+  const end = css.indexOf(closer, start);
   const block = css.slice(start, end);
   const tokens = new Map();
   for (const line of block.split("\n")) {
@@ -31,7 +31,14 @@ function readRootTokens(css) {
   return tokens;
 }
 
-const TOKENS = readRootTokens(CSS);
+// Dark set is the :root block. Light set is the OS-light override merged over it.
+const TOKENS = readTokens(CSS, ":root {", "\n}");
+const LIGHT = new Map([
+  ...TOKENS,
+  ...readTokens(CSS, "@media (prefers-color-scheme: light) {\n  :root {", "\n  }"),
+]);
+/** The token set resolve() reads from; the audit loop swaps it per mode. */
+let ACTIVE = TOKENS;
 
 /* ------------------------------------------------------------------ colour -- */
 
@@ -68,14 +75,21 @@ function resolve(expr, depth = 0) {
 
   const varMatch = value.match(/^var\(\s*(--[a-z0-9-]+)\s*\)$/i);
   if (varMatch) {
-    const next = TOKENS.get(varMatch[1]);
+    const next = ACTIVE.get(varMatch[1]);
     if (!next) throw new Error(`unknown token ${varMatch[1]}`);
     return resolve(next, depth + 1);
   }
 
+  // Hex literal, as used by the semantic tier (already gamma-encoded sRGB).
+  const hex = value.match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  }
+
   // Bare token name (as passed from the CHECKS table).
   if (/^--[a-z0-9-]+$/i.test(value)) {
-    const next = TOKENS.get(value);
+    const next = ACTIVE.get(value);
     if (!next) throw new Error(`unknown token ${value}`);
     return resolve(next, depth + 1);
   }
@@ -162,6 +176,14 @@ const CHECKS = [
   ["text faint / sunken", "--text-faint", "--surface-sunken", 4.5, "log timestamps"],
   ["text faint / raised", "--text-faint", "--surface-raised", 4.5, "placeholders, faint meta"],
 
+  // Sidebar, selected row and user bubble are separate planes now (no borders)
+  ["text primary / sidebar", "--text-primary", "--surface-sidebar", 4.5, "project rows"],
+  ["text muted / sidebar", "--text-muted", "--surface-sidebar", 4.5, "account row, secondary labels"],
+  ["text faint / sidebar", "--text-faint", "--surface-sidebar", 4.5, "Projects label"],
+  ["text primary / active", "--text-primary", "--surface-active", 4.5, "selected row"],
+  ["text primary / bubble", "--text-primary", "--surface-bubble", 4.5, "user message"],
+  ["accent / sidebar", "--accent", "--surface-sidebar", 3, "needs-you dot (SC 1.4.11)"],
+
   // Accent surfaces (SC 1.4.3: button label is normal-size text)
   ["on-accent / accent", "--text-on-accent", "--accent", 4.5, "primary button label"],
 
@@ -183,6 +205,9 @@ const CHECKS = [
 let failures = 0;
 console.log("\nkohlab token contrast audit, WCAG 2.2 AA\n");
 
+for (const [mode, set] of [["dark", TOKENS], ["light", LIGHT]]) {
+ACTIVE = set;
+console.log(`${mode} set`);
 for (const [label, fgTok, bgTok, min, why, chipName, chipTint] of CHECKS) {
   const fg = resolve(fgTok);
   let bg;
@@ -202,10 +227,12 @@ for (const [label, fgTok, bgTok, min, why, chipName, chipTint] of CHECKS) {
     `  ${ok ? "ok  " : "FAIL"} ${label.padEnd(26)} ${ratio.toFixed(2).padStart(6)}:1  (min ${min})  ${hex(fg)} on ${hex(bg)}, ${why}`,
   );
 }
+console.log("");
+}
 
 console.log(
   failures
-    ? `\n${failures} contrast failure(s). WCAG 2.2 AA is the conformance target, fix the token, not the check.\n`
-    : `\nall ${CHECKS.length} pairs meet WCAG 2.2 AA\n`,
+    ? `${failures} contrast failure(s). WCAG 2.2 AA is the conformance target, fix the token, not the check.\n`
+    : `all ${CHECKS.length} pairs meet WCAG 2.2 AA in both modes\n`,
 );
 process.exit(failures ? 1 : 0);

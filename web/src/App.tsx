@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
-import { List, Plus } from "@phosphor-icons/react";
+import { List, PencilSimple } from "@phosphor-icons/react";
 import { useApp, useCan } from "./store";
 import { useSync } from "./lib/useSync";
 import { ROUTE_LABEL } from "./lib/route";
@@ -131,7 +131,7 @@ export default function App() {
 
             {can.mutate ? (
               <Button variant="quiet" iconOnly aria-label="New project" onClick={() => setNewOpen(true)}>
-                <Plus size={18} weight="bold" />
+                <PencilSimple size={18} />
               </Button>
             ) : null}
           </header>

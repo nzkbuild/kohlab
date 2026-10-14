@@ -34,6 +34,9 @@ export interface AppState {
   newOpen: boolean;
   /** Phone and tablet drawer. Lives here so any page header can open it. */
   navOpen: boolean;
+  /** The command palette (⌘K or the sidebar search button). */
+  paletteOpen: boolean;
+  setPaletteOpen: (value: boolean) => void;
 
   setNavOpen: (value: boolean) => void;
   setNewOpen: (value: boolean) => void;
@@ -61,6 +64,8 @@ export const useApp = create<AppState>((set) => ({
   advanced: false,
   newOpen: false,
   navOpen: false,
+  paletteOpen: false,
+  setPaletteOpen: (value) => set({ paletteOpen: value }),
 
   setNavOpen: (value) => set({ navOpen: value }),
   setNewOpen: (value) => set({ newOpen: value }),

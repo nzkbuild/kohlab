@@ -1,17 +1,13 @@
 import { lazy, Suspense, startTransition, useEffect, useOptimistic, useState } from "react";
 import {
   ArrowsClockwise,
-  ChatCircleDots,
-  DotsThree,
-  Files,
-  GitDiff,
+  CaretDown,
   Ghost,
   Globe,
   List,
   Play,
   PencilSimple,
   Plus,
-  Scroll,
   ShareNetwork,
   Stop,
   Terminal,
@@ -34,7 +30,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import LogView from "./LogView";
 import PreviewPanel from "./PreviewPanel";
 import { disposeWorkspaceTerminals } from "./terminalCache";
-import { Button, EmptyState, Menu, MenuItem, SkeletonRows, StatusChip, Tab, TabList, TabPanel, Tabs } from "./ui";
+import { Button, EmptyState, Menu, MenuItem, SkeletonRows, Tab, TabList, TabPanel, Tabs } from "./ui";
 import { copyText } from "../lib/clipboard";
 
 // xterm (~390 KB) and Monaco must not load before the cockpit does: only an
@@ -47,11 +43,11 @@ const DiffView = lazy(() => import("./DiffView"));
 type TabId = WorkspaceTab;
 
 /** The same tab names in every project: the conversation is "Claude", whether it is a chat or a terminal. */
-const TABS: { id: TabId; label: string; icon: typeof Terminal }[] = [
-  { id: "terminal", label: "Claude", icon: Terminal },
-  { id: "files", label: "Files", icon: Files },
-  { id: "review", label: "Changes", icon: GitDiff },
-  { id: "log", label: "Log", icon: Scroll },
+const TABS: { id: TabId; label: string }[] = [
+  { id: "terminal", label: "Claude" },
+  { id: "files", label: "Files" },
+  { id: "review", label: "Changes" },
+  { id: "log", label: "Log" },
 ];
 
 /** Simple mode: the agent and the changes, nothing else. */
@@ -64,7 +60,6 @@ const WIDE_QUERY = "(min-width: 56.25rem)";
 interface Badge {
   count: number;
   noun: string;
-  chip: string;
 }
 
 const ACTION_DONE: Record<string, string> = {
@@ -299,13 +294,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     );
   }
 
-  const st = workspaceStatus(w);
   const running = optimisticRunning;
+  const title = projectTitle(w);
 
   const badges: Partial<Record<TabId, Badge>> = {};
-  if (terminals.length > 1 && !chat) badges.terminal = { count: terminals.length, noun: "open terminals", chip: "chip-stopped" };
-  if (reviewCount > 0)
-    badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files", chip: "chip-review" };
+  if (terminals.length > 1 && !chat) badges.terminal = { count: terminals.length, noun: "open terminals" };
+  if (reviewCount > 0) badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files" };
 
   // Terminal ids carry their kind (see spawnAgentSession): shell-<n> or agent-<name>-<n>.
   const addTerminal = (kind: "shell" | string) => {
@@ -320,48 +314,52 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   };
 
   // No primary button in the header: a terminal project's Claude is restarted or
-  // stopped from the ⋯ menu, and a chat's one primary action lives in the chat.
+  // stopped from the project menu, and a chat's one primary action lives in the chat.
   // A chat has no start/stop of its own: the server's start is a no-op, and Stop lives inside the chat.
-  const actions = (
-    <>
-      <Menu
-        label="More actions"
-        trigger={
-          <Button size="sm" variant="secondary" iconOnly className="max-md:size-11 max-md:border-transparent max-md:bg-transparent">
-            <DotsThree size={16} weight="bold" />
-          </Button>
-        }
-      >
-        {chat ? null : (
-          <>
-            <MenuItem onSelect={() => run("restart")}>
-              <ArrowsClockwise size={14} aria-hidden="true" />
-              Restart Claude
-            </MenuItem>
-            {running ? (
-              <MenuItem onSelect={() => run("stop")}>
-                <Stop size={14} aria-hidden="true" />
-                Stop Claude
-              </MenuItem>
-            ) : null}
-          </>
-        )}
-        {advanced ? (
-          <MenuItem onSelect={() => void share()}>
-            <ShareNetwork size={14} aria-hidden="true" />
-            Copy share link
+  // The project name is the menu's trigger, so the menu is the title's own affordance.
+  const projectMenu = (
+    <Menu
+      label={title}
+      align="start"
+      trigger={
+        <button
+          type="button"
+          className="inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2.5 text-[15px] font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent"
+        >
+          <span className="min-w-0 truncate">{title}</span>
+          <CaretDown size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
+        </button>
+      }
+    >
+      {chat ? null : (
+        <>
+          <MenuItem onSelect={() => run("restart")}>
+            <ArrowsClockwise size={14} aria-hidden="true" />
+            Restart Claude
           </MenuItem>
-        ) : null}
-        <MenuItem onSelect={() => setRenaming(true)}>
-          <PencilSimple size={14} aria-hidden="true" />
-          Rename
+          {running ? (
+            <MenuItem onSelect={() => run("stop")}>
+              <Stop size={14} aria-hidden="true" />
+              Stop Claude
+            </MenuItem>
+          ) : null}
+        </>
+      )}
+      {advanced ? (
+        <MenuItem onSelect={() => void share()}>
+          <ShareNetwork size={14} aria-hidden="true" />
+          Copy share link
         </MenuItem>
-        <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
-          <Trash size={14} aria-hidden="true" />
-          Delete project…
-        </MenuItem>
-      </Menu>
-    </>
+      ) : null}
+      <MenuItem onSelect={() => setRenaming(true)}>
+        <PencilSimple size={14} aria-hidden="true" />
+        Rename
+      </MenuItem>
+      <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
+        <Trash size={14} aria-hidden="true" />
+        Delete project…
+      </MenuItem>
+    </Menu>
   );
 
   const paneOpen = !chat && wide && pane !== null;
@@ -372,50 +370,52 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   return (
     <div className="cockpit max-md:overflow-hidden">
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
-      {/* One top row per project: menu (phones), title, status, the tabs, and the ⋯ menu. On a phone the tabs wrap under the title, inside the same 52px-wide column. */}
-      <header className="cockpit-head max-md:!flex-wrap max-md:!gap-x-1 max-md:!gap-y-0 max-md:!px-1 max-md:!py-0 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
-        <div className="flex min-w-0 items-center gap-2 max-md:h-13 max-md:flex-1 max-md:basis-0 max-md:gap-1">
+      {/* One 56px row per project: the title (its menu), the segmented switch centred, and Preview. On a phone the title row is 52px and the switch sits on its own row below. */}
+      <header className="grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 pr-3 pl-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
+        <div className="flex h-14 min-w-0 items-center justify-self-start gap-1 max-md:h-13 max-md:w-full max-md:justify-self-stretch">
           <Button variant="quiet" iconOnly aria-label="Open menu" title="Menu" className="shell:hidden size-11 shrink-0" onClick={() => setNavOpen(true)}>
             <List size={20} aria-hidden="true" />
           </Button>
-          <h1 className="m-0 min-w-0 truncate text-base font-semibold text-text-primary">{projectTitle(w)}</h1>
-          <StatusChip status={st} />
+          <h1 className="m-0 flex min-w-0 text-[15px] font-medium text-text-primary">
+            {can.mutate ? projectMenu : <span className="min-w-0 truncate px-2.5">{title}</span>}
+          </h1>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center gap-1 max-md:order-last max-md:basis-full">
-        <TabList label="Project tabs" className="!border-b-0 !px-0">
-        {visibleTabs.map(({ id, label, icon: Icon }) => {
-          const badge = badges[id];
-          const TabIcon = chat && id === "terminal" ? ChatCircleDots : Icon;
-          return (
-            <Tab key={id} value={id} aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}>
-              <TabIcon size={14} aria-hidden="true" />
-              {label}
-              {badge ? (
-                <span className={cn("chip", badge.chip, "tnum")} aria-hidden="true">
-                  {badge.count}
-                </span>
-              ) : null}
-            </Tab>
-          );
-        })}
-      </TabList>
-        {/* The chat has its own Preview button; a terminal project gets this one, in the tab row. */}
-        {chat ? null : (
-          <button type="button" className="tab shrink-0 bg-transparent" disabled={previewing} onClick={() => void preview()}>
-            <Globe size={14} aria-hidden="true" />
-            Preview
-          </button>
-        )}
-        </div>
+        <TabList label="Project views" className="max-md:col-span-2 max-md:row-start-2 max-md:mb-2">
+          {visibleTabs.map(({ id, label }) => {
+            const badge = badges[id];
+            const name = id === "terminal" && chat ? "Chat" : label;
+            return (
+              <Tab key={id} value={id} aria-label={badge ? `${name}, ${badge.count} ${badge.noun}` : undefined}>
+                {name}
+                {badge ? (
+                  <span className="tnum text-text-faint" aria-hidden="true">
+                    {badge.count}
+                  </span>
+                ) : null}
+              </Tab>
+            );
+          })}
+        </TabList>
 
-        {can.mutate ? (
-          <div className="flex shrink-0 items-center gap-1.5 max-md:gap-1">{actions}</div>
-        ) : (
-          <span className="chip chip-stopped" title="You can look at this project but not change it.">
-            View only
-          </span>
-        )}
+        <div className="flex h-14 shrink-0 items-center justify-self-end gap-1.5 max-md:h-13">
+          {(
+            <button
+              type="button"
+              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-3 text-sm text-text-secondary hover:bg-surface-hover disabled:opacity-50"
+              disabled={previewing}
+              onClick={() => void preview()}
+            >
+              <Globe size={14} aria-hidden="true" />
+              Preview
+            </button>
+          )}
+          {can.mutate ? null : (
+            <span className="chip chip-stopped" title="You can look at this project but not change it.">
+              View only
+            </span>
+          )}
+        </div>
       </header>
 
       {tab === "terminal" && !chat && terminals.length > 1 ? (
@@ -490,33 +490,35 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       running, because the daemon retains the final screen of a
                       finished session, replacing it with a notice would throw
                       away the only surviving record of what the agent did. */}
-                  {running || activeTerminal !== "main" ? null : (
-                    <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5">
-                      <Play size={13} className="shrink-0 text-text-muted" aria-hidden="true" />
-                      <span className="min-w-0 flex-1 text-xs text-text-muted">
-                        {can.mutate
-                          ? `Claude stopped, showing the last screen. Restart it${advanced ? ", or open a shell" : ""}.`
-                          : "Not running, showing the last screen."}
-                      </span>
-                      {can.mutate ? (
-                        <Button variant="secondary" size="sm" onClick={() => run("start")}>
-                          Restart Claude
-                        </Button>
-                      ) : null}
-                      {can.mutate && advanced ? (
-                        <Button variant="secondary" size="sm" onClick={() => addTerminal("shell")}>
-                          Open shell
-                        </Button>
-                      ) : null}
+                  {/* The terminal sits in a calm dark panel, inset from the page edges and under the header. */}
+                  <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] bg-surface-terminal">
+                    {running || activeTerminal !== "main" ? null : (
+                      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-3 text-sm text-text-muted">
+                        <span className="min-w-0 flex-1">
+                          {can.mutate
+                            ? `Claude stopped, showing the last screen. Restart it${advanced ? ", or open a shell" : ""}.`
+                            : "Not running, showing the last screen."}
+                        </span>
+                        {can.mutate ? (
+                          <Button variant="secondary" size="sm" className="rounded-full" onClick={() => run("start")}>
+                            Restart Claude
+                          </Button>
+                        ) : null}
+                        {can.mutate && advanced ? (
+                          <Button variant="quiet" size="sm" onClick={() => addTerminal("shell")}>
+                            Open shell
+                          </Button>
+                        ) : null}
+                      </div>
+                    )}
+                    <div className="min-h-0 flex-1">
+                      <TerminalView
+                        key={`${workspaceId}:${activeTerminal}`}
+                        workspaceId={workspaceId}
+                        terminalId={activeTerminal}
+                        onExit={activeTerminal === "main" ? undefined : () => closeTerminal(activeTerminal)}
+                      />
                     </div>
-                  )}
-                  <div className="min-h-0 flex-1">
-                    <TerminalView
-                      key={`${workspaceId}:${activeTerminal}`}
-                      workspaceId={workspaceId}
-                      terminalId={activeTerminal}
-                      onExit={activeTerminal === "main" ? undefined : () => closeTerminal(activeTerminal)}
-                    />
                   </div>
                 </>
               ) : null}

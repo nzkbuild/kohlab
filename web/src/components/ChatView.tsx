@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowUp, CaretRight, Check, Copy, Eye, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowUp, CaretRight, Check, Copy, Eye, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
@@ -51,6 +51,20 @@ function summarizeTools(lines: string[]): string {
   if (helped) parts.push(`asked ${n(helped, "helper", "helpers")}`);
   if (other) parts.push(`did ${n(other, "other thing", "other things")}`);
   return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** Present-tense version of a describeTool line for the working line: "Created a.html" -> "Writing a.html". */
+function workingLine(t: string): string {
+  const rest = (n: number) => t.slice(n);
+  if (t.startsWith("Created ")) return `Writing ${rest(8)}`;
+  if (t.startsWith("Edited ")) return `Editing ${rest(7)}`;
+  if (t.startsWith("Read ")) return `Reading ${rest(5)}`;
+  if (t.startsWith("Ran: ")) return "Running a command";
+  if (t.startsWith("Searched the web")) return "Searching the web";
+  if (t.startsWith("Searched")) return "Searching the files";
+  if (t.startsWith("Opened ")) return "Opening a page";
+  if (t.startsWith("Asked a helper")) return "Asking a helper";
+  return "Working";
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -126,7 +140,7 @@ function CopyReply({ text, latest }: { text: string; latest: boolean }) {
           iconOnly
           aria-label="Copy reply"
           className={cn(
-            "size-8 text-text-muted hover:text-text-primary max-md:size-11 [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100",
+            "size-8 text-text-faint hover:text-text-primary max-md:size-11 [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100",
             "motion-safe:transition-opacity",
             latest ? "opacity-100" : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
           )}
@@ -201,7 +215,7 @@ function Prose({ text }: { text: string }) {
 }
 
 /** A run of tool actions: one muted line; the caret opens the list of each action. */
-function ToolRun({ lines, live }: { lines: ChatEvent[]; live: boolean }) {
+function ToolRun({ lines }: { lines: ChatEvent[] }) {
   const [open, setOpen] = useState(false);
   const tools = lines.filter((e): e is ToolEvent => e.kind === "tool");
   const summary = summarizeTools(tools.map((e) => e.text));
@@ -214,7 +228,7 @@ function ToolRun({ lines, live }: { lines: ChatEvent[]; live: boolean }) {
         className="flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-left text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
       >
         <CaretRight size={14} weight="bold" aria-hidden="true" className={cn("shrink-0 motion-safe:transition-transform", open && "rotate-90")} />
-        {live ? `Working… ${summary}` : cap(summary)}
+        {cap(summary)}
       </button>
       {open ? (
         <ul className="mt-1 flex flex-col gap-1 pl-6 text-[13px] text-text-muted">
@@ -299,9 +313,9 @@ function AnsweredGroup({ events, answers }: { events: ChatEvent[]; answers: Map<
 }
 
 /** The command behind an ask (and its reason, when the card does not already show it), behind a disclosure. */
-function Details({ detail, why }: { detail?: string; why?: string }) {
+function Details({ detail, why, className }: { detail?: string; why?: string; className?: string }) {
   return (
-    <details className="text-[13px] text-text-muted">
+    <details className={cn("text-[13px] text-text-muted", className)}>
       <summary className="flex min-h-11 cursor-pointer select-none items-center hover:text-text-primary shell:min-h-8">Show details</summary>
       {why ? <p className="pb-2 text-text-secondary">{why}</p> : null}
       {detail ? (
@@ -586,9 +600,10 @@ export default function ChatView({ workspaceId }: Props) {
   };
 
   const working = busy && waiting === null;
-  const lastVisible = visibleRows[visibleRows.length - 1];
-  // The newest tool run already reads "Working…", so no separate line is needed then.
-  const lastIsTool = lastVisible?.[0].kind === "tool";
+  // The line under the last message: the newest tool line of this turn if the code has one, else "Working".
+  const lastUserAllN = Math.max(0, ...events.filter((e) => e.kind === "user").map((e) => e.n));
+  const latestTool = [...events].reverse().find((e): e is ToolEvent => e.kind === "tool" && e.n > lastUserAllN);
+  const currentAction = latestTool ? workingLine(latestTool.text) : "Working";
 
   // Keep / Undo only while the AI's changes are waiting to be kept or undone.
   const ws = findWorkspace(workspaces, workspaceId);
@@ -596,6 +611,24 @@ export default function ChatView({ workspaceId }: Props) {
   // The commit message is the user's last request: its first line, cut to 72 characters.
   const lastRequest = [...events].reverse().find((e) => e.kind === "user")?.text ?? "";
   const keepMessage = (lastRequest.split("\n")[0] ?? "").trim().slice(0, 72).trim() || "Changes from chat";
+
+  // How many files the AI changed, for "Changed N files" under the reply.
+  const [changed, setChanged] = useState<number | null>(null);
+  useEffect(() => {
+    if (!hasChanges || busy) return;
+    let alive = true;
+    api
+      .diff(workspaceId)
+      .then((files) => {
+        if (alive) setChanged(files.length);
+      })
+      .catch(() => {
+        if (alive) setChanged(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [hasChanges, busy, workspaceId]);
 
   const preview = async () => {
     setPreviewing(true);
@@ -641,7 +674,7 @@ export default function ChatView({ workspaceId }: Props) {
       case "user":
         return (
           <div className="flex justify-end" data-turn-start={e.n === lastUserN ? "" : undefined}>
-            <div className="max-w-[80%] break-words whitespace-pre-wrap rounded-[18px] bg-bubble-user px-4 py-3 text-[15px] leading-6 text-text-primary max-md:max-w-[85%] max-md:text-base">{e.text}</div>
+            <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-[15px] leading-6 text-text-primary max-md:text-base">{e.text}</div>
           </div>
         );
       case "assistant":
@@ -651,32 +684,34 @@ export default function ChatView({ workspaceId }: Props) {
         if (answered !== undefined) return <AnsweredAsk e={e} allowed={answered} />;
         if (pendingAsk?.requestId !== e.requestId) return <p className="text-[14px] text-text-muted">This question expired.</p>;
         return (
-          <section aria-label="Claude is asking" className="rounded-[14px] border border-line-subtle bg-surface-raised px-[18px] py-4">
-            <p className="text-base font-semibold text-text-primary">{e.text}</p>
-            {e.why ? <p className="mt-1 text-[15px] leading-6 text-text-secondary">{e.why}</p> : null}
-            {e.detail ? <Details detail={e.detail} /> : null}
-            {can ? (
-              <div className="mt-4 flex flex-col gap-2 shell:flex-row">
-                <Button
-                  variant="primary"
-                  className="min-h-11 w-full rounded-[10px] max-md:min-h-12 shell:w-auto"
-                  disabled={answering !== null}
-                  onClick={() => void answer(e.requestId, true)}
-                >
-                  Allow
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="min-h-11 w-full rounded-[10px] max-md:min-h-12 shell:w-auto"
-                  disabled={answering !== null}
-                  onClick={() => void answer(e.requestId, false)}
-                >
-                  {"Don't allow"}
-                </Button>
-              </div>
-            ) : (
-              <p className="mt-3 text-[14px] text-text-muted">Waiting for an answer.</p>
-            )}
+          <section aria-label="Claude is asking" className="rounded-2xl border border-line-subtle px-5 py-[18px]">
+            <p className="text-base font-medium text-text-primary">{e.text}</p>
+            {e.why ? <p className="mt-1 text-[14px] leading-5 text-text-muted">{e.why}</p> : null}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {can ? (
+                <>
+                  <Button
+                    variant="primary"
+                    className="min-h-11 rounded-full shell:min-h-9"
+                    disabled={answering !== null}
+                    onClick={() => void answer(e.requestId, true)}
+                  >
+                    Allow
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="min-h-11 rounded-full shell:min-h-9"
+                    disabled={answering !== null}
+                    onClick={() => void answer(e.requestId, false)}
+                  >
+                    {"Don't allow"}
+                  </Button>
+                </>
+              ) : (
+                <p className="text-[14px] text-text-muted">Waiting for an answer.</p>
+              )}
+              {e.detail ? <Details className="ml-auto" detail={e.detail} /> : null}
+            </div>
           </section>
         );
       }
@@ -713,34 +748,52 @@ export default function ChatView({ workspaceId }: Props) {
                 </div>
               ) : null}
               {turns.map((turn, ti) => {
-                const firstReply = turn.findIndex((row) => row[0].kind !== "user");
                 // Everything Claude wrote in this turn, as its markdown source, for Copy.
                 const replies = turn.flat().filter((e) => e.kind === "assistant").map((e) => e.text);
                 return (
                   <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
-                    {turn.map((row, ri) => {
-                      const live = working && row === lastVisible;
-                      return (
-                        <Fragment key={row[0].n}>
-                          {ri === firstReply ? <p className="text-[13px] font-semibold text-text-secondary">Claude</p> : null}
-                          {row[0].kind === "tool" ? (
-                            <ToolRun lines={row} live={live} />
-                          ) : row.length > 1 ? (
-                            <AnsweredGroup events={row} answers={answers} />
-                          ) : (
-                            renderEvent(row[0])
-                          )}
-                        </Fragment>
-                      );
-                    })}
+                    {turn.map((row) => (
+                      <Fragment key={row[0].n}>
+                        {row[0].kind === "tool" ? (
+                          <ToolRun lines={row} />
+                        ) : row.length > 1 ? (
+                          <AnsweredGroup events={row} answers={answers} />
+                        ) : (
+                          renderEvent(row[0])
+                        )}
+                      </Fragment>
+                    ))}
                     {replies.length > 0 ? <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} /> : null}
                   </div>
                 );
               })}
-              {working && !lastIsTool ? (
+              {!busy && hasChanges && can ? (
+            <div role="region" aria-label="Changes to check" className="flex flex-col gap-3">
+              <p className="text-[14px] text-text-muted">
+                {changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="primary" className="min-h-11 rounded-full shell:min-h-9" disabled={keeping} onClick={() => void keep()}>
+                  <Check size={14} aria-hidden="true" />
+                  Keep this version
+                </Button>
+                {paneOpen ? null : (
+                  <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={previewing} onClick={() => void preview()}>
+                    <Eye size={14} aria-hidden="true" />
+                    Preview
+                  </Button>
+                )}
+                <Button variant="quiet" className="min-h-11 text-text-secondary shell:min-h-9" disabled={undoing} onClick={() => setConfirmUndo(true)}>
+                  <ArrowCounterClockwise size={14} aria-hidden="true" />
+                  Undo
+                </Button>
+              </div>
+            </div>
+              ) : null}
+              {working ? (
                 <p className="flex items-center gap-2 text-[14px] text-text-muted">
-                  <span className="size-2 shrink-0 rounded-full bg-text-muted motion-safe:animate-pulse" aria-hidden="true" />
-                  Working…
+                  <span className="size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
+                  {currentAction}
                 </p>
               ) : null}
             </div>
@@ -757,48 +810,12 @@ export default function ChatView({ workspaceId }: Props) {
                   {sendError}
                 </p>
               ) : null}
-              {!busy && hasChanges ? (
-                <div
-                  role="region"
-                  aria-label="Changes to check"
-                  className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[14px] border border-line-subtle bg-surface-raised px-4 py-3 max-md:gap-y-2 max-md:px-3 max-md:py-2.5"
-                >
-                  <p className="mr-auto min-w-0 text-[15px] text-text-primary max-md:w-full max-md:truncate">
-                    <span className="max-md:hidden">Look at the preview. If you like it, keep it. If not, undo it.</span>
-                    <span className="hidden max-md:inline">Like it? Keep it, or undo.</span>
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {paneOpen ? null : (
-                      <Button variant="secondary" size="sm" className="min-h-11 shell:min-h-9" disabled={previewing} onClick={() => void preview()}>
-                        <Eye size={14} aria-hidden="true" />
-                        Preview
-                      </Button>
-                    )}
-                    <Button variant="primary" size="sm" className="min-h-11 shell:min-h-9" disabled={keeping} onClick={() => void keep()}>
-                      <Check size={14} aria-hidden="true" />
-                      <span className="max-md:hidden">Keep this version</span>
-                      <span className="hidden max-md:inline">Keep</span>
-                    </Button>
-                    <Button variant="quiet" size="sm" className="min-h-11 text-text-secondary shell:min-h-9" disabled={undoing} onClick={() => setConfirmUndo(true)}>
-                      <ArrowCounterClockwise size={14} aria-hidden="true" />
-                      Undo
-                    </Button>
-                  </div>
-                </div>
-              ) : !busy && !paneOpen ? (
-                <div className="mb-2 flex justify-end">
-                  <Button variant="secondary" size="sm" className="min-h-11 shell:min-h-9" disabled={previewing} onClick={() => void preview()}>
-                    <Eye size={14} aria-hidden="true" />
-                    Preview
-                  </Button>
-                </div>
-              ) : null}
 
-              <div className="flex flex-col gap-2 rounded-[18px] border border-line-strong bg-surface-raised p-3 pl-4 focus-within:border-line-accent focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-line-accent">
+              <div className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5 focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-line-strong">
                 <textarea
                   ref={taRef}
                   aria-label="Message Claude"
-                  className="block min-h-12 w-full resize-none bg-transparent text-[15px] leading-6 text-text-primary placeholder:text-text-muted outline-none! disabled:cursor-not-allowed max-md:text-base"
+                  className="block min-h-9 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-text-primary placeholder:text-text-muted outline-none! disabled:cursor-not-allowed max-md:text-base"
                   rows={1}
                   value={draft}
                   disabled={busy}
@@ -806,28 +823,23 @@ export default function ChatView({ workspaceId }: Props) {
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={onKeyDown}
                 />
-                <div className="flex items-center gap-3">
-                  <span className="hidden text-[13px] text-text-muted shell:inline">Enter to send, Shift+Enter for a new line</span>
-                  <div className="ml-auto flex items-center">
-                    {waiting !== null ? null : busy ? (
-                      <Button variant="primary" iconOnly aria-label="Stop Claude" title="Stop Claude" className="size-11 rounded-full shell:size-9" onClick={() => void stop()}>
-                        <Stop size={16} weight="fill" aria-hidden="true" />
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="primary"
-                        iconOnly
-                        aria-label="Send"
-                        title="Send"
-                        className="size-11 rounded-full shell:size-9"
-                        disabled={sending || draft.trim() === ""}
-                        onClick={() => void send()}
-                      >
-                        <ArrowUp size={18} weight="bold" aria-hidden="true" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                {waiting !== null ? null : busy ? (
+                  <Button variant="primary" iconOnly aria-label="Stop Claude" title="Stop Claude" className="size-11 shrink-0 rounded-full shell:size-9" onClick={() => void stop()}>
+                    <span aria-hidden="true" className="size-[11px] rounded-[2px] bg-current" />
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    iconOnly
+                    aria-label="Send"
+                    title="Send"
+                    className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
+                    disabled={sending || draft.trim() === ""}
+                    onClick={() => void send()}
+                  >
+                    <ArrowUp size={18} weight="bold" aria-hidden="true" />
+                  </Button>
+                )}
               </div>
             </div>
           </div>

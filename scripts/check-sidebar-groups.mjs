@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
 /**
- * Sidebar grouping: which group a project lands in, the time a row shows, the
- * newest-first order inside a group, and the compact row time. The sidebar
- * groups are the owner's only view of what needs them, so a wrong bucket here
- * hides a question behind "Earlier".
+ * Sidebar list order: one flat list, projects that need the owner first, then
+ * the rest by most recent change. Also the relative time the rail no longer
+ * shows, kept on the formatter it still uses elsewhere. A project that needs
+ * the owner buried under "Earlier" would hide a question, so the order is checked.
  *
  * Run:  bun scripts/check-sidebar-groups.mjs
  */
-import { sidebarGroup, sidebarTime, bySidebarActivity } from "../web/src/lib/status.ts";
+import { sidebarOrder } from "../web/src/lib/sidebarOrder.ts";
+import { workspaceStatus } from "../web/src/lib/status.ts";
 import { sidebarWhen, projectTitle } from "../web/src/lib/format.ts";
 
 let failures = 0;
@@ -20,23 +21,23 @@ function check(name, got, want) {
 const base = { id: "w", repo: "/r", task: "t", agent: "sh", created: 1, started: null, stopped: null, running: false, path: "/p" };
 const NOW = 1_000_000_000_000;
 const MIN = 60_000;
+const ids = (list) => list.map((w) => w.id);
 
-check("waiting wins over running", sidebarGroup({ ...base, running: true, started: 5, waiting: true }), "needs");
-check("running is working", sidebarGroup({ ...base, running: true, started: 5 }), "working");
-check("stopped with changes is ready to check", sidebarGroup({ ...base, started: 5, stopped: 9 }), "review");
-check("committed is earlier", sidebarGroup({ ...base, started: 5, stopped: 9, lastCommitAt: 10 }), "earlier");
-check("stopped clean is earlier", sidebarGroup({ ...base, started: 5, stopped: 9, stoppedClean: true }), "earlier");
-check("discarded is earlier", sidebarGroup({ ...base, started: 5, stopped: 9, discardedAt: 10 }), "earlier");
-check("never run is earlier", sidebarGroup({ ...base }), "earlier");
+check("waiting is needs-you", workspaceStatus({ ...base, running: true, waiting: true }), "needs-you");
+check("stopped with changes is ready to check", workspaceStatus({ ...base, stopped: 9 }), "needs-review");
 
-check("needs-you time is started", sidebarTime({ ...base, running: true, started: 5, stopped: 3, waiting: true }), 5);
-check("review time is stopped", sidebarTime({ ...base, started: 5, stopped: 9 }), 9);
-check("earlier time is stopped", sidebarTime({ ...base, started: 5, stopped: 9, lastCommitAt: 10 }), 9);
-check("never-run time falls back to created", sidebarTime({ ...base }), 1);
+const oldNeeds = { ...base, id: "needs-old", started: 2, stopped: 4, waiting: true };
+const newestPlain = { ...base, id: "plain-new", started: 2, stopped: 8 };
+const newNeeds = { ...base, id: "needs-new", started: 2, stopped: 6, waiting: true };
+const running = { ...base, id: "running", running: true, started: 7 };
+const reviewed = { ...base, id: "review-old", stopped: 3 };
+const input = [newestPlain, reviewed, running, oldNeeds, newNeeds];
+const before = ids(input);
 
-const older = { ...base, id: "a", started: 2, stopped: 4 };
-const newer = { ...base, id: "b", started: 2, stopped: 8 };
-check("newest activity first", [older, newer].sort(bySidebarActivity).map((w) => w.id), ["b", "a"]);
+check("needs-you first, even when older", ids(sidebarOrder(input)), ["needs-new", "needs-old", "plain-new", "running", "review-old"]);
+check("rest by most recent change, no status grouping", ids(sidebarOrder([reviewed, running, newestPlain])), ["plain-new", "running", "review-old"]);
+check("sort does not mutate the store's array", ids(input), before);
+check("empty list", sidebarOrder([]), []);
 
 check("under a minute is now", sidebarWhen(NOW - 30_000, NOW), "now");
 check("future clock skew is now", sidebarWhen(NOW + 5 * MIN, NOW), "now");

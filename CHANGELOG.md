@@ -9,6 +9,17 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.39.0] - 2026-10-14
+
+### Changed
+- A quieter, more grown-up look, in the style of ChatGPT and Claude: soft charcoal in dark mode, clean white in light mode, and no lines between the sidebar and the page.
+- The sidebar is one plain list of projects. A small dot marks a project that needs you or is ready to check; no group headings, counts, times or status icons. Search sits at the top; Settings and Install app are in the menu under your name at the bottom.
+- No spinners and no "Working" badge. While Claude works, the chat shows one grey line saying what it is doing ("Writing menu.html") and the send button becomes Stop.
+- The project page has the project's name with a small menu (rename, restart, delete), a centred Chat | Changes switch (Claude | Changes for terminal projects) and Preview on the right.
+- Home asks "What should we build?" with one message box and a few ideas underneath.
+- Keep this version, Preview and Undo now appear right under Claude's reply. Claude's questions sit in a plain box with Allow and Don't allow.
+- The terminal sits in a calm dark panel.
+
 ## [1.38.0] - 2026-10-14
 
 ### Added

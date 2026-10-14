@@ -1,17 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import {
-  ArrowRight,
-  ArrowUp,
-  CalendarCheck,
-  CheckCircle,
-  CircleNotch,
-  GithubLogo,
-  BellRinging,
-  Storefront,
-  Wrench,
-  X,
-  type Icon,
-} from "@phosphor-icons/react";
+import { ArrowUp, GithubLogo, X } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
@@ -179,7 +167,6 @@ function NewProjectForm({ onCancel }: { onCancel: () => void }) {
           Cancel
         </Button>
         <Button type="submit" variant="primary" className="max-md:w-full" disabled={busy || !!missing}>
-          {busy ? <CircleNotch size={14} className="motion-safe:animate-spin" aria-hidden="true" /> : null}
           {busy ? "Creating…" : "Create project"}
         </Button>
       </div>
@@ -211,16 +198,14 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
 
 /* ------------------------------------------------------------------ home -- */
 
-const STARTERS: { text: string; icon: Icon }[] = [
-  { text: "A website for my small business", icon: Storefront },
-  { text: "A page that collects RSVPs for an event", icon: CalendarCheck },
-  { text: "A small tool that does a boring job for me", icon: Wrench },
-];
+/** Starter ideas: each one fills the composer. "Something else" just puts the cursor there. */
+const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator"];
+const CHIP = "inline-flex h-9 items-center rounded-full border border-line-subtle px-3.5 text-[14px] text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none";
 
 /**
  * Home, and the same screen for a first run with no projects: one question, one
- * composer, a few ideas to start from, and a line for each project that needs
- * the person. The sidebar is the project list, so nothing else lives here.
+ * composer, a few ideas to start from. If a project needs the person, one quiet
+ * link says so. The sidebar is the project list, so nothing else lives here.
  */
 export function HomeScreen() {
   const workspaces = useApp((s) => s.workspaces);
@@ -248,14 +233,6 @@ export function HomeScreen() {
       workspaces
         .filter((w) => workspaceStatus(w) === "needs-you")
         .sort((a, b) => (a.stopped ?? a.created) - (b.stopped ?? b.created)),
-    [workspaces],
-  );
-  const ready = useMemo(
-    () =>
-      workspaces
-        .filter((w) => workspaceStatus(w) === "needs-review")
-        .sort((a, b) => (a.stopped ?? a.created) - (b.stopped ?? b.created))
-        .slice(0, 3),
     [workspaces],
   );
 
@@ -314,50 +291,21 @@ export function HomeScreen() {
   return (
     <div className="surface">
       <div className="surface-inner">
-        <div className="mx-auto w-full max-w-[696px] px-4 pt-6 pb-16 sm:pt-[12vh]">
-          {needsYou.length > 0 || ready.length > 0 ? (
-            <div className="mb-10 flex flex-col gap-2">
-              {needsYou.map((w) => (
-                <div
-                  key={w.id}
-                  className="flex items-center gap-3 rounded-[14px] bg-surface-raised px-4 py-3 text-[15px] text-text-primary max-md:px-3 max-md:py-2.5"
-                >
-                  <BellRinging size={18} weight="fill" className="shrink-0 text-accent" aria-hidden="true" />
-                  <span className="min-w-0 flex-1">
-                    <strong className="font-semibold">{projectTitle(w)}</strong> needs you. Claude is waiting for your
-                    answer.
-                  </span>
-                  <Button variant="secondary" size="sm" className="!min-h-11 sm:!min-h-0" aria-label={`Open ${projectTitle(w)}`} onClick={() => open(w.id)}>
-                    Open
-                  </Button>
-                </div>
-              ))}
-              {ready.map((w) => (
-                <div key={w.id} className="flex items-center gap-3 px-1 text-sm text-text-muted">
-                  <CheckCircle size={16} className="shrink-0" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{projectTitle(w)} is ready to check</span>
-                  <Button variant="quiet" size="sm" className="!min-h-11 sm:!min-h-0" aria-label={`Open ${projectTitle(w)}`} onClick={() => open(w.id)}>
-                    Open
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <h1 className="text-balance text-center text-[28px] leading-[34px] font-[620] tracking-[-0.022em] text-text-primary max-md:text-[24px] max-md:leading-[30px]">
-            What do you want to build?
+        <div className="mx-auto flex w-full max-w-[720px] flex-col items-center px-4 pt-[12vh] pb-16">
+          <h1 className="text-center text-[28px] leading-[34px] font-medium tracking-tight text-text-primary max-md:text-[24px] max-md:leading-[30px]">
+            What should we build?
           </h1>
 
           {can.mutate ? (
             <>
-              <div className="relative mt-8 rounded-[18px] border border-line-strong bg-surface-raised focus-within:border-line-accent focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-line-accent">
+              <div className="mt-8 flex w-full items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5 focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-line-strong">
                 <label htmlFor="home-idea" className="sr-only">
                   Describe what you want to build
                 </label>
                 <textarea
                   id="home-idea"
                   ref={composer}
-                  rows={3}
+                  rows={1}
                   value={idea}
                   readOnly={busy}
                   onChange={(e) => setIdea(e.target.value)}
@@ -366,57 +314,48 @@ export function HomeScreen() {
                   onFocus={(e) => {
                     if (isPhone()) e.currentTarget.scrollIntoView({ block: "center" });
                   }}
-                  placeholder="Describe your idea in your own words…"
-                  aria-describedby="home-hint"
-                  className="block min-h-[84px] w-full resize-none rounded-[18px] bg-transparent px-5 pt-4 pb-16 text-base leading-6 text-text-primary outline-none! placeholder:text-text-muted"
+                  placeholder="Describe it in a sentence or two"
+                  className="field-sizing-content block max-h-40 min-h-9 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-base leading-6 text-text-primary outline-none! placeholder:text-text-muted"
                 />
-                <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-4 pb-3">
-                  <p id="home-hint" className="text-[13px] leading-5 text-text-muted">
-                    Claude works in its own folder. Every change can be undone.
-                  </p>
-                  <Button
-                    variant="primary"
-                    aria-label="Start building"
-                    onClick={() => void start()}
-                    disabled={busy || !idea.trim()}
-                    className="size-11 shrink-0 rounded-full p-0"
-                  >
-                    {busy ? (
-                      <CircleNotch size={18} className="motion-safe:animate-spin" aria-hidden="true" />
-                    ) : (
-                      <ArrowUp size={18} weight="bold" aria-hidden="true" />
-                    )}
-                  </Button>
-                </div>
+                <Button
+                  variant="primary"
+                  iconOnly
+                  aria-label="Start building"
+                  title="Start building"
+                  onClick={() => void start()}
+                  disabled={busy || !idea.trim()}
+                  className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
+                >
+                  <ArrowUp size={18} weight="bold" aria-hidden="true" />
+                </Button>
               </div>
 
               {error ? (
-                <p role="alert" className="mt-3 text-sm text-status-danger">
+                <p role="alert" className="mt-3 w-full text-sm text-status-danger">
                   {error}
                 </p>
               ) : null}
 
-              <section aria-labelledby="home-ideas" className="mt-10">
-                <h2 id="home-ideas" className="text-sm font-normal text-text-muted">
-                  Not sure where to start?
-                </h2>
-                <ul className="mt-3 flex flex-col gap-2">
-                  {STARTERS.map(({ text, icon: Icon }) => (
-                    <li key={text}>
-                      <button
-                        type="button"
-                        onClick={() => fill(text)}
-                        className="flex min-h-11 w-full items-center gap-3 rounded-[14px] border border-line-subtle px-4 py-3 text-left text-[15px] max-md:min-h-[52px] text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none"
-                      >
-                        <Icon size={18} className="shrink-0 text-text-secondary" aria-hidden="true" />
-                        <span className="min-w-0 flex-1">{text}</span>
-                        <ArrowRight size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              <ul className="mt-4 flex flex-wrap justify-center gap-2">
+                {STARTERS.map((text) => (
+                  <li key={text}>
+                    <button type="button" onClick={() => fill(text)} className={CHIP}>
+                      {text}
+                    </button>
+                  </li>
+                ))}
+                <li>
+                  <button type="button" onClick={() => composer.current?.focus()} className={CHIP}>
+                    Something else
+                  </button>
+                </li>
+              </ul>
 
+              {needsYou[0] ? (
+                <Button variant="quiet" size="sm" className="mt-6 text-text-muted" onClick={() => open(needsYou[0].id)}>
+                  {`${projectTitle(needsYou[0])} needs you`}
+                </Button>
+              ) : null}
             </>
           ) : (
             <p className="mt-6 text-center text-sm text-text-muted">

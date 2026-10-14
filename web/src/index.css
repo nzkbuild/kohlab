@@ -6,14 +6,15 @@
 /* ============================================================================
    Kohlab design tokens
    ----------------------------------------------------------------------------
-   Direction: zinc planes, white primary, lime only for live agents, Geist for UI, mono
-   only for code and measurement.
+   Direction: quiet charcoal, ChatGPT-like. Separation by background, not
+   borders; Geist for UI, mono only for code and measurement.
 
    Two tiers, and only two:
-     1. PRIMITIVE: raw OKLCH ramps. The ONLY place a colour literal exists.
+     1. PRIMITIVE: raw OKLCH ramps (neutrals, signal colours).
      2. SEMANTIC: what a thing IS (surface-raised, text-muted, status-running).
-   Components consume the semantic tier. No component holds a hex literal or a
-   primitive name.
+        The approved quiet palette is given as hex here, light and dark.
+   index.css is the ONLY file with colour literals. Components consume the
+   semantic tier: no hex literal and no primitive name outside this file.
 
    OKLCH rather than HSL: HSL hue is not perceptually uniform (CSS Color 4
    states it normatively), so equal-L steps across two hues do not read as equal
@@ -44,28 +45,34 @@
   --lime-500: oklch(0.84 0.21 124);
   --red-500: oklch(0.65 0.21 25);
 
-  /* --- semantic: surfaces (distinct planes, never one flat black) ---------- */
-  --surface-base: var(--neutral-1000);      /* app canvas */
-  --surface-sunken: oklch(0.125 0.002 286);  /* terminal, code, log */
-  --surface-raised: var(--neutral-950);     /* panels, cards, sidebar */
-  --surface-overlay: var(--neutral-900);    /* dialogs, palette, popovers */
-  --surface-hover: var(--neutral-900);
-  --surface-active: var(--neutral-800);
-  --bubble-user: var(--neutral-800);  /* the user's own message in the chat */
+  /* --- semantic: surfaces. Separation is by tone alone: no borders between
+     the sidebar, the page and the header. Values are the approved quiet
+     palette (docs spec, "Tokens"); the terminal stays #181818 in both modes. */
+  --surface-base: #212121;        /* page: chat, home, settings */
+  --surface-sidebar: #171717;     /* the rail, one step darker than the page */
+  --surface-sunken: #181818;      /* code, log */
+  --surface-terminal: #181818;    /* terminal panel: dark in both modes */
+  --surface-raised: #2f2f2f;      /* composer, fields, cards */
+  --surface-overlay: #2f2f2f;     /* dialogs, palette, popovers */
+  --surface-hover: #2a2a2a;
+  --surface-active: #3a3a3a;      /* selected row, segmented thumb */
+  --surface-bubble: #303030;      /* the user's own message */
+  --bubble-user: var(--surface-bubble);
 
   /* --- semantic: text ----------------------------------------------------- */
-  --text-primary: var(--neutral-100);
-  --text-secondary: var(--neutral-300);
-  --text-muted: var(--neutral-400);
-  --text-faint: var(--neutral-500);
+  --text-primary: #ececec;
+  --text-secondary: #c4c4c4;
+  --text-muted: #a3a3a3;
+  --text-faint: #9a9a9a;
   --text-on-accent: oklch(0.18 0.002 286);
 
-  /* --- semantic: lines (borders only, forced-colors deletes box-shadow) --- */
-  --line-subtle: var(--neutral-800);
-  /* Control boundaries must clear 3:1 against their own surface (SC 1.4.11),
-     so this is a full step lighter than the decorative divider. */
-  --line-strong: var(--neutral-600);
-  --line-accent: var(--neutral-100);
+  /* --- semantic: lines ---------------------------------------------------- */
+  /* Decorative divider only. Not used between sidebar and page or under headers. */
+  --line-subtle: rgba(255, 255, 255, 0.1);
+  /* Control boundaries must clear 3:1 against their own surface (SC 1.4.11).
+     scripts/check-contrast.mjs audits this against surface-raised. */
+  --line-strong: #808080;
+  --line-accent: var(--text-primary);
 
   /* --- semantic: status lifecycle ---------------------------------------- */
   /* One tone per status, chosen so the chip LABEL passes 4.5:1 against the
@@ -77,7 +84,7 @@
   --status-stopped: var(--neutral-500);
   --status-danger: oklch(0.82 0.14 25);
   /* The primary action is a white fill (brand rule); lime stays a status. */
-  --accent: var(--neutral-100);
+  --accent: var(--text-primary);
   --accent-hover: oklch(1 0 0);
   --accent-press: var(--neutral-300);
 
@@ -111,7 +118,7 @@
 
   /* Layout constants shared by JS and CSS (mobile drawer + sticky chrome). */
   --topbar-h: 3.25rem;
-  --sidebar-w: 15.5rem;
+  --sidebar-w: 16.25rem;
   --sidebar-w-collapsed: 3.75rem;
 
   /* Density: one place to tune how tight the console sits. Always min-height,
@@ -119,7 +126,6 @@
   --control-h: 2.5rem;
   --control-h-sm: 2rem;
   --row-h: 2.25rem;
-  --tab-h: 2.75rem;
 
   /* Stacking: named layers instead of magic numbers. */
   --z-sticky: 10;
@@ -142,31 +148,33 @@
   :root {
     color-scheme: light;
 
-    --surface-base: oklch(0.985 0.001 286);
-    --surface-sunken: oklch(0.955 0.003 286);
-    --surface-raised: oklch(1 0 0);
-    --surface-overlay: oklch(1 0 0);
-    --surface-hover: oklch(0.965 0.002 286);
-    --surface-active: oklch(0.93 0.003 286);
-    --bubble-user: oklch(0.955 0.003 286);
+    --surface-base: #ffffff;
+    --surface-sidebar: #f9f9f9;
+    --surface-sunken: #f4f4f4;
+    --surface-raised: #f4f4f4;
+    --surface-overlay: #ffffff;
+    --surface-hover: #ececec;
+    --surface-active: #e5e5e5;
+    --surface-bubble: #f4f4f4;
+    --bubble-user: var(--surface-bubble);
 
-    --text-primary: oklch(0.2 0.003 286);
-    --text-secondary: oklch(0.37 0.004 286);
-    --text-muted: oklch(0.48 0.005 286);
-    --text-faint: oklch(0.53 0.005 286);
+    --text-primary: #0d0d0d;
+    --text-secondary: #3d3d3d;
+    --text-muted: #5d5d5d;
+    --text-faint: #6e6e6e;
     --text-on-accent: oklch(0.985 0 0);
 
-    --line-subtle: oklch(0.91 0.003 286);
+    --line-subtle: rgba(0, 0, 0, 0.1);
     --line-strong: oklch(0.6 0.005 286);
-    --line-accent: oklch(0.2 0.003 286);
+    --line-accent: var(--text-primary);
 
-    --status-running: oklch(0.5 0.14 130);
+    --status-running: oklch(0.46 0.14 130);
     --status-review: var(--text-primary);
     --status-committed: var(--text-muted);
     --status-stopped: var(--text-faint);
     --status-danger: oklch(0.5 0.19 25);
 
-    --accent: oklch(0.2 0.003 286);
+    --accent: var(--text-primary);
     --accent-hover: oklch(0.28 0.003 286);
     --accent-press: oklch(0.35 0.004 286);
   }
@@ -179,22 +187,22 @@
   .dark-pane {
     color-scheme: dark;
 
-    --surface-base: var(--neutral-1000);
-    --surface-sunken: oklch(0.125 0.002 286);
-    --surface-raised: var(--neutral-950);
-    --surface-overlay: var(--neutral-900);
-    --surface-hover: var(--neutral-900);
-    --surface-active: var(--neutral-800);
+    --surface-base: #181818;
+    --surface-sunken: #181818;
+    --surface-raised: #181818;
+    --surface-overlay: #2f2f2f;
+    --surface-hover: #2a2a2a;
+    --surface-active: #3a3a3a;
 
-    --text-primary: var(--neutral-100);
-    --text-secondary: var(--neutral-300);
-    --text-muted: var(--neutral-400);
-    --text-faint: var(--neutral-500);
+    --text-primary: #ececec;
+    --text-secondary: #c4c4c4;
+    --text-muted: #a3a3a3;
+    --text-faint: #9a9a9a;
     --text-on-accent: oklch(0.18 0.002 286);
 
-    --line-subtle: var(--neutral-800);
-    --line-strong: var(--neutral-600);
-    --line-accent: var(--neutral-100);
+    --line-subtle: rgba(255, 255, 255, 0.1);
+    --line-strong: #808080;
+    --line-accent: var(--text-primary);
 
     --status-running: oklch(0.9 0.17 124);
     --status-review: var(--neutral-100);
@@ -202,7 +210,7 @@
     --status-stopped: var(--neutral-500);
     --status-danger: oklch(0.82 0.14 25);
 
-    --accent: var(--neutral-100);
+    --accent: var(--text-primary);
     --accent-hover: oklch(1 0 0);
     --accent-press: var(--neutral-300);
 
@@ -216,11 +224,14 @@
 @theme inline {
   --color-surface-base: var(--surface-base);
   --color-surface-sunken: var(--surface-sunken);
+  --color-surface-terminal: var(--surface-terminal);
   --color-surface-raised: var(--surface-raised);
   --color-surface-overlay: var(--surface-overlay);
   --color-surface-hover: var(--surface-hover);
   --color-surface-active: var(--surface-active);
   --color-bubble-user: var(--bubble-user);
+  --color-surface-sidebar: var(--surface-sidebar);
+  --color-surface-bubble: var(--surface-bubble);
 
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
@@ -588,12 +599,6 @@ input[type="radio"] {
     background: color-mix(in oklch, var(--status-running) 12%, transparent);
     color: var(--status-running);
   }
-  /* The only decorative animation in the product. 3 x 1.6s = 4.8s total, i.e.
-     under the five-second window SC 2.2.2 exempts, so no pause control is
-     required for it. Reduced-motion users get a static dot. */
-  .chip-running .chip-dot {
-    animation: kohlab-pulse 1.6s var(--ease-standard) 3;
-  }
   .chip-review {
     border-color: color-mix(in oklch, var(--status-review) 42%, transparent);
     background: color-mix(in oklch, var(--status-review) 12%, transparent);
@@ -656,28 +661,6 @@ input[type="radio"] {
 
 /* ============================ utilities ================================== */
 
-@keyframes kohlab-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-
-/* Working status glyph: a slow spin. Reduced motion keeps the glyph still. */
-@keyframes kohlab-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .status-spin {
-    animation: kohlab-spin 1.6s linear infinite;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -727,7 +710,6 @@ input[type="radio"] {
   flex: 0 0 auto;
   align-items: center;
   gap: 0.75rem;
-  border-bottom: 1px solid var(--line-subtle);
   padding: 0.5rem 1rem;
   /* Real translucency rather than a faux alpha fill. */
   background: color-mix(in oklch, var(--surface-base) 82%, transparent);
@@ -758,8 +740,7 @@ input[type="radio"] {
   flex-direction: column;
   overflow: hidden;
   overscroll-behavior: contain;
-  border-inline-end: 1px solid var(--line-subtle);
-  background: var(--surface-raised);
+  background: var(--surface-sidebar);
   /* No width transition: animating layout reflows the whole shell every frame.
      The rail snaps; its labels are what change. */
 }
@@ -793,19 +774,18 @@ input[type="radio"] {
 
 .sidebar-row[aria-current="page"],
 .sidebar-row[data-selected="true"] {
-  border-color: var(--line-subtle);
+  border-color: transparent;
   background: var(--surface-active);
   color: var(--text-primary);
 }
 
-/* Leading mark in a row: 14px, so an empty slot keeps titles aligned. */
-.sidebar-lead {
-  display: inline-flex;
-  width: 0.875rem;
-  height: 0.875rem;
+/* The only status shown in the rail: needs you, or ready to check. */
+.sidebar-dot {
+  width: 0.4375rem;
+  height: 0.4375rem;
   flex: none;
-  align-items: center;
-  justify-content: center;
+  border-radius: 999px;
+  background: var(--text-primary);
 }
 
 /* Collapsed rail only: the project's initial stands in for the title. */
@@ -824,21 +804,6 @@ input[type="radio"] {
   font-weight: 600;
   color: var(--text-secondary);
 }
-.sidebar[data-collapsed="true"] .sidebar-lead {
-  display: none;
-}
-
-.sidebar-divider {
-  height: 1px;
-  margin-inline: 0.5rem;
-  background: var(--line-subtle);
-}
-
-/* Collapsed rail: the connection pill shrinks to its dot (label in tooltip). */
-.sidebar[data-collapsed="true"] .sidebar-conn {
-  padding: 0.375rem;
-}
-
 .sidebar-label {
   min-width: 0;
   overflow: hidden;
@@ -861,7 +826,6 @@ input[type="radio"] {
   padding-inline: 0;
 }
 
-.sidebar[data-collapsed="true"] .sidebar-brand,
 .sidebar[data-collapsed="true"] .sidebar-head-fill {
   display: none;
 }
@@ -891,15 +855,6 @@ input[type="radio"] {
 .sidebar-row {
   position: relative;
 }
-.sidebar[data-collapsed="true"] .sidebar-badge {
-  position: absolute;
-  inset-block-start: 0.125rem;
-  inset-inline-end: 0.125rem;
-  min-height: 0;
-  padding: 0 0.25rem;
-  line-height: 1rem;
-}
-
 /* --- mobile drawer ------------------------------------------------------- */
 @media (max-width: 63.9375rem) {
   .sidebar {
@@ -937,9 +892,6 @@ input[type="radio"] {
   .sidebar[data-collapsed="true"] .sidebar-row {
     justify-content: flex-start;
     padding-inline: 0.5rem;
-  }
-  .sidebar[data-collapsed="true"] .sidebar-badge {
-    position: static;
   }
 }
 
@@ -1113,46 +1065,10 @@ input[type="radio"] {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  border-bottom: 1px solid var(--line-subtle);
   padding: 0.625rem 1rem;
 }
 
-.tabstrip {
-  display: flex;
-  align-items: center;
-  gap: 0.125rem;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--line-subtle);
-  padding: 0 0.75rem;
-  scrollbar-width: none;
-}
-
-.tabstrip::-webkit-scrollbar {
-  display: none;
-}
-
-.tab {
-  display: inline-flex;
-  min-height: var(--tab-h);
-  align-items: center;
-  gap: 0.4375rem;
-  border-bottom: 2px solid transparent;
-  padding: 0 0.6875rem;
-  font-size: 0.8125rem;
-  white-space: nowrap;
-  color: var(--text-muted);
-  transition: color var(--duration-fast-02) var(--ease-standard);
-}
-
 @media (hover: hover) {
-  .tab:hover {
-    color: var(--text-primary);
-  }
-}
-
-.tab[aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--text-primary);
 }
 
 .cockpit-body {
@@ -1163,7 +1079,7 @@ input[type="radio"] {
 /* --- terminal ------------------------------------------------------------ */
 .terminal-wrap {
   height: 100%;
-  background: var(--surface-base);
+  background: var(--surface-terminal);
 }
 
 .terminal-wrap .xterm {
@@ -1616,13 +1532,6 @@ input[type="radio"] {
   }
 }
 
-/* Alive, not decorative: the same three pulses as the running chip. */
-@media (prefers-reduced-motion: no-preference) {
-  .live-dot {
-    animation: kohlab-pulse 1.6s var(--ease-standard) 3;
-  }
-}
-
 /* --- menu + tooltip (Radix) --------------------------------------------- */
 .menu {
   z-index: var(--z-overlay);
@@ -1684,9 +1593,6 @@ input[type="radio"] {
 
 /* Collapsed rail: the count moves into the tooltip and accessible name. */
 @media (min-width: 64rem) {
-  .sidebar[data-collapsed="true"] .sidebar-row .chip {
-    display: none;
-  }
 }
 
 @media (pointer: coarse) {

@@ -142,7 +142,7 @@ try {
           small,
           form: !!document.querySelector(".launch-form"),
           // Home is one question and one composer, the same screen for every project count.
-          composer: !!document.querySelector("textarea[placeholder^='Describe your idea']"),
+          composer: !!document.querySelector("textarea[placeholder^='Describe it in a sentence']"),
           // Radix generates the trigger id; the pane name is its suffix.
           tab: document.querySelector("[role=tab][aria-selected=true]")?.id.replace(/^.*-trigger-/, "tab-") ?? null,
         };

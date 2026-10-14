@@ -7,7 +7,7 @@ import {
   BellRinging,
   CaretRight,
   CheckCircle,
-  CircleNotch,
+  Circle,
   Eye,
   PauseCircle,
 } from "@phosphor-icons/react";
@@ -22,7 +22,7 @@ export * as Dialog from "@radix-ui/react-dialog";
 /** Shape cue per status, drawn from the icon set rather than text glyphs. The one source for status icons: StatusChip and the sidebar both use it. */
 export const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
   "needs-you": <BellRinging size={14} weight="fill" />,
-  running: <CircleNotch size={14} weight="bold" className="status-spin" />,
+  running: <Circle size={10} weight="fill" />,
   "needs-review": <Eye size={14} weight="bold" />,
   committed: <CheckCircle size={14} weight="fill" />,
   discarded: <ArrowCounterClockwise size={14} weight="bold" />,
@@ -134,30 +134,50 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
  */
 export const Tabs = RadixTabs.Root;
 
+/** The project page's segmented switch: a pill track, the selected segment is the lighter thumb. */
 export function TabList({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
-    <RadixTabs.List aria-label={label} className={cn("tabstrip", className)}>
+    <RadixTabs.List aria-label={label} className={cn("inline-flex items-center rounded-full bg-surface-hover p-[3px]", className)}>
       {children}
     </RadixTabs.List>
   );
 }
 
 export function Tab({ className, ...rest }: RadixTabs.TabsTriggerProps) {
-  return <RadixTabs.Trigger className={cn("tab", className)} {...rest} />;
+  return (
+    <RadixTabs.Trigger
+      className={cn(
+        "inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent",
+        "aria-selected:bg-surface-active aria-selected:font-medium aria-selected:text-text-primary",
+        className,
+      )}
+      {...rest}
+    />
+  );
 }
 
 export const TabPanel = RadixTabs.Content;
 
 /* -------------------------------------------------------------------- menu -- */
 
-export function Menu({ trigger, label, children }: { trigger: ReactNode; label: string; children: ReactNode }) {
+export function Menu({
+  trigger,
+  label,
+  align = "end",
+  children,
+}: {
+  trigger: ReactNode;
+  label: string;
+  align?: "start" | "end";
+  children: ReactNode;
+}) {
   return (
     <RadixMenu.Root>
       <RadixMenu.Trigger asChild aria-label={label}>
         {trigger}
       </RadixMenu.Trigger>
       <RadixMenu.Portal>
-        <RadixMenu.Content className="menu" align="end" sideOffset={4} collisionPadding={8}>
+        <RadixMenu.Content className="menu" align={align} sideOffset={4} collisionPadding={8}>
           {children}
         </RadixMenu.Content>
       </RadixMenu.Portal>

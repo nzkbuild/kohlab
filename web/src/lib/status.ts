@@ -81,35 +81,6 @@ export function byReviewFirst(a: Workspace, b: Workspace): number {
   return (b.started ?? b.created) - (a.started ?? a.created);
 }
 
-/**
- * Sidebar groups, in the order the rail shows them. "needs" is the only group
- * waiting on the owner: a chat permission question is unanswered.
- */
-export type SidebarGroup = "needs" | "working" | "review" | "earlier";
-
-export const SIDEBAR_GROUPS: { key: SidebarGroup; label: string }[] = [
-  { key: "needs", label: "Needs you" },
-  { key: "working", label: "Working" },
-  { key: "review", label: "Ready to check" },
-  { key: "earlier", label: "Earlier" },
-];
-
-export function sidebarGroup(w: Workspace): SidebarGroup {
-  const status = workspaceStatus(w);
-  if (status === "needs-you") return "needs";
-  if (status === "running") return "working";
-  if (status === "needs-review") return "review";
-  return "earlier";
-}
-
-/** The time a row shows: when it started while live, when it stopped once it awaits review, else its latest end. */
-export function sidebarTime(w: Workspace): number {
-  const group = sidebarGroup(w);
-  if (group === "needs" || group === "working") return w.started ?? w.created;
-  if (group === "review") return w.stopped ?? w.created;
-  return w.stopped ?? w.started ?? w.created;
-}
-
 function lastActivity(w: Workspace): number {
   return Math.max(w.created, w.started ?? 0, w.stopped ?? 0);
 }
