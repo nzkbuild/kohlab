@@ -101,6 +101,7 @@ try {
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
   // Against the built web/dist; skips with a reason when no Chromium is present.
   run("rendered UI (browser)", "node", ["scripts/check-browser.mjs"]);
+  run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);

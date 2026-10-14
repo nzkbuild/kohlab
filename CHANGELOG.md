@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.37.2] - 2026-10-14
+
+### Fixed
+- Swiping up in Claude's terminal on a phone scrolls back through the conversation. The terminal library (xterm.js 6.0) ignored touch scrolling; Kohlab now uses the 6.1 beta that fixes it.
+
 ## [1.37.1] - 2026-10-14
 
 ### Fixed
