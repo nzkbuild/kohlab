@@ -54,9 +54,9 @@ check("browser eval ask: a script", describeAsk("mcp__browser__agent_browser_eva
 
 // what the user reads when Claude fails
 check("usage limit: plain sentence", friendlyError("Claude AI usage limit reached|123"), "Claude has reached its usage limit for now. Try again in a little while.");
-check("sign-in problem: plain sentence", friendlyError("Invalid API key · Please run /login"), "Claude is signed out on this server. Open Settings → Claude to check the connection.");
+check("sign-in problem: plain sentence", friendlyError("Invalid API key · Please run /login"), "Claude is signed out on this server. Open Settings → Agents to check the connection.");
 check("anything else: generic sentence", friendlyError("something odd happened"), "Something went wrong on Claude's side. Try again.");
-check("not installed: set-up sentence", friendlyError("claude is not installed on this server"), "Claude is not set up on this server yet. Open Settings → Claude.");
+check("not installed: set-up sentence", friendlyError("claude is not installed on this server"), "Claude is not set up on this server yet. Open Settings → Agents.");
 
 if (failures) {
   console.log(`\n${failures} failed`);

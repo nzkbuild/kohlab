@@ -1453,6 +1453,8 @@ interface State {
   schemaVersion?: number;
   workspaces: Workspace[];
   agents: Record<string, string>;
+  /** Per-account preferences, keyed by account id. */
+  prefs?: Record<string, { powerTools?: boolean }>;
 }
 
 /** The shape this build writes. See migrateState(). */
@@ -1588,6 +1590,23 @@ export async function mutateState<T>(fn: (s: State) => T | Promise<T>): Promise<
     const res = await fn(s);
     await saveState(s);
     return res;
+  });
+}
+
+/** One account's preferences. Empty until it sets one. */
+export async function getPrefs(id: string): Promise<{ powerTools?: boolean }> {
+  const prefs = (await loadState()).prefs;
+  return prefs && Object.hasOwn(prefs, id) ? prefs[id] : {};
+}
+
+/** Merge a change into one account's preferences. */
+export async function setPrefs(id: string, patch: { powerTools?: boolean }): Promise<{ powerTools?: boolean }> {
+  return mutateState((s) => {
+    s.prefs ??= {};
+    const next = { ...(Object.hasOwn(s.prefs, id) ? s.prefs[id] : {}), ...patch };
+    // defineProperty: a plain assignment to "__proto__" would swap the prototype instead of storing.
+    Object.defineProperty(s.prefs, id, { value: next, enumerable: true, writable: true, configurable: true });
+    return next;
   });
 }
 

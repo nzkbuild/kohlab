@@ -153,8 +153,8 @@ export function describeAsk(name: string, input: Record<string, any>, cwd: strin
 /** What the user reads when Claude fails. The raw CLI text goes to the server log, not the chat. */
 export function friendlyError(raw: string): string {
   if (/usage limit|rate limit|limit reached|quota|overloaded|529/i.test(raw)) return "Claude has reached its usage limit for now. Try again in a little while.";
-  if (/not logged in|log ?in|login|authenticat|401|invalid api key|credential/i.test(raw)) return "Claude is signed out on this server. Open Settings → Claude to check the connection.";
-  if (/is not installed on this server/i.test(raw)) return "Claude is not set up on this server yet. Open Settings → Claude.";
+  if (/not logged in|log ?in|login|authenticat|401|invalid api key|credential/i.test(raw)) return "Claude is signed out on this server. Open Settings → Agents to check the connection.";
+  if (/is not installed on this server/i.test(raw)) return "Claude is not set up on this server yet. Open Settings → Agents.";
   return "Something went wrong on Claude's side. Try again.";
 }
 

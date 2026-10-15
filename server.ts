@@ -76,6 +76,8 @@ import {
   repoNameFromUrl,
   handleHook,
   setHookBase,
+  getPrefs,
+  setPrefs,
 } from "./lib";
 import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 import { resolvePreviewFile } from "./preview";
@@ -638,6 +640,13 @@ async function handleUserRole(id: string, req: Request): Promise<Response> {
 }
 
 type Auth = Awaited<ReturnType<typeof authenticate>>;
+
+/** The account whose preferences a caller reads and writes. */
+function accountIdOf(auth: NonNullable<Auth>): string {
+  if (auth.kind === "anonymous") return "anonymous";
+  if (auth.kind === "legacy") return "owner";
+  return auth.kind === "share" ? "shared link" : auth.id;
+}
 
 /** Mint a pairing code. Owner action: it can hand out the real key. */
 async function handlePairCreate(): Promise<Response> {
@@ -1446,9 +1455,17 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (path === "/api/account" && req.method === "GET") {
       if (!auth) return json({ error: "unauthorized" }, 401);
       if (auth.kind === "share") return json({ id: "shared link", role: "viewer", kind: "share" });
-      if (auth.kind === "anonymous") return json({ id: "anonymous", role: "owner", kind: "anonymous" });
-      if (auth.kind === "legacy") return json({ id: "owner", role: auth.role, kind: "legacy" });
-      return json({ id: auth.id, role: auth.role, kind: "user" });
+      if (auth.kind === "anonymous") return json({ id: "anonymous", role: "owner", kind: "anonymous", prefs: await getPrefs("anonymous") });
+      if (auth.kind === "legacy") return json({ id: "owner", role: auth.role, kind: "legacy", prefs: await getPrefs("owner") });
+      return json({ id: auth.id, role: auth.role, kind: "user", prefs: await getPrefs(auth.id) });
+    }
+    // Viewers may set their own preferences: it only changes their own view.
+    if (path === "/api/account/prefs" && req.method === "POST") {
+      if (!auth) return json({ error: "unauthorized" }, 401);
+      if (auth.kind === "share") return json({ error: "a shared link cannot save preferences" }, 403);
+      const body = (await req.json().catch(() => ({}))) as { powerTools?: unknown };
+      if (typeof body.powerTools !== "boolean") return json({ error: "powerTools must be true or false" }, 400);
+      return json(await setPrefs(accountIdOf(auth), { powerTools: body.powerTools }));
     }
     if (path === "/api/account/key" && req.method === "POST") {
       return handleAccountKey(auth);

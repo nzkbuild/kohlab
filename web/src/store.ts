@@ -11,6 +11,7 @@ export interface Me {
   id: string;
   role: string;
   kind: string;
+  prefs?: { powerTools?: boolean };
 }
 
 export interface AppState {
@@ -61,9 +62,13 @@ export interface PanelRequest {
   action: PanelAction;
 }
 
+// Set once the user changes the setting this page load, so a slow account load cannot undo it.
+let touchedPowerTools = false;
+
 const POWER_KEY = "kohlab.powerTools";
 
-// localStorage can throw (private mode, storage disabled): the setting then lives for this page only.
+// The account's copy is the truth (see loadMe). This local copy only paints the first frame right.
+// localStorage can throw (private mode, storage disabled): the cache is then just missing.
 function readPowerTools(): boolean {
   try {
     return localStorage.getItem(POWER_KEY) === "1";
@@ -76,7 +81,7 @@ function writePowerTools(value: boolean) {
   try {
     localStorage.setItem(POWER_KEY, value ? "1" : "0");
   } catch {
-    /* not persisted */
+    /* not cached */
   }
 }
 
@@ -99,8 +104,11 @@ export const useApp = create<AppState>((set, get) => ({
   me: null,
   powerTools: readPowerTools(),
   setPowerTools: (value) => {
+    if (get().powerTools === value) return;
+    touchedPowerTools = true;
     writePowerTools(value);
     set({ powerTools: value });
+    void api.savePrefs({ powerTools: value }).catch(() => {});
   },
   panelRequest: null,
   requestPanel: (request) => set({ panelRequest: request }),
@@ -125,7 +133,18 @@ export const useApp = create<AppState>((set, get) => ({
 
   loadMe: async () => {
     try {
-      set({ me: await api.account() });
+      const me = await api.account();
+      set({ me });
+      const saved = me.prefs?.powerTools;
+      if (touchedPowerTools) {
+        /* the user clicked while this was loading: their choice wins and was already saved */
+      } else if (typeof saved === "boolean") {
+        writePowerTools(saved);
+        set({ powerTools: saved });
+      } else if (readPowerTools()) {
+        // Turned on before accounts saved it: move that choice up once.
+        void api.savePrefs({ powerTools: true }).catch(() => {});
+      }
     } catch {
       /* stays null: permissive, and the server refuses what it must */
     }

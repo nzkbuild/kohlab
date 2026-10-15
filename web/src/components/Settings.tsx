@@ -3,6 +3,7 @@ import { ArrowsClockwise, Bell, BellRinging, SignOut, Sparkle, SlidersHorizontal
 import type { SettingsSection } from "../lib/route";
 import { useApp, useCan } from "../store";
 import { api, clearKey } from "../api";
+import type { AgentStatus } from "../types";
 import { announce, setAnnouncementsPaused } from "../lib/announce";
 import { cn } from "../lib/utils";
 import PushToggle from "./PushToggle";
@@ -32,7 +33,7 @@ const PERMISSION_CHIP: Record<Permission, string> = {
 const SECTIONS: { id: SettingsSection; label: string; hint: string; icon: typeof Bell }[] = [
   { id: "account", label: "Account", hint: "Who is signed in on this computer.", icon: UserCircle },
   { id: "appearance", label: "Appearance", hint: "How the project page looks.", icon: SlidersHorizontal },
-  { id: "agents", label: "Claude", hint: "The AI that builds your projects.", icon: Sparkle },
+  { id: "agents", label: "Agents", hint: "The AI helpers on this computer.", icon: Sparkle },
   { id: "notifications", label: "Notifications", hint: "What reaches you when Kohlab is in the background.", icon: Bell },
   { id: "updates", label: "Updates", hint: "New versions of Kohlab.", icon: ArrowsClockwise },
 ];
@@ -79,7 +80,7 @@ function AppearancePane() {
           <span className="min-w-0">
             <span className="block text-sm text-text-primary">Show files and terminal</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
-              Adds a Files tab and a status bar for people who like to see the code.
+              Adds a Files tab and a status bar for people who like to see the code. Follows your account on every device.
             </span>
           </span>
         </label>
@@ -88,10 +89,20 @@ function AppearancePane() {
   );
 }
 
-/** Claude: whether it is ready on this computer, read from the server's own check. */
-function ClaudePane() {
-  // `installed` is null until the first check answers; `signedIn` is null when the server could not tell.
-  const [state, setState] = useState<{ installed: boolean; signedIn: boolean | null } | null>(null);
+/** Agents on this computer, Claude first. The names are what people see; the keys are what the server reports. */
+const AGENT_NAMES: [key: string, name: string][] = [
+  ["claude", "Claude Code"],
+  ["codex", "Codex"],
+  ["gemini", "Gemini CLI"],
+  ["opencode", "OpenCode"],
+  ["pi", "Pi"],
+  ["omp", "Oh My Pi"],
+];
+
+/** Agents: which AI helpers are set up on this computer, read from the server's own check. */
+function AgentsPane() {
+  // `status` is null until the first check answers; `claudeSignedIn` is null when the server could not tell.
+  const [status, setStatus] = useState<AgentStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -100,44 +111,72 @@ function ClaudePane() {
     setFailed(false);
     api
       .agentsStatus()
-      .then((status) => setState({ installed: !!status.claude, signedIn: status.claudeSignedIn ?? null }))
+      .then((s) => setStatus(s))
       .catch(() => setFailed(true))
       .finally(() => setChecking(false));
   };
   useEffect(check, []);
 
-  const notSignedIn = state?.installed === true && state.signedIn === false;
+  const claudeInstalled = status?.claude === true;
+  const notSignedIn = claudeInstalled && status?.claudeSignedIn === false;
+
+  // Claude stays first; of the rest, installed ones come before the ones not set up.
+  const rows = AGENT_NAMES.map(([key, name]) => ({ key, name, installed: status?.[key] === true }));
+  const ordered = [rows[0], ...rows.slice(1).filter((r) => r.installed), ...rows.slice(1).filter((r) => !r.installed)];
+
+  const chipFor = (row: { key: string; installed: boolean }) => {
+    if (status === null) return <Chip>Checking</Chip>;
+    if (row.key === "claude") {
+      if (!row.installed) {
+        return (
+          <span className={cn("chip", "chip-danger")}>
+            <span className="chip-dot" aria-hidden="true" />
+            Not set up
+          </span>
+        );
+      }
+      if (notSignedIn) {
+        return (
+          <span className={cn("chip", "chip-danger")}>
+            <span className="chip-dot" aria-hidden="true" />
+            Not signed in
+          </span>
+        );
+      }
+      return (
+        <span className={cn("chip", "chip-running")}>
+          <span className="chip-dot" aria-hidden="true" />
+          Ready
+        </span>
+      );
+    }
+    return row.installed ? (
+      <span className={cn("chip", "chip-running")}>
+        <span className="chip-dot" aria-hidden="true" />
+        Installed
+      </span>
+    ) : (
+      <Chip>Not installed</Chip>
+    );
+  };
 
   return (
     <Panel>
       <div className="flex flex-col gap-4 p-4">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary">
-          Claude
-          {state === null ? (
-            <Chip>Checking</Chip>
-          ) : !state.installed ? (
-            <span className={cn("chip", "chip-danger")}>
-              <span className="chip-dot" aria-hidden="true" />
-              Not set up
-            </span>
-          ) : notSignedIn ? (
-            <span className={cn("chip", "chip-danger")}>
-              <span className="chip-dot" aria-hidden="true" />
-              Not signed in
-            </span>
-          ) : (
-            <span className={cn("chip", "chip-running")}>
-              <span className="chip-dot" aria-hidden="true" />
-              Ready
-            </span>
-          )}
-        </div>
+        <ul className="flex flex-col gap-1">
+          {ordered.map((row) => (
+            <li key={row.key} className="flex min-h-11 items-center justify-between gap-3 rounded-md bg-surface-sunken px-3 text-sm text-text-primary">
+              <span>{row.name}</span>
+              {chipFor(row)}
+            </li>
+          ))}
+        </ul>
         <p className="text-sm leading-relaxed text-text-secondary">
           {failed ? (
-            "Could not check Claude right now. Try again in a moment."
-          ) : state === null ? (
-            "Checking whether Claude is set up on this computer."
-          ) : !state.installed ? (
+            "Could not check the agents right now. Try again in a moment."
+          ) : status === null ? (
+            "Checking which agents are set up on this computer."
+          ) : !claudeInstalled ? (
             "Claude is not set up on this computer yet. Ask whoever installed Kohlab to set it up, then check again."
           ) : notSignedIn ? (
             <>
@@ -145,7 +184,7 @@ function ClaudePane() {
               and sign in with your Claude account, then check again.
             </>
           ) : (
-            "Claude is connected. New projects start with it."
+            "New projects start with Claude Code. Other agents can run in a project's terminal; chat support for them comes later."
           )}
         </p>
         <div>
@@ -262,7 +301,7 @@ export default function Settings() {
   const content: Partial<Record<SettingsSection, ReactNode>> = {
     account: <AccountPane />,
     appearance: <AppearancePane />,
-    agents: <ClaudePane />,
+    agents: <AgentsPane />,
     notifications,
     updates: (
       <Panel>

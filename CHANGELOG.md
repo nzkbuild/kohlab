@@ -9,6 +9,12 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.47.0] - 2026-10-16
+
+### Changed
+- "Show files and terminal" now follows your account: turn it on once and the Files tab shows on every device and browser you sign in from.
+- Settings → Claude is now Settings → Agents, listing every AI helper on this computer (Claude Code, Codex, Gemini CLI, OpenCode, Pi, Oh My Pi) and whether each is installed and ready.
+
 ## [1.46.0] - 2026-10-16
 
 ### Changed

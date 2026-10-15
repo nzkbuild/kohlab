@@ -167,7 +167,14 @@ export const api = {
   files: (id: string) => json<TreeNode[]>(`/api/workspaces/${id}/files`),
   users: () => json<{ users: TeamUser[]; canInvite: boolean }>("/api/users"),
   /** Who this browser is, as far as the server is concerned. */
-  account: () => json<{ id: string; role: string; kind: string }>("/api/account"),
+  account: () => json<{ id: string; role: string; kind: string; prefs?: { powerTools?: boolean } }>("/api/account"),
+  /** Save my preferences on the server, so they follow my account to every device. */
+  savePrefs: (prefs: { powerTools: boolean }) =>
+    json<{ powerTools?: boolean }>("/api/account/prefs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(prefs),
+    }),
   /** Rotate my own key. Returns the new one once; the old one dies here. */
   rotateMyKey: () => json<{ key: string }>("/api/account/key", { method: "POST" }),
   invite: (body: { id: string; name?: string; role?: string }) =>
