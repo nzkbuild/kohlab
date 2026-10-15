@@ -972,7 +972,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               ) : null}
 
               <div
-                className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5 focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-line-strong"
+                className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5"
                 onDragOver={(e: DragEvent<HTMLDivElement>) => {
                   if (e.dataTransfer.types.includes("Files")) e.preventDefault();
                 }}

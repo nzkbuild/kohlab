@@ -21,6 +21,7 @@ import { sidebarOrder } from "../lib/sidebarOrder";
 import { projectTitle } from "../lib/format";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
+import { restoreFocusAfterClose } from "../lib/inputModality";
 import { cn } from "../lib/utils";
 import { isPhone } from "../lib/viewport";
 import ConfirmDialog from "./ConfirmDialog";
@@ -193,11 +194,16 @@ export default function Sidebar({ open, onClose }: Props) {
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // The Back or Forward button that has focus. When it unmounts, focus goes to search (or the toggle when collapsed).
+  const navArrow = useRef<HTMLButtonElement | null>(null);
   // Rename starts only once the menu has closed and released focus, or the field would lose it at once.
   const renameNext = useRef<string | null>(null);
   // Touch has no right-click, and iOS Safari sends no contextmenu, so a held finger opens the More menu.
   const holdTimer = useRef<number | null>(null);
   const holdFired = useRef(false);
+  // Where focus returns when a More or account menu closes, so a pointer close can restore it without the ring.
+  const moreButtons = useRef(new Map<string, HTMLButtonElement>());
+  const accountTrigger = useRef<HTMLButtonElement>(null);
 
   useEffect(
     () => () => {
@@ -209,6 +215,16 @@ export default function Sidebar({ open, onClose }: Props) {
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, String(collapsed));
   }, [collapsed]);
+
+  // An arrow that was focused has been removed: without this, focus falls to <body>.
+  useEffect(() => {
+    const arrow = navArrow.current;
+    if (!arrow || arrow.isConnected) return;
+    navArrow.current = null;
+    if (document.activeElement === document.body || document.activeElement === null) {
+      document.querySelector<HTMLButtonElement>(collapsed ? ".sidebar-toggle" : ".sidebar-search")?.focus();
+    }
+  }, [canBack, canForward, collapsed]);
 
   // The browser offers the install prompt once; hold it until the button uses it.
   useEffect(() => {
@@ -281,32 +297,42 @@ export default function Sidebar({ open, onClose }: Props) {
           kohlab
         </button>
         <div className="sidebar-head-fill flex-1" />
-        <Tooltip content="Back (Alt+←)" side="bottom">
-          <Button
-            variant="quiet"
-            iconOnly
-            size="sm"
-            className="sidebar-nav"
-            aria-label="Back"
-            disabled={!canBack}
-            onClick={() => history.back()}
-          >
-            <ArrowLeft size={16} />
-          </Button>
-        </Tooltip>
-        <Tooltip content="Forward (Alt+→)" side="bottom">
-          <Button
-            variant="quiet"
-            iconOnly
-            size="sm"
-            className="sidebar-nav"
-            aria-label="Forward"
-            disabled={!canForward}
-            onClick={() => history.forward()}
-          >
-            <ArrowRight size={16} />
-          </Button>
-        </Tooltip>
+        {canBack ? (
+          <Tooltip content="Back (Alt+←)" side="bottom">
+            <Button
+              variant="quiet"
+              iconOnly
+              size="sm"
+              className="sidebar-nav shrink-0"
+              aria-label="Back"
+              onFocus={(e) => (navArrow.current = e.currentTarget)}
+              onBlur={(e) => {
+                if (e.relatedTarget) navArrow.current = null;
+              }}
+              onClick={() => history.back()}
+            >
+              <ArrowLeft size={16} />
+            </Button>
+          </Tooltip>
+        ) : null}
+        {canForward ? (
+          <Tooltip content="Forward (Alt+→)" side="bottom">
+            <Button
+              variant="quiet"
+              iconOnly
+              size="sm"
+              className="sidebar-nav shrink-0"
+              aria-label="Forward"
+              onFocus={(e) => (navArrow.current = e.currentTarget)}
+              onBlur={(e) => {
+                if (e.relatedTarget) navArrow.current = null;
+              }}
+              onClick={() => history.forward()}
+            >
+              <ArrowRight size={16} />
+            </Button>
+          </Tooltip>
+        ) : null}
         <Button
           variant="quiet"
           iconOnly
@@ -453,6 +479,10 @@ export default function Sidebar({ open, onClose }: Props) {
                       <DropdownMenu.Trigger asChild>
                         <button
                           type="button"
+                          ref={(el) => {
+                            if (el) moreButtons.current.set(workspace.id, el);
+                            else moreButtons.current.delete(workspace.id);
+                          }}
                           aria-label={`More actions for ${title}`}
                           tabIndex={collapsed ? -1 : undefined}
                           className={cn("sidebar-more", collapsed && "shell:hidden")}
@@ -470,7 +500,10 @@ export default function Sidebar({ open, onClose }: Props) {
                         sideOffset={4}
                         collisionPadding={8}
                         onCloseAutoFocus={(e) => {
-                          if (renameNext.current === null) return;
+                          if (renameNext.current === null) {
+                            restoreFocusAfterClose(e, moreButtons.current.get(workspace.id));
+                            return;
+                          }
                           e.preventDefault();
                           if (isPhone()) setSheetFor(renameNext.current);
                           else setRenaming(renameNext.current);
@@ -503,7 +536,7 @@ export default function Sidebar({ open, onClose }: Props) {
         <DropdownMenu.Root>
           <Tooltip content={accountName} disabled={!collapsed}>
             <DropdownMenu.Trigger asChild>
-              <button type="button" className="sidebar-row" aria-label={`Account, ${accountName}`}>
+              <button ref={accountTrigger} type="button" className="sidebar-row" aria-label={`Account, ${accountName}`}>
                 <span
                   className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-active text-xs font-semibold text-text-primary"
                   aria-hidden="true"
@@ -515,7 +548,14 @@ export default function Sidebar({ open, onClose }: Props) {
             </DropdownMenu.Trigger>
           </Tooltip>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content className="menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
+            <DropdownMenu.Content
+              className="menu"
+              align="start"
+              side="top"
+              sideOffset={4}
+              collisionPadding={8}
+              onCloseAutoFocus={(e) => restoreFocusAfterClose(e, accountTrigger.current)}
+            >
               <MenuItem onSelect={() => navigate({ kind: "settings" })}>
                 <GearSix size={16} aria-hidden="true" />
                 Settings

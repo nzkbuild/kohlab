@@ -74,6 +74,8 @@
      scripts/check-contrast.mjs audits this against surface-raised. */
   --line-strong: #808080;
   --line-accent: var(--text-primary);
+  /* Focus indicator only: soft grey, 3:1 on every surface it sits over (check-contrast.mjs). */
+  --focus-ring: #8a8a8a;
 
   /* --- semantic: status lifecycle ---------------------------------------- */
   /* One tone per status, chosen so the chip LABEL passes 4.5:1 against the
@@ -172,6 +174,7 @@
     --line-subtle: rgba(0, 0, 0, 0.1);
     --line-strong: oklch(0.6 0.005 286);
     --line-accent: var(--text-primary);
+    --focus-ring: #8a8a8a;
 
     --status-running: oklch(0.46 0.14 130);
     --status-review: var(--text-primary);
@@ -209,6 +212,7 @@
     --line-subtle: rgba(255, 255, 255, 0.1);
     --line-strong: #808080;
     --line-accent: var(--text-primary);
+    --focus-ring: #8a8a8a;
 
     --status-running: oklch(0.9 0.17 124);
     --status-review: var(--neutral-100);
@@ -249,6 +253,7 @@
   --color-line-subtle: var(--line-subtle);
   --color-line-strong: var(--line-strong);
   --color-line-accent: var(--line-accent);
+  --color-focus: var(--focus-ring);
 
   --color-status-running: var(--status-running);
   --color-status-review: var(--status-review);
@@ -369,8 +374,19 @@ button:disabled {
    changes shape (measured: the primary button was 8px unfocused, 6px while
    Tab-focused). A focus ring must never mutate the geometry of what it marks. */
 :focus-visible {
-  outline: 2px solid var(--line-accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* Full-width rows inset the same ring so it hugs their own radius and never
+   pokes past the rail or a menu edge. Set outline explicitly: some rows reset
+   outline to none for their own highlight. */
+.sidebar-row:focus-visible,
+.settings-nav-item:focus-visible,
+.palette-item:focus-visible,
+.file-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 ::selection {
@@ -869,12 +885,22 @@ input[type="radio"] {
   opacity: 0;
 }
 
-/* Rail header stacks its controls when collapsed: expand, back, forward. */
+/* Rail header stacks its controls when collapsed: expand, then back and forward below it. */
 .sidebar[data-collapsed="true"] .sidebar-head {
   flex-direction: column;
   min-height: 0;
   gap: 0.25rem;
   padding-block: 0.5rem;
+}
+.sidebar[data-collapsed="true"] .sidebar-nav {
+  order: 1;
+}
+
+/* Back and Forward exist only when usable. They fade in; nothing animates layout. */
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-nav {
+    animation: kohlab-fade var(--duration-fast-02) var(--ease-standard);
+  }
 }
 
 /* The one status shown in the rail: needs you, or ready to check. */
@@ -1409,7 +1435,7 @@ input[type="radio"] {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .source-card input:focus-visible + .source-card-body {
-  outline: 2px solid var(--line-accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -1487,7 +1513,7 @@ input[type="radio"] {
   font-weight: 550;
 }
 .segmented input:focus-visible + span {
-  outline: 2px solid var(--line-accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 

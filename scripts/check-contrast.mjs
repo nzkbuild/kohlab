@@ -194,6 +194,9 @@ const CHECKS = [
   ["accent / base", "--accent", "--surface-base", 3, "focus ring on canvas"],
   ["accent / raised", "--accent", "--surface-raised", 3, "focus ring on panel"],
   ["accent / overlay", "--accent", "--surface-overlay", 3, "focus ring in dialog"],
+  ["focus ring / base", "--focus-ring", "--surface-base", 3, "focus ring on canvas"],
+  ["focus ring / sidebar", "--focus-ring", "--surface-sidebar", 3, "inset ring on sidebar rows"],
+  ["focus ring / raised", "--focus-ring", "--surface-raised", 3, "focus ring on panel and cards"],
   ["line-strong / raised", "--line-strong", "--surface-raised", 3, "input + control boundaries"],
   ["line-strong / sunken", "--line-strong", "--surface-sunken", 3, "control boundary on sunken"],
 

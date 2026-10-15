@@ -200,7 +200,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
 
 /** Starter ideas: each one fills the composer. "Something else" just puts the cursor there. */
 const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator"];
-const CHIP = "inline-flex h-9 items-center rounded-full bg-surface-raised px-3.5 text-[14px] text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none";
+const CHIP = "inline-flex h-9 items-center rounded-full bg-surface-raised px-3.5 text-[14px] text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 
 /**
  * Home, and the same screen for a first run with no projects: one question, one
@@ -319,7 +319,7 @@ export function HomeScreen() {
                   </div>
                 </Panel>
               ) : null}
-              <div className="mt-8 flex w-full items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5 focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-line-strong">
+              <div className="mt-8 flex w-full items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5">
                 <label htmlFor="home-idea" className="sr-only">
                   Describe what you want to build
                 </label>

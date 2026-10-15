@@ -1,4 +1,14 @@
-import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type ReactElement,
+  type ReactNode,
+  type Ref,
+} from "react";
 import * as RadixTabs from "@radix-ui/react-tabs";
 import * as RadixMenu from "@radix-ui/react-dropdown-menu";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
@@ -14,11 +24,27 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "../lib/utils";
 import { subscribeAnnouncements } from "../lib/announce";
+import { restoreFocusAfterClose } from "../lib/inputModality";
 import { STATUS_CHIP, STATUS_LABEL, type WorkspaceStatus } from "../lib/status";
 
 /** Dialog parts are styled by .dialog-overlay / .dialog-content; re-exported so
  *  surfaces import every Radix primitive through this file. */
-export * as Dialog from "@radix-ui/react-dialog";
+import * as RadixDialog from "@radix-ui/react-dialog";
+
+/** Dialog.Content that hands focus back to its opener quietly after a pointer close (keyboard closes keep the ring). */
+function DialogContent({ onCloseAutoFocus, ...rest }: RadixDialog.DialogContentProps) {
+  const [opener] = useState(() => document.activeElement as HTMLElement | null);
+  return (
+    <RadixDialog.Content
+      {...rest}
+      onCloseAutoFocus={(e) => {
+        onCloseAutoFocus?.(e);
+        if (!e.defaultPrevented) restoreFocusAfterClose(e, opener?.isConnected && opener !== document.body ? opener : null);
+      }}
+    />
+  );
+}
+export const Dialog = { ...RadixDialog, Content: DialogContent };
 
 /** Shape cue per status, drawn from the icon set rather than text glyphs. The one source for status icons: StatusChip and the sidebar both use it. */
 export const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
@@ -151,7 +177,7 @@ export function Tab({ className, ...rest }: RadixTabs.TabsTriggerProps) {
   return (
     <RadixTabs.Trigger
       className={cn(
-        "flex h-[30px] items-center justify-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent",
+        "flex h-[30px] items-center justify-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
         "aria-selected:bg-surface-active aria-selected:font-medium aria-selected:text-text-primary",
         className,
       )}
@@ -175,13 +201,22 @@ export function Menu({
   align?: "start" | "end";
   children: ReactNode;
 }) {
+  const triggerRef = useRef<HTMLElement>(null);
   return (
     <RadixMenu.Root>
       <RadixMenu.Trigger asChild aria-label={label}>
-        {trigger}
+        {isValidElement(trigger)
+          ? cloneElement(trigger as ReactElement<{ ref?: Ref<HTMLElement> }>, { ref: triggerRef })
+          : trigger}
       </RadixMenu.Trigger>
       <RadixMenu.Portal>
-        <RadixMenu.Content className="menu" align={align} sideOffset={4} collisionPadding={8}>
+        <RadixMenu.Content
+          className="menu"
+          align={align}
+          sideOffset={4}
+          collisionPadding={8}
+          onCloseAutoFocus={(e) => restoreFocusAfterClose(e, triggerRef.current)}
+        >
           {children}
         </RadixMenu.Content>
       </RadixMenu.Portal>

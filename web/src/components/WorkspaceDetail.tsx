@@ -413,7 +413,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       trigger={
         <button
           type="button"
-          className="inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-row px-2.5 text-[15px] font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent"
+          className="inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-row px-2.5 text-[15px] font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           <span className="min-w-0 truncate">{title}</span>
           <CaretDown size={14} className="shrink-0 text-text-muted" aria-hidden="true" />

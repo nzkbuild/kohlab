@@ -78,7 +78,7 @@ Body and controls 15-16px, nothing below 12px. Home heading 28px weight 500. Hea
 
 Radix primitives are styled once in `web/src/components/ui.tsx` (Button, Menu, Tabs, Dialog, Tooltip, Field, Panel, EmptyState, Skeleton, Kbd, ...); surfaces import from there, never from `@radix-ui/*`. The status icon comes only from `STATUS_ICON` in `ui.tsx`; running is a small static filled dot, never a spinner glyph.
 
-Buttons: min-height 40px (44px on touch), weight 550. Primary filled, dimmed to 40% when disabled; secondary tonal (`surface-raised` fill, hover `surface-active`, pressed `surface-pressed`, no border); quiet borderless; danger red text on a red tint. Icon-only buttons are square with an `aria-label`. Focus is a 2px outline offset 2px in the accent colour, never a box-shadow ring.
+Buttons: min-height 40px (44px on touch), weight 550. Primary filled, dimmed to 40% when disabled; secondary tonal (`surface-raised` fill, hover `surface-active`, pressed `surface-pressed`, no border); quiet borderless; danger red text on a red tint. Icon-only buttons are square with an `aria-label`. Focus is a 2px soft grey (focus-ring token) outline, inset on full-width rows, shown for keyboard use only.
 
 Menus, dialogs and the palette sit on `surface-overlay` with a soft shadow; in-page cards and rows are flat. Forced-colors maps borders and outlines to system colours.
 

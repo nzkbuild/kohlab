@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.44.1] - 2026-10-15
+
+### Changed
+- The Back and Forward arrows at the top of the sidebar only appear when they can be used: Back once you've moved around, Forward once you've gone back. The other buttons stay in place.
+- One soft grey focus ring everywhere, instead of the bright white outline. It hugs a row's own rounded corners, and it only shows when you use the keyboard. Closing a menu or a window with the mouse or a tap no longer leaves an outline behind (for example on your name at the bottom of the sidebar).
+- The message box no longer gets an outline while you type in it.
+
 ## [1.44.0] - 2026-10-15
 
 ### Added
