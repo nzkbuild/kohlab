@@ -482,8 +482,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   // Chat users get a clean Claude with the same login: no user settings, skills, MCP servers or CLAUDE.md.
   // CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies.
   // --include-partial-messages streams Claude's reply as it is written (stream_event lines). --model only when the project chose one; otherwise the account default.
-  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
-  if (!term) args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
+  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"];
+  // A terminal project's chat keeps the person's own permission mode from their settings, as their terminal does. Chat users get "default".
+  if (!term) args.push("--permission-mode", "default", "--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
   // strict: only our browser tools load, never the user's MCP servers
   const mcpFile = writeBrowserMcp(ws, who);
   if (mcpFile) args.push("--mcp-config", mcpFile);

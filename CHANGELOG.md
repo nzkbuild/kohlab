@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.48.1] - 2026-10-16
+
+### Fixed
+- The chat of a terminal project no longer asks Allow / Don't allow for every action. It now follows your own Claude permission setting (for example auto mode), exactly like your terminal does.
+
 ## [1.48.0] - 2026-10-16
 
 ### Added
