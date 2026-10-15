@@ -31,9 +31,6 @@ import {
   imagesDir,
   identityOf,
   spawnAgentSession,
-  // ensurePtySession() calls markStarted() to record a browser-attach as a real
-  // run. The call existed but the import did not, so the first terminal attach
-  // threw ReferenceError and took the whole server process down.
   markStarted,
   WORKS_DIR,
   startWatcher,
@@ -78,7 +75,7 @@ import {
 } from "./lib";
 import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 import { resolvePreviewFile } from "./preview";
-import { ChatError, answer as answerChat, send as sendChat, snapshot as chatSnapshot } from "./chat";
+import { ChatError, answer as answerChat, restoreWaiting, send as sendChat, snapshot as chatSnapshot } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -190,6 +187,7 @@ async function mayAccessWorkspace(auth: { kind?: string; id?: string; role?: str
   }
 }
 startWatcher();
+restoreWaiting();
 
 
 
@@ -665,10 +663,36 @@ async function handleAudit(req: Request): Promise<Response> {
 }
 
 /** Check which agent CLIs are installed on the host. */
+/** Parse `claude auth status` stdout: `loggedIn` as a boolean, or null when it is not that JSON. */
+export function parseClaudeLoggedIn(stdout: string): boolean | null {
+  try {
+    const v = JSON.parse(stdout) as { loggedIn?: unknown } | null;
+    return typeof v?.loggedIn === "boolean" ? v.loggedIn : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One in-flight or finished sign-in check, shared for 60 s so polling never spawns a process per request. */
+let claudeAuthCheck: { at: number; result: Promise<boolean | null> } | null = null;
+function claudeSignedIn(): Promise<boolean | null> {
+  if (!claudeAuthCheck || Date.now() - claudeAuthCheck.at >= 60_000) {
+    claudeAuthCheck = {
+      at: Date.now(),
+      result: new Promise<boolean | null>((resolve) => {
+        execFile("claude", ["auth", "status"], { timeout: 8000 }, (err, stdout) => {
+          resolve(err ? null : parseClaudeLoggedIn(String(stdout)));
+        });
+      }),
+    };
+  }
+  return claudeAuthCheck.result;
+}
+
 async function handleAgentsStatus(): Promise<Response> {
   const names = ["omp", "claude", "codex", "opencode", "pi", "gemini"];
   const { execFile } = await import("child_process");
-  const status: Record<string, boolean> = {};
+  const status: Record<string, boolean | null> = {};
   await Promise.all(
     names.map(
       (n) =>
@@ -680,6 +704,7 @@ async function handleAgentsStatus(): Promise<Response> {
         }),
     ),
   );
+  status.claudeSignedIn = status.claude ? await claudeSignedIn() : null;
   return json(status);
 }
 
@@ -1082,6 +1107,10 @@ async function ensurePtySession(id: string, terminalId = "main") {
 
   try {
     await spawnAgentSession(ws, terminalId);
+    // First ever spawn is a real start: record it so the exit watcher can finish the run
+    // (agents without hooks). Re-attaching to a live session must not touch `started`
+    // (it moved the project to the top of the sidebar).
+    if (terminalId === "main" && !ws.started) await markStarted(id);
   } catch (error) {
     // Re-attaching to a session that is already live is the normal case for a
     // browser reload or a second tab, not a failure. The daemon reports it as
@@ -1089,8 +1118,6 @@ async function ensurePtySession(id: string, terminalId = "main") {
     // our own daemon's message, so matching it here is an internal contract.
     if (!/session already exists/i.test(error instanceof Error ? error.message : String(error))) throw error;
   }
-  // a browser-attach start is a real run: record it so completion fires
-  if (terminalId === "main") await markStarted(id);
 }
 
 // --- server --------------------------------------------------------------

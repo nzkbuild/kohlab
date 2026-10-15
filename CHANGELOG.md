@@ -9,6 +9,20 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.41.0] - 2026-10-15
+
+### Added
+- Claude's reply appears as it is written, instead of all at once after a silent wait.
+- Home tells you when Claude isn't connected yet, with a button to Settings. Settings → Claude says whether Claude is connected, installed but not signed in, or not set up.
+- When something goes wrong, the chat says what happened in one plain sentence (usage limit reached, signed out, or a problem on Claude's side) and offers Try again.
+
+### Fixed
+- A question from Claude that was still waiting when Kohlab restarted keeps its dot in the sidebar, so you know to go back to it.
+- Opening a project no longer moves it to the top of the list. Only real work does.
+
+### Removed
+- Leftover code from the old Advanced tools switch (file browser, code viewer and log screens nobody could reach).
+
 ## [1.40.0] - 2026-10-15
 
 ### Changed

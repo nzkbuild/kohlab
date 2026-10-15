@@ -46,7 +46,7 @@ export interface DiffFile {
   diff: string;
 }
 
-export type AgentStatus = Record<string, boolean>;
+export type AgentStatus = Record<string, boolean> & { claudeSignedIn?: boolean | null };
 
 /** What `/api/release` reports: the published version, and any update in flight. */
 export interface ReleaseStatus {

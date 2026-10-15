@@ -62,7 +62,8 @@ function AccountPane() {
 
 /** Claude: whether it is ready on this computer, read from the server's own check. */
 function ClaudePane() {
-  const [ready, setReady] = useState<boolean | null>(null);
+  // `installed` is null until the first check answers; `signedIn` is null when the server could not tell.
+  const [state, setState] = useState<{ installed: boolean; signedIn: boolean | null } | null>(null);
   const [checking, setChecking] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -71,39 +72,53 @@ function ClaudePane() {
     setFailed(false);
     api
       .agentsStatus()
-      .then((status) => setReady(!!status.claude))
+      .then((status) => setState({ installed: !!status.claude, signedIn: status.claudeSignedIn ?? null }))
       .catch(() => setFailed(true))
       .finally(() => setChecking(false));
   };
   useEffect(check, []);
+
+  const notSignedIn = state?.installed === true && state.signedIn === false;
 
   return (
     <Panel>
       <div className="flex flex-col gap-4 p-4">
         <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary">
           Claude
-          {ready === null ? (
+          {state === null ? (
             <Chip>Checking</Chip>
-          ) : ready ? (
-            <span className={cn("chip", "chip-running")}>
-              <span className="chip-dot" aria-hidden="true" />
-              Ready
-            </span>
-          ) : (
+          ) : !state.installed ? (
             <span className={cn("chip", "chip-danger")}>
               <span className="chip-dot" aria-hidden="true" />
               Not set up
             </span>
+          ) : notSignedIn ? (
+            <span className={cn("chip", "chip-danger")}>
+              <span className="chip-dot" aria-hidden="true" />
+              Not signed in
+            </span>
+          ) : (
+            <span className={cn("chip", "chip-running")}>
+              <span className="chip-dot" aria-hidden="true" />
+              Ready
+            </span>
           )}
         </div>
         <p className="text-sm leading-relaxed text-text-secondary">
-          {failed
-            ? "Could not check Claude right now. Try again in a moment."
-            : ready
-              ? "Claude is set up on this computer. New projects start with it."
-              : ready === false
-                ? "Claude is not set up on this computer yet. Ask whoever installed Kohlab to set it up, then check again."
-                : "Checking whether Claude is set up on this computer."}
+          {failed ? (
+            "Could not check Claude right now. Try again in a moment."
+          ) : state === null ? (
+            "Checking whether Claude is set up on this computer."
+          ) : !state.installed ? (
+            "Claude is not set up on this computer yet. Ask whoever installed Kohlab to set it up, then check again."
+          ) : notSignedIn ? (
+            <>
+              Claude is installed but not signed in. On the server, run <code className="mono rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">claude</code> once
+              and sign in with your Claude account, then check again.
+            </>
+          ) : (
+            "Claude is connected. New projects start with it."
+          )}
         </p>
         <div>
           <Button variant="secondary" size="sm" disabled={checking} onClick={check}>

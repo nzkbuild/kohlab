@@ -1,19 +1,5 @@
 import { lazy, Suspense, startTransition, useEffect, useOptimistic, useState } from "react";
-import {
-  ArrowsClockwise,
-  CaretDown,
-  Eye,
-  Ghost,
-  List,
-  Play,
-  PencilSimple,
-  Plus,
-  ShareNetwork,
-  Stop,
-  Terminal,
-  Trash,
-  X,
-} from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretDown, Eye, Ghost, List, PencilSimple, Stop, Terminal, Trash, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { toastAction } from "../lib/actions";
@@ -23,15 +9,12 @@ import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
 import { projectTitle } from "../lib/format";
 import { cn } from "../lib/utils";
-import BrowseView from "./BrowseView";
 import ConfirmDialog from "./ConfirmDialog";
 import { RenameDialog } from "./Sidebar";
 import ErrorBoundary from "./ErrorBoundary";
-import LogView from "./LogView";
 import PreviewPanel from "./PreviewPanel";
 import { disposeWorkspaceTerminals } from "./terminalCache";
 import { Button, EmptyState, Menu, MenuItem, SkeletonRows, Tab, TabList, TabPanel, Tabs } from "./ui";
-import { copyText } from "../lib/clipboard";
 
 // xterm (~390 KB) and Monaco must not load before the cockpit does: only an
 // import through lazy() defers the fetch. A static import here: even one that
@@ -42,16 +25,11 @@ const DiffView = lazy(() => import("./DiffView"));
 
 type TabId = WorkspaceTab;
 
-/** The same tab names in every project: the conversation is "Claude", whether it is a chat or a terminal. */
-const TABS: { id: TabId; label: string }[] = [
+/** The agent and the changes, nothing else. The conversation is "Claude", whether it is a chat or a terminal. */
+const SIMPLE_TABS: { id: TabId; label: string }[] = [
   { id: "terminal", label: "Claude" },
-  { id: "files", label: "Files" },
   { id: "review", label: "Changes" },
-  { id: "log", label: "Log" },
 ];
-
-/** Simple mode: the agent and the changes, nothing else. */
-const SIMPLE_TABS = TABS.filter(({ id }) => id === "terminal" || id === "review");
 
 /** The shell breakpoint: the preview opens beside the project from here, as a sheet below it. */
 const WIDE_QUERY = "(min-width: 56.25rem)";
@@ -78,19 +56,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const navigate = useApp((s) => s.navigate);
   const setNavOpen = useApp((s) => s.setNavOpen);
   const route = useApp((s) => s.route);
-  const advanced = useApp((s) => s.advanced);
   const can = useCan();
-  const visibleTabs = advanced ? TABS : SIMPLE_TABS;
 
   // The pane lives in the URL (/w/:id/review), so a refresh, a shared link or
   // Back returns to it. Switching panes replaces the entry rather than pushing
   // one per click.
   const routeTab = route.kind === "workspace" ? route.tab : undefined;
   const setTab = (next: TabId) => navigate({ kind: "workspace", id: workspaceId, tab: next }, { replace: true });
-  const [installedAgents, setInstalledAgents] = useState<string[]>([]);
-  useEffect(() => {
-    api.agentsStatus().then((st) => setInstalledAgents(Object.keys(st).filter((n) => st[n])), () => {});
-  }, []);
   const [terminals, setTerminals] = useState([{ id: "main", label: "Claude" }]);
   const [activeTerminal, setActiveTerminal] = useState("main");
   const [confirming, setConfirming] = useState(false);
@@ -154,18 +126,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     });
   };
 
-  const share = async () => {
-    try {
-      const s = await api.share(workspaceId);
-      const link = `${location.origin}/?share=${s.share}`;
-      await copyText(link);
-      toast.success("Share link copied");
-      announce(`Share link copied for ${workspaceId}`);
-    } catch (e) {
-      toast.error(`Could not copy the link, ${(e as Error).message}`);
-    }
-  };
-
   const onDelete = async () => {
     setDeleting(true);
     try {
@@ -191,7 +151,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // terminal. The default is written into the URL once, so a workspace that
   // flips to needs-review while you watch it does not yank you off the terminal.
   // A hidden pane in the URL (files or log, while simple) falls back like no pane.
-  const hiddenTab = !advanced && (routeTab === "files" || routeTab === "log");
+  const hiddenTab = routeTab === "files" || routeTab === "log";
   // A chat workspace opens on its chat even when it needs review; the review button is still there.
   const tab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
   useEffect(() => {
@@ -233,14 +193,14 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         return;
       }
       const index = Number(e.key) - 1;
-      if (Number.isInteger(index) && index >= 0 && index < visibleTabs.length) {
+      if (Number.isInteger(index) && index >= 0 && index < SIMPLE_TABS.length) {
         e.preventDefault();
-        setTab(visibleTabs[index].id);
+        setTab(SIMPLE_TABS[index].id);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [workspaceId, advanced]);
+  }, [workspaceId]);
 
   // The terminal bundle may still be in flight on the first `.`, so the focus
   // request retries briefly instead of silently doing nothing.
@@ -301,13 +261,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   if (terminals.length > 1 && !chat) badges.terminal = { count: terminals.length, noun: "open terminals" };
   if (reviewCount > 0) badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files" };
 
-  // Terminal ids carry their kind (see spawnAgentSession): shell-<n> or agent-<name>-<n>.
-  const addTerminal = (kind: "shell" | string) => {
-    const id = kind === "shell" ? `shell-${Date.now()}` : `agent-${kind}-${Date.now()}`;
-    setTerminals((items) => [...items, { id, label: kind === "shell" ? `Shell ${items.length}` : kind }]);
-    setActiveTerminal(id);
-  };
-
   const closeTerminal = (id: string) => {
     setTerminals((items) => items.filter((item) => item.id !== id));
     if (activeTerminal === id) setActiveTerminal("main");
@@ -345,12 +298,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           ) : null}
         </>
       )}
-      {advanced ? (
-        <MenuItem onSelect={() => void share()}>
-          <ShareNetwork size={14} aria-hidden="true" />
-          Copy share link
-        </MenuItem>
-      ) : null}
       <MenuItem onSelect={() => setRenaming(true)}>
         <PencilSimple size={14} aria-hidden="true" />
         Rename
@@ -382,7 +329,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </div>
 
         <TabList label="Project views" className="max-md:col-span-2 max-md:row-start-2 max-md:mb-2">
-          {visibleTabs.map(({ id, label }) => {
+          {SIMPLE_TABS.map(({ id, label }) => {
             const badge = badges[id];
             const name = id === "terminal" && chat ? "Chat" : label;
             return (
@@ -453,28 +400,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               </span>
             );
           })}
-          {advanced && !chat ? (
-            <Menu
-              label="New terminal"
-              trigger={
-                <Button variant="quiet" size="sm" title="Open another terminal in this project's folder">
-                  <Plus size={13} aria-hidden="true" />
-                  New
-                </Button>
-              }
-            >
-              <MenuItem onSelect={() => addTerminal("shell")}>
-                <Terminal size={14} aria-hidden="true" />
-                Plain shell
-              </MenuItem>
-              {installedAgents.map((name) => (
-                <MenuItem key={name} onSelect={() => addTerminal(name)}>
-                  <Play size={14} aria-hidden="true" />
-                  {name}
-                </MenuItem>
-              ))}
-            </Menu>
-          ) : null}
         </div>
       ) : null}
 
@@ -506,11 +431,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                             Restart Claude
                           </Button>
                         ) : null}
-                        {can.mutate && advanced ? (
-                          <Button variant="quiet" size="sm" onClick={() => addTerminal("shell")}>
-                            Open shell
-                          </Button>
-                        ) : null}
                       </div>
                     )}
                     <div className="min-h-0 flex-1">
@@ -528,14 +448,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </ErrorBoundary>
         </TabPanel>
 
-        {advanced ? (
-          <TabPanel value="files" className="h-full min-h-0" tabIndex={-1}>
-            <ErrorBoundary label="Files">
-              {tab === "files" ? <BrowseView workspaceId={workspaceId} /> : null}
-            </ErrorBoundary>
-          </TabPanel>
-        ) : null}
-
         <TabPanel value="review" className="h-full min-h-0" tabIndex={-1}>
           <ErrorBoundary label="Review">
             <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
@@ -543,14 +455,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             </Suspense>
           </ErrorBoundary>
         </TabPanel>
-
-        {advanced ? (
-          <TabPanel value="log" className="h-full min-h-0" tabIndex={-1}>
-            <ErrorBoundary label="Log">
-              {tab === "log" ? <LogView key={workspaceId} workspaceId={workspaceId} /> : null}
-            </ErrorBoundary>
-          </TabPanel>
-        ) : null}
       </div>
       {paneOpen && pane ? (
         <aside aria-label="Preview" className={cn("flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised", paneWidth)}>

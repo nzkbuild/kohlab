@@ -8,7 +8,7 @@
  * flight at restart is lost. Upgrade path: host it in the PTY daemon.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
@@ -118,6 +118,14 @@ export function describeAsk(name: string, input: Record<string, any>, cwd: strin
   }
 }
 
+/** What the user reads when Claude fails. The raw CLI text goes to the server log, not the chat. */
+export function friendlyError(raw: string): string {
+  if (/usage limit|rate limit|limit reached|quota|overloaded|529/i.test(raw)) return "Claude has reached its usage limit for now. Try again in a little while.";
+  if (/not logged in|log ?in|login|authenticat|401|invalid api key|credential/i.test(raw)) return "Claude is signed out on this server. Open Settings → Claude to check the connection.";
+  if (/is not installed on this server/i.test(raw)) return "Claude is not set up on this server yet. Open Settings → Claude.";
+  return "Something went wrong on Claude's side. Try again.";
+}
+
 interface Live {
   child: ChildProcess;
   cwd: string;
@@ -131,6 +139,8 @@ interface Live {
   resuming?: string;
   /** the message being answered, kept to retry once if the resume fails */
   msg?: string;
+  /** Claude's reply so far, streamed as text arrives. In memory only: not persisted, not an event. */
+  draft: string;
 }
 
 interface Chat {
@@ -228,8 +238,14 @@ function onLine(id: string, live: Live, line: string) {
     if (typeof m.session_id === "string") persistSession(id, m.session_id);
     return;
   }
+  if (m.type === "stream_event") {
+    if (m.parent_tool_use_id) return; // a helper agent's work, not the conversation
+    if (m.event?.type === "content_block_delta" && m.event.delta?.type === "text_delta") live.draft += m.event.delta.text ?? "";
+    return;
+  }
   if (m.type === "assistant") {
     if (m.parent_tool_use_id) return; // a helper agent's work, not the conversation
+    live.draft = ""; // the full message replaces the streamed draft
     for (const b of m.message?.content ?? []) {
       if (b?.type === "text" && b.text) emit(id, { kind: "assistant", text: b.text });
       else if (b?.type === "tool_use" && b.name !== "TodoWrite") {
@@ -249,9 +265,12 @@ function onLine(id: string, live: Live, line: string) {
     return;
   }
   if (m.type === "result") {
+    live.draft = "";
     if (m.subtype !== "success" && resumeFailed(id, live)) return;
     if (m.subtype !== "success") {
-      emit(id, { kind: "error", text: `Claude hit a problem: ${String(m.result ?? m.subtype ?? "unknown").slice(0, 200)}` });
+      const raw = String(m.result ?? m.subtype ?? "unknown");
+      console.warn("[chat] claude result error:", raw.slice(0, 200));
+      emit(id, { kind: "error", text: friendlyError(raw) });
     }
     emit(id, { kind: "done" });
     chatBusy.delete(id);
@@ -269,8 +288,9 @@ function onExit(id: string, live: Live) {
   live.asks.clear();
   if (live.stopping || !chatBusy.has(id)) return;
   if (resumeFailed(id, live)) return;
-  const last = live.stderr.trim().split("\n").pop()?.trim();
-  emit(id, { kind: "error", text: `Claude stopped unexpectedly. Send a message to continue.${last ? ` (${last.slice(0, 200)})` : ""}` });
+  const last = live.stderr.trim().split("\n").pop()?.trim() ?? "";
+  console.warn("[chat] claude stopped unexpectedly:", last.slice(0, 200));
+  emit(id, { kind: "error", text: friendlyError(last) });
   finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
 }
 
@@ -282,7 +302,8 @@ function resumeFailed(id: string, live: Live): boolean {
   if (procs.get(id) === live) procs.delete(id);
   retryFresh(id, live.msg).catch((e) => {
     chatBusy.delete(id);
-    emit(id, { kind: "error", text: `Claude could not start: ${(e as Error).message}` });
+    console.error("[chat] could not start:", (e as Error).message);
+    emit(id, { kind: "error", text: friendlyError((e as Error).message) });
     finish(id).catch(() => {});
   });
   return true;
@@ -307,8 +328,8 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   const home = who?.home || homedir();
   // Chat users get a clean Claude with the same login: no user settings, skills, MCP servers or CLAUDE.md.
   // CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies.
-  // No --include-partial-messages and no --model: the account default model.
-  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
+  // --include-partial-messages streams Claude's reply as it is written (stream_event lines). No --model: the account default model.
+  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
   args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
   args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
   if (ws.chatSession) args.push("--resume", ws.chatSession);
@@ -318,7 +339,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "1";
   const cwd = worktreePath(ws);
   const child = spawn(bin, args, { cwd, uid: who?.uid, gid: who?.gid, env, stdio: ["pipe", "pipe", "pipe"] });
-  const live: Live = { child, cwd, asks: new Map(), stderr: "", stopping: false, closed: false, resuming: ws.chatSession };
+  const live: Live = { child, cwd, asks: new Map(), stderr: "", stopping: false, closed: false, resuming: ws.chatSession, draft: "" };
   procs.set(id, live);
   child.stdin!.on("error", () => {}); // a dead process: its exit event reports it
   child.stderr!.on("data", (d) => {
@@ -338,7 +359,7 @@ export async function snapshot(id: string, after: number) {
   if (!ws.chat) throw new ChatError(400, "not a chat workspace");
   const events = load(id).events.filter((e) => e.n > after);
   const live = procs.get(id);
-  return { events, busy: chatBusy.has(id), waiting: live?.asks.keys().next().value ?? null };
+  return { events, busy: chatBusy.has(id), waiting: live?.asks.keys().next().value ?? null, draft: live?.draft ?? "" };
 }
 
 /** Send a user message. Starts the claude process if none is alive. */
@@ -351,6 +372,7 @@ export async function send(id: string, text: string): Promise<void> {
   // check and claim in one synchronous step, so two posts cannot both start a turn
   if (chatBusy.has(id)) throw new ChatError(409, "still working");
   chatBusy.add(id);
+  chatWaiting.delete(id); // a new message clears a stale "needs you" from before
   emit(id, { kind: "user", text: t });
   try {
     await markStarted(id);
@@ -359,7 +381,8 @@ export async function send(id: string, text: string): Promise<void> {
     live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
   } catch (e) {
     chatBusy.delete(id);
-    emit(id, { kind: "error", text: `Claude could not start: ${(e as Error).message}` });
+    console.error("[chat] could not start:", (e as Error).message);
+    emit(id, { kind: "error", text: friendlyError((e as Error).message) });
     await finish(id);
   }
 }
@@ -374,4 +397,33 @@ export async function answer(id: string, requestId: string, allow: boolean): Pro
   const response = allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "The user said no." };
   live.child.stdin!.write(JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: requestId, response } }) + "\n");
   emit(id, { kind: "answer", requestId, allow });
+}
+
+/** After a server restart: a chat whose newest question has nothing answered after it is still waiting, so its "needs you" dot comes back. */
+export function restoreWaiting(): void {
+  if (!existsSync(chatsDir())) return;
+  for (const f of readdirSync(chatsDir())) {
+    if (!f.endsWith(".jsonl")) continue;
+    const id = f.slice(0, -".jsonl".length);
+    const events: ChatEvent[] = [];
+    let text: string;
+    try {
+      text = readFileSync(join(chatsDir(), f), "utf8");
+    } catch {
+      continue; // unreadable: skip it, a restart must not fail on one bad file
+    }
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        events.push(JSON.parse(line));
+      } catch {
+        /* a torn last line after a crash: skip it */
+      }
+    }
+    let lastAsk = -1;
+    for (let i = 0; i < events.length; i++) if (events[i].kind === "ask") lastAsk = i;
+    if (lastAsk < 0) continue;
+    const answered = events.slice(lastAsk + 1).some((e) => e.kind === "answer" || e.kind === "done" || e.kind === "error" || e.kind === "user");
+    if (!answered) chatWaiting.add(id);
+  }
 }

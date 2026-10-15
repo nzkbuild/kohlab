@@ -5,7 +5,7 @@ import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { projectTitle } from "../lib/format";
 import { workspaceStatus } from "../lib/status";
-import { Button, Dialog, Field } from "./ui";
+import { Button, Dialog, Field, Panel } from "./ui";
 import { projectNameFromIdea } from "./homeName";
 import { isPhone } from "../lib/viewport";
 
@@ -220,6 +220,12 @@ export function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
 
+  // Claude missing or signed out: one calm notice above the message box. A failed check shows nothing.
+  const [claudeNeedsSetup, setClaudeNeedsSetup] = useState(false);
+  useEffect(() => {
+    api.agentsStatus().then((s) => setClaudeNeedsSetup(!s.claude || s.claudeSignedIn === false), () => {});
+  }, []);
+
   // `/new` (an old bookmark) opens the dialog over this page, then drops the flag.
   const wantsCreate = route.kind === "workspaces" && !!route.create;
   useEffect(() => {
@@ -298,6 +304,21 @@ export function HomeScreen() {
 
           {can.mutate ? (
             <>
+              {claudeNeedsSetup ? (
+                <Panel className="mt-8 w-full">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-text-primary">Claude isn't connected yet</p>
+                      <p className="mt-0.5 text-sm text-text-secondary">
+                        Kohlab needs Claude to build things. Open Settings to see how to connect it.
+                      </p>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => navigate({ kind: "settings", section: "agents" })}>
+                      Open settings
+                    </Button>
+                  </div>
+                </Panel>
+              ) : null}
               <div className="mt-8 flex w-full items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5 focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-line-strong">
                 <label htmlFor="home-idea" className="sr-only">
                   Describe what you want to build

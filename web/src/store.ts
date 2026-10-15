@@ -27,9 +27,6 @@ export interface AppState {
   me: Me | null;
   /** Workspace that should open a fresh shell tab on arrival (Home's Open menu). */
   openShell: string | null;
-  /** Developer tools (files, log, share links, extra terminals, team, server). Off by default. */
-  /** Always false: the developer view is switched off (v1.33.0). Its code paths remain; flip this to bring it back. */
-  advanced: boolean;
   /** The New project sheet. Opens over whatever page is showing, so the page under it stays put. */
   newOpen: boolean;
   /** Phone and tablet drawer. Lives here so any page header can open it. */
@@ -61,7 +58,6 @@ export const useApp = create<AppState>((set) => ({
   connection: "connecting",
   me: null,
   openShell: null,
-  advanced: false,
   newOpen: false,
   navOpen: false,
   paletteOpen: false,

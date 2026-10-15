@@ -6,7 +6,7 @@
  *
  * Run:  bun scripts/check-chat.mjs
  */
-import { describeAsk, describeTool } from "../chat.ts";
+import { describeAsk, describeTool, friendlyError } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -39,6 +39,12 @@ check("WebFetch ask", describeAsk("WebFetch", { url: "https://example.com" }, cw
 check("unknown tool ask: text", describeAsk("Foo", { a: 1 }, cwd).text, "Claude wants to use Foo");
 check("unknown tool ask: detail is the input as JSON", describeAsk("Foo", { a: 1 }, cwd).detail, '{"a":1}');
 check("unknown tool ask: detail trimmed to 300", describeAsk("Foo", { big: "y".repeat(1000) }, cwd).detail.length, 300);
+
+// what the user reads when Claude fails
+check("usage limit: plain sentence", friendlyError("Claude AI usage limit reached|123"), "Claude has reached its usage limit for now. Try again in a little while.");
+check("sign-in problem: plain sentence", friendlyError("Invalid API key · Please run /login"), "Claude is signed out on this server. Open Settings → Claude to check the connection.");
+check("anything else: generic sentence", friendlyError("something odd happened"), "Something went wrong on Claude's side. Try again.");
+check("not installed: set-up sentence", friendlyError("claude is not installed on this server"), "Claude is not set up on this server yet. Open Settings → Claude.");
 
 if (failures) {
   console.log(`\n${failures} failed`);

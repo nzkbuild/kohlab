@@ -349,6 +349,8 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState<string | null>(null);
+  // Claude's reply as it is being written (streamed by the server, not yet an event).
+  const [streamed, setStreamed] = useState("");
   const [kick, setKick] = useState(0);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -369,7 +371,7 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
   const nearBottomRef = useRef(true);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Poll: 1 s while the AI is working or asking, 4 s otherwise. Paused while the
+  // Poll: 0.5 s while the AI is working, 1 s while it waits for an answer, 4 s otherwise. Paused while the
   // tab is hidden; `kick` restarts the loop at once (after a send or an answer).
   useEffect(() => {
     let alive = true;
@@ -397,7 +399,8 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
         if (res.events.length > 0) setEvents((prev) => mergeEvents(prev, res.events));
         setBusy(res.busy);
         setWaiting(res.waiting);
-        schedule(res.busy || res.waiting !== null ? 1000 : 4000);
+        setStreamed(res.draft);
+        schedule(res.busy ? 500 : res.waiting !== null ? 1000 : 4000);
       } catch {
         if (alive) schedule(4000);
       }
@@ -516,7 +519,7 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
       return;
     }
     if (nearBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [events, busy, waiting]);
+  }, [events, busy, waiting, streamed]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -756,12 +759,25 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
                         ) : (
                           renderEvent(row[0])
                         )}
+                        {row[0].n === events.at(-1)?.n && row[0].kind === "error" && !busy && can && lastRequest ? (
+                          <div>
+                            <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={sending} onClick={() => void sendText(lastRequest)}>
+                              Try again
+                            </Button>
+                          </div>
+                        ) : null}
                       </Fragment>
                     ))}
                     {replies.length > 0 ? <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} /> : null}
                   </div>
                 );
               })}
+              {busy && streamed ? (
+                // aria-live off: the reply is announced once, when its assistant message arrives.
+                <div aria-live="off">
+                  <Prose text={streamed} />
+                </div>
+              ) : null}
               {!busy && hasChanges && can ? (
             <div role="region" aria-label="Changes to check" className="flex flex-col gap-3">
               <p className="text-[14px] text-text-muted">

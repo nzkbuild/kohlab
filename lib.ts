@@ -1340,11 +1340,12 @@ export async function isRunning(ws: Workspace): Promise<boolean> {
   return !ws.stopped && (await isAlive(ws));
 }
 
+/** Called once per turn (hook UserPromptSubmit, chat send), so `started` is the latest run's start. */
 export async function markStarted(id: string): Promise<Workspace> {
   return mutateState(async (s) => {
     const ws = s.workspaces.find((w) => w.id === id);
     if (!ws) throw new Error(`no workspace '${id}'`);
-    ws.started = ws.started ?? Date.now();
+    ws.started = Date.now();
     ws.stopped = null;
     return ws;
   });

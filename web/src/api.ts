@@ -77,15 +77,6 @@ export const api = {
   create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; location?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   paths: () => json<{ projects: string }>("/api/paths"),
-  /** Create a folder or an empty file in a workspace's tree. */
-  fsOp: (id: string, op: "mkdir" | "touch", path: string) =>
-    json<{ ok: boolean; path: string }>(`/api/workspaces/${encodeURIComponent(id)}/fs?op=${op}&path=${encodeURIComponent(path)}`, { method: "POST" }),
-  /** Upload one file into the tree at `path` (overwrite only when asked). */
-  putFile: (id: string, path: string, file: Blob, overwrite = false) =>
-    json<{ ok: boolean; path: string; bytes: number }>(
-      `/api/workspaces/${encodeURIComponent(id)}/fs?op=upload&path=${encodeURIComponent(path)}${overwrite ? "&overwrite=1" : ""}`,
-      { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file },
-    ),
   /** Download a file, or a folder as .tar.gz, through the authenticated fetch. */
   download: async (id: string, path: string): Promise<void> => {
     const res = await req(`/api/workspaces/${encodeURIComponent(id)}/raw?path=${encodeURIComponent(path)}`);
@@ -111,7 +102,7 @@ export const api = {
     json<Workspace>(`/api/workspaces/${id}/${action}`, { method: "POST" }),
   /** Chat events after sequence number `after`, plus whether the AI is working and which question it waits on. */
   chat: (id: string, after: number) =>
-    json<{ events: ChatEvent[]; busy: boolean; waiting: string | null }>(`/api/workspaces/${encodeURIComponent(id)}/chat?after=${after}`),
+    json<{ events: ChatEvent[]; busy: boolean; waiting: string | null; draft: string }>(`/api/workspaces/${encodeURIComponent(id)}/chat?after=${after}`),
   chatSend: (id: string, text: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat`, {
       method: "POST",
@@ -124,8 +115,6 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ requestId, allow }),
     }),
-  share: (id: string) =>
-    json<{ id: string; share: string }>(`/api/workspaces/${id}/share`, { method: "POST" }),
   /** Give a project a new name (its title in the UI). The server checks the name. */
   rename: (id: string, title: string) =>
     json<Workspace>(`/api/workspaces/${encodeURIComponent(id)}/rename`, {
@@ -148,9 +137,6 @@ export const api = {
       body: JSON.stringify({ message }),
     }),
   files: (id: string) => json<TreeNode[]>(`/api/workspaces/${id}/files`),
-  file: (id: string, path: string) =>
-    json<{ path: string; content: string }>(`/api/workspaces/${id}/file?path=${encodeURIComponent(path)}`),
-  log: (id: string) => json<{ log: string }>(`/api/workspaces/${id}/log`),
   users: () => json<{ users: TeamUser[]; canInvite: boolean }>("/api/users"),
   /** Who this browser is, as far as the server is concerned. */
   account: () => json<{ id: string; role: string; kind: string }>("/api/account"),
