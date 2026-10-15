@@ -215,6 +215,30 @@ export default function BrowserView({ workspaceId, onUrl }: Props) {
     };
   }, [workspaceId, attempt]);
 
+  // The page is laid out at the pane's size, so it is shown 1:1 instead of shrunk into the frame.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el || phase !== "live" || !canInputRef.current) return;
+    let timer = 0;
+    const sendSize = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 50 || r.height < 50) return;
+      api.browserAct(workspaceId, "viewport", undefined, { width: Math.round(r.width), height: Math.round(r.height) }).catch(() => {});
+    };
+    // Dragging the pane fires many resizes: wait for a pause. The first call is made once the browser is live.
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(sendSize, 250);
+    };
+    const ro = new ResizeObserver(schedule);
+    ro.observe(el);
+    schedule();
+    return () => {
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [phase, workspaceId]);
+
   // Wheel and touch need passive: false so preventDefault stops the panel scrolling, which React's listeners cannot do.
   useEffect(() => {
     const el = wrapperRef.current;
@@ -330,7 +354,7 @@ export default function BrowserView({ workspaceId, onUrl }: Props) {
       role="region"
       aria-label="Shared browser"
       tabIndex={0}
-      className="relative min-h-0 flex-1 touch-none select-none overflow-hidden rounded-card bg-surface-sunken cursor-default"
+      className="relative min-h-0 flex-1 touch-none select-none overflow-hidden bg-surface-sunken cursor-default"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

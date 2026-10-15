@@ -172,7 +172,23 @@ export function normalizeBrowserUrl(input: string): string | null {
 }
 
 /** Navigate: open a URL (starting the browser when none runs), or go back, forward or reload. Returns the page's URL now. */
-export async function browserAction(ws: Workspace, action: "open" | "home" | "back" | "forward" | "reload", url?: string): Promise<string | null> {
+export async function browserAction(
+  ws: Workspace,
+  action: "open" | "home" | "back" | "forward" | "reload" | "viewport",
+  url?: string,
+  size?: { width: number; height: number },
+): Promise<string | null> {
+  if (action === "viewport") {
+    const { width, height } = size ?? { width: NaN, height: NaN };
+    if (!Number.isFinite(width) || !Number.isFinite(height)) throw new BrowserError(400, "Width and height must be numbers.");
+    // Only a running browser has a page to size: a resize never starts one.
+    if (!running.has(ws.id)) return null;
+    const w = Math.min(2560, Math.max(320, Math.round(width)));
+    const h = Math.min(1600, Math.max(240, Math.round(height)));
+    await cli(ws, ["set", "viewport", String(w), String(h)], 10_000);
+    touchBrowser(ws);
+    return browserUrl(ws);
+  }
   if (action === "open" || action === "home") {
     // home is the project's own start page, opened by the server: never the public address the person used
     const target = action === "home" ? await startUrlFor(ws) : normalizeBrowserUrl(url ?? "");

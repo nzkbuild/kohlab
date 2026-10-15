@@ -126,11 +126,11 @@ export const api = {
   preview: (id: string, fresh = false) => json<{ url: string }>(`/api/workspaces/${id}/preview${fresh ? "?new=1" : ""}`, { method: "POST" }),
   /** The shared browser's address. Starts the browser if needed, which can take ~30 s the first time. */
   browser: (id: string) => json<{ url: string | null }>(`/api/workspaces/${id}/browser`),
-  browserAct: (id: string, action: "open" | "home" | "back" | "forward" | "reload", url?: string) =>
+  browserAct: (id: string, action: "open" | "home" | "back" | "forward" | "reload" | "viewport", url?: string, size?: { width: number; height: number }) =>
     json<{ url: string }>(`/api/workspaces/${id}/browser`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, url }),
+      body: JSON.stringify({ action, url, ...size }),
     }),
   versions: (id: string) => json<Version[]>(`/api/workspaces/${id}/versions`),
   restoreVersion: (id: string, version: string) =>

@@ -2,8 +2,6 @@ import { lazy, Suspense, startTransition, useEffect, useOptimistic, useRef, useS
 import {
   ArrowLeft,
   ArrowsClockwise,
-  ArrowsInSimple,
-  ArrowsOutSimple,
   Browser,
   CaretDown,
   CaretLeft,
@@ -27,6 +25,7 @@ import { workspaceStatus } from "../lib/status";
 import { projectTitle } from "../lib/format";
 import { canContinue, changeModel, modelOf, type ModelChoice } from "../lib/projectActions";
 import { cn } from "../lib/utils";
+import { useDragSize } from "../lib/useDragSize";
 import ConfirmDialog from "./ConfirmDialog";
 import { RenameDialog } from "./Sidebar";
 import ErrorBoundary from "./ErrorBoundary";
@@ -60,9 +59,6 @@ type TabId = WorkspaceTab;
 
 /** The shell breakpoint: the preview opens beside the project from here, as a sheet below it. */
 const WIDE_QUERY = "(min-width: 56.25rem)";
-
-/** The bottom terminal panel: 300px, or 65% of the page when made bigger. */
-const PANEL_HEIGHT = { short: "300px", tall: "65%" };
 
 /** Shell tabs are `shell-*` (a login shell in the project folder); the Claude tab is `resume-*`. */
 const SHELL_PREFIX = "shell-";
@@ -124,7 +120,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   // The bottom terminal panel. Its tabs and size live as long as this page does; the page is keyed by project.
   const [panelOpen, setPanelOpen] = useState(false);
-  const [panelTall, setPanelTall] = useState(false);
+  // Both sizes are dragged by the person and kept per browser.
+  const { size: paneSize, handleProps: paneHandle } = useDragSize("kohlab_preview_width", 520, 360, () => window.innerWidth - 480, "left");
+  const { size: panelSize, handleProps: panelHandle } = useDragSize("kohlab_panel_height", 300, 140, () => window.innerHeight - 200, "top");
   const [shells, setShells] = useState<Shell[]>([]);
   const [activeShell, setActiveShell] = useState("");
   const shellSeq = useRef(0);
@@ -486,9 +484,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
   const paneOpen = wide && pane !== null;
   const sheetOpen = !wide && pane !== null;
-  const paneWidth = "w-[clamp(360px,42%,640px)]";
-  // The same width as a padding-right on the header, so the switch centres on the content column beside an open pane.
-  const paneInset = "pr-[clamp(360px,42%,640px)]";
   const closePreview = () => setPane(null);
 
   // Docked on desktop, a full-screen sheet on a phone (Back closes it).
@@ -498,11 +493,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       className={cn(
         "dark-pane flex min-h-0 flex-col overflow-hidden bg-surface-terminal",
         wide
-          ? "mx-3 mb-2.5 shrink-0 rounded-[14px]"
+          ? "relative mx-3 mb-2.5 shrink-0 rounded-[14px]"
           : "fixed inset-0 z-[var(--z-drawer)] pt-[var(--safe-top)] pb-[var(--safe-bottom)]",
       )}
-      style={wide ? { height: panelTall ? PANEL_HEIGHT.tall : PANEL_HEIGHT.short } : undefined}
+      style={wide ? { height: panelSize } : undefined}
     >
+      {wide ? <div {...panelHandle} aria-label="Resize terminal panel" className="resize-handle resize-handle-y" /> : null}
       <div className="flex shrink-0 items-center gap-1 px-2 pt-2 pb-1.5">
         {wide ? null : (
           <Button variant="quiet" size="sm" className="shrink-0" onClick={() => setPanelOpen(false)}>
@@ -541,20 +537,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <Plus size={14} aria-hidden="true" />
         </Button>
         {wide ? (
-          <>
-            <Button
-              variant="quiet"
-              size="sm"
-              iconOnly
-              aria-label={panelTall ? "Make the panel smaller" : "Make the panel bigger"}
-              onClick={() => setPanelTall((t) => !t)}
-            >
-              {panelTall ? <ArrowsInSimple size={14} aria-hidden="true" /> : <ArrowsOutSimple size={14} aria-hidden="true" />}
-            </Button>
-            <Button variant="quiet" size="sm" iconOnly aria-label="Close the terminal panel" onClick={() => setPanelOpen(false)}>
-              <X size={14} aria-hidden="true" />
-            </Button>
-          </>
+          <Button variant="quiet" size="sm" iconOnly aria-label="Close the terminal panel" onClick={() => setPanelOpen(false)}>
+            <X size={14} aria-hidden="true" />
+          </Button>
         ) : null}
       </div>
       <div className="min-h-0 flex-1">
@@ -575,9 +560,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
   return (
     <div className="cockpit max-md:overflow-hidden">
-      <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1">
+      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
       {/* One 56px row per project: the title (its menu), the segmented switch centred, and Preview. On a phone the title row is 52px and the switch sits on its own row below. */}
-      <header className={cn("grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 px-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]", paneOpen && paneInset)}>
+      <header className="grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 px-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
         <div className="flex min-w-0 items-center justify-self-start gap-1 max-md:h-13 max-md:w-full max-md:justify-self-stretch">
           {/* A project reached from Home or search has history behind it: Back, not the menu. */}
           {navIndex > 0 ? (
@@ -686,13 +672,15 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             </TabPanel>
           ) : null}
         </div>
-        {paneOpen && pane ? (
-          <aside aria-label="Preview" className={cn("flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised", paneWidth)}>
-            <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
-          </aside>
-        ) : null}
       </div>
       {terminalPanel}
+      </div>
+      {paneOpen && pane ? (
+        <aside aria-label="Preview" className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised" style={{ width: paneSize }}>
+          <div {...paneHandle} aria-label="Resize preview" className="resize-handle resize-handle-x" />
+          <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
+        </aside>
+      ) : null}
       {sheetOpen && pane ? (
         <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
       ) : null}

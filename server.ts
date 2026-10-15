@@ -1281,13 +1281,14 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot use the browser");
       if (refused) return refused;
-      const body = (await req.json().catch(() => ({}))) as { action?: string; url?: string };
-      if (body.action !== "open" && body.action !== "home" && body.action !== "back" && body.action !== "forward" && body.action !== "reload") {
-        return json({ error: "action must be open, home, back, forward or reload" }, 400);
+      const body = (await req.json().catch(() => ({}))) as { action?: string; url?: string; width?: number; height?: number };
+      if (body.action !== "open" && body.action !== "home" && body.action !== "back" && body.action !== "forward" && body.action !== "reload" && body.action !== "viewport") {
+        return json({ error: "action must be open, home, back, forward, reload or viewport" }, 400);
       }
-      containFailure(audit(actor, "browser." + body.action, bid), "audit");
+      // A viewport resize fires on every drag, so it is not audited.
+      if (body.action !== "viewport") containFailure(audit(actor, "browser." + body.action, bid), "audit");
       try {
-        return json({ url: await browserAction(await getWorkspace(bid), body.action, body.url) });
+        return json({ url: await browserAction(await getWorkspace(bid), body.action, body.url, { width: body.width as number, height: body.height as number }) });
       } catch (e) {
         return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 503);
       }

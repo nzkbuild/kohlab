@@ -1189,6 +1189,59 @@ input[type="radio"] {
   flex: 1;
 }
 
+/* Drag handles for the preview pane and the terminal panel. Hidden until hovered or focused. */
+.resize-handle {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+  outline: none;
+}
+
+.resize-handle-x {
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.resize-handle-y {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 8px;
+  cursor: row-resize;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  background: var(--accent, currentColor);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.resize-handle-x::after {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+}
+
+.resize-handle-y::after {
+  left: 16px;
+  right: 16px;
+  top: 3px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.resize-handle:hover::after,
+.resize-handle:focus-visible::after,
+.resize-handle:active::after {
+  opacity: 0.6;
+}
+
 /* --- terminal ------------------------------------------------------------ */
 .terminal-wrap {
   height: 100%;

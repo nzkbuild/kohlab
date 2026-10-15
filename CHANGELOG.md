@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.46.0] - 2026-10-16
+
+### Changed
+- Preview now runs the full height of the window beside your project, instead of sitting under an empty strip of the header.
+- The page in Preview is shown at real size: the shared browser takes the size of the pane, so pages no longer appear shrunk in a big dark box.
+- Drag the edge of Preview to make it wider or narrower, and the top edge of the terminal panel to make it taller or shorter. Sizes are remembered; double-click an edge to reset it, or focus it and use the arrow keys.
+
 ## [1.45.0] - 2026-10-15
 
 ### Added
