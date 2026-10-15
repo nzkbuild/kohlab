@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.40.0] - 2026-10-15
+
+### Changed
+- Changes speaks plainly: "What Claude changed", with each file marked New, Changed or Removed instead of line counts. Keep this version and Undo are right there too, so you don't have to go back to the chat.
+- On a phone, Keep this version, Preview and Undo fit on one line.
+- A stopped terminal project says "Claude has stopped. This is the last thing it showed." next to Restart Claude.
+
 ## [1.39.1] - 2026-10-15
 
 ### Fixed

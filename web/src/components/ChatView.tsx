@@ -767,18 +767,18 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
               <p className="text-[14px] text-text-muted">
                 {changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}
               </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="primary" className="min-h-11 rounded-full shell:min-h-9" disabled={keeping} onClick={() => void keep()}>
-                  <Check size={14} aria-hidden="true" />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button variant="primary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={keeping} onClick={() => void keep()}>
+                  <Check size={14} className="max-md:hidden" aria-hidden="true" />
                   Keep this version
                 </Button>
                 {previewOpen ? null : (
-                  <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={previewing} onClick={onPreview}>
-                    <Eye size={14} aria-hidden="true" />
+                  <Button variant="secondary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={previewing} onClick={onPreview}>
+                    <Eye size={14} className="max-md:hidden" aria-hidden="true" />
                     Preview
                   </Button>
                 )}
-                <Button variant="quiet" className="min-h-11 text-text-secondary shell:min-h-9" disabled={undoing} onClick={() => setConfirmUndo(true)}>
+                <Button variant="quiet" className="min-h-11 text-text-secondary max-md:px-2.5 shell:min-h-9" disabled={undoing} onClick={() => setConfirmUndo(true)}>
                   <ArrowCounterClockwise size={14} aria-hidden="true" />
                   Undo
                 </Button>

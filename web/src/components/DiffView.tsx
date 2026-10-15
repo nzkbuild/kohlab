@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
+import { toast } from "sonner";
 import { MONACO_THEME, baseOptions, defineKohlabTheme } from "../lib/monaco";
 import {
+  ArrowCounterClockwise,
   ArrowUUpLeft,
   ArrowsClockwise,
   CaretRight,
+  Check,
   CheckSquare,
   Files,
   FileText,
@@ -154,6 +157,10 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
   const [mergeResult, setMergeResult] = useState<string | null>(null);
   /** Which irreversible action the confirm dialog is currently asking about. */
   const [confirming, setConfirming] = useState<null | "commit" | "discard" | "merge">(null);
+  /** Simple (chat) view only: Keep and Undo, with their own busy state and undo confirm. */
+  const [keeping, setKeeping] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const [confirmUndo, setConfirmUndo] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -355,36 +362,84 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
         : error && count === 0
           ? "Could not load the changes"
           : count === 0
-            ? "Claude has not changed any files since you last kept"
-            : `Claude has changed ${count} file${count === 1 ? "" : "s"} since you last kept`;
+            ? "Nothing new since you last kept"
+            : "What Claude changed";
+    // Same guard as the developer view's discard: the server refuses a reset under a live agent.
+    const simpleBusy = keeping || undoing || !!workspace?.running;
+
+    const keepSimple = async () => {
+      setKeeping(true);
+      try {
+        await api.commit(workspaceId, `Kept ${count} changed file${count === 1 ? "" : "s"}`);
+        await load();
+        await refresh();
+        toast.success("Saved");
+      } catch (e) {
+        toast.error(`Could not save, ${(e as Error).message}`);
+      } finally {
+        setKeeping(false);
+      }
+    };
+
+    const undoSimple = async () => {
+      setUndoing(true);
+      try {
+        await api.action(workspaceId, "discard");
+        await load();
+        await refresh();
+        toast.success("Changes undone");
+      } catch (e) {
+        toast.error(`Could not undo, ${(e as Error).message}`);
+      } finally {
+        setUndoing(false);
+        setConfirmUndo(false);
+      }
+    };
+
     return (
       <div className="cockpit">
-        <header className="cockpit-head">
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">{heading}</h2>
-          <Button variant="quiet" size="sm" iconOnly aria-label="Refresh changes" disabled={loading} onClick={() => void load()}>
-            <ArrowsClockwise size={13} />
-          </Button>
-        </header>
-
-        {error ? (
-          <div role="alert" className="flex items-center gap-2 border-b border-line-subtle px-3 py-2 text-xs text-status-danger">
-            <WarningCircle size={14} className="shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 break-words">{error}</span>
-            <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
-              Try again
-            </Button>
-          </div>
-        ) : null}
-
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 max-md:p-3">
           <div className="mx-auto w-full max-w-[720px]">
+            <div className="flex items-center gap-3">
+              <h2 className="min-w-0 flex-1 text-base font-medium text-text-primary">{heading}</h2>
+              <Button
+                variant="quiet"
+                iconOnly
+                aria-label="Refresh changes"
+                className="max-md:min-h-11 max-md:min-w-11"
+                disabled={loading}
+                onClick={() => void load()}
+              >
+                <ArrowsClockwise size={16} aria-hidden="true" />
+              </Button>
+            </div>
+            {count > 0 ? (
+              <p className="mt-1 text-[14px] text-text-muted">
+                {count} {count === 1 ? "file" : "files"} since you last pressed Keep.
+              </p>
+            ) : null}
+
+            {error ? (
+              <div role="alert" className="mt-3 flex items-center gap-2 px-3 py-2 text-xs text-status-danger">
+                <WarningCircle size={14} className="shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1 break-words">{error}</span>
+                <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
+                  Try again
+                </Button>
+              </div>
+            ) : null}
+
             {loading && count === 0 ? <SkeletonRows rows={4} /> : null}
             {count > 0 ? (
               <>
-                <ul className="flex flex-col">
+                <ul className="mt-3 flex flex-col">
                   {files.map((file) => {
-                    const stats = diffStats(file.diff);
                     const isCurrent = current?.name === file.name;
+                    const word = /^new file mode/m.test(file.diff)
+                      ? "New"
+                      : /^deleted file mode/m.test(file.diff)
+                        ? "Removed"
+                        : "Changed";
                     return (
                       <li key={file.name}>
                         <button
@@ -400,18 +455,24 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                           <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary" title={file.name}>
                             {file.name}
                           </span>
-                          {stats ? (
-                            <span className="tnum shrink-0 text-sm text-text-muted">
-                              +{stats.added} −{stats.removed}
-                            </span>
-                          ) : (
-                            <span className="shrink-0 text-sm text-text-muted">Changed</span>
-                          )}
+                          <span className="shrink-0 text-sm text-text-muted">{word}</span>
                         </button>
                       </li>
                     );
                   })}
                 </ul>
+                {can.mutate ? (
+                  <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                    <Button variant="primary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={simpleBusy} onClick={() => void keepSimple()}>
+                      <Check size={14} className="max-md:hidden" aria-hidden="true" />
+                      Keep this version
+                    </Button>
+                    <Button variant="quiet" className="min-h-11 text-text-secondary max-md:px-2.5 shell:min-h-9" disabled={simpleBusy} onClick={() => setConfirmUndo(true)}>
+                      <ArrowCounterClockwise size={14} aria-hidden="true" />
+                      Undo
+                    </Button>
+                  </div>
+                ) : null}
                 {/* The code is mounted only once opened: the editor is the heavy part. */}
                 <details className="group mt-4" onToggle={(e) => setShowCode(e.currentTarget.open)}>
                   <summary className="flex min-h-11 w-fit cursor-pointer list-none select-none items-center gap-1.5 rounded-lg px-3 text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary [&::-webkit-details-marker]:hidden">
@@ -428,6 +489,18 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
             ) : null}
           </div>
         </div>
+
+        <ConfirmDialog
+          open={confirmUndo}
+          onOpenChange={(v) => {
+            if (!v) setConfirmUndo(false);
+          }}
+          title="Undo the changes?"
+          description="Everything Claude changed since you last pressed Keep will be removed. This can't be reversed."
+          confirmLabel="Undo"
+          busy={undoing}
+          onConfirm={() => void undoSimple()}
+        />
       </div>
     );
   }
