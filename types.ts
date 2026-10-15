@@ -39,6 +39,8 @@ export interface Workspace {
   hookToken?: string;
   /** optional resource caps applied to the agent's PTY session */
   limits?: WorkspaceLimits;
+  /** Claude model for this project. Undefined = the account default. */
+  model?: "opus" | "sonnet" | "haiku";
 }
 
 export interface WorkspaceLimits {

@@ -22,6 +22,8 @@ export interface Workspace {
   chatSession?: string;
   /** From the listing: a chat permission question is pending (unanswered). */
   waiting?: boolean;
+  /** Claude model for this project. Undefined = the account default. */
+  model?: "opus" | "sonnet" | "haiku";
 }
 
 /** One entry in a chat workspace's conversation. `n` is the sequence number used for polling. */

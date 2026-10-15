@@ -4,31 +4,41 @@ import {
   ArrowDown,
   ArrowElbowDownLeft,
   ArrowUp,
+  ClockCounterClockwise,
+  DownloadSimple,
+  Eye,
+  File,
   GearSix,
   House,
   MagnifyingGlass,
   Plus,
+  Sparkle,
+  Terminal,
+  TerminalWindow,
   X,
 } from "@phosphor-icons/react";
+import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
+import { isApple } from "../lib/platform";
+import { canContinue, changeModel, modelOf, type ModelChoice } from "../lib/projectActions";
+import type { PanelAction, PanelRequest } from "../store";
+import type { Workspace } from "../types";
 import { projectTitle } from "../lib/format";
 import { sidebarOrder } from "../lib/sidebarOrder";
 import { STATUS_LABEL, workspaceStatus, type WorkspaceStatus } from "../lib/status";
 import { Button, Kbd } from "./ui";
 
-const isApple = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-
-type PaletteGroup = "Views" | "Projects" | "Actions";
-
-/** Heading order is fixed: where you are, what you have, what you can do. */
-const GROUP_ORDER: readonly PaletteGroup[] = ["Views", "Projects", "Actions"];
+/** A group heading is plain text: the fixed ones, and the open project's name. */
+type PaletteGroup = string;
 
 type PaletteItem = {
   id: string;
   label: string;
   group: PaletteGroup;
   icon: ReactNode;
+  /** Muted text on the right of the row: a shortcut, or "Current" for the model in use. */
+  hint?: string;
   keywords?: string[];
   status?: WorkspaceStatus;
   onAction: () => void | Promise<unknown>;
@@ -46,6 +56,46 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return target.closest(".terminal-wrap, .xterm") !== null;
 }
 
+/** The open project's own actions. Changing things is for people who can change the project. */
+function projectActionItems(
+  w: Workspace,
+  group: string,
+  mutate: boolean,
+  requestPanel: (request: PanelRequest) => void,
+): PaletteItem[] {
+  const panel = (action: PanelAction) => () => requestPanel({ workspaceId: w.id, action });
+  return [
+    ...(mutate
+      ? [{ id: "project-terminal", label: "Open terminal", group, icon: <Terminal size={16} />, hint: "Ctrl `", keywords: ["shell", "console", "command line"], onAction: panel("terminal") }]
+      : []),
+    ...(mutate && canContinue(w)
+      ? [{ id: "project-continue", label: "Continue in Claude's terminal", group, icon: <TerminalWindow size={16} />, keywords: ["resume", "chat", "claude"], onAction: panel("continue") }]
+      : []),
+    { id: "project-file", label: "Open file…", group, icon: <File size={16} />, keywords: ["files", "code", "browse"], onAction: panel("files") },
+    { id: "project-versions", label: "Earlier versions", group, icon: <ClockCounterClockwise size={16} />, keywords: ["changes", "history", "undo", "versions"], onAction: panel("changes") },
+    { id: "project-download", label: "Download project", group, icon: <DownloadSimple size={16} />, keywords: ["zip", "save", "export", "archive"], onAction: () => api.download(w.id, "") },
+    ...(mutate
+      ? (
+          [
+            ["opus", "Use Opus 5.5"],
+            ["sonnet", "Use Sonnet 5.5"],
+            ["haiku", "Use Haiku 5.5"],
+            ["default", "Use the account default model"],
+          ] as [ModelChoice, string][]
+        ).map(([model, label]) => ({
+          id: `project-model-${model}`,
+          label,
+          group,
+          icon: <Sparkle size={16} />,
+          hint: modelOf(w) === model ? "Current" : undefined,
+          keywords: ["model", "claude"],
+          onAction: () => changeModel(w, model),
+        }))
+      : []),
+    { id: "project-preview", label: "Preview", group, icon: <Eye size={16} />, keywords: ["site", "browser", "view", "page"], onAction: panel("preview") },
+  ];
+}
+
 /**
  * Command palette: an APG combobox + listbox (popup) with grouped options.
  *
@@ -60,6 +110,8 @@ export default function CommandPalette() {
   const [activeIndex, setActiveIndex] = useState(0);
 
   const workspaces = useApp((s) => s.workspaces);
+  const route = useApp((s) => s.route);
+  const requestPanel = useApp((s) => s.requestPanel);
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
   const can = useCan();
@@ -73,12 +125,14 @@ export default function CommandPalette() {
   // Global accelerator, bound on document so it works from any surface. It must
   // not fire while someone is typing elsewhere; the palette's own input is the
   // exception, because Ctrl/⌘ K there is the documented way to close it again.
+  // Ctrl/⌘ Shift P opens it too.
   // Rebinding on `open` is what lets the open path reset filter and selection in
   // one place: Radix only ever closes this dialog, so a Radix-driven *open*
   // never happens and cannot be the reset hook.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (!(e.metaKey || e.ctrlKey) || !(key === "k" || (key === "p" && e.shiftKey))) return;
       if (e.target !== inputRef.current && isTypingTarget(e.target)) return;
       e.preventDefault();
       if (open) {
@@ -106,6 +160,15 @@ export default function CommandPalette() {
 
   const q = query.trim().toLowerCase();
   const match = (s: string) => !q || s.toLowerCase().includes(q) || s.toLowerCase().includes(q.replace(/\s+/g, "-"));
+
+  // With a project open, its own group sits between Projects and Actions.
+  const openId = route.kind === "workspace" ? route.id : null;
+  const openProject = openId ? workspaces.find((w) => w.id === openId) : undefined;
+  const projectGroup = openProject ? projectTitle(openProject) : null;
+  const groupOrder: readonly PaletteGroup[] = projectGroup
+    ? ["Views", "Projects", projectGroup, "Actions"]
+    : ["Views", "Projects", "Actions"];
+  const projectItems: PaletteItem[] = openProject ? projectActionItems(openProject, projectGroup ?? "", can.mutate, requestPanel) : [];
 
   const items: PaletteItem[] = [
     {
@@ -138,6 +201,7 @@ export default function CommandPalette() {
         onAction: () => navigate({ kind: "workspace", id: w.id }),
       };
     }),
+    ...projectItems,
     ...(can.mutate
       ? [
           {
@@ -156,7 +220,7 @@ export default function CommandPalette() {
   // Option ids are minted once, so the id attribute and the
   // `aria-activedescendant` reference can never drift apart.
   const optionIds = filtered.map((_, index) => `${uid}-option-${index}`);
-  const sections = GROUP_ORDER.map((group) => ({
+  const sections = groupOrder.map((group) => ({
     group,
     entries: filtered.flatMap((entry, index) => (entry.group === group ? [{ entry, index }] : [])),
   })).filter((section) => section.entries.length > 0);
@@ -273,6 +337,7 @@ export default function CommandPalette() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate">{entry.label}</span>
                       </span>
+                      {entry.hint ? <span className="shrink-0 text-xs text-text-faint">{entry.hint}</span> : null}
                       {entry.status === "needs-you" || entry.status === "needs-review" ? (
                         <>
                           <span className="sidebar-dot" aria-hidden="true" />

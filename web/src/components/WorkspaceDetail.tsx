@@ -1,5 +1,21 @@
-import { lazy, Suspense, startTransition, useEffect, useOptimistic, useState } from "react";
-import { ArrowsClockwise, CaretDown, Eye, Ghost, List, PencilSimple, Stop, Terminal, Trash, X } from "@phosphor-icons/react";
+import { lazy, Suspense, startTransition, useEffect, useOptimistic, useRef, useState } from "react";
+import {
+  ArrowsClockwise,
+  ArrowsInSimple,
+  ArrowsOutSimple,
+  CaretDown,
+  CaretLeft,
+  DownloadSimple,
+  Eye,
+  Ghost,
+  List,
+  PencilSimple,
+  Plus,
+  Stop,
+  Terminal,
+  Trash,
+  X,
+} from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { toastAction } from "../lib/actions";
@@ -8,13 +24,28 @@ import { useApp, useCan } from "../store";
 import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
 import { projectTitle } from "../lib/format";
+import { canContinue, changeModel, modelOf, type ModelChoice } from "../lib/projectActions";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
 import { RenameDialog } from "./Sidebar";
 import ErrorBoundary from "./ErrorBoundary";
 import PreviewPanel from "./PreviewPanel";
 import { disposeWorkspaceTerminals } from "./terminalCache";
-import { Button, EmptyState, Menu, MenuItem, SkeletonRows, Tab, TabList, TabPanel, Tabs } from "./ui";
+import {
+  Button,
+  EmptyState,
+  Menu,
+  MenuItem,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuSub,
+  SkeletonRows,
+  Tab,
+  TabList,
+  TabPanel,
+  Tabs,
+} from "./ui";
 
 // xterm (~390 KB) and Monaco must not load before the cockpit does: only an
 // import through lazy() defers the fetch. A static import here: even one that
@@ -22,22 +53,29 @@ import { Button, EmptyState, Menu, MenuItem, SkeletonRows, Tab, TabList, TabPane
 const TerminalView = lazy(() => import("./TerminalView"));
 const ChatView = lazy(() => import("./ChatView"));
 const DiffView = lazy(() => import("./DiffView"));
+const FilesView = lazy(() => import("./FilesView"));
 
 type TabId = WorkspaceTab;
 
-/** The agent and the changes, nothing else. The conversation is "Claude", whether it is a chat or a terminal. */
-const SIMPLE_TABS: { id: TabId; label: string }[] = [
-  { id: "terminal", label: "Claude" },
-  { id: "review", label: "Changes" },
-];
-
 /** The shell breakpoint: the preview opens beside the project from here, as a sheet below it. */
 const WIDE_QUERY = "(min-width: 56.25rem)";
+
+/** The bottom terminal panel: 300px, or 65% of the page when made bigger. */
+const PANEL_HEIGHT = { short: "300px", tall: "65%" };
+
+/** Shell tabs are `shell-*` (a login shell in the project folder); the Claude tab is `resume-*`. */
+const SHELL_PREFIX = "shell-";
+const RESUME_PREFIX = "resume-";
 
 /** Tab count badges, noun included so the tab's name reads as a sentence. */
 interface Badge {
   count: number;
   noun: string;
+}
+
+interface Shell {
+  id: string;
+  label: string;
 }
 
 const ACTION_DONE: Record<string, string> = {
@@ -49,6 +87,12 @@ const ACTION_DONE: Record<string, string> = {
 
 const TEXT_ENTRY_TAGS: Record<string, true> = { INPUT: true, TEXTAREA: true, SELECT: true };
 
+/** Focus is busy in a field or a live terminal: bare keys belong there, not to the page. */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || TEXT_ENTRY_TAGS[target.tagName] === true || target.closest(".xterm") !== null;
+}
+
 export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }) {
   const workspaces = useApp((s) => s.workspaces);
   const loading = useApp((s) => s.loading);
@@ -56,6 +100,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const navigate = useApp((s) => s.navigate);
   const setNavOpen = useApp((s) => s.setNavOpen);
   const route = useApp((s) => s.route);
+  const powerTools = useApp((s) => s.powerTools);
+  const setPowerTools = useApp((s) => s.setPowerTools);
+  const panelRequest = useApp((s) => s.panelRequest);
+  const requestPanel = useApp((s) => s.requestPanel);
   const can = useCan();
 
   // The pane lives in the URL (/w/:id/review), so a refresh, a shared link or
@@ -63,8 +111,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // one per click.
   const routeTab = route.kind === "workspace" ? route.tab : undefined;
   const setTab = (next: TabId) => navigate({ kind: "workspace", id: workspaceId, tab: next }, { replace: true });
-  const [terminals, setTerminals] = useState([{ id: "main", label: "Claude" }]);
-  const [activeTerminal, setActiveTerminal] = useState("main");
   const [confirming, setConfirming] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -74,6 +120,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [pane, setPane] = useState<{ url: string; t: number } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
+  // The bottom terminal panel. Its tabs and size live as long as this page does; the page is keyed by project.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelTall, setPanelTall] = useState(false);
+  const [shells, setShells] = useState<Shell[]>([]);
+  const [activeShell, setActiveShell] = useState("");
+  const shellSeq = useRef(0);
   useEffect(() => {
     const mq = window.matchMedia(WIDE_QUERY);
     const onChange = () => setWide(mq.matches);
@@ -89,16 +141,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // their outcome before the server confirms it. Deleting and committing never do.
   const [optimisticRunning, setOptimisticRunning] = useOptimistic(w?.running ?? false);
 
-  // Home's "open… > Terminal in" lands here: open one fresh shell, once.
-  const openShell = useApp((s) => s.openShell);
-  const setOpenShell = useApp((s) => s.setOpenShell);
-  useEffect(() => {
-    if (openShell !== workspaceId) return;
-    setOpenShell(null);
-    const id = `shell-${Date.now()}`;
-    setTerminals((items) => [...items, { id, label: `Shell ${items.length}` }]);
-    setActiveTerminal(id);
-  }, [openShell, workspaceId, setOpenShell]);
   const preview = async () => {
     setPreviewing(true);
     try {
@@ -111,6 +153,56 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     }
   };
   const reloadPane = () => setPane((p) => (p ? { ...p, t: Date.now() } : p));
+
+  const addShell = () => {
+    shellSeq.current += 1;
+    const id = `${SHELL_PREFIX}${Date.now()}`;
+    setShells((items) => [...items, { id, label: `Terminal ${shellSeq.current}` }]);
+    setActiveShell(id);
+  };
+
+  // Opening the panel is the first use of power tools, so the Files tab appears from here on.
+  const openPanel = (resume = false) => {
+    setPowerTools(true);
+    setPanelOpen(true);
+    if (resume) {
+      const existing = shells.find((s) => s.id.startsWith(RESUME_PREFIX));
+      if (existing) {
+        setActiveShell(existing.id);
+        return;
+      }
+      const id = `${RESUME_PREFIX}${Date.now()}`;
+      setShells((items) => [...items, { id, label: "Claude" }]);
+      setActiveShell(id);
+      return;
+    }
+    if (shells.length === 0) addShell();
+  };
+
+  // Closing a tab ends its shell on the server too.
+  const closeShell = (id: string) => {
+    void api.closeTerminal(workspaceId, id).catch(() => {});
+    const rest = shells.filter((s) => s.id !== id);
+    setShells(rest);
+    if (rest.length === 0) setPanelOpen(false);
+    else if (activeShell === id) setActiveShell(rest[rest.length - 1].id);
+  };
+
+  const togglePanel = () => {
+    if (!panelOpen) {
+      openPanel();
+      return;
+    }
+    // Closing from inside the terminal would drop focus to the page body: send it to the chat composer instead.
+    const inPanel = !!document.activeElement?.closest('[aria-label="Terminal panel"]');
+    setPanelOpen(false);
+    if (inPanel) {
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Claude"]')?.focus());
+    }
+  };
+  // The window listener is bound once per project, so it reads the latest toggle through a ref.
+  const togglePanelRef = useRef(togglePanel);
+  togglePanelRef.current = togglePanel;
 
   const run = (action: string) => {
     startTransition(async () => {
@@ -150,13 +242,20 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // Work waiting for a decision opens on that decision, not on a finished
   // terminal. The default is written into the URL once, so a workspace that
   // flips to needs-review while you watch it does not yank you off the terminal.
-  // A hidden pane in the URL (files or log, while simple) falls back like no pane.
-  const hiddenTab = routeTab === "files" || routeTab === "log";
+  // The Files pane is hidden while power tools are off, and falls back like no pane.
+  const hiddenTab = routeTab === "files" && !powerTools;
   // A chat workspace opens on its chat even when it needs review; the review button is still there.
   const tab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
   useEffect(() => {
     if (w && tab !== routeTab) setTab(tab);
   }, [w === undefined, routeTab]);
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "terminal", label: chat ? "Chat" : "Claude" },
+    { id: "review", label: "Changes" },
+    ...(powerTools ? [{ id: "files" as const, label: "Files" }] : []),
+  ];
+
   useEffect(() => {
     if (!needsReview) {
       setReviewCount(0);
@@ -176,16 +275,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     };
   }, [workspaceId, needsReview, w?.lastCommitAt]);
 
-  // 1..4 switch panes, `.` puts the cursor back in the terminal. Keys are left
+  // 1..n switch panes, `.` puts the cursor back in the terminal. Keys are left
   // alone while focus is in a text field or in the terminal itself.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
-      const target = e.target;
-      // A real keydown always targets an element, but the guard must not be the
-      // thing that throws if one ever targets the document.
-      if (target instanceof HTMLElement && (target.isContentEditable || TEXT_ENTRY_TAGS[target.tagName] || target.closest(".xterm")))
-        return;
+      if (isTextEntry(e.target)) return;
       if (e.key === ".") {
         e.preventDefault();
         setTab("terminal");
@@ -193,14 +288,55 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         return;
       }
       const index = Number(e.key) - 1;
-      if (Number.isInteger(index) && index >= 0 && index < SIMPLE_TABS.length) {
+      if (Number.isInteger(index) && index >= 0 && index < tabs.length) {
         e.preventDefault();
-        setTab(SIMPLE_TABS[index].id);
+        setTab(tabs[index].id);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [workspaceId]);
+    // The tab list depends on power tools and on chat, so the handler is rebound when either changes.
+  }, [workspaceId, powerTools, chat]);
+
+  // Ctrl+` (and Ctrl+J, as in VS Code) open and close the terminal panel. Ctrl+`
+  // works from anywhere; Ctrl+J stays out of fields and terminals, where it is a newline.
+  const projectOpen = w !== undefined;
+  useEffect(() => {
+    if (!can.mutate || !projectOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !e.ctrlKey || e.metaKey || e.altKey) return;
+      const backtick = e.key === "`" || e.code === "Backquote";
+      if (!backtick && (e.key.toLowerCase() !== "j" || isTextEntry(e.target))) return;
+      e.preventDefault();
+      togglePanelRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [can.mutate, projectOpen]);
+
+  // Command-palette actions for this project. Taken once, then cleared.
+  useEffect(() => {
+    if (!panelRequest || panelRequest.workspaceId !== workspaceId) return;
+    requestPanel(null);
+    switch (panelRequest.action) {
+      case "terminal":
+        if (can.mutate) openPanel();
+        break;
+      case "continue":
+        if (can.mutate && canContinue(w)) openPanel(true);
+        break;
+      case "files":
+        setPowerTools(true);
+        setTab("files");
+        break;
+      case "changes":
+        setTab("review");
+        break;
+      case "preview":
+        void preview();
+        break;
+    }
+  }, [panelRequest, workspaceId]);
 
   // The terminal bundle may still be in flight on the first `.`, so the focus
   // request retries briefly instead of silently doing nothing.
@@ -258,13 +394,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const title = projectTitle(w);
 
   const badges: Partial<Record<TabId, Badge>> = {};
-  if (terminals.length > 1 && !chat) badges.terminal = { count: terminals.length, noun: "open terminals" };
   if (reviewCount > 0) badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files" };
 
-  const closeTerminal = (id: string) => {
-    setTerminals((items) => items.filter((item) => item.id !== id));
-    if (activeTerminal === id) setActiveTerminal("main");
-  };
+  // The panel is for people who can change the project. Viewers never see it.
+  const showPanel = can.mutate && panelOpen && shells.length > 0;
+  const current = shells.find((s) => s.id === activeShell) ?? shells[0];
 
   // No primary button in the header: a terminal project's Claude is restarted or
   // stopped from the project menu, and a chat's one primary action lives in the chat.
@@ -284,6 +418,49 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </button>
       }
     >
+      <MenuItem onSelect={() => setRenaming(true)}>
+        <PencilSimple size={14} aria-hidden="true" />
+        Rename
+      </MenuItem>
+      <MenuSub label="Model">
+        <MenuRadioGroup value={modelOf(w)} onValueChange={(v) => void changeModel(w, v as ModelChoice)}>
+          <MenuRadioItem value="opus">
+            <span className="block">Opus 5.5</span>
+            <span className="block text-xs text-text-muted">Most capable, uses your limit fastest</span>
+          </MenuRadioItem>
+          <MenuRadioItem value="sonnet">
+            <span className="block">Sonnet 5.5</span>
+            <span className="block text-xs text-text-muted">Good for most projects</span>
+          </MenuRadioItem>
+          <MenuRadioItem value="haiku">
+            <span className="block">Haiku 5.5</span>
+            <span className="block text-xs text-text-muted">Fastest, for small changes</span>
+          </MenuRadioItem>
+          <MenuSeparator />
+          <MenuRadioItem value="default">Account default</MenuRadioItem>
+        </MenuRadioGroup>
+      </MenuSub>
+      <MenuSeparator />
+      <MenuItem onSelect={() => openPanel()}>
+        <Terminal size={14} aria-hidden="true" />
+        <span className="flex-1">Open terminal</span>
+        <span className="text-xs text-text-faint">Ctrl `</span>
+      </MenuItem>
+      {chat ? (
+        <MenuItem
+          disabled={!canContinue(w)}
+          title={canContinue(w) ? undefined : "Send Claude a message first, then you can continue it here."}
+          onSelect={() => openPanel(true)}
+        >
+          <Terminal size={14} aria-hidden="true" />
+          Continue in Claude's terminal
+        </MenuItem>
+      ) : null}
+      <MenuItem onSelect={() => void api.download(workspaceId, "").catch((e: Error) => toast.error(`Could not download the project, ${e.message}`))}>
+        <DownloadSimple size={14} aria-hidden="true" />
+        Download project
+      </MenuItem>
+      <MenuSeparator />
       {chat ? null : (
         <>
           <MenuItem onSelect={() => run("restart")}>
@@ -298,10 +475,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           ) : null}
         </>
       )}
-      <MenuItem onSelect={() => setRenaming(true)}>
-        <PencilSimple size={14} aria-hidden="true" />
-        Rename
-      </MenuItem>
       <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
         <Trash size={14} aria-hidden="true" />
         Delete project…
@@ -314,12 +487,94 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const paneWidth = "w-[clamp(360px,42%,640px)]";
   const closePreview = () => setPane(null);
 
+  // Docked on desktop, a full-screen sheet on a phone (Back closes it).
+  const terminalPanel = showPanel ? (
+    <section
+      aria-label="Terminal panel"
+      className={cn(
+        "dark-pane flex min-h-0 flex-col overflow-hidden bg-surface-terminal",
+        wide
+          ? "mx-3 mb-2.5 shrink-0 rounded-[14px]"
+          : "fixed inset-0 z-[var(--z-drawer)] pt-[var(--safe-top)] pb-[var(--safe-bottom)]",
+      )}
+      style={wide ? { height: panelTall ? PANEL_HEIGHT.tall : PANEL_HEIGHT.short } : undefined}
+    >
+      <div className="flex shrink-0 items-center gap-1 px-2 pt-2 pb-1.5">
+        {wide ? null : (
+          <Button variant="quiet" size="sm" className="shrink-0" onClick={() => setPanelOpen(false)}>
+            <CaretLeft size={14} aria-hidden="true" />
+            Back
+          </Button>
+        )}
+        <div role="group" aria-label="Terminals" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {shells.map((shell) => {
+            const active = shell.id === current.id;
+            return (
+              <span
+                key={shell.id}
+                className={cn("flex shrink-0 items-center gap-0.5 rounded-lg pr-0.5", active && "bg-surface-active")}
+              >
+                <button
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setActiveShell(shell.id)}
+                  className={cn(
+                    "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm whitespace-nowrap",
+                    active ? "text-text-primary" : "text-text-muted hover:text-text-primary",
+                  )}
+                >
+                  {active ? <Terminal size={14} aria-hidden="true" /> : null}
+                  {shell.label}
+                </button>
+                <Button variant="quiet" size="sm" iconOnly aria-label={`Close ${shell.label}`} onClick={() => closeShell(shell.id)}>
+                  <X size={12} aria-hidden="true" />
+                </Button>
+              </span>
+            );
+          })}
+        </div>
+        <Button variant="quiet" size="sm" iconOnly aria-label="New terminal" onClick={() => addShell()}>
+          <Plus size={14} aria-hidden="true" />
+        </Button>
+        {wide ? (
+          <>
+            <Button
+              variant="quiet"
+              size="sm"
+              iconOnly
+              aria-label={panelTall ? "Make the panel smaller" : "Make the panel bigger"}
+              onClick={() => setPanelTall((t) => !t)}
+            >
+              {panelTall ? <ArrowsInSimple size={14} aria-hidden="true" /> : <ArrowsOutSimple size={14} aria-hidden="true" />}
+            </Button>
+            <Button variant="quiet" size="sm" iconOnly aria-label="Close the terminal panel" onClick={() => setPanelOpen(false)}>
+              <X size={14} aria-hidden="true" />
+            </Button>
+          </>
+        ) : null}
+      </div>
+      <div className="min-h-0 flex-1">
+        <ErrorBoundary label="Terminal">
+          <Suspense fallback={<SkeletonRows rows={3} className="p-4" />}>
+            <TerminalView
+              key={`${workspaceId}:${current.id}`}
+              workspaceId={workspaceId}
+              terminalId={current.id}
+              onExit={() => closeShell(current.id)}
+              autoFocus
+            />
+          </Suspense>
+        </ErrorBoundary>
+      </div>
+    </section>
+  ) : null;
+
   return (
     <div className="cockpit max-md:overflow-hidden">
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
       {/* One 56px row per project: the title (its menu), the segmented switch centred, and Preview. On a phone the title row is 52px and the switch sits on its own row below. */}
       <header className="grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 pr-3 pl-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
-        <div className="flex h-14 min-w-0 items-center justify-self-start gap-1 max-md:h-13 max-md:w-full max-md:justify-self-stretch">
+        <div className="flex min-w-0 items-center justify-self-start gap-1 max-md:h-13 max-md:w-full max-md:justify-self-stretch">
           <Button variant="quiet" iconOnly aria-label="Open menu" title="Menu" className="shell:hidden size-11 shrink-0" onClick={() => setNavOpen(true)}>
             <List size={20} aria-hidden="true" />
           </Button>
@@ -329,12 +584,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </div>
 
         <TabList label="Project views" className="max-md:col-span-2 max-md:row-start-2 max-md:mb-2">
-          {SIMPLE_TABS.map(({ id, label }) => {
+          {tabs.map(({ id, label }) => {
             const badge = badges[id];
-            const name = id === "terminal" && chat ? "Chat" : label;
             return (
-              <Tab key={id} value={id} aria-label={badge ? `${name}, ${badge.count} ${badge.noun}` : undefined}>
-                {name}
+              <Tab key={id} value={id} aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}>
+                {label}
                 {badge ? (
                   <span className="tnum text-text-faint" aria-hidden="true">
                     {badge.count}
@@ -345,18 +599,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           })}
         </TabList>
 
-        <div className="flex h-14 shrink-0 items-center justify-self-end gap-1.5 max-md:h-13">
-          {(
-            <button
-              type="button"
-              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-3 text-sm text-text-secondary hover:bg-surface-hover disabled:opacity-50"
-              disabled={previewing}
-              onClick={() => void preview()}
-            >
-              <Eye size={14} aria-hidden="true" />
-              Preview
-            </button>
-          )}
+        <div className="flex shrink-0 items-center justify-self-end gap-1.5 max-md:h-13">
+          <button
+            type="button"
+            className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-3 text-sm text-text-secondary hover:bg-surface-hover disabled:opacity-50"
+            disabled={previewing}
+            onClick={() => void preview()}
+          >
+            <Eye size={14} aria-hidden="true" />
+            Preview
+          </button>
           {can.mutate ? null : (
             <span className="chip chip-stopped" title="You can look at this project but not change it.">
               View only
@@ -365,66 +617,25 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </div>
       </header>
 
-      {tab === "terminal" && !chat && terminals.length > 1 ? (
-        <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5" role="group" aria-label="Terminal instances">
-          {terminals.map((term) => {
-            const active = activeTerminal === term.id;
-            return (
-              <span
-                key={term.id}
-                className={cn(
-                  "flex items-center gap-0.5 rounded-md border px-0.5",
-                  active ? "border-line-strong bg-surface-active" : "border-transparent",
-                )}
-              >
-                <button
-                  type="button"
-                  className={cn("file-row border-0 bg-transparent", active ? "text-text-primary" : "text-text-muted")}
-                  aria-pressed={active}
-                  onClick={() => setActiveTerminal(term.id)}
-                >
-                  <Terminal size={12} aria-hidden="true" />
-                  {term.label}
-                </button>
-                {term.id !== "main" ? (
-                  <Button
-                    variant="quiet"
-                    size="sm"
-                    iconOnly
-                    aria-label={`Close terminal ${term.label}`}
-                    onClick={() => closeTerminal(term.id)}
-                  >
-                    <X size={13} />
-                  </Button>
-                ) : null}
-              </span>
-            );
-          })}
-        </div>
-      ) : null}
-
       <div className="flex min-h-0 flex-1">
-      <div className="cockpit-body min-w-0">
-        <TabPanel value="terminal" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
-          <ErrorBoundary label="Terminal">
-            <Suspense fallback={<SkeletonRows rows={8} className="p-4" />}>
-              {tab === "terminal" && chat ? (
-                <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} />
-              ) : null}
-              {tab === "terminal" && !chat ? (
-                <>
-                  {/* The terminal is mounted even when the workspace is not
-                      running, because the daemon retains the final screen of a
-                      finished session, replacing it with a notice would throw
-                      away the only surviving record of what the agent did. */}
-                  {/* The terminal sits in a calm dark panel, inset from the page edges and under the header. */}
+        <div className="cockpit-body min-w-0">
+          <TabPanel value="terminal" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
+            <ErrorBoundary label="Terminal">
+              <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
+                {chat ? (
+                  <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} />
+                ) : null}
+                {!chat ? (
+                  // The terminal is mounted even when the workspace is not
+                  // running, because the daemon retains the final screen of a
+                  // finished session, replacing it with a notice would throw
+                  // away the only surviving record of what the agent did.
+                  // The terminal sits in a calm dark panel, inset from the page edges and under the header.
                   <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] bg-surface-terminal">
-                    {running || activeTerminal !== "main" ? null : (
+                    {running ? null : (
                       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-3 text-sm text-text-muted">
                         <span className="min-w-0 flex-1">
-                          {can.mutate
-                            ? "Claude has stopped. This is the last thing it showed."
-                            : "Not running, showing the last screen."}
+                          {can.mutate ? "Claude has stopped. This is the last thing it showed." : "Not running, showing the last screen."}
                         </span>
                         {can.mutate ? (
                           <Button variant="secondary" size="sm" className="rounded-full" onClick={() => run("start")}>
@@ -434,34 +645,39 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       </div>
                     )}
                     <div className="min-h-0 flex-1">
-                      <TerminalView
-                        key={`${workspaceId}:${activeTerminal}`}
-                        workspaceId={workspaceId}
-                        terminalId={activeTerminal}
-                        onExit={activeTerminal === "main" ? undefined : () => closeTerminal(activeTerminal)}
-                      />
+                      <TerminalView key={`${workspaceId}:main`} workspaceId={workspaceId} terminalId="main" />
                     </div>
                   </div>
-                </>
-              ) : null}
-            </Suspense>
-          </ErrorBoundary>
-        </TabPanel>
+                ) : null}
+              </Suspense>
+            </ErrorBoundary>
+          </TabPanel>
 
-        <TabPanel value="review" className="h-full min-h-0" tabIndex={-1}>
-          <ErrorBoundary label="Review">
-            <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
-              {tab === "review" ? <DiffView key={workspaceId} workspaceId={workspaceId} simple={chat} /> : null}
-            </Suspense>
-          </ErrorBoundary>
-        </TabPanel>
+          <TabPanel value="review" className="h-full min-h-0" tabIndex={-1}>
+            <ErrorBoundary label="Review">
+              <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
+                {tab === "review" ? <DiffView key={workspaceId} workspaceId={workspaceId} simple={chat} /> : null}
+              </Suspense>
+            </ErrorBoundary>
+          </TabPanel>
+
+          {powerTools ? (
+            <TabPanel value="files" className="h-full min-h-0" tabIndex={-1}>
+              <ErrorBoundary label="Files">
+                <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
+                  {tab === "files" ? <FilesView workspaceId={workspaceId} /> : null}
+                </Suspense>
+              </ErrorBoundary>
+            </TabPanel>
+          ) : null}
+        </div>
+        {paneOpen && pane ? (
+          <aside aria-label="Preview" className={cn("flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised", paneWidth)}>
+            <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
+          </aside>
+        ) : null}
       </div>
-      {paneOpen && pane ? (
-        <aside aria-label="Preview" className={cn("flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised", paneWidth)}>
-          <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
-        </aside>
-      ) : null}
-      </div>
+      {terminalPanel}
       {sheetOpen && pane ? (
         <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
       ) : null}

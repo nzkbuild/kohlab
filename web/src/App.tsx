@@ -16,6 +16,7 @@ import CommandPalette from "./components/CommandPalette";
 import WorkspacesView, { LaunchSheet } from "./components/WorkspacesView";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
+import StatusBar from "./components/StatusBar";
 import { Announcer, Button, SkeletonRows, TooltipProvider } from "./components/ui";
 
 // xterm is ~390 KB and Monaco is far larger. Only lazy() defers the *fetch*,
@@ -34,6 +35,7 @@ export default function App() {
   const newOpen = useApp((s) => s.newOpen);
   const setNewOpen = useApp((s) => s.setNewOpen);
   const navOpen = useApp((s) => s.navOpen);
+  const powerTools = useApp((s) => s.powerTools);
   const setNavOpen = useApp((s) => s.setNavOpen);
   const can = useCan();
 
@@ -99,96 +101,99 @@ export default function App() {
         }}
       />
 
-      <div className="app-shell">
-        <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      <div className="flex h-full min-h-0 flex-col">
+      <div className="app-shell min-h-0 flex-1">
+          <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
 
-        {/* Scrim behind the mobile drawer. A real button so it is keyboard and
-            screen-reader dismissible, not a decorative div. */}
-        {navOpen ? (
-          <button className="scrim shell:hidden" aria-label="Close navigation" onClick={() => setNavOpen(false)} />
-        ) : null}
-
-        <main className="app-main">
-          {/* On a project page the project's own header is the only bar on a phone. */}
-          <header className={cn("app-topbar", route.kind === "workspace" && "max-shell:!hidden")}>
-            <Button
-              variant="quiet"
-              iconOnly
-              className="shell:hidden"
-              aria-label="Open navigation"
-              onClick={() => setNavOpen(true)}
-            >
-              <List size={18} />
-            </Button>
-
-            {/* No route label here: every surface renders its own <h1> directly
-                below, so a label in the bar reads as the title twice. On mobile
-                this bar is the app chrome (menu button and brand) and the page
-                supplies the heading. */}
-            <span className="text-base font-semibold tracking-tight">kohlab</span>
-
-            <div className="flex-1" />
-
-            {can.mutate ? (
-              <Button variant="quiet" iconOnly aria-label="New project" onClick={() => setNewOpen(true)}>
-                <PencilSimple size={18} />
-              </Button>
-            ) : null}
-          </header>
-
-          {/* Silent while connected; the page only speaks up when it cannot
-              reach the server, and says the agents are unaffected. */}
-          {connection === "reconnecting" || connection === "offline" ? (
-            <div role="status" className="conn-banner" data-state={connection}>
-              <span className="chip-dot" aria-hidden="true" />
-              {connection === "reconnecting"
-                ? "Reconnecting to the server… your projects keep running."
-                : "Can't reach the server. Your projects keep running there; this page catches up when it reconnects."}
-            </div>
+          {/* Scrim behind the mobile drawer. A real button so it is keyboard and
+              screen-reader dismissible, not a decorative div. */}
+          {navOpen ? (
+            <button className="scrim shell:hidden" aria-label="Close navigation" onClick={() => setNavOpen(false)} />
           ) : null}
 
-          <div className="app-content">
-            {error && workspaces.length === 0 ? (
-              <div className="p-6">
-                <p className="text-sm text-status-danger" role="alert">
-                  {error}
-                </p>
+          <main className="app-main">
+            {/* On a project page the project's own header is the only bar on a phone. */}
+            <header className={cn("app-topbar", route.kind === "workspace" && "max-shell:!hidden")}>
+              <Button
+                variant="quiet"
+                iconOnly
+                className="shell:hidden"
+                aria-label="Open navigation"
+                onClick={() => setNavOpen(true)}
+              >
+                <List size={18} />
+              </Button>
+
+              {/* No route label here: every surface renders its own <h1> directly
+                  below, so a label in the bar reads as the title twice. On mobile
+                  this bar is the app chrome (menu button and brand) and the page
+                  supplies the heading. */}
+              <span className="text-base font-semibold tracking-tight">kohlab</span>
+
+              <div className="flex-1" />
+
+              {can.mutate ? (
+                <Button variant="quiet" iconOnly aria-label="New project" onClick={() => setNewOpen(true)}>
+                  <PencilSimple size={18} />
+                </Button>
+              ) : null}
+            </header>
+
+            {/* Silent while connected; the page only speaks up when it cannot
+                reach the server, and says the agents are unaffected. */}
+            {connection === "reconnecting" || connection === "offline" ? (
+              <div role="status" className="conn-banner" data-state={connection}>
+                <span className="chip-dot" aria-hidden="true" />
+                {connection === "reconnecting"
+                  ? "Reconnecting to the server… your projects keep running."
+                  : "Can't reach the server. Your projects keep running there; this page catches up when it reconnects."}
               </div>
             ) : null}
 
-            <ErrorBoundary label={ROUTE_LABEL[route.kind]}>
-              {route.kind === "settings" ? <Settings /> : null}
-              {route.kind === "workspaces" ? (
-                loading ? (
-                  <div className="surface">
-                    <div className="surface-inner">
-                      <SkeletonRows rows={5} className="panel" />
-                    </div>
-                  </div>
-                ) : workspaces.length === 0 ? (
-                  <Onboarding />
-                ) : (
-                  <WorkspacesView />
-                )
+            <div className="app-content">
+              {error && workspaces.length === 0 ? (
+                <div className="p-6">
+                  <p className="text-sm text-status-danger" role="alert">
+                    {error}
+                  </p>
+                </div>
               ) : null}
-              {route.kind === "workspace" ? (
-                <ErrorBoundary label="Workspace">
-                  <Suspense
-                    fallback={
-                      <div className="surface">
-                        <div className="surface-inner">
-                          <SkeletonRows rows={4} className="panel" />
-                        </div>
+
+              <ErrorBoundary label={ROUTE_LABEL[route.kind]}>
+                {route.kind === "settings" ? <Settings /> : null}
+                {route.kind === "workspaces" ? (
+                  loading ? (
+                    <div className="surface">
+                      <div className="surface-inner">
+                        <SkeletonRows rows={5} className="panel" />
                       </div>
-                    }
-                  >
-                    <WorkspaceDetail workspaceId={route.id} />
-                  </Suspense>
-                </ErrorBoundary>
-              ) : null}
-            </ErrorBoundary>
-          </div>
-        </main>
+                    </div>
+                  ) : workspaces.length === 0 ? (
+                    <Onboarding />
+                  ) : (
+                    <WorkspacesView />
+                  )
+                ) : null}
+                {route.kind === "workspace" ? (
+                  <ErrorBoundary label="Workspace">
+                    <Suspense
+                      fallback={
+                        <div className="surface">
+                          <div className="surface-inner">
+                            <SkeletonRows rows={4} className="panel" />
+                          </div>
+                        </div>
+                      }
+                    >
+                      <WorkspaceDetail key={route.id} workspaceId={route.id} />
+                    </Suspense>
+                  </ErrorBoundary>
+                ) : null}
+              </ErrorBoundary>
+            </div>
+          </main>
+      </div>
+      {powerTools ? <StatusBar /> : null}
       </div>
     </TooltipProvider>
   );

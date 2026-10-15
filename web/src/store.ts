@@ -25,8 +25,12 @@ export interface AppState {
   /** null until /api/account answers. Treated as permissive meanwhile: hiding
    *  controls for a beat on every load would flicker for the common case. */
   me: Me | null;
-  /** Workspace that should open a fresh shell tab on arrival (Home's Open menu). */
-  openShell: string | null;
+  /** Files tab and status bar. Off until someone opens a terminal or asks for files. */
+  powerTools: boolean;
+  setPowerTools: (value: boolean) => void;
+  /** A command-palette action for the open project, taken by WorkspaceDetail. */
+  panelRequest: PanelRequest | null;
+  requestPanel: (request: PanelRequest | null) => void;
   /** The New project sheet. Opens over whatever page is showing, so the page under it stays put. */
   newOpen: boolean;
   /** Phone and tablet drawer. Lives here so any page header can open it. */
@@ -37,7 +41,6 @@ export interface AppState {
 
   setNavOpen: (value: boolean) => void;
   setNewOpen: (value: boolean) => void;
-  setOpenShell: (id: string | null) => void;
   setAuthed: (value: boolean) => void;
   setConnection: (value: Connection) => void;
   refresh: () => Promise<void>;
@@ -46,6 +49,31 @@ export interface AppState {
   navigate: (route: Route, opts?: { replace?: boolean }) => void;
   /** Adopt the current URL without touching history (Back/Forward). */
   adoptRoute: (route: Route) => void;
+}
+
+export type PanelAction = "terminal" | "continue" | "files" | "changes" | "preview";
+export interface PanelRequest {
+  workspaceId: string;
+  action: PanelAction;
+}
+
+const POWER_KEY = "kohlab.powerTools";
+
+// localStorage can throw (private mode, storage disabled): the setting then lives for this page only.
+function readPowerTools(): boolean {
+  try {
+    return localStorage.getItem(POWER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writePowerTools(value: boolean) {
+  try {
+    localStorage.setItem(POWER_KEY, value ? "1" : "0");
+  } catch {
+    /* not persisted */
+  }
 }
 
 export const useApp = create<AppState>((set) => ({
@@ -57,7 +85,13 @@ export const useApp = create<AppState>((set) => ({
   lastUpdated: null,
   connection: "connecting",
   me: null,
-  openShell: null,
+  powerTools: readPowerTools(),
+  setPowerTools: (value) => {
+    writePowerTools(value);
+    set({ powerTools: value });
+  },
+  panelRequest: null,
+  requestPanel: (request) => set({ panelRequest: request }),
   newOpen: false,
   navOpen: false,
   paletteOpen: false,
@@ -65,7 +99,6 @@ export const useApp = create<AppState>((set) => ({
 
   setNavOpen: (value) => set({ navOpen: value }),
   setNewOpen: (value) => set({ newOpen: value }),
-  setOpenShell: (id) => set({ openShell: id }),
   setAuthed: (value) => set({ authed: value }),
   setConnection: (value) => set({ connection: value }),
 

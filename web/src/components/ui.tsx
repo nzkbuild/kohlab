@@ -6,6 +6,7 @@ import {
   ArrowCounterClockwise,
   BellRinging,
   CaretRight,
+  Check,
   CheckCircle,
   Circle,
   Eye,
@@ -200,6 +201,24 @@ export function MenuSub({ label, icon, children }: { label: string; icon?: React
       </RadixMenu.Portal>
     </RadixMenu.Sub>
   );
+}
+
+/** A checked item shows its tick at the end; the group holds one value at a time. */
+export const MenuRadioGroup = RadixMenu.RadioGroup;
+
+export function MenuRadioItem({ className, children, ...rest }: RadixMenu.DropdownMenuRadioItemProps) {
+  return (
+    <RadixMenu.RadioItem className={cn("menu-item", className)} {...rest}>
+      <span className="min-w-0 flex-1">{children}</span>
+      <RadixMenu.ItemIndicator className="shrink-0 text-text-muted">
+        <Check size={14} aria-hidden="true" />
+      </RadixMenu.ItemIndicator>
+    </RadixMenu.RadioItem>
+  );
+}
+
+export function MenuSeparator() {
+  return <RadixMenu.Separator className="my-1 h-px bg-line-subtle" />;
 }
 
 export function MenuItem({ tone, className, ...rest }: RadixMenu.DropdownMenuItemProps & { tone?: "danger" }) {

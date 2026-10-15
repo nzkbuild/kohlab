@@ -42,6 +42,8 @@ import {
   workspaceByShare,
   previewWorkspace,
   renameWorkspace,
+  setModel,
+  closeTerminal,
   workspaceByPreview,
   authRequired,
   authenticate,
@@ -261,6 +263,15 @@ async function handleRename(id: string, req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { title?: unknown };
     return json(await renameWorkspace(id, body.title));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+async function handleModel(id: string, req: Request): Promise<Response> {
+  try {
+    const body = (await req.json().catch(() => ({}))) as { model?: unknown };
+    return json(await setModel(id, body.model));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -1156,7 +1167,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       return handleHookPost(hookM[1], req);
     }
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|rename|log|versions|restore)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|rename|log|versions|restore|model|terminal)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -1302,6 +1313,16 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
           containFailure(audit(actor, "restore", id), "audit");
           return handleRestore(id, req);
         case "rename": containFailure(audit(actor, "rename", id), "audit"); return handleRename(id, req);
+        case "terminal": {
+          if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+          try {
+            const body = (await req.json().catch(() => ({}))) as { terminalId?: unknown };
+            return json(await closeTerminal(id, body.terminalId));
+          } catch (e) {
+            return json({ error: (e as Error).message }, 400);
+          }
+        }
+        case "model": containFailure(audit(actor, "model", id), "audit"); return handleModel(id, req);
       }
     }
 
@@ -1630,7 +1651,10 @@ const socketHandlers: WebSocketHandler<WSData> = {
                     if (!dims) return;
                     return ptySend({ type: "resize", id: sessId, cols: dims.cols, rows: dims.rows });
                   })
-                  .then(() => attachPty(ws, attachId, attachTerminal));
+                  .then(() => attachPty(ws, attachId, attachTerminal))
+                  .catch((e) => {
+                    ws.send(JSON.stringify({ type: "error", error: (e as Error).message }));
+                  });
               }),
               `attach ${attachId}`,
             );

@@ -17,6 +17,7 @@ import { notifyNeedsYou } from "./push";
 import {
   WORKS_DIR,
   chatBusy,
+  resumeOpen,
   chatKillers,
   chatWaiting,
   getWorkspace,
@@ -329,11 +330,12 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   const home = who?.home || homedir();
   // Chat users get a clean Claude with the same login: no user settings, skills, MCP servers or CLAUDE.md.
   // CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies.
-  // --include-partial-messages streams Claude's reply as it is written (stream_event lines). No --model: the account default model.
+  // --include-partial-messages streams Claude's reply as it is written (stream_event lines). --model only when the project chose one; otherwise the account default.
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
   args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
   args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
   if (ws.chatSession) args.push("--resume", ws.chatSession);
+  if (ws.model) args.push("--model", ws.model);
   const env: Record<string, string> = {};
   for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
   env.HOME = home;
@@ -370,6 +372,7 @@ export async function send(id: string, text: string): Promise<void> {
   if (t.length > MAX_TEXT) throw new ChatError(400, `message is over ${MAX_TEXT} characters`);
   const ws = await getWorkspace(id);
   if (!ws.chat) throw new ChatError(400, "not a chat workspace");
+  if (await resumeOpen(id)) throw new ChatError(409, "Claude is open in the terminal. Close it there, then send your message again.");
   // check and claim in one synchronous step, so two posts cannot both start a turn
   if (chatBusy.has(id)) throw new ChatError(409, "still working");
   chatBusy.add(id);

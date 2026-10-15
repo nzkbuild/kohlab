@@ -9,6 +9,20 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.43.0] - 2026-10-15
+
+### Added
+- A terminal at the bottom of every project, like VS Code: press Ctrl ` (or Ctrl J), or choose Open terminal from the project's menu or from search. It opens in the project's folder, has tabs (+ for another), can be made bigger, and closing a tab ends its shell. On a phone it opens full screen, with a sticky Ctrl key and a | key in the key row.
+- Files, next to Chat and Changes: the project's files (folders first, New and Changed marked), an editor with tabs (Ctrl S saves, Ctrl P finds a file), Claude docked on the right on wide screens, and Download project.
+- Choose Claude's model per project (Opus, Sonnet, Haiku or your account default) from the project's menu or search.
+- Continue in Claude's terminal: open a chat project's conversation in Claude's own terminal app, with your own skills and plugins. While it's open there, the chat waits.
+- A status bar along the bottom on a computer: whether Claude is connected, the project's model and folder, and the shortcuts.
+- Search (Ctrl K, or Ctrl Shift P like VS Code) has the open project's actions: Open terminal, Continue in Claude's terminal, Open file, Earlier versions, Download project, the models, and Preview.
+
+### Changed
+- Files and the status bar appear once you open a terminal for the first time, or when you turn on Settings → Appearance → Show files and terminal. Until then Kohlab looks exactly as before.
+- When a terminal can't start (for example, there's no conversation to continue yet), the reason now shows in the terminal instead of nothing happening.
+
 ## [1.42.0] - 2026-10-15
 
 ### Added

@@ -395,11 +395,22 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
   const s = await loadState();
   if (!/^[\w.-]+$/.test(terminalId)) throw new Error("invalid terminal id");
   // "+" menu terminals: shell-<n> is a plain login shell, agent-<name>-<n> any
-  // configured agent. Everything else (main) is the workspace's own agent.
+  // configured agent. resume-<n> is Claude's own terminal on a chat's conversation.
+  // Everything else (main) is the workspace's own agent.
   const extra = terminalId.match(/^agent-([\w.-]+?)-\d+$/);
-  const cmd = terminalId.startsWith("shell-")
-    ? [Bun.which("bash") ? "bash" : "sh", ...(Bun.which("bash") ? ["-l"] : [])]
-    : (s.agents[extra?.[1] ?? ws.agent] || "sh").split(/\s+/);
+  let cmd: string[];
+  if (/^resume-\d+$/.test(terminalId)) {
+    if (!ws.chat || !ws.chatSession || !/^[\w-]+$/.test(ws.chatSession)) throw new Error("This project has no conversation to continue yet.");
+    if (chatBusy.has(ws.id)) throw new Error("Wait until Claude has finished, then try again.");
+    // The chat's own claude process must not run alongside this one on the same session.
+    // Re-attaching to a resume terminal that is already open must leave the chat alone (it is stopped already).
+    if (!(await resumeOpen(ws.id))) chatKillers.get(ws.id)?.();
+    cmd = [(s.agents.claude || "claude").split(/\s+/)[0], "--resume", ws.chatSession, ...(ws.model ? ["--model", ws.model] : [])];
+  } else {
+    cmd = terminalId.startsWith("shell-")
+      ? [Bun.which("bash") ? "bash" : "sh", ...(Bun.which("bash") ? ["-l"] : [])]
+      : (s.agents[extra?.[1] ?? ws.agent] || "sh").split(/\s+/);
+  }
   const who = identityOf(ws);
   // The shared agent account gets the operator's Claude config; a named member's home is never touched.
   const agent = who && !ws.ownerId ? agentIdentity() : null;
@@ -413,12 +424,14 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
   const sessId = sessionId(ws.id, terminalId);
   // Claude Code reports idle, waiting and done to us through its hooks (handleHook).
   const hookFile = terminalId === "main" && basename(cmd[0]) === "claude" ? await writeHookSettings(ws, who) : null;
+  // A project's model applies when its Claude starts. Resume already carries --model above.
+  const modelArgs = ws.model && terminalId === "main" && basename(cmd[0]) === "claude" ? ["--model", ws.model] : [];
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
     "open",
     {
       id: sessId,
       cwd: worktreePath(ws),
-      cmd: hookFile ? [...cmd, "--settings", hookFile] : cmd,
+      cmd: [...cmd, ...modelArgs, ...(hookFile ? ["--settings", hookFile] : [])],
       cols,
       rows,
       env: AGENT_PTY_ENV,
@@ -1301,6 +1314,19 @@ export async function ptyList(): Promise<{ id: string; exited: boolean; meta?: R
   }
 }
 
+/** True while a live "Claude's terminal" (resume-<n>) session exists for the workspace. */
+export async function resumeOpen(workspaceId: string): Promise<boolean> {
+  const list = (await ptyList()) ?? [];
+  return list.some((x) => !x.exited && x.id.startsWith(`works-${workspaceId}-resume-`));
+}
+
+/** Close one extra terminal (shell-<n> or resume-<n>) of a workspace. Never "main". */
+export async function closeTerminal(workspaceId: string, terminalId: unknown) {
+  if (typeof terminalId !== "string" || !/^(shell|resume)-\d+$/.test(terminalId)) throw new Error("invalid terminal id");
+  await ptySend({ type: "close", id: sessionId(workspaceId, terminalId) });
+  return { ok: true };
+}
+
 /** Fetch a session's buffered output as UTF-8 text, or null if unreachable. */
 export async function ptyLog(id: string): Promise<string | null> {
   try {
@@ -1967,6 +1993,31 @@ export async function renameWorkspace(id: string, raw: unknown) {
     ws.task = checked.title;
     return ws;
   });
+}
+
+/** The model choice a client may send: one of the three aliases, or "default" for the account's own. Anything else is null. */
+export function parseModel(x: unknown): "opus" | "sonnet" | "haiku" | "default" | null {
+  return x === "opus" || x === "sonnet" || x === "haiku" || x === "default" ? x : null;
+}
+
+/**
+ * Sets the project's Claude model. A chat picks it up on its next message (its
+ * claude process is stopped here so the next start uses it). A terminal project
+ * applies it when Claude next starts.
+ */
+export async function setModel(id: string, model: unknown): Promise<{ ok: true; model?: string }> {
+  const picked = parseModel(model);
+  if (!picked) throw new Error("unknown model");
+  if (chatBusy.has(id)) throw new Error("Wait until Claude has finished, then try again.");
+  const next = picked === "default" ? undefined : picked;
+  const ws = await mutateState((s) => {
+    const w = s.workspaces.find((x) => x.id === id);
+    if (!w) throw new Error(`no workspace '${id}'`);
+    w.model = next;
+    return w;
+  });
+  if (ws.chat) chatKillers.get(id)?.();
+  return { ok: true, model: next };
 }
 
 // --- sharing -------------------------------------------------------------

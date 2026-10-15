@@ -131,6 +131,18 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ version }),
     }),
+  setModel: (id: string, model: "opus" | "sonnet" | "haiku" | "default") =>
+    json<{ ok: boolean; model?: string }>(`/api/workspaces/${id}/model`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
+    }),
+  closeTerminal: (id: string, terminalId: string) =>
+    json<{ ok: boolean }>(`/api/workspaces/${id}/terminal`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ terminalId }),
+    }),
   diff: (id: string) => json<DiffFile[]>(`/api/workspaces/${id}/diff`),
   commit: (id: string, message: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${id}/commit`, {
@@ -236,6 +248,24 @@ export const api = {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
     return { ok: true, path: (body as { path?: string }).path ?? path };
+  },
+  /** One file as text. The server reads it as UTF-8, so the caller checks for binary and size. */
+  file: (id: string, path: string) =>
+    json<{ path: string; content: string }>(`/api/workspaces/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`),
+  /** Create a folder or an empty file in a workspace's tree. */
+  fsOp: (id: string, op: "mkdir" | "touch", path: string) =>
+    json<{ ok: boolean; path: string }>(`/api/workspaces/${encodeURIComponent(id)}/fs?op=${op}&path=${encodeURIComponent(path)}`, { method: "POST" }),
+  /** Write bytes to `path`. Replaces an existing file only when `overwrite` is set; otherwise the server answers 409 ("already exists"). */
+  putFile: (id: string, path: string, file: Blob, overwrite = false) =>
+    json<{ ok: boolean; path: string; bytes: number }>(
+      `/api/workspaces/${encodeURIComponent(id)}/fs?op=upload&path=${encodeURIComponent(path)}${overwrite ? "&overwrite=1" : ""}`,
+      { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file },
+    ),
+  /** A file's bytes through the authenticated fetch, for images (an <img src> cannot send the key). */
+  rawBlob: async (id: string, path: string): Promise<Blob> => {
+    const res = await req(`/api/workspaces/${encodeURIComponent(id)}/raw?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error(res.statusText);
+    return res.blob();
   },
 };
 

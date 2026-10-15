@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, socketProtocol } from "../api";
 import { Button } from "./ui";
 import { Copy, Paperclip } from "@phosphor-icons/react";
+import { cn } from "../lib/utils";
 import { cacheTerminal, termCache } from "./terminalCache";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -18,6 +19,8 @@ interface Props {
   terminalId: string;
   /** Called when the session's process ends (the server prints "[process exited]"). */
   onExit?: () => void;
+  /** Take keyboard focus once attached, and again whenever this turns true. */
+  autoFocus?: boolean;
 }
 
 /**
@@ -139,9 +142,13 @@ const TERMINAL_KEYS: [string, string, string][] = [
   ["↓", "\x1b[B", "Down arrow"],
   ["←", "\x1b[D", "Left arrow"],
   ["→", "\x1b[C", "Right arrow"],
+  ["|", "|", "Pipe"],
 ];
 
-export default function TerminalView({ workspaceId, terminalId, onExit }: Props) {
+/** Phone keys are 44px: the touch target size, not the desktop control height. */
+const PHONE_KEY = "termkey !min-h-11";
+
+export default function TerminalView({ workspaceId, terminalId, onExit, autoFocus }: Props) {
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -155,6 +162,9 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
   const keyRef = useRef<(value: string) => void>(() => {});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [socket, setSocket] = useState<SocketState>("connecting");
+  // The phone's sticky Ctrl: armed by its key, it turns the next letter into a control code.
+  const ctrlRef = useRef(false);
+  const [ctrlArmed, setCtrlArmed] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -200,6 +210,8 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
     // agent; Ctrl+Shift+C always copies, as in desktop terminals. keydown only:
     // the handler sees keyup and keypress too.
     term.attachCustomKeyEventHandler((e) => {
+      // Ctrl+` opens and closes the terminal panel, so it must reach the window.
+      if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "`" || e.code === "Backquote")) return false;
       // Ctrl/Cmd+V must stay a browser paste. xterm would otherwise send a raw
       // ^V to the pty and cancel the key, so the browser never fires "paste"
       // and a screenshot on the clipboard never reaches the page (the agent
@@ -261,7 +273,16 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
     // subscription is per-mount and must be released, because the terminal it
     // listens on is cached and outlives this effect: without dispose(), every
     // remount would send a keystroke once more.
-    const inputSubscription = term.onData(sendInput);
+    const inputSubscription = term.onData((data) => {
+      if (!ctrlRef.current) {
+        sendInput(data);
+        return;
+      }
+      ctrlRef.current = false;
+      setCtrlArmed(false);
+      // Ctrl then a letter sends that letter's control code (Ctrl C is \x03). Anything else goes through as typed.
+      sendInput(/^[a-zA-Z]$/.test(data) ? String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64) : data);
+    });
     const onDrop = (e: DragEvent) => {
       const files = filesOf(e.dataTransfer);
       if (files.length === 0) return;
@@ -341,7 +362,15 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
       // Coalesced onto rAF: a chatty agent would otherwise write per message and
       // drag the frame budget down with it.
       ws.onmessage = (ev) => {
-        pending += ev.data as string;
+        const data = ev.data as string;
+        // A refused attach comes back as one JSON frame: show its words, not the braces.
+        if (data.startsWith('{"type":"error"')) {
+          try {
+            term.write(`\r\n\x1b[2m${(JSON.parse(data) as { error: string }).error}\x1b[22m\r\n`);
+            return;
+          } catch {}
+        }
+        pending += data;
         if (!frame) frame = requestAnimationFrame(flush);
       };
       ws.onclose = () => {
@@ -392,7 +421,27 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
     };
   }, [workspaceId, terminalId]);
 
+  // Declared after the attach effect, so termRef already holds the attached terminal.
+  useEffect(() => {
+    if (!autoFocus) return;
+    // A tick late: a menu or dialog that just closed returns focus to its trigger in a timeout of its own.
+    const t = window.setTimeout(() => termRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [autoFocus, workspaceId, terminalId]);
+
   const descId = `terminal-desc-${workspaceId}-${terminalId}`;
+  const termKey = ([label, value, name]: [string, string, string]) => (
+    <button
+      key={name}
+      type="button"
+      className={PHONE_KEY}
+      aria-label={name}
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={() => keyRef.current(value)}
+    >
+      {label}
+    </button>
+  );
   const reconnecting = socket === "reconnecting" || socket === "offline";
 
   return (
@@ -466,18 +515,21 @@ export default function TerminalView({ workspaceId, terminalId, onExit }: Props)
           Shown on touch devices only; pressing a key must not take focus from the
           terminal, or the on-screen keyboard closes with every tap. */}
       <div className="termkeys" role="toolbar" aria-label="terminal keys">
-        {TERMINAL_KEYS.map(([label, value, name]) => (
-          <button
-            key={name}
-            type="button"
-            className="termkey"
-            aria-label={name}
-            onPointerDown={(e) => e.preventDefault()}
-            onClick={() => keyRef.current(value)}
-          >
-            {label}
-          </button>
-        ))}
+        {TERMINAL_KEYS.slice(0, 3).map(termKey)}
+        <button
+          type="button"
+          className={cn(PHONE_KEY, ctrlArmed && "!bg-surface-active")}
+          aria-label="Control"
+          aria-pressed={ctrlArmed}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => {
+            ctrlRef.current = !ctrlRef.current;
+            setCtrlArmed(ctrlRef.current);
+          }}
+        >
+          Ctrl
+        </button>
+        {TERMINAL_KEYS.slice(3).map(termKey)}
       </div>
       <p id={descId} className="sr-only">
         Interactive terminal. Keystrokes are sent to the agent&apos;s process; output is not

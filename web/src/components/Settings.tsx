@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowsClockwise, Bell, BellRinging, SignOut, Sparkle, UserCircle, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, SignOut, Sparkle, SlidersHorizontal, UserCircle, WarningCircle } from "@phosphor-icons/react";
 import type { SettingsSection } from "../lib/route";
 import { useApp, useCan } from "../store";
 import { api, clearKey } from "../api";
@@ -31,6 +31,7 @@ const PERMISSION_CHIP: Record<Permission, string> = {
 /** Only the sections a non-technical person needs. Updates is owner-only. */
 const SECTIONS: { id: SettingsSection; label: string; hint: string; icon: typeof Bell }[] = [
   { id: "account", label: "Account", hint: "Who is signed in on this computer.", icon: UserCircle },
+  { id: "appearance", label: "Appearance", hint: "How the project page looks.", icon: SlidersHorizontal },
   { id: "agents", label: "Claude", hint: "The AI that builds your projects.", icon: Sparkle },
   { id: "notifications", label: "Notifications", hint: "What reaches you when Kohlab is in the background.", icon: Bell },
   { id: "updates", label: "Updates", hint: "New versions of Kohlab.", icon: ArrowsClockwise },
@@ -55,6 +56,33 @@ function AccountPane() {
         <p className="text-xs leading-relaxed text-text-muted">
           Signing out removes Kohlab's access from this browser. Your projects stay as they are.
         </p>
+      </div>
+    </Panel>
+  );
+}
+
+/** Appearance: the power tools switch. Off keeps the project page to Claude and Changes. */
+function AppearancePane() {
+  const powerTools = useApp((s) => s.powerTools);
+  const setPowerTools = useApp((s) => s.setPowerTools);
+  return (
+    <Panel>
+      <div className="p-4">
+        <label className="flex min-h-11 cursor-pointer items-start gap-3" htmlFor="power-tools">
+          <input
+            id="power-tools"
+            type="checkbox"
+            className="mt-0.5 size-4 shrink-0 accent-accent"
+            checked={powerTools}
+            onChange={(e) => setPowerTools(e.target.checked)}
+          />
+          <span className="min-w-0">
+            <span className="block text-sm text-text-primary">Show files and terminal</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
+              Adds a Files tab and a status bar for people who like to see the code.
+            </span>
+          </span>
+        </label>
       </div>
     </Panel>
   );
@@ -233,6 +261,7 @@ export default function Settings() {
 
   const content: Partial<Record<SettingsSection, ReactNode>> = {
     account: <AccountPane />,
+    appearance: <AppearancePane />,
     agents: <ClaudePane />,
     notifications,
     updates: (

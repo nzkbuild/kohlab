@@ -5,13 +5,13 @@
  * context, links are shareable, and Back/Forward work. Four routes do not
  * justify a router dependency.
  */
-export type WorkspaceTab = "terminal" | "files" | "review" | "log";
+export type WorkspaceTab = "terminal" | "files" | "review";
 
-export const WORKSPACE_TABS: readonly WorkspaceTab[] = ["terminal", "files", "review", "log"];
+export const WORKSPACE_TABS: readonly WorkspaceTab[] = ["terminal", "files", "review"];
 
-export type SettingsSection = "account" | "team" | "agents" | "notifications" | "server" | "updates";
+export type SettingsSection = "account" | "appearance" | "team" | "agents" | "notifications" | "server" | "updates";
 
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ["account", "team", "agents", "notifications", "server", "updates"];
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ["account", "appearance", "team", "agents", "notifications", "server", "updates"];
 
 export type Route =
   /** Home: the review queue, then every workspace. `create` opens the form. */

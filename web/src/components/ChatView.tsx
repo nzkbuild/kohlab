@@ -33,9 +33,11 @@ interface Attachment {
 
 interface Props {
   workspaceId: string;
-  onPreview: () => void;
-  previewing: boolean;
-  previewOpen: boolean;
+  onPreview?: () => void;
+  previewing?: boolean;
+  previewOpen?: boolean;
+  /** Narrow dock (the Files view): full-width column, and no Keep/Preview/Undo row. */
+  compact?: boolean;
   /** Called when Claude's turn ends, so an open preview can reload. */
   onTurnEnd?: () => void;
 }
@@ -355,7 +357,7 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
   return rows;
 }
 
-export default function ChatView({ workspaceId, onPreview, previewing, previewOpen, onTurnEnd }: Props) {
+export default function ChatView({ workspaceId, onPreview, previewing = false, previewOpen = false, onTurnEnd, compact = false }: Props) {
   const refresh = useApp((s) => s.refresh);
   const workspaces = useApp((s) => s.workspaces);
   const can = useCan().mutate;
@@ -851,7 +853,10 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
               role="log"
               aria-live="polite"
               aria-label="Conversation with Claude"
-              className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pt-6 pb-8 max-md:gap-5 max-md:pt-4 max-md:pb-4 shell:px-6"
+              className={cn(
+                "flex w-full flex-col gap-6 px-4 pt-6 pb-8 max-md:gap-5 max-md:pt-4 max-md:pb-4",
+                compact ? "pt-4" : "mx-auto max-w-[720px] shell:px-6",
+              )}
             >
               {events.length === 0 && !busy ? (
                 <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
@@ -892,7 +897,7 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
                   <Prose text={streamed} />
                 </div>
               ) : null}
-              {!busy && hasChanges && can ? (
+              {!compact && !busy && hasChanges && can ? (
             <div role="region" aria-label="Changes to check" className="flex flex-col gap-3">
               <p className="text-[14px] text-text-muted">
                 {changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}
@@ -929,7 +934,7 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
 
         {can ? (
           <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pb-[max(12px,var(--safe-bottom,env(safe-area-inset-bottom)))] shell:px-6">
-            <div className="mx-auto w-full max-w-[720px]">
+            <div className={compact ? "w-full" : "mx-auto w-full max-w-[720px]"}>
               {sendError ? (
                 <p role="alert" className="mb-2 text-[13px] text-status-danger">
                   {sendError}
