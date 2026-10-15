@@ -78,6 +78,8 @@ try {
   run("chat lines (describeTool, describeAsk)", "bun", ["scripts/check-chat.mjs"]);
   run("project names (rename rules, notification titles)", "bun", ["scripts/check-rename.mjs"]);
   run("web preview paths (no escape from the worktree)", "bun", ["scripts/check-preview.mjs"]);
+  run("shared browser rules (dev command, dev URL, allowed URLs)", "bun", ["scripts/check-browser-unit.mjs"]);
+  run("shared browser coordinates (letterbox, clamp)", "bun", ["scripts/check-browser-coords.mjs"]);
   run("chat markdown (code, links, lists, headings)", "bun", ["scripts/check-markdown.mjs"]);
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);

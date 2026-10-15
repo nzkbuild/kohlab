@@ -1901,3 +1901,26 @@ input[type="radio"] {
     min-height: 2.75rem;
   }
 }
+
+/* The click ripple in the shared browser: a soft dot that grows and fades. Reduced motion keeps the fade and drops the growth. */
+.browser-ripple {
+  position: absolute;
+  width: 2rem;
+  height: 2rem;
+  margin: -1rem 0 0 -1rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--text-primary) 35%, transparent);
+  pointer-events: none;
+  animation: browser-ripple 250ms ease-out forwards;
+}
+@keyframes browser-ripple {
+  from { transform: scale(0.4); opacity: 0.9; }
+  to { transform: scale(1.1); opacity: 0; }
+}
+@keyframes browser-ripple-fade {
+  from { opacity: 0.9; }
+  to { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .browser-ripple { animation-name: browser-ripple-fade; }
+}

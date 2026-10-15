@@ -11,6 +11,7 @@ import { randomBytes, timingSafeEqual } from "crypto";
 import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { cwd } from "process";
+import { stopBrowser, writeBrowserMcp } from "./browser";
 
 /**
  * Where state lives. An explicit `WORKS_DIR` always wins.
@@ -351,6 +352,10 @@ let hookBase = "";
 export function setHookBase(url: string) {
   hookBase = url;
 }
+/** The server's own loopback address, for links it hands to its own helpers (the shared browser's start page). */
+export function ownBase(): string {
+  return hookBase;
+}
 
 const HOOK_EVENTS = ["UserPromptSubmit", "Notification", "PostToolUse", "Stop"];
 
@@ -424,6 +429,8 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
   const sessId = sessionId(ws.id, terminalId);
   // Claude Code reports idle, waiting and done to us through its hooks (handleHook).
   const hookFile = terminalId === "main" && basename(cmd[0]) === "claude" ? await writeHookSettings(ws, who) : null;
+  // the same shared browser the person watches in the panel (browser.ts)
+  const mcpFile = terminalId === "main" && basename(cmd[0]) === "claude" ? writeBrowserMcp(ws, who) : null;
   // A project's model applies when its Claude starts. Resume already carries --model above.
   const modelArgs = ws.model && terminalId === "main" && basename(cmd[0]) === "claude" ? ["--model", ws.model] : [];
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
@@ -431,7 +438,7 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
     {
       id: sessId,
       cwd: worktreePath(ws),
-      cmd: [...cmd, ...modelArgs, ...(hookFile ? ["--settings", hookFile] : [])],
+      cmd: [...cmd, ...modelArgs, ...(hookFile ? ["--settings", hookFile] : []), ...(mcpFile ? ["--mcp-config", mcpFile] : [])],
       cols,
       rows,
       env: AGENT_PTY_ENV,
@@ -2119,6 +2126,8 @@ export async function deleteWorkspace(id: string) {
   const ws = s.workspaces.find((w) => w.id === id);
   if (!ws) throw new Error(`no workspace '${id}'`);
   chatKillers.get(id)?.();
+  // best-effort: the browser may already be gone (idle timeout), and it must not block the delete
+  await stopBrowser(ws).catch(() => {});
   if (ws.chat) await rm(join(WORKS_DIR, "chats", `${id}.jsonl`), { force: true });
   // close every named PTY session for this workspace
   const sessions = (await ptyList()) ?? [];

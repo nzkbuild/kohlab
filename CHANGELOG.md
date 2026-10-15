@@ -9,6 +9,19 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.45.0] - 2026-10-15
+
+### Added
+- Preview is now a real browser that you and Claude share. Each project gets its own Chrome on the server, and you watch it live: click, type, scroll, paste and touch right in the Preview pane. Claude uses the same browser to open your page and check its own work, so you see exactly what it sees.
+- An address bar with Back, Forward and Reload. Type any address, or a path like `/about` to go to that page on the current site. "Open project page" in the ⋯ menu always brings you back to your project.
+- For web apps (React, Next.js, Vite…) Kohlab starts the project's dev server by itself once its packages are installed, so Preview shows the real app, not just plain pages.
+- Logins stay per project: sign in to a site once in a project's Preview and it's remembered there, and only there. Deleting the project wipes it.
+
+### Safety
+- Claude can browse, read and test your own project's pages freely. Before it clicks, types or runs anything on any other site, including other services on your server, it asks you first in plain English ("Claude wants to click on example.com").
+- People who can only view a project can watch its browser but not use it.
+- At most 3 browsers run at once, and a browser closes itself after 15 minutes without use, so the server stays comfortable.
+
 ## [1.44.1] - 2026-10-15
 
 ### Changed

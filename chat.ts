@@ -14,6 +14,8 @@ import { isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import type { Workspace } from "./types";
 import { notifyNeedsYou } from "./push";
+import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
+import { devServerOrigin } from "./devserver";
 import {
   WORKS_DIR,
   chatBusy,
@@ -26,6 +28,7 @@ import {
   markStarted,
   mutateState,
   notifyWorkspaceDone,
+  ownBase,
   worktreeIsClean,
   worktreePath,
 } from "./lib";
@@ -40,7 +43,8 @@ const CHAT_SYSTEM_PROMPT =
   "and put an index.html at the project root, so it works by opening that file; use another technology only if they ask for it. " +
   "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes. " +
   "Files the person attaches are saved in the uploads folder of the project; open them with your Read tool, and use pictures from there directly in the page when they ask for that. " +
-  "When you run a command, always give it a short plain-English description of what it does and why.";
+  "When you run a command, always give it a short plain-English description of what it does and why. " +
+  "You have a real browser that the person watches live: after you change a page, open it there and check it, using the http://127.0.0.1 address of a dev server you started, or else the project's Preview.";
 const MAX_TEXT = 20000;
 
 type Body =
@@ -95,12 +99,38 @@ export function describeTool(name: string, input: Record<string, any>, cwd: stri
     case "Task":
       return "Asked a helper to look into it";
     default:
-      return `Used ${name}`;
+      if (name === "mcp__browser__agent_browser_open") return `Opened ${input.url ?? "a page"} in the browser`;
+      return name.startsWith("mcp__browser__") ? "Used the browser" : `Used ${name}`;
+  }
+}
+
+/** The permission question for a browser tool, naming the site it acts on ("a website" when the page address is not known). */
+function describeBrowserAsk(name: string, input: Record<string, any>, currentUrl: string | null): { text: string; detail?: string } {
+  let site = "a website";
+  try {
+    site = (currentUrl && new URL(currentUrl).hostname) || site;
+  } catch {
+    /* not an address: say "a website" */
+  }
+  switch (name.replace("mcp__browser__agent_browser_", "")) {
+    case "click":
+    case "dblclick":
+      return { text: `Claude wants to click on ${site}`, ...(input.selector ? { detail: String(input.selector) } : {}) };
+    case "fill":
+    case "type":
+      return { text: `Claude wants to type into a form on ${site}`, detail: String(input.text ?? "").slice(0, 80) };
+    case "press":
+      return { text: `Claude wants to press a key on ${site}`, detail: String(input.key ?? "") };
+    case "eval":
+      return { text: `Claude wants to run a script on ${site}`, detail: String(input.script ?? "").slice(0, 300) };
+    default:
+      return { text: `Claude wants to use the browser on ${site}`, detail: JSON.stringify(input).slice(0, 300) };
   }
 }
 
 /** The permission question for a risky action: what it asks, the detail to show under it, and why (the model's own words, for a command). */
-export function describeAsk(name: string, input: Record<string, any>, cwd: string): { text: string; detail?: string; why?: string } {
+export function describeAsk(name: string, input: Record<string, any>, cwd: string, currentUrl: string | null = null): { text: string; detail?: string; why?: string } {
+  if (name.startsWith("mcp__browser__")) return describeBrowserAsk(name, input, currentUrl);
   switch (name) {
     case "Write":
       return { text: `Claude wants to create the file ${rel(input.file_path, cwd)}` };
@@ -258,12 +288,15 @@ function onLine(id: string, live: Live, line: string) {
   }
   if (m.type === "control_request" && m.request?.subtype === "can_use_tool") {
     const input = (m.request.input ?? {}) as Record<string, unknown>;
-    live.asks.set(m.request_id, input);
-    const { text, detail, why } = describeAsk(m.request.tool_name, input as Record<string, any>, live.cwd);
-    const wasWaiting = chatWaiting.has(id);
-    chatWaiting.add(id);
-    emit(id, { kind: "ask", requestId: m.request_id, text, ...(detail !== undefined ? { detail } : {}), ...(why !== undefined ? { why } : {}) });
-    if (!wasWaiting) pingNeedsYou(id, text);
+    const tool = String(m.request.tool_name ?? "");
+    if (browserToolPolicy(tool, null, NO_OWN_PAGES) === null) askPerson(id, live, m.request_id, tool, input, null);
+    else {
+      // fail closed: any error while working out the page or the own pages asks the person, never allows and never leaves Claude waiting
+      void browserAsk(id, live, m.request_id, tool, input).catch((e) => {
+        console.error("[chat] browser ask:", (e as Error).message);
+        if (!live.stopping && !live.closed && live.child.stdin) askPerson(id, live, m.request_id, tool, input, null);
+      });
+    }
     return;
   }
   if (m.type === "result") {
@@ -333,6 +366,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   // --include-partial-messages streams Claude's reply as it is written (stream_event lines). --model only when the project chose one; otherwise the account default.
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
   args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
+  // strict: only our browser tools load, never the user's MCP servers
+  const mcpFile = writeBrowserMcp(ws, who);
+  if (mcpFile) args.push("--mcp-config", mcpFile);
   args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
   if (ws.chatSession) args.push("--resume", ws.chatSession);
   if (ws.model) args.push("--model", ws.model);
@@ -391,6 +427,43 @@ export async function send(id: string, text: string): Promise<void> {
   }
 }
 
+/** Claude's answer to a permission question: allow echoes the input back. */
+function writeAnswer(live: Live, requestId: string, allow: boolean, input: Record<string, unknown>) {
+  const response = allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "The user said no." };
+  live.child.stdin!.write(JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: requestId, response } }) + "\n");
+}
+
+/** Show a permission question to the person and ping them. `url` is the browser's page, when the tool acts on one. */
+function askPerson(id: string, live: Live, requestId: string, tool: string, input: Record<string, unknown>, url: string | null) {
+  live.asks.set(requestId, input);
+  const { text, detail, why } = describeAsk(tool, input as Record<string, any>, live.cwd, url);
+  const wasWaiting = chatWaiting.has(id);
+  chatWaiting.add(id);
+  emit(id, { kind: "ask", requestId, text, ...(detail !== undefined ? { detail } : {}), ...(why !== undefined ? { why } : {}) });
+  if (!wasWaiting) pingNeedsYou(id, text);
+}
+
+/** A browser tool's permission question: read-only tools are allowed at once, interaction tools on the project's own page too, the rest are asked. */
+async function browserAsk(id: string, live: Live, requestId: string, tool: string, input: Record<string, unknown>) {
+  // only a tool that acts on the page needs its address and the workspace's own pages; a read does not touch the browser
+  const ws = browserToolPolicy(tool, null, NO_OWN_PAGES) === "ask" ? await getWorkspace(id).catch(() => null) : null;
+  const url = ws ? await browserUrl(ws).catch(() => null) : null;
+  if (live.stopping || live.closed) return;
+  if (browserToolPolicy(tool, url, ownPagesOf(ws)) === "allow") writeAnswer(live, requestId, true, input);
+  else askPerson(id, live, requestId, tool, input, url);
+}
+
+const NO_OWN_PAGES: OwnPages = { previewPrefix: null, devOrigin: null };
+
+/** This workspace's own pages: its static preview under its token, and its running dev server. */
+function ownPagesOf(ws: Workspace | null): OwnPages {
+  const base = ownBase();
+  return {
+    previewPrefix: ws?.previewToken && base ? `${base}/p/${ws.previewToken}/` : null,
+    devOrigin: ws ? devServerOrigin(ws) : null,
+  };
+}
+
 /** Answer a pending permission question. */
 export async function answer(id: string, requestId: string, allow: boolean): Promise<void> {
   const live = procs.get(id);
@@ -398,8 +471,7 @@ export async function answer(id: string, requestId: string, allow: boolean): Pro
   const input = live.asks.get(requestId)!;
   live.asks.delete(requestId);
   if (live.asks.size === 0) chatWaiting.delete(id);
-  const response = allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "The user said no." };
-  live.child.stdin!.write(JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: requestId, response } }) + "\n");
+  writeAnswer(live, requestId, allow, input);
   emit(id, { kind: "answer", requestId, allow });
 }
 

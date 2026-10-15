@@ -79,6 +79,8 @@ import {
 } from "./lib";
 import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 import { resolvePreviewFile } from "./preview";
+import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, touchBrowser } from "./browser";
+import { stopAllDevServers } from "./devserver";
 import { ChatError, answer as answerChat, restoreWaiting, send as sendChat, snapshot as chatSnapshot } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -103,7 +105,8 @@ const VERSION = (() => {
 // `ws.data`. A concrete type here (vs. `Server<any>`) is required for
 // `data` to type-check on `upgrade()`: with `any`, bun-types' conditional
 // overload resolves to the no-`data` branch instead of the `data`-required one.
-type WSData = { auth: Awaited<ReturnType<typeof authenticate>>; canMutate: boolean };
+// `browser` is set on a shared-browser stream socket: the workspace and the port of its Chrome.
+type WSData = { auth: Awaited<ReturnType<typeof authenticate>>; canMutate: boolean; browser?: { id: string; port: number } };
 
 /** Browser push subscribers (dashboard pages). */
 const brotli = promisify(brotliCompress);
@@ -1229,7 +1232,20 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       // authenticated at the handshake. `auth`/`canMutate` travel in
       // `ws.data` so every later frame can be checked against the caller
       // that opened the connection, not just "some caller passed `denied`".
-      const upgradeOpts = { data: { auth, canMutate }, ...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
+      // The shared browser's live stream. The port is bound to this socket here, so it can only reach its own workspace's browser.
+      const streamM = path.match(/^\/browser\/([^/]+)$/);
+      let browser: { id: string; port: number } | undefined;
+      if (streamM) {
+        const sid = streamM[1];
+        if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, sid))) return json({ error: "forbidden, not your workspace" }, 403);
+        try {
+          const sws = await getWorkspace(sid);
+          browser = { id: sid, port: (await ensureBrowser(sws, await startUrlFor(sws))).port };
+        } catch (e) {
+          return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 503);
+        }
+      }
+      const upgradeOpts = { data: { auth, canMutate, browser }, ...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
       if (server.upgrade(req, upgradeOpts)) return undefined;
     }
 
@@ -1245,6 +1261,36 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
       return handleChatPost(chatId, req, actor, !!answerPath);
+    }
+
+    // The shared browser (browser.ts): read its page URL, or navigate it. Share links never reach it.
+    const browserM = path.match(/^\/api\/workspaces\/([^/]+)\/browser$/);
+    if (browserM) {
+      const bid = browserM[1];
+      if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, bid))) return json({ error: "forbidden, not your workspace" }, 403);
+      if (req.method === "GET") {
+        if (denied) return json({ error: "unauthorized" }, 401);
+        try {
+          const bws = await getWorkspace(bid);
+          await ensureBrowser(bws, await startUrlFor(bws));
+          return json({ url: await browserUrl(bws) });
+        } catch (e) {
+          return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 503);
+        }
+      }
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      const refused = gate(canMutate, "forbidden, viewer cannot use the browser");
+      if (refused) return refused;
+      const body = (await req.json().catch(() => ({}))) as { action?: string; url?: string };
+      if (body.action !== "open" && body.action !== "home" && body.action !== "back" && body.action !== "forward" && body.action !== "reload") {
+        return json({ error: "action must be open, home, back, forward or reload" }, 400);
+      }
+      containFailure(audit(actor, "browser." + body.action, bid), "audit");
+      try {
+        return json({ url: await browserAction(await getWorkspace(bid), body.action, body.url) });
+      } catch (e) {
+        return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 503);
+      }
     }
 
     if (m) {
@@ -1611,12 +1657,72 @@ async function staticResponse(f: ReturnType<typeof Bun.file>, file: string, req:
   return new Response(hit.bytes, { headers: { ...headers, "content-encoding": hit.enc } });
 }
 
+/**
+ * A shared-browser socket relays to agent-browser's stream server on loopback. It is
+ * never a push subscriber or a terminal, so none of that logic sees its frames.
+ */
+const browserPipes = new Map<ServerWebSocket<WSData>, { up: WebSocket; pending: string[]; open: boolean }>();
+
+function openBrowserPipe(ws: ServerWebSocket<WSData>) {
+  const up = new WebSocket(`ws://127.0.0.1:${ws.data.browser!.port}/?pacing=ack`);
+  const pipe = { up, pending: [] as string[], open: false };
+  browserPipes.set(ws, pipe);
+  up.onopen = () => {
+    pipe.open = true;
+    for (const m of pipe.pending) up.send(m);
+    pipe.pending = [];
+  };
+  up.onmessage = (ev) => {
+    ws.send(ev.data as string);
+  };
+  up.onclose = () => {
+    if (browserPipes.get(ws) === pipe) browserPipes.delete(ws);
+    try {
+      ws.close();
+    } catch {
+      /* already closed */
+    }
+  };
+  up.onerror = () => up.close();
+}
+
+function browserClientMessage(ws: ServerWebSocket<WSData>, str: string) {
+  const pipe = browserPipes.get(ws);
+  if (!pipe) return;
+  touchBrowser({ id: ws.data.browser!.id });
+  let type = "";
+  try {
+    type = String(JSON.parse(str).type ?? "");
+  } catch {
+    /* not JSON: passed on as it is */
+  }
+  // a viewer watches: only frame pacing (ack, config) goes through. Anything else could move or reconfigure the browser, which only a member may do.
+  if (!ws.data.canMutate && type !== "ack" && type !== "config") return;
+  if (pipe.open) pipe.up.send(str);
+  else pipe.pending.push(str);
+}
+
+function closeBrowserPipe(ws: ServerWebSocket<WSData>) {
+  const pipe = browserPipes.get(ws);
+  if (!pipe) return;
+  browserPipes.delete(ws);
+  pipe.up.close();
+}
+
 const socketHandlers: WebSocketHandler<WSData> = {
     open(ws) {
+      if (ws.data.browser) {
+        openBrowserPipe(ws);
+        return;
+      }
       // every dashboard page is a push subscriber
       pushClients.add(ws);
     },
     message(ws, raw) {
+      if (ws.data.browser) {
+        browserClientMessage(ws, String(raw));
+        return;
+      }
       const str = String(raw);
       // Bound to the socket at upgrade (see `server.upgrade` above). Absent
       // only for a connection made before this check existed and surviving a
@@ -1690,6 +1796,10 @@ const socketHandlers: WebSocketHandler<WSData> = {
       }
     },
     close(ws) {
+      if (ws.data.browser) {
+        closeBrowserPipe(ws);
+        return;
+      }
       pushClients.delete(ws);
       const sessId = termClients.get(ws);
       if (sessId) containFailure(ptySend({ type: "unsubscribe", id: sessId }), "terminal unsubscribe");
@@ -1743,5 +1853,14 @@ serve({
   websocket: socketHandlers,
 });
 
+
+// The dev servers are detached, so they would outlive this process. Stop them on the way out; a signal is sent again once they are stopped, so the exit is the same as before.
+process.once("exit", stopAllDevServers);
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.once(sig, () => {
+    stopAllDevServers();
+    process.kill(process.pid, sig);
+  });
+}
 
 console.log(`works server on http://${HOST}:${PORT}${authRequired() ? " (access key required)" : " (no key, loopback only)"}`);

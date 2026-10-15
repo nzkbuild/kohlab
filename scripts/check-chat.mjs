@@ -26,6 +26,8 @@ check("Bash without description cuts the command at 80", describeTool("Bash", { 
 check("Glob is a search", describeTool("Glob", { pattern: "*.ts" }, cwd), "Searched the files");
 check("WebSearch names the query", describeTool("WebSearch", { query: "cats" }, cwd), "Searched the web for cats");
 check("unknown tool falls back", describeTool("Frobnicate", {}, cwd), "Used Frobnicate");
+check("browser open", describeTool("mcp__browser__agent_browser_open", { url: "https://example.com" }, cwd), "Opened https://example.com in the browser");
+check("browser other tool", describeTool("mcp__browser__agent_browser_click", {}, cwd), "Used the browser");
 
 // what the agent asks before doing it
 check("Bash ask: text", describeAsk("Bash", { command: "rm -rf x", description: "Clean up" }, cwd).text, "Claude wants to run a command");
@@ -39,6 +41,16 @@ check("WebFetch ask", describeAsk("WebFetch", { url: "https://example.com" }, cw
 check("unknown tool ask: text", describeAsk("Foo", { a: 1 }, cwd).text, "Claude wants to use Foo");
 check("unknown tool ask: detail is the input as JSON", describeAsk("Foo", { a: 1 }, cwd).detail, '{"a":1}');
 check("unknown tool ask: detail trimmed to 300", describeAsk("Foo", { big: "y".repeat(1000) }, cwd).detail.length, 300);
+
+// browser tools name the site they act on
+const clickAsk = "mcp__browser__agent_browser_click";
+check("browser click ask: names the site", describeAsk(clickAsk, { selector: "@e5" }, cwd, "https://example.com/a").text, "Claude wants to click on example.com");
+check("browser click ask: detail is the ref", describeAsk(clickAsk, { selector: "@e5" }, cwd, "https://example.com/a").detail, "@e5");
+check("browser click ask with no page: a website", describeAsk(clickAsk, { selector: "@e5" }, cwd, null).text, "Claude wants to click on a website");
+check("browser type ask: form, detail is the text", describeAsk("mcp__browser__agent_browser_fill", { text: "hi" }, cwd, "https://example.com/").detail, "hi");
+check("browser type ask: text", describeAsk("mcp__browser__agent_browser_type", { text: "hi" }, cwd, "https://example.com/").text, "Claude wants to type into a form on example.com");
+check("browser type ask: detail cut at 80", describeAsk("mcp__browser__agent_browser_type", { text: "z".repeat(200) }, cwd, "https://example.com/").detail.length, 80);
+check("browser eval ask: a script", describeAsk("mcp__browser__agent_browser_eval", { script: "1" }, cwd, "https://example.com/").text, "Claude wants to run a script on example.com");
 
 // what the user reads when Claude fails
 check("usage limit: plain sentence", friendlyError("Claude AI usage limit reached|123"), "Claude has reached its usage limit for now. Try again in a little while.");
