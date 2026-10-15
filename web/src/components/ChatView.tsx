@@ -11,7 +11,6 @@ import { workspaceStatus } from "../lib/status";
 import { inline, parseBlocks, type Inline } from "../lib/markdown";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
-import PreviewPanel from "./PreviewPanel";
 import { Button, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
@@ -21,6 +20,11 @@ type AskEvent = Extract<ChatEvent, { kind: "ask" }>;
 
 interface Props {
   workspaceId: string;
+  onPreview: () => void;
+  previewing: boolean;
+  previewOpen: boolean;
+  /** Called when Claude's turn ends, so an open preview can reload. */
+  onTurnEnd?: () => void;
 }
 
 /** The tool lines of one run, as one plain sentence: "looked at 3 files, wrote 2 and ran 1 command". Prefixes come from describeTool in chat.ts. */
@@ -338,7 +342,7 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
   return rows;
 }
 
-export default function ChatView({ workspaceId }: Props) {
+export default function ChatView({ workspaceId, onPreview, previewing, previewOpen, onTurnEnd }: Props) {
   const refresh = useApp((s) => s.refresh);
   const workspaces = useApp((s) => s.workspaces);
   const can = useCan().mutate;
@@ -350,19 +354,12 @@ export default function ChatView({ workspaceId }: Props) {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [answering, setAnswering] = useState<string | null>(null);
-  const [previewing, setPreviewing] = useState(false);
   const [keeping, setKeeping] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
-  // Wide (900px, the shell breakpoint): the preview opens beside the chat. Narrower
-  // screens (phones and small tablets) open it as a full-screen sheet.
-  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 56.25rem)").matches);
   // iOS Safari does not shrink the layout viewport for the keyboard, so the composer
   // would sit under it. While the composer is focused on a phone, the chat is lifted by the keyboard's height.
   const [keyboard, setKeyboard] = useState(0);
-  const [pane, setPane] = useState<{ url: string; t: number } | null>(null);
-  const paneOpen = wide && pane !== null;
-  const sheetOpen = !wide && pane !== null;
 
   const afterRef = useRef(0);
   const primedRef = useRef(false);
@@ -424,13 +421,6 @@ export default function ChatView({ workspaceId }: Props) {
   const repoll = () => setKick((k) => k + 1);
 
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 56.25rem)");
-    const onChange = () => setWide(mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-
-  useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     const onResize = () => {
@@ -444,16 +434,14 @@ export default function ChatView({ workspaceId }: Props) {
     return () => vv.removeEventListener("resize", onResize);
   }, []);
 
-  // A cache-busting reload of the preview (the ?t= makes the browser fetch again).
-  const reloadPane = () => setPane((p) => (p ? { ...p, t: Date.now() } : p));
-  const closePreview = () => setPane(null);
-
   // A turn that just ended may have changed files: refresh so the Keep / Undo bar sees it,
-  // and reload the preview so it shows the new version.
+  // and let the parent reload an open preview.
   const wasBusy = useRef(busy);
+  const turnEndRef = useRef(onTurnEnd);
+  turnEndRef.current = onTurnEnd;
   useEffect(() => {
     if (!busy) void refresh();
-    if (wasBusy.current && !busy) reloadPane();
+    if (wasBusy.current && !busy) turnEndRef.current?.();
     wasBusy.current = busy;
   }, [busy, refresh]);
 
@@ -546,24 +534,30 @@ export default function ChatView({ workspaceId }: Props) {
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
   }, [draft]);
 
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || busy || sending) return;
+  // Sends one message. Returns true when the server took it.
+  const sendText = async (text: string): Promise<boolean> => {
     setSending(true);
     setSendError(null);
     try {
       await api.chatSend(workspaceId, text);
-      setDraft("");
       setBusy(true);
       nearBottomRef.current = true;
+      return true;
     } catch (e) {
       // 409 "still working": Claude is busy, so the composer locks until it is not.
       setSendError((e as Error).message);
       setBusy(true);
+      return false;
     } finally {
       setSending(false);
       repoll();
     }
+  };
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || busy || sending) return;
+    if (await sendText(text)) setDraft("");
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -630,18 +624,6 @@ export default function ChatView({ workspaceId }: Props) {
     };
   }, [hasChanges, busy, workspaceId]);
 
-  const preview = async () => {
-    setPreviewing(true);
-    try {
-      const { url } = await api.preview(workspaceId);
-      setPane({ url, t: Date.now() });
-    } catch (e) {
-      toast.error(`Could not open the preview, ${(e as Error).message}`);
-    } finally {
-      setPreviewing(false);
-    }
-  };
-
   const keep = async () => {
     setKeeping(true);
     try {
@@ -682,7 +664,21 @@ export default function ChatView({ workspaceId }: Props) {
       case "ask": {
         const answered = answers.get(e.requestId);
         if (answered !== undefined) return <AnsweredAsk e={e} allowed={answered} />;
-        if (pendingAsk?.requestId !== e.requestId) return <p className="text-[14px] text-text-muted">This question expired.</p>;
+        if (pendingAsk?.requestId !== e.requestId) {
+          // The newest question, with nothing said after it, can be asked again: the server restart lost the process that was waiting.
+          const latestAskN = Math.max(0, ...events.filter((x) => x.kind === "ask").map((x) => x.n));
+          const repeatable = e.n === latestAskN && !events.some((x) => x.kind === "user" && x.n > e.n) && !busy && waiting === null && can;
+          return (
+            <div className="flex flex-col items-start gap-3">
+              <p className="text-[14px] text-text-muted">Kohlab restarted before you answered, so Claude stopped here.</p>
+              {repeatable ? (
+                <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={sending} onClick={() => void sendText("Please carry on with what you were doing.")}>
+                  Ask Claude again
+                </Button>
+              ) : null}
+            </div>
+          );
+        }
         return (
           <section aria-label="Claude is asking" className="rounded-2xl border border-line-subtle px-5 py-[18px]">
             <p className="text-base font-medium text-text-primary">{e.text}</p>
@@ -728,7 +724,6 @@ export default function ChatView({ workspaceId }: Props) {
   };
 
   const placeholder = waiting !== null ? "Claude is waiting for your answer above" : busy ? "Claude is working…" : "Ask Claude for a change…";
-  const paneWidth = "w-[clamp(360px,42%,640px)]";
 
   return (
     <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
@@ -777,8 +772,8 @@ export default function ChatView({ workspaceId }: Props) {
                   <Check size={14} aria-hidden="true" />
                   Keep this version
                 </Button>
-                {paneOpen ? null : (
-                  <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={previewing} onClick={() => void preview()}>
+                {previewOpen ? null : (
+                  <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={previewing} onClick={onPreview}>
                     <Eye size={14} aria-hidden="true" />
                     Preview
                   </Button>
@@ -845,16 +840,6 @@ export default function ChatView({ workspaceId }: Props) {
           </div>
         ) : null}
       </div>
-
-      {paneOpen && pane ? (
-        <aside aria-label="Preview" className={cn("flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised", paneWidth)}>
-          <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} />
-        </aside>
-      ) : null}
-
-      {sheetOpen && pane ? (
-        <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} />
-      ) : null}
 
       <ConfirmDialog
         open={confirmUndo}

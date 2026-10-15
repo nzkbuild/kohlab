@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.39.1] - 2026-10-15
+
+### Fixed
+- Preview in the top bar of a chat project now opens the preview. It did nothing before.
+- If Kohlab restarts before you answer one of Claude's questions, the chat now says so and offers Ask Claude again, instead of a dead "This question expired."
+
+### Changed
+- Search (Ctrl K) matches the rest of the app: projects in the same order as the sidebar, a small dot for needs you or ready to check instead of coloured badges, and Ctrl K instead of ⌘K on Windows and Linux.
+
 ## [1.39.0] - 2026-10-14
 
 ### Changed

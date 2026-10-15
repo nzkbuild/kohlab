@@ -2,8 +2,8 @@ import { lazy, Suspense, startTransition, useEffect, useOptimistic, useState } f
 import {
   ArrowsClockwise,
   CaretDown,
+  Eye,
   Ghost,
-  Globe,
   List,
   Play,
   PencilSimple,
@@ -362,8 +362,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     </Menu>
   );
 
-  const paneOpen = !chat && wide && pane !== null;
-  const sheetOpen = !chat && !wide && pane !== null;
+  const paneOpen = wide && pane !== null;
+  const sheetOpen = !wide && pane !== null;
   const paneWidth = "w-[clamp(360px,42%,640px)]";
   const closePreview = () => setPane(null);
 
@@ -406,7 +406,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               disabled={previewing}
               onClick={() => void preview()}
             >
-              <Globe size={14} aria-hidden="true" />
+              <Eye size={14} aria-hidden="true" />
               Preview
             </button>
           )}
@@ -483,7 +483,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <TabPanel value="terminal" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
           <ErrorBoundary label="Terminal">
             <Suspense fallback={<SkeletonRows rows={8} className="p-4" />}>
-              {tab === "terminal" && chat ? <ChatView key={workspaceId} workspaceId={workspaceId} /> : null}
+              {tab === "terminal" && chat ? (
+                <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} />
+              ) : null}
               {tab === "terminal" && !chat ? (
                 <>
                   {/* The terminal is mounted even when the workspace is not

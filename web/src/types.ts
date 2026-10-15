@@ -29,7 +29,7 @@ export type ChatEvent = { n: number; at: number } & (
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string }
-  | { kind: "ask"; requestId: string; text: string; detail?: string }
+  | { kind: "ask"; requestId: string; text: string; why?: string; detail?: string }
   | { kind: "answer"; requestId: string; allow: boolean }
   | { kind: "done" }
   | { kind: "error"; text: string }

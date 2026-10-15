@@ -4,19 +4,20 @@ import {
   ArrowDown,
   ArrowElbowDownLeft,
   ArrowUp,
-  ArrowsClockwise,
   GearSix,
   House,
   MagnifyingGlass,
   Plus,
-  Sparkle,
   X,
 } from "@phosphor-icons/react";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { projectTitle } from "../lib/format";
-import { byReviewFirst, workspaceStatus, type WorkspaceStatus } from "../lib/status";
-import { Button, Kbd, StatusChip } from "./ui";
+import { sidebarOrder } from "../lib/sidebarOrder";
+import { STATUS_LABEL, workspaceStatus, type WorkspaceStatus } from "../lib/status";
+import { Button, Kbd } from "./ui";
+
+const isApple = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 type PaletteGroup = "Views" | "Projects" | "Actions";
 
@@ -34,7 +35,7 @@ type PaletteItem = {
 };
 
 /**
- * Focus is "busy typing" inside a form control or a live terminal; the ⌘K
+ * Focus is "busy typing" inside a form control or a live terminal; the Ctrl/⌘ K
  * accelerator belongs to the field there, not to the palette.
  */
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -59,7 +60,6 @@ export default function CommandPalette() {
   const [activeIndex, setActiveIndex] = useState(0);
 
   const workspaces = useApp((s) => s.workspaces);
-  const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
   const can = useCan();
@@ -72,7 +72,7 @@ export default function CommandPalette() {
 
   // Global accelerator, bound on document so it works from any surface. It must
   // not fire while someone is typing elsewhere; the palette's own input is the
-  // exception, because ⌘K there is the documented way to close it again.
+  // exception, because Ctrl/⌘ K there is the documented way to close it again.
   // Rebinding on `open` is what lets the open path reset filter and selection in
   // one place: Radix only ever closes this dialog, so a Radix-driven *open*
   // never happens and cannot be the reset hook.
@@ -104,9 +104,6 @@ export default function CommandPalette() {
     if (open) void refresh();
   }, [open, refresh]);
 
-  const current = route.kind === "workspace" ? workspaces.find((w) => w.id === route.id) : undefined;
-  const scope = current ? projectTitle(current) : route.kind === "settings" ? "Settings" : "Home";
-
   const q = query.trim().toLowerCase();
   const match = (s: string) => !q || s.toLowerCase().includes(q) || s.toLowerCase().includes(q.replace(/\s+/g, "-"));
 
@@ -127,15 +124,15 @@ export default function CommandPalette() {
       keywords: ["claude", "account", "notifications", "updates", "preferences"],
       onAction: () => navigate({ kind: "settings" }),
     },
-    // One entry per project, review first, tagged with its status so the group reads as a queue.
-    ...[...workspaces].sort(byReviewFirst).map((w) => {
+    // One entry per project, in sidebar order, with the sidebar's dot for the two statuses that need the user.
+    ...sidebarOrder(workspaces).map((w) => {
       const status = workspaceStatus(w);
       const title = projectTitle(w);
       return {
         id: `project-${w.id}`,
         label: title,
         group: "Projects" as const,
-        icon: <Sparkle size={16} />,
+        icon: <span className="inline-block size-4" />,
         status,
         keywords: [w.id],
         onAction: () => navigate({ kind: "workspace", id: w.id }),
@@ -153,14 +150,6 @@ export default function CommandPalette() {
           },
         ]
       : []),
-    {
-      id: "action-refresh",
-      label: "Refresh",
-      group: "Actions",
-      icon: <ArrowsClockwise size={16} />,
-      keywords: ["reload", "sync", "update"],
-      onAction: () => refresh(),
-    },
   ];
 
   const filtered = items.filter((i) => match(i.label) || i.keywords?.some((k) => match(k)));
@@ -245,9 +234,9 @@ export default function CommandPalette() {
               aria-controls={listId}
               aria-activedescendant={activeOptionId}
               placeholder="Search projects, or run a command…"
-              className="min-w-0 flex-1 bg-transparent py-3 text-sm text-text-primary outline-none placeholder:text-text-faint"
+              className="min-w-0 flex-1 bg-transparent py-3 text-sm text-text-primary outline-none! placeholder:text-text-faint"
             />
-            <Kbd>⌘K</Kbd>
+            <Kbd>{isApple ? "⌘K" : "Ctrl K"}</Kbd>
             <Dialog.Close asChild>
               <Button variant="quiet" iconOnly size="sm" aria-label="Close">
                 <X size={13} />
@@ -284,7 +273,12 @@ export default function CommandPalette() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate">{entry.label}</span>
                       </span>
-                      {entry.status ? <StatusChip status={entry.status} /> : null}
+                      {entry.status === "needs-you" || entry.status === "needs-review" ? (
+                        <>
+                          <span className="sidebar-dot" aria-hidden="true" />
+                          <span className="sr-only">{STATUS_LABEL[entry.status]}</span>
+                        </>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -294,8 +288,6 @@ export default function CommandPalette() {
           </div>
 
           <div className="flex items-center gap-2 border-t border-line-subtle px-3 py-2 text-xs text-text-muted">
-            <span className="section-label">Current</span>
-            <span className="mono text-2xs text-text-secondary">{scope}</span>
             <span className="ml-auto flex items-center gap-3">
               <span className="flex items-center gap-1">
                 <ArrowUp size={12} aria-hidden="true" />
