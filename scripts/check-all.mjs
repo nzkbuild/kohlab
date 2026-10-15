@@ -76,6 +76,7 @@ try {
 
   banner("static checks");
   run("chat lines (describeTool, describeAsk)", "bun", ["scripts/check-chat.mjs"]);
+  run("terminal transcript lines (what the chat view shows)", "bun", ["scripts/check-transcript.mjs"]);
   run("project names (rename rules, notification titles)", "bun", ["scripts/check-rename.mjs"]);
   run("web preview paths (no escape from the worktree)", "bun", ["scripts/check-preview.mjs"]);
   run("shared browser rules (dev command, dev URL, allowed URLs)", "bun", ["scripts/check-browser-unit.mjs"]);

@@ -426,6 +426,20 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
       console.warn(`agent claude config sync failed: ${(e as Error).message}`);
     }
   }
+  // A terminal project's Claude never runs beside the chat's Claude on the same conversation.
+  let resumeArgs: string[] = [];
+  if (terminalId === "main") intentionallyStopped.delete(ws.id); // a new main terminal's exit counts again
+  if (terminalId === "main" && !ws.chat && basename(cmd[0]) === "claude") {
+    if (chatBusy.has(ws.id)) throw new Error("Wait until Claude has finished in the chat, then try again.");
+    chatKillers.get(ws.id)?.();
+    if (ws.resumeInTerminal && ws.chatSession && /^[\w-]+$/.test(ws.chatSession)) {
+      resumeArgs = ["--resume", ws.chatSession];
+      await mutateState((st) => {
+        const w = st.workspaces.find((x) => x.id === ws.id);
+        if (w) w.resumeInTerminal = undefined;
+      });
+    }
+  }
   const sessId = sessionId(ws.id, terminalId);
   // Claude Code reports idle, waiting and done to us through its hooks (handleHook).
   const hookFile = terminalId === "main" && basename(cmd[0]) === "claude" ? await writeHookSettings(ws, who) : null;
@@ -438,7 +452,7 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
     {
       id: sessId,
       cwd: worktreePath(ws),
-      cmd: [...cmd, ...modelArgs, ...(hookFile ? ["--settings", hookFile] : []), ...(mcpFile ? ["--mcp-config", mcpFile] : [])],
+      cmd: [...cmd, ...resumeArgs, ...modelArgs, ...(hookFile ? ["--settings", hookFile] : []), ...(mcpFile ? ["--mcp-config", mcpFile] : [])],
       cols,
       rows,
       env: AGENT_PTY_ENV,
@@ -1371,7 +1385,14 @@ export async function isAlive(ws: Workspace): Promise<boolean> {
  */
 export async function isRunning(ws: Workspace): Promise<boolean> {
   if (ws.chat) return chatBusy.has(ws.id);
+  if (chatBusy.has(ws.id)) return true; // a turn in the chat view of a terminal project
   return !ws.stopped && (await isAlive(ws));
+}
+
+/** Close a workspace's main Claude terminal. Not a stop: the run is not reported as finished. */
+export async function closeMain(id: string) {
+  markIntentionallyStopped(id);
+  await ptySend({ type: "close", id: sessionId(id) });
 }
 
 /** Called once per turn (hook UserPromptSubmit, chat send), so `started` is the latest run's start. */
@@ -1406,18 +1427,30 @@ export async function finishRun(id: string): Promise<void> {
 export async function handleHook(
   id: string,
   token: string,
-  body: { hook_event_name?: string; notification_type?: string; message?: unknown },
+  body: { hook_event_name?: string; notification_type?: string; message?: unknown; session_id?: unknown },
 ): Promise<false | { ws: Workspace; needsYou?: string }> {
   const ws = (await loadState()).workspaces.find((w) => w.id === id);
   if (!ws || ws.chat || !ws.hookToken) return false;
   const given = Buffer.from(token);
   const want = Buffer.from(ws.hookToken);
   if (given.length !== want.length || !timingSafeEqual(given, want)) return false;
+  // The terminal Claude's session id, so the chat view can read the same conversation.
+  const sid = body.session_id;
+  if (typeof sid === "string" && /^[\w-]+$/.test(sid) && sid !== ws.chatSession) {
+    await mutateState((st) => {
+      const w = st.workspaces.find((x) => x.id === id);
+      if (w) w.chatSession = sid;
+    });
+  }
 
   switch (body.hook_event_name) {
     case "UserPromptSubmit":
       chatWaiting.delete(id);
       await markStarted(id);
+      await mutateState((st) => {
+        const w = st.workspaces.find((x) => x.id === id);
+        if (w) w.promptAt = Date.now();
+      });
       return { ws };
     case "Notification": {
       const message = typeof body.message === "string" ? body.message : "";
@@ -2101,6 +2134,7 @@ export async function startWorkspace(id: string) {
     if (!w) throw new Error(`no workspace '${id}'`);
     w.started = Date.now();
     w.stopped = null;
+    w.promptAt = undefined; // a fresh start has not been prompted yet
     return { ...w, running: true, path: worktreePath(w) };
   });
 }
@@ -2147,7 +2181,9 @@ export async function deleteWorkspace(id: string) {
   chatKillers.get(id)?.();
   // best-effort: the browser may already be gone (idle timeout), and it must not block the delete
   await stopBrowser(ws).catch(() => {});
-  if (ws.chat) await rm(join(WORKS_DIR, "chats", `${id}.jsonl`), { force: true });
+  // a terminal project's chat view keeps an imported copy too, so both files go
+  await rm(join(WORKS_DIR, "chats", `${id}.jsonl`), { force: true });
+  await rm(join(WORKS_DIR, "chats", `${id}.cursor.json`), { force: true });
   // close every named PTY session for this workspace
   const sessions = (await ptyList()) ?? [];
   for (const sess of sessions) {

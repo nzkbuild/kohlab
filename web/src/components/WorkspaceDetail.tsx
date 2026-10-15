@@ -52,6 +52,29 @@ import {
 // only wants a helper: would pull the whole chunk into first paint.
 const TerminalView = lazy(() => import("./TerminalView"));
 const ChatView = lazy(() => import("./ChatView"));
+
+/** Which view a terminal project's Claude tab shows: its conversation as a chat, or the terminal. Remembered per project. */
+type ClaudeView = "chat" | "terminal";
+const CLAUDE_VIEWS: { view: ClaudeView; label: string }[] = [
+  { view: "chat", label: "Chat" },
+  { view: "terminal", label: "Terminal" },
+];
+const claudeViewKey = (id: string) => `kohlab.claudeView.${id}`;
+// localStorage can throw (private mode, storage disabled): the view then just is not remembered.
+function readClaudeView(id: string): ClaudeView {
+  try {
+    return localStorage.getItem(claudeViewKey(id)) === "terminal" ? "terminal" : "chat";
+  } catch {
+    return "chat";
+  }
+}
+function writeClaudeView(id: string, view: ClaudeView) {
+  try {
+    localStorage.setItem(claudeViewKey(id), view);
+  } catch {
+    /* storage disabled: nothing to keep */
+  }
+}
 const DiffView = lazy(() => import("./DiffView"));
 const FilesView = lazy(() => import("./FilesView"));
 
@@ -118,6 +141,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [pane, setPane] = useState<{ url: string; t: number } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
+  // The Claude tab's view. Kept with the project id, so a change of project shows that project's own choice.
+  const [claudeViewState, setClaudeViewState] = useState<{ id: string; view: ClaudeView }>(() => ({ id: workspaceId, view: readClaudeView(workspaceId) }));
   // The bottom terminal panel. Its tabs and size live as long as this page does; the page is keyed by project.
   const [panelOpen, setPanelOpen] = useState(false);
   // Both sizes are dragged by the person and kept per browser.
@@ -136,6 +161,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const w = workspaces.find((x) => x.id === workspaceId);
   // A chat workspace drives the AI through a conversation: its "terminal" pane is the chat.
   const chat = w?.chat === true;
+  // A terminal project whose agent is Claude also has a chat view of its conversation.
+  const claudeTerminal = !chat && w?.agent === "claude";
+  const claudeView = claudeViewState.id === workspaceId ? claudeViewState.view : readClaudeView(workspaceId);
+  const chatOfTerminal = claudeTerminal && claudeView === "chat";
 
   // Lifecycle toggles are bounded single-object mutations, so they may show
   // their outcome before the server confirms it. Deleting and committing never do.
@@ -393,6 +422,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const running = optimisticRunning;
   const title = projectTitle(w);
 
+  const pickClaudeView = (view: ClaudeView) => {
+    setClaudeViewState({ id: workspaceId, view });
+    writeClaudeView(workspaceId, view);
+    // The chat moved the conversation on: Terminal resumes it there.
+    if (view === "terminal" && w?.resumeInTerminal && can.mutate) run("start");
+  };
+
   const badges: Partial<Record<TabId, Badge>> = {};
   if (reviewCount > 0) badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files" };
 
@@ -623,10 +659,30 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <TabPanel value="terminal" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
             <ErrorBoundary label="Terminal">
               <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
+                {claudeTerminal ? (
+                  <div role="group" aria-label="Claude view" className="flex h-10 shrink-0 items-center justify-end gap-1 px-3">
+                    {CLAUDE_VIEWS.map(({ view, label }) => (
+                      <button
+                        key={view}
+                        type="button"
+                        aria-pressed={claudeView === view}
+                        onClick={() => pickClaudeView(view)}
+                        className={cn("inline-flex h-8 items-center rounded-full px-3 text-sm", claudeView === view ? "bg-surface-active text-text-primary" : "text-text-muted hover:text-text-primary")}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {chat ? (
                   <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} />
                 ) : null}
-                {!chat ? (
+                {chatOfTerminal ? (
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} terminalProject />
+                  </div>
+                ) : null}
+                {!chat && !chatOfTerminal ? (
                   // The terminal is mounted even when the workspace is not
                   // running, because the daemon retains the final screen of a
                   // finished session, replacing it with a notice would throw

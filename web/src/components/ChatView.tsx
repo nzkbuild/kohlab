@@ -40,6 +40,8 @@ interface Props {
   compact?: boolean;
   /** Called when Claude's turn ends, so an open preview can reload. */
   onTurnEnd?: () => void;
+  /** A terminal project's Claude, shown as its chat: no Keep / Undo, since those would change the real project. */
+  terminalProject?: boolean;
 }
 
 /** The tool lines of one run, as one plain sentence: "looked at 3 files, wrote 2 and ran 1 command". Prefixes come from describeTool in chat.ts. */
@@ -357,13 +359,15 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
   return rows;
 }
 
-export default function ChatView({ workspaceId, onPreview, previewing = false, previewOpen = false, onTurnEnd, compact = false }: Props) {
+export default function ChatView({ workspaceId, onPreview, previewing = false, previewOpen = false, onTurnEnd, compact = false, terminalProject = false }: Props) {
   const refresh = useApp((s) => s.refresh);
   const workspaces = useApp((s) => s.workspaces);
   const can = useCan().mutate;
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState<string | null>(null);
+  // Whether the project's terminal Claude is open: sending from here closes it.
+  const [terminalOpen, setTerminalOpen] = useState(false);
   // Claude's reply as it is being written (streamed by the server, not yet an event).
   const [streamed, setStreamed] = useState("");
   const [kick, setKick] = useState(0);
@@ -424,6 +428,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         setBusy(res.busy);
         setWaiting(res.waiting);
         setStreamed(res.draft);
+        setTerminalOpen(res.terminalOpen ?? false);
         schedule(res.busy ? 500 : res.waiting !== null ? 1000 : 4000);
       } catch {
         if (alive) schedule(4000);
@@ -706,7 +711,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
 
   // Keep / Undo only while the AI's changes are waiting to be kept or undone.
   const ws = findWorkspace(workspaces, workspaceId);
-  const hasChanges = ws !== null && workspaceStatus(ws) === "needs-review";
+  const hasChanges = !terminalProject && ws !== null && workspaceStatus(ws) === "needs-review";
   // The commit message is the user's last request: its first line, cut to 72 characters.
   const lastRequest = [...events].reverse().find((e) => e.kind === "user")?.text ?? "";
   const keepMessage = (lastRequest.split("\n")[0] ?? "").trim().slice(0, 72).trim() || "Changes from chat";
@@ -842,7 +847,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
-  const placeholder = waiting !== null ? "Claude is waiting for your answer above" : busy ? "Claude is working…" : "Ask Claude for a change…";
+  const placeholder = waiting !== null ? "Claude is waiting for your answer above" : busy ? "Claude is working…" : terminalProject ? "Message Claude…" : "Ask Claude for a change…";
 
   return (
     <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
@@ -971,6 +976,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </ul>
               ) : null}
 
+              {terminalProject && terminalOpen && !busy && waiting === null ? (
+                <p className="mb-2 text-xs text-text-muted">
+                  Sending from here closes Claude's terminal screen. The conversation carries on here, and in Terminal when you switch back.
+                </p>
+              ) : null}
               <div
                 className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5"
                 onDragOver={(e: DragEvent<HTMLDivElement>) => {

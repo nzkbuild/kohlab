@@ -8,9 +8,9 @@
  * flight at restart is lost. Upgrade path: host it in the PTY daemon.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import type { Workspace } from "./types";
 import { notifyNeedsYou } from "./push";
@@ -22,8 +22,10 @@ import {
   resumeOpen,
   chatKillers,
   chatWaiting,
+  closeMain,
   getWorkspace,
   identityOf,
+  isAlive,
   loadState,
   markStarted,
   mutateState,
@@ -173,6 +175,10 @@ interface Live {
   msg?: string;
   /** Claude's reply so far, streamed as text arrives. In memory only: not persisted, not an event. */
   draft: string;
+  /** the session this process writes to, from its init line */
+  sid?: string;
+  /** terminal projects: the home that holds Claude's transcript, so the turn's own lines can be skipped */
+  transcriptHome?: string;
 }
 
 interface Chat {
@@ -186,6 +192,110 @@ const procs = new Map<string, Live>();
 
 const chatsDir = () => join(WORKS_DIR, "chats");
 const transcriptPath = (id: string) => join(chatsDir(), `${id}.jsonl`);
+const cursorPath = (id: string) => join(chatsDir(), `${id}.cursor.json`);
+/** A terminal project's first import reads at most this many bytes of Claude's transcript, and shows its last FIRST_IMPORT events. */
+const TAIL_BYTES = 8 * 1024 * 1024;
+const FIRST_IMPORT = 300;
+
+/** Claude Code's transcript for a session: under the home, in a folder named after the worktree path. */
+function transcriptFile(home: string, cwd: string, sid: string): string {
+  return join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), `${sid}.jsonl`);
+}
+
+/** How far into a terminal project's transcript the chat has read, for one session. */
+function readCursor(id: string): { sid: string; offset: number } | null {
+  try {
+    const c = JSON.parse(readFileSync(cursorPath(id), "utf8"));
+    return typeof c.sid === "string" && Number.isSafeInteger(c.offset) && c.offset >= 0 ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCursor(id: string, sid: string, offset: number) {
+  mkdirSync(chatsDir(), { recursive: true, mode: 0o700 });
+  writeFileSync(cursorPath(id), JSON.stringify({ sid, offset }), { mode: 0o600 });
+}
+
+/** Claude Code's transcript lines as chat events: what the person wrote and what Claude said and did. Pure. */
+export function transcriptEvents(lines: string[], cwd: string): Body[] {
+  const out: Body[] = [];
+  for (const line of lines) {
+    let m: any;
+    try {
+      m = JSON.parse(line);
+    } catch {
+      continue; // a torn or foreign line: skip it
+    }
+    if (!m || typeof m !== "object" || m.isSidechain || m.isMeta) continue; // a helper agent's work, or a note for Claude itself
+    if (m.type === "user") {
+      const content = m.message?.content;
+      let text = "";
+      if (typeof content === "string") text = content;
+      else if (Array.isArray(content)) text = content.map((b) => (b?.type === "text" && typeof b.text === "string" ? b.text : "")).join("\n");
+      text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+      // a slash command's own bookkeeping, not a message
+      if (!text || ["<command-name>", "<local-command", "<command-message>"].some((p) => text.startsWith(p))) continue;
+      out.push({ kind: "user", text });
+    } else if (m.type === "assistant") {
+      for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
+        if (b?.type === "text" && typeof b.text === "string" && b.text.trim()) out.push({ kind: "assistant", text: b.text.trim() });
+        else if (b?.type === "tool_use" && typeof b.name === "string" && b.name !== "TodoWrite") {
+          out.push({ kind: "tool", text: describeTool(b.name, b.input ?? {}, cwd) });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** A terminal project: copy the lines the terminal's Claude wrote since the last look into the chat. Never throws. */
+async function syncFromTerminal(ws: Workspace): Promise<void> {
+  const sid = ws.chatSession;
+  if (chatBusy.has(ws.id) || !sid || !/^[\w-]+$/.test(sid)) return;
+  try {
+    const cwd = worktreePath(ws);
+    const file = transcriptFile(identityOf(ws)?.home || homedir(), cwd, sid);
+    if (!existsSync(file)) return;
+    // The server runs as root and the folder may be writable by the agent: never follow a link.
+    if (!lstatSync(file).isFile()) return;
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const size = fstatSync(fd).size;
+      const cur = readCursor(ws.id);
+      const mine = cur !== null && cur.sid === sid ? cur : null;
+      const first = mine === null;
+      let start = mine && mine.offset <= size ? mine.offset : 0;
+      if (first && size > TAIL_BYTES) start = size - TAIL_BYTES;
+      const buf = Buffer.alloc(size - start);
+      const got = readSync(fd, buf, 0, buf.length, start);
+      const nl = buf.subarray(0, got).lastIndexOf(0x0a);
+      if (nl < 0) return; // no whole new line yet
+      let chunk = buf.subarray(0, nl + 1);
+      // a window that starts mid-line: its first, partial line is not ours
+      if (first && start > 0) chunk = chunk.subarray(chunk.indexOf(0x0a) + 1);
+      let events = transcriptEvents(chunk.toString("utf8").split("\n"), cwd);
+      if (first) events = events.slice(-FIRST_IMPORT);
+      for (const body of events) emit(ws.id, body);
+      writeCursor(ws.id, sid, start + nl + 1);
+    } finally {
+      closeSync(fd);
+    }
+  } catch (e) {
+    console.warn(`[chat] terminal sync: ${(e as Error).message}`);
+  }
+}
+
+/** A terminal project: the turn's own lines are already in the chat, so the import skips past them. ponytail: a server restart mid-turn re-imports that turn once. */
+function markSeen(id: string, live: Live) {
+  if (!live.transcriptHome || !live.sid) return;
+  try {
+    const file = transcriptFile(live.transcriptHome, live.cwd, live.sid);
+    writeCursor(id, live.sid, existsSync(file) ? statSync(file).size : 0);
+  } catch (e) {
+    console.warn(`[chat] terminal cursor: ${(e as Error).message}`);
+  }
+}
 
 function load(id: string): Chat {
   const have = chats.get(id);
@@ -224,6 +334,7 @@ function stop(id: string) {
   chats.delete(id);
   chatBusy.delete(id);
   chatWaiting.delete(id);
+  if (live && chatBusy.has(id)) markSeen(id, live); // the cut-off turn is already in the chat
   if (live) {
     live.stopping = true;
     live.child.kill("SIGTERM");
@@ -267,7 +378,10 @@ function onLine(id: string, live: Live, line: string) {
   }
   if (m.type === "system" && m.subtype === "init") {
     live.resuming = undefined;
-    if (typeof m.session_id === "string") persistSession(id, m.session_id);
+    if (typeof m.session_id === "string") {
+      live.sid = m.session_id;
+      persistSession(id, m.session_id);
+    }
     return;
   }
   if (m.type === "stream_event") {
@@ -302,6 +416,7 @@ function onLine(id: string, live: Live, line: string) {
   if (m.type === "result") {
     live.draft = "";
     if (m.subtype !== "success" && resumeFailed(id, live)) return;
+    markSeen(id, live);
     if (m.subtype !== "success") {
       const raw = String(m.result ?? m.subtype ?? "unknown");
       console.warn("[chat] claude result error:", raw.slice(0, 200));
@@ -323,6 +438,7 @@ function onExit(id: string, live: Live) {
   live.asks.clear();
   if (live.stopping || !chatBusy.has(id)) return;
   if (resumeFailed(id, live)) return;
+  markSeen(id, live);
   const last = live.stderr.trim().split("\n").pop()?.trim() ?? "";
   console.warn("[chat] claude stopped unexpectedly:", last.slice(0, 200));
   emit(id, { kind: "error", text: friendlyError(last) });
@@ -361,24 +477,37 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
   const who = identityOf(ws);
   const home = who?.home || homedir();
+  // A terminal project's chat continues the person's own Claude (their settings, skills and MCP servers), as their terminal does.
+  const term = !ws.chat;
   // Chat users get a clean Claude with the same login: no user settings, skills, MCP servers or CLAUDE.md.
   // CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies.
   // --include-partial-messages streams Claude's reply as it is written (stream_event lines). --model only when the project chose one; otherwise the account default.
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
-  args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
+  if (!term) args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
   // strict: only our browser tools load, never the user's MCP servers
   const mcpFile = writeBrowserMcp(ws, who);
   if (mcpFile) args.push("--mcp-config", mcpFile);
-  args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
+  if (!term) args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
   if (ws.chatSession) args.push("--resume", ws.chatSession);
   if (ws.model) args.push("--model", ws.model);
   const env: Record<string, string> = {};
   for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
   env.HOME = home;
-  env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "1";
+  if (!term) env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "1";
   const cwd = worktreePath(ws);
   const child = spawn(bin, args, { cwd, uid: who?.uid, gid: who?.gid, env, stdio: ["pipe", "pipe", "pipe"] });
-  const live: Live = { child, cwd, asks: new Map(), stderr: "", stopping: false, closed: false, resuming: ws.chatSession, draft: "" };
+  const live: Live = {
+    child,
+    cwd,
+    asks: new Map(),
+    stderr: "",
+    stopping: false,
+    closed: false,
+    resuming: ws.chatSession,
+    draft: "",
+    sid: ws.chatSession,
+    transcriptHome: term ? home : undefined,
+  };
   procs.set(id, live);
   child.stdin!.on("error", () => {}); // a dead process: its exit event reports it
   child.stderr!.on("data", (d) => {
@@ -395,10 +524,25 @@ async function start(ws: Workspace, id: string): Promise<Live> {
 /** The chat transcript after event `after`, and whether a turn is in flight. */
 export async function snapshot(id: string, after: number) {
   const ws = await getWorkspace(id);
-  if (!ws.chat) throw new ChatError(400, "not a chat workspace");
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  if (term) await syncFromTerminal(ws);
   const events = load(id).events.filter((e) => e.n > after);
   const live = procs.get(id);
-  return { events, busy: chatBusy.has(id), waiting: live?.asks.keys().next().value ?? null, draft: live?.draft ?? "" };
+  return {
+    events,
+    busy: chatBusy.has(id),
+    waiting: live?.asks.keys().next().value ?? null,
+    draft: live?.draft ?? "",
+    terminalOpen: term && (await isAlive(ws)),
+  };
+}
+
+/** A terminal project whose agent is Claude: its conversation can be read and sent to from the chat view. */
+async function viaTerminal(ws: Workspace): Promise<boolean> {
+  if (ws.chat) return false;
+  const cmd = ((await loadState()).agents?.[ws.agent] || "").split(/\s+/)[0];
+  return basename(cmd) === "claude";
 }
 
 /** Send a user message. Starts the claude process if none is alive. */
@@ -407,8 +551,22 @@ export async function send(id: string, text: string): Promise<void> {
   if (!t) throw new ChatError(400, "message is empty");
   if (t.length > MAX_TEXT) throw new ChatError(400, `message is over ${MAX_TEXT} characters`);
   const ws = await getWorkspace(id);
-  if (!ws.chat) throw new ChatError(400, "not a chat workspace");
-  if (await resumeOpen(id)) throw new ChatError(409, "Claude is open in the terminal. Close it there, then send your message again.");
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  if (term) await syncFromTerminal(ws);
+  if (!term && (await resumeOpen(id))) throw new ChatError(409, "Claude is open in the terminal. Close it there, then send your message again.");
+  // The terminal's Claude moves into the chat: its terminal screen closes first, unless it is still working there.
+  if (term && !procs.has(id)) {
+    const now = await getWorkspace(id);
+    if (await isAlive(now)) {
+      if (now.promptAt && (!now.stopped || now.promptAt > now.stopped)) throw new ChatError(409, "Claude is still working in the terminal. Wait until it finishes, then send again.");
+      await closeMain(id);
+    }
+    await mutateState((st) => {
+      const w = st.workspaces.find((x) => x.id === id);
+      if (w) w.resumeInTerminal = true;
+    });
+  }
   // check and claim in one synchronous step, so two posts cannot both start a turn
   if (chatBusy.has(id)) throw new ChatError(409, "still working");
   chatBusy.add(id);
@@ -416,7 +574,7 @@ export async function send(id: string, text: string): Promise<void> {
   emit(id, { kind: "user", text: t });
   try {
     await markStarted(id);
-    const live = procs.get(id) ?? (await start(ws, id));
+    const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
     live.msg = t;
     live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
   } catch (e) {

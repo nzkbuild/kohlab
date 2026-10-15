@@ -20,6 +20,8 @@ export interface Workspace {
   /** A chat workspace: the AI is driven through a chat screen, not a terminal. */
   chat?: boolean;
   chatSession?: string;
+  /** The conversation last moved on in the chat view, so the terminal's next Claude resumes it. */
+  resumeInTerminal?: boolean;
   /** From the listing: a chat permission question is pending (unanswered). */
   waiting?: boolean;
   /** Claude model for this project. Undefined = the account default. */

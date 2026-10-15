@@ -20,8 +20,12 @@ export interface Workspace {
   payload?: string;
   /** Talks through the claude CLI's chat mode (chat.ts), not a main PTY. */
   chat?: boolean;
-  /** claude session id, for --resume on the next message. */
+  /** claude session id: the chat's, or the terminal Claude's as reported by its hooks. For --resume. */
   chatSession?: string;
+  /** the conversation last moved on in the chat view, so the terminal's next Claude resumes it. */
+  resumeInTerminal?: boolean;
+  /** terminal Claude: when its last prompt was submitted (UserPromptSubmit hook); cleared on start. Mid-turn when set and not stopped after it. */
+  promptAt?: number;
   /** owner's workspace root under their home; legacy records omit it and live
    *  under the shared store */
   dir?: string;

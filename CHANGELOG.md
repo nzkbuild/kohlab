@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.48.0] - 2026-10-16
+
+### Added
+- One conversation, two views. Projects that run Claude Code in a terminal now have a Chat | Terminal switch in the Claude tab. Chat shows the same Claude session as a conversation, including what you typed in the terminal, and you can carry on talking there. Terminal shows Claude Code's own screen. Switching never loses the conversation: sending from Chat closes the terminal screen (only when Claude is idle), and switching back reopens Claude in the terminal on the same conversation.
+- In these projects the chat keeps your full Claude setup (your skills, settings and instructions), and Keep / Undo stay hidden so your real work is never thrown away.
+
+### Fixed
+- After stopping and restarting a terminal project, Kohlab again notices when its Claude finishes.
+
 ## [1.47.0] - 2026-10-16
 
 ### Changed
