@@ -63,6 +63,22 @@ check(
   transcriptEvents([user([{ type: "image", source: {} }, { type: "text", text: "see this" }])], cwd),
   [{ kind: "user", text: "see this" }],
 );
+check(
+  "background task note: one quiet line with its summary",
+  transcriptEvents([user("<task-notification>\n<task-id>b1</task-id>\n<summary>Background command \"npm test\" completed (exit code 0)</summary>\n</task-notification>")], cwd),
+  [{ kind: "tool", text: 'Background task finished: Background command "npm test" completed (exit code 0)' }],
+);
+check(
+  "background task note: summary cut at 120 characters",
+  transcriptEvents([user(`<task-notification><summary>${"s".repeat(200)}</summary></task-notification>`)], cwd),
+  [{ kind: "tool", text: `Background task finished: ${"s".repeat(120)}` }],
+);
+check(
+  "background task note without a summary",
+  transcriptEvents([user("<task-notification><task-id>b1</task-id></task-notification>")], cwd),
+  [{ kind: "tool", text: "A background task finished" }],
+);
+check("helper message to Claude is skipped", transcriptEvents([user('<agent-message from="helper">done</agent-message>')], cwd), []);
 
 if (failures > 0) {
   console.log(`\n${failures} check(s) failed`);

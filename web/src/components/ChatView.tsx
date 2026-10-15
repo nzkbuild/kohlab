@@ -90,6 +90,47 @@ function workingLine(t: string): string {
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+/** "12s" under a minute, then "1m 05s". */
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+/** "claude-opus-5-5" -> "Opus 5.5"; a name it does not know is shown as it is. */
+function modelName(id: string): string {
+  const m = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)(?:-\d{8})?$/.exec(id);
+  if (m) return `${cap(m[1])} ${m[2]}.${m[3]}`;
+  return ["opus", "sonnet", "haiku"].includes(id) ? cap(id) : id;
+}
+
+/** The permission mode the CLI reports, in plain words. */
+const MODE_LABEL: Record<string, string> = {
+  auto: "Auto mode",
+  default: "Asks first",
+  manual: "Asks first",
+  acceptEdits: "Edits allowed",
+  bypassPermissions: "No questions",
+  plan: "Plan mode",
+};
+
+/** The working line: a pulsing dot, the current action, how long the turn has run, and background tasks. The timer ticks only while this line is shown. */
+function WorkingLine({ action, since, background }: { action: string; since: number | null; background: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  return (
+    <p className="flex items-center gap-2 text-[14px] text-text-muted">
+      <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
+      <span className="shimmer-text min-w-0">{action}</span>
+      {/* aria-hidden: the timer changes every second and must not be read out */}
+      {since !== null ? <span aria-hidden="true" className="tabular-nums text-text-faint">{formatElapsed(now - since)}</span> : null}
+      {background > 0 ? <span>· {background} in background</span> : null}
+    </p>
+  );
+}
+
 /** Merge a fresh batch into the list by sequence number, so a repeated event never shows twice. */
 function mergeEvents(prev: ChatEvent[], next: ChatEvent[]): ChatEvent[] {
   const seen = new Set(prev.map((e) => e.n));
@@ -236,10 +277,15 @@ function Prose({ text }: { text: string }) {
 }
 
 /** A run of tool actions: one muted line; the caret opens the list of each action. */
-function ToolRun({ lines }: { lines: ChatEvent[] }) {
-  const [open, setOpen] = useState(false);
+function ToolRun({ lines, live = false }: { lines: ChatEvent[]; live?: boolean }) {
+  // The run Claude is in now opens by itself, with its last three steps, and folds again when the turn ends.
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    if (!live) setOpen(false);
+  }, [live]);
   const tools = lines.filter((e): e is ToolEvent => e.kind === "tool");
   const summary = summarizeTools(tools.map((e) => e.text));
+  const shown = live ? tools.slice(-3) : tools;
   return (
     <div>
       <button
@@ -253,7 +299,7 @@ function ToolRun({ lines }: { lines: ChatEvent[] }) {
       </button>
       {open ? (
         <ul className="mt-1 flex flex-col gap-1 pl-6 text-[13px] text-text-muted">
-          {tools.map((e) => (
+          {shown.map((e) => (
             <li key={e.n}>{e.text}</li>
           ))}
         </ul>
@@ -365,6 +411,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const can = useCan().mutate;
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
+  // When the current turn started (ms), whoever started it; background tasks still running; the model and mode the CLI reports.
+  const [busySince, setBusySince] = useState<number | null>(null);
+  const [background, setBackground] = useState(0);
+  const [model, setModel] = useState<string | null>(null);
+  const [mode, setMode] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<string | null>(null);
   // Whether the project's terminal Claude is open: sending from here closes it.
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -399,7 +450,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const nearBottomRef = useRef(true);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Poll: 0.5 s while the AI is working, 1 s while it waits for an answer, 4 s otherwise. Paused while the
+  // Poll: 0.5 s while the AI is working, 1 s while it waits for an answer or background tasks run, 4 s otherwise. Paused while the
   // tab is hidden; `kick` restarts the loop at once (after a send or an answer).
   useEffect(() => {
     let alive = true;
@@ -426,10 +477,16 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         }
         if (res.events.length > 0) setEvents((prev) => mergeEvents(prev, res.events));
         setBusy(res.busy);
+        // elapsed on the server's clock, moved onto this device's; kept steady across polls
+        const start = res.busySince === null ? null : Date.now() - (res.now - res.busySince);
+        setBusySince((prev) => (prev !== null && start !== null && Math.abs(prev - start) < 2000 ? prev : start));
+        setBackground(res.background);
+        setModel(res.model);
+        setMode(res.mode);
         setWaiting(res.waiting);
         setStreamed(res.draft);
         setTerminalOpen(res.terminalOpen ?? false);
-        schedule(res.busy ? 500 : res.waiting !== null ? 1000 : 4000);
+        schedule(res.busy ? 500 : res.waiting !== null || res.background > 0 ? 1000 : 4000);
       } catch {
         if (alive) schedule(4000);
       }
@@ -847,6 +904,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  // Under the composer: which model answers and how it asks, in plain words. Hidden until the CLI has reported them.
+  const footer = [model ? modelName(model) : null, mode ? (MODE_LABEL[mode] ?? mode) : null].filter(Boolean).join(" · ");
+
   const placeholder = waiting !== null ? "Claude is waiting for your answer above" : busy ? "Claude is working…" : terminalProject ? "Message Claude…" : "Ask Claude for a change…";
 
   return (
@@ -878,7 +938,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     {turn.map((row) => (
                       <Fragment key={row[0].n}>
                         {row[0].kind === "tool" ? (
-                          <ToolRun lines={row} />
+                          <ToolRun lines={row} live={working && ti === turns.length - 1 && row === turn[turn.length - 1]} />
                         ) : row.length > 1 ? (
                           <AnsweredGroup events={row} answers={answers} />
                         ) : (
@@ -926,10 +986,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               </div>
             </div>
               ) : null}
-              {working ? (
+              {working ? <WorkingLine action={currentAction} since={busySince} background={background} /> : null}
+              {!busy && background > 0 ? (
                 <p className="flex items-center gap-2 text-[14px] text-text-muted">
-                  <span className="size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
-                  {currentAction}
+                  <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
+                  {background === 1 ? "1 task still running in the background" : `${background} tasks still running in the background`}
                 </p>
               ) : null}
             </div>
@@ -1047,6 +1108,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   </Button>
                 )}
               </div>
+              {footer ? <p className="mt-2 px-4 text-center text-xs text-text-faint">{footer}</p> : null}
             </div>
           </div>
         ) : null}

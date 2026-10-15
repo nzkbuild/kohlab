@@ -102,7 +102,21 @@ export const api = {
     json<Workspace>(`/api/workspaces/${id}/${action}`, { method: "POST" }),
   /** Chat events after sequence number `after`, plus whether the AI is working and which question it waits on. */
   chat: (id: string, after: number) =>
-    json<{ events: ChatEvent[]; busy: boolean; waiting: string | null; draft: string; terminalOpen?: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat?after=${after}`),
+    json<{
+      events: ChatEvent[];
+      busy: boolean;
+      /** when the current turn started (ms), or null when idle */
+      busySince: number | null;
+      /** the server's clock, to correct a device clock that is off */
+      now: number;
+      /** background tasks still running */
+      background: number;
+      model: string | null;
+      mode: string | null;
+      waiting: string | null;
+      draft: string;
+      terminalOpen?: boolean;
+    }>(`/api/workspaces/${encodeURIComponent(id)}/chat?after=${after}`),
   chatSend: (id: string, text: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat`, {
       method: "POST",

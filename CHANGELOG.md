@@ -9,6 +9,17 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.49.0] - 2026-10-16
+
+### Added
+- You can always tell when Claude is working. The chat shows a pulsing working line with what Claude is doing right now and how long it has been at it, and its latest steps unfold live.
+- Background work is visible: "· 1 in background" while Claude works, "1 task still running in the background" after it replies, and "Background task finished: …" when one ends.
+- When Claude picks up work by itself (for example after a background task finishes), the chat shows it as working, with the Stop button.
+- A small line under the message box tells you the model and mode, such as "Opus 5.5 · Auto mode".
+
+### Fixed
+- Imported terminal conversations no longer show raw background-task messages as code.
+
 ## [1.48.1] - 2026-10-16
 
 ### Fixed

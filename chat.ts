@@ -179,6 +179,13 @@ interface Live {
   sid?: string;
   /** terminal projects: the home that holds Claude's transcript, so the turn's own lines can be skipped */
   transcriptHome?: string;
+  /** when the current turn started (ms), by a send or by Claude itself; cleared at its result */
+  busySince?: number;
+  /** background tasks still running (Bash or helper runs), from the CLI's own list */
+  background: number;
+  /** the model and permission mode the CLI reports in its init line */
+  model: string | null;
+  mode: string | null;
 }
 
 interface Chat {
@@ -217,6 +224,12 @@ function writeCursor(id: string, sid: string, offset: number) {
   writeFileSync(cursorPath(id), JSON.stringify({ sid, offset }), { mode: 0o600 });
 }
 
+/** The one-line note for a finished background task, from its <task-notification> text. */
+function taskFinishedLine(text: string): string {
+  const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1].trim().slice(0, 120);
+  return summary ? `Background task finished: ${summary}` : "A background task finished";
+}
+
 /** Claude Code's transcript lines as chat events: what the person wrote and what Claude said and did. Pure. */
 export function transcriptEvents(lines: string[], cwd: string): Body[] {
   const out: Body[] = [];
@@ -236,6 +249,12 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
       text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
       // a slash command's own bookkeeping, not a message
       if (!text || ["<command-name>", "<local-command", "<command-message>"].some((p) => text.startsWith(p))) continue;
+      // a background task's note to Claude: one quiet line; a helper's message to Claude: not the person's
+      if (text.startsWith("<task-notification>")) {
+        out.push({ kind: "tool", text: taskFinishedLine(text) });
+        continue;
+      }
+      if (text.startsWith("<agent-message")) continue;
       out.push({ kind: "user", text });
     } else if (m.type === "assistant") {
       for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
@@ -368,6 +387,16 @@ function persistSession(id: string, sid: string) {
   }).catch((e) => console.error("[chat] session save:", (e as Error).message));
 }
 
+/** The model and mode last reported per project: kept after the process exits, so the footer stays between turns. */
+const lastSeen = new Map<string, { model: string | null; mode: string | null }>();
+
+/** A line that opens a turn. Only the opening lines count: a stream_event or assistant line can trail a result, and would leave the chat stuck working. */
+function isTurnStart(m: any): boolean {
+  if (m.parent_tool_use_id) return false;
+  if (m.type === "system") return m.subtype === "init" || (m.subtype === "status" && m.status === "requesting");
+  return m.type === "stream_event" && m.event?.type === "message_start";
+}
+
 function onLine(id: string, live: Live, line: string) {
   if (live.stopping) return;
   let m: any;
@@ -376,8 +405,25 @@ function onLine(id: string, live: Live, line: string) {
   } catch {
     return; // not JSON: ignore
   }
+  // Claude can start a turn by itself (a background task finished): show it as working, as a send does.
+  if (isTurnStart(m) && !chatBusy.has(id)) {
+    chatBusy.add(id);
+    live.busySince = Date.now();
+  }
+  // A finished background task, live. A terminal project's importer reads the same line from the transcript, so it stays quiet there.
+  if (m.type === "system" && m.subtype === "task_notification") {
+    if (!live.transcriptHome) emit(id, { kind: "tool", text: taskFinishedLine(`<summary>${String(m.summary ?? "")}</summary>`) });
+    return;
+  }
+  if (m.type === "system" && m.subtype === "background_tasks_changed") {
+    live.background = Array.isArray(m.tasks) ? m.tasks.length : 0;
+    return;
+  }
   if (m.type === "system" && m.subtype === "init") {
     live.resuming = undefined;
+    if (typeof m.model === "string") live.model = m.model;
+    if (typeof m.permissionMode === "string") live.mode = m.permissionMode;
+    lastSeen.set(id, { model: live.model, mode: live.mode });
     if (typeof m.session_id === "string") {
       live.sid = m.session_id;
       persistSession(id, m.session_id);
@@ -424,6 +470,7 @@ function onLine(id: string, live: Live, line: string) {
     }
     emit(id, { kind: "done" });
     chatBusy.delete(id);
+    live.busySince = undefined;
     finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
   }
 }
@@ -467,6 +514,7 @@ async function retryFresh(id: string, msg: string) {
   });
   const live = await start(await getWorkspace(id), id);
   live.msg = msg;
+  live.busySince = Date.now();
   live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: msg }, parent_tool_use_id: null }) + "\n");
 }
 
@@ -508,6 +556,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     draft: "",
     sid: ws.chatSession,
     transcriptHome: term ? home : undefined,
+    background: 0,
+    model: null,
+    mode: null,
   };
   procs.set(id, live);
   child.stdin!.on("error", () => {}); // a dead process: its exit event reports it
@@ -533,6 +584,11 @@ export async function snapshot(id: string, after: number) {
   return {
     events,
     busy: chatBusy.has(id),
+    busySince: chatBusy.has(id) ? (live?.busySince ?? null) : null,
+    now: Date.now(),
+    background: live?.background ?? 0,
+    model: live?.model ?? lastSeen.get(id)?.model ?? null,
+    mode: live?.mode ?? lastSeen.get(id)?.mode ?? null,
     waiting: live?.asks.keys().next().value ?? null,
     draft: live?.draft ?? "",
     terminalOpen: term && (await isAlive(ws)),
@@ -577,6 +633,7 @@ export async function send(id: string, text: string): Promise<void> {
     await markStarted(id);
     const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
     live.msg = t;
+    live.busySince = Date.now();
     live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
   } catch (e) {
     chatBusy.delete(id);

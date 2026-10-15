@@ -1977,3 +1977,26 @@ input[type="radio"] {
 @media (prefers-reduced-motion: reduce) {
   .browser-ripple { animation-name: browser-ripple-fade; }
 }
+
+/* The chat's working line: a dot that pulses while Claude works, and its text breathes gently. Reduced motion keeps both still. */
+.pulse-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.shimmer-text {
+  color: var(--text-muted);
+  animation: text-breathe 2s ease-in-out infinite;
+}
+@keyframes text-breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot,
+  .shimmer-text {
+    animation: none;
+  }
+}
