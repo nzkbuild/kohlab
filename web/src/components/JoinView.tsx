@@ -25,7 +25,7 @@ export default function JoinView() {
   // The token is spent by being redeemed, so it must not be left in the address
   // bar or in history for anyone with access to this browser to reuse.
   useEffect(() => {
-    if (token) history.replaceState(null, "", "/join");
+    if (token) history.replaceState(history.state, "", "/join");
   }, [token]);
 
   const accept = async () => {

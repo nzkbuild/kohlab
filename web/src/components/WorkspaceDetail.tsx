@@ -1,12 +1,13 @@
 import { lazy, Suspense, startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import {
+  ArrowLeft,
   ArrowsClockwise,
   ArrowsInSimple,
   ArrowsOutSimple,
+  Browser,
   CaretDown,
   CaretLeft,
   DownloadSimple,
-  Eye,
   Ghost,
   List,
   PencilSimple,
@@ -99,6 +100,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const refresh = useApp((s) => s.refresh);
   const navigate = useApp((s) => s.navigate);
   const setNavOpen = useApp((s) => s.setNavOpen);
+  const navIndex = useApp((s) => s.navIndex);
   const route = useApp((s) => s.route);
   const powerTools = useApp((s) => s.powerTools);
   const setPowerTools = useApp((s) => s.setPowerTools);
@@ -411,7 +413,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       trigger={
         <button
           type="button"
-          className="inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2.5 text-[15px] font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent"
+          className="inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-row px-2.5 text-[15px] font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent"
         >
           <span className="min-w-0 truncate">{title}</span>
           <CaretDown size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
@@ -419,7 +421,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       }
     >
       <MenuItem onSelect={() => setRenaming(true)}>
-        <PencilSimple size={14} aria-hidden="true" />
+        <PencilSimple size={16} aria-hidden="true" />
         Rename
       </MenuItem>
       <MenuSub label="Model">
@@ -457,7 +459,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </MenuItem>
       ) : null}
       <MenuItem onSelect={() => void api.download(workspaceId, "").catch((e: Error) => toast.error(`Could not download the project, ${e.message}`))}>
-        <DownloadSimple size={14} aria-hidden="true" />
+        <DownloadSimple size={16} aria-hidden="true" />
         Download project
       </MenuItem>
       <MenuSeparator />
@@ -476,7 +478,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </>
       )}
       <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
-        <Trash size={14} aria-hidden="true" />
+        <Trash size={16} aria-hidden="true" />
         Delete project…
       </MenuItem>
     </Menu>
@@ -485,6 +487,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const paneOpen = wide && pane !== null;
   const sheetOpen = !wide && pane !== null;
   const paneWidth = "w-[clamp(360px,42%,640px)]";
+  // The same width as a padding-right on the header, so the switch centres on the content column beside an open pane.
+  const paneInset = "pr-[clamp(360px,42%,640px)]";
   const closePreview = () => setPane(null);
 
   // Docked on desktop, a full-screen sheet on a phone (Back closes it).
@@ -573,17 +577,24 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     <div className="cockpit max-md:overflow-hidden">
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1 flex-col">
       {/* One 56px row per project: the title (its menu), the segmented switch centred, and Preview. On a phone the title row is 52px and the switch sits on its own row below. */}
-      <header className="grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 pr-3 pl-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
+      <header className={cn("grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 px-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]", paneOpen && paneInset)}>
         <div className="flex min-w-0 items-center justify-self-start gap-1 max-md:h-13 max-md:w-full max-md:justify-self-stretch">
-          <Button variant="quiet" iconOnly aria-label="Open menu" title="Menu" className="shell:hidden size-11 shrink-0" onClick={() => setNavOpen(true)}>
-            <List size={20} aria-hidden="true" />
-          </Button>
+          {/* A project reached from Home or search has history behind it: Back, not the menu. */}
+          {navIndex > 0 ? (
+            <Button variant="quiet" iconOnly aria-label="Back" title="Back" className="shell:hidden size-11 shrink-0" onClick={() => history.back()}>
+              <ArrowLeft size={20} aria-hidden="true" />
+            </Button>
+          ) : (
+            <Button variant="quiet" iconOnly aria-label="Open menu" title="Menu" className="shell:hidden size-11 shrink-0" onClick={() => setNavOpen(true)}>
+              <List size={20} aria-hidden="true" />
+            </Button>
+          )}
           <h1 className="m-0 flex min-w-0 text-[15px] font-medium text-text-primary">
             {can.mutate ? projectMenu : <span className="min-w-0 truncate px-2.5">{title}</span>}
           </h1>
         </div>
 
-        <TabList label="Project views" className="max-md:col-span-2 max-md:row-start-2 max-md:mb-2">
+        <TabList label="Project views" className="max-md:col-span-2 max-md:row-start-2 max-md:mb-2 max-md:w-full">
           {tabs.map(({ id, label }) => {
             const badge = badges[id];
             return (
@@ -602,11 +613,15 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <div className="flex shrink-0 items-center justify-self-end gap-1.5 max-md:h-13">
           <button
             type="button"
-            className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-3 text-sm text-text-secondary hover:bg-surface-hover disabled:opacity-50"
+            aria-pressed={paneOpen}
+            className={cn(
+              "inline-flex h-9 shrink-0 items-center gap-2 rounded-row px-3 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50",
+              paneOpen && "bg-surface-active text-text-primary",
+            )}
             disabled={previewing}
             onClick={() => void preview()}
           >
-            <Eye size={14} aria-hidden="true" />
+            <Browser size={18} aria-hidden="true" />
             Preview
           </button>
           {can.mutate ? null : (

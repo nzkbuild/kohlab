@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowUp, CaretRight, Check, Copy, Eye, Paperclip, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowUp, Browser, CaretRight, Check, Copy, Paperclip, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
@@ -177,8 +177,8 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const [copied, copy] = useCopied();
   const Icon = copied ? Check : Copy;
   return (
-    <div className="overflow-hidden rounded-[10px] border border-line-subtle bg-surface-sunken">
-      <div className="flex items-center justify-between gap-3 border-b border-line-subtle py-0.5 pr-1 pl-3.5">
+    <div className="overflow-hidden rounded-card bg-surface-sunken">
+      <div className="flex items-center justify-between gap-3 py-0.5 pr-1 pl-3.5">
         <span className="mono min-w-0 truncate text-[12px] text-text-muted">{lang}</span>
         <Button
           variant="quiet"
@@ -246,7 +246,7 @@ function ToolRun({ lines }: { lines: ChatEvent[] }) {
         onClick={() => setOpen((o) => !o)}
         className="flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-left text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
       >
-        <CaretRight size={14} weight="bold" aria-hidden="true" className={cn("shrink-0 motion-safe:transition-transform", open && "rotate-90")} />
+        <CaretRight size={14} aria-hidden="true" className={cn("shrink-0 motion-safe:transition-transform", open && "rotate-90")} />
         {cap(summary)}
       </button>
       {open ? (
@@ -799,10 +799,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           );
         }
         return (
-          <section aria-label="Claude is asking" className="rounded-2xl border border-line-subtle px-5 py-[18px]">
-            <p className="text-base font-medium text-text-primary">{e.text}</p>
+          <section aria-label="Claude is asking" className="rounded-card bg-surface-raised px-5 py-[18px]">
+            <p className="text-[15px] font-semibold text-text-primary">{e.text}</p>
             {e.why ? <p className="mt-1 text-[14px] leading-5 text-text-muted">{e.why}</p> : null}
-            <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-3">
               {can ? (
                 <>
                   <Button
@@ -866,7 +866,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               ) : null}
               {turns.map((turn, ti) => {
                 // Everything Claude wrote in this turn, as its markdown source, for Copy.
-                const replies = turn.flat().filter((e) => e.kind === "assistant").map((e) => e.text);
+                // Only Claude text that is actually shown earns a Copy: a blank reply under a question has nothing to copy.
+                const replies = turn.flat().flatMap((e) => (e.kind === "assistant" && e.text.trim() !== "" ? [e.text] : []));
                 return (
                   <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
                     {turn.map((row) => (
@@ -904,17 +905,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button variant="primary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={keeping} onClick={() => void keep()}>
-                  <Check size={14} className="max-md:hidden" aria-hidden="true" />
+                  <Check size={16} className="max-md:hidden" aria-hidden="true" />
                   Keep this version
                 </Button>
                 {previewOpen ? null : (
                   <Button variant="secondary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={previewing} onClick={onPreview}>
-                    <Eye size={14} className="max-md:hidden" aria-hidden="true" />
+                    <Browser size={16} className="max-md:hidden" aria-hidden="true" />
                     Preview
                   </Button>
                 )}
                 <Button variant="quiet" className="min-h-11 text-text-secondary max-md:px-2.5 shell:min-h-9" disabled={undoing} onClick={() => setConfirmUndo(true)}>
-                  <ArrowCounterClockwise size={14} aria-hidden="true" />
+                  <ArrowCounterClockwise size={16} aria-hidden="true" />
                   Undo
                 </Button>
               </div>
@@ -1032,7 +1033,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     disabled={sending || uploading || (draft.trim() === "" && attachments.length === 0)}
                     onClick={() => void send()}
                   >
-                    <ArrowUp size={18} weight="bold" aria-hidden="true" />
+                    <ArrowUp size={18} aria-hidden="true" />
                   </Button>
                 )}
               </div>

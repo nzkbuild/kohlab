@@ -448,7 +448,7 @@ export default function TerminalView({ workspaceId, terminalId, onExit, autoFocu
     <div className="dark-pane flex h-full min-h-0 flex-col">
       {/* A live terminal has no chrome. The bar shows only while the socket is down. */}
       {socket === "live" ? null : (
-        <div className="flex items-center gap-2 border-b border-line-subtle bg-surface-raised px-3 py-1.5 text-xs text-text-muted">
+        <div className="flex items-center gap-2 bg-surface-raised px-3 py-1.5 text-xs text-text-muted">
           <span className="min-w-0 flex-1 truncate">{SOCKET_LABEL[socket]}</span>
           {reconnecting ? (
             <Button variant="secondary" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => reconnectRef.current()} aria-describedby={descId}>

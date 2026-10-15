@@ -38,7 +38,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     return (
       <div className="grid h-full place-items-center p-6 text-center">
         <div className="max-w-md">
-          <div className="mx-auto mb-3 grid size-10 place-items-center rounded-lg border border-line-subtle bg-surface-hover text-status-danger">
+          <div className="mx-auto mb-3 grid size-10 place-items-center rounded-lg bg-surface-hover text-status-danger">
             <Warning size={18} />
           </div>
           <p className="text-base font-semibold text-text-primary">{this.props.label} failed to render</p>

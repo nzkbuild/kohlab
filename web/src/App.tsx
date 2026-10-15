@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
-import { List, PencilSimple } from "@phosphor-icons/react";
+import { ArrowLeft, List, PencilSimple } from "@phosphor-icons/react";
 import { useApp, useCan } from "./store";
 import { useSync } from "./lib/useSync";
 import { ROUTE_LABEL } from "./lib/route";
@@ -37,6 +37,9 @@ export default function App() {
   const navOpen = useApp((s) => s.navOpen);
   const powerTools = useApp((s) => s.powerTools);
   const setNavOpen = useApp((s) => s.setNavOpen);
+  const navIndex = useApp((s) => s.navIndex);
+  // On a phone, a page reached from inside the app gets Back in place of the menu; Home keeps the menu.
+  const backChevron = route.kind !== "workspaces" && navIndex > 0;
   const can = useCan();
 
   useDrawerSwipe(navOpen, setNavOpen);
@@ -114,15 +117,21 @@ export default function App() {
           <main className="app-main">
             {/* On a project page the project's own header is the only bar on a phone. */}
             <header className={cn("app-topbar", route.kind === "workspace" && "max-shell:!hidden")}>
-              <Button
-                variant="quiet"
-                iconOnly
-                className="shell:hidden"
-                aria-label="Open navigation"
-                onClick={() => setNavOpen(true)}
-              >
-                <List size={18} />
-              </Button>
+              {backChevron ? (
+                <Button variant="quiet" iconOnly className="shell:hidden" aria-label="Back" onClick={() => history.back()}>
+                  <ArrowLeft size={18} />
+                </Button>
+              ) : (
+                <Button
+                  variant="quiet"
+                  iconOnly
+                  className="shell:hidden"
+                  aria-label="Open navigation"
+                  onClick={() => setNavOpen(true)}
+                >
+                  <List size={18} />
+                </Button>
+              )}
 
               {/* No route label here: every surface renders its own <h1> directly
                   below, so a label in the bar reads as the title twice. On mobile

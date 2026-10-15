@@ -55,7 +55,8 @@
   --surface-raised: #2f2f2f;      /* composer, fields, cards */
   --surface-overlay: #2f2f2f;     /* dialogs, palette, popovers */
   --surface-hover: #2a2a2a;
-  --surface-active: #3a3a3a;      /* selected row, segmented thumb */
+  --surface-active: #3a3a3a;      /* selected row, segmented thumb, hovered secondary button */
+  --surface-pressed: #454545;     /* pressed secondary button: one step past active */
   --surface-bubble: #303030;      /* the user's own message */
   --bubble-user: var(--surface-bubble);
 
@@ -111,6 +112,9 @@
   --radius-md: 0.625rem;
   --radius-lg: 0.875rem;
   --radius-xl: 1.125rem;
+  /* Cards are 16px, sidebar and menu rows 8px (DESIGN.md, Layout and shapes). */
+  --radius-card: 1rem;
+  --radius-row: 0.5rem;
 
   /* Scrollbar thumb: a 22% tint of the primary text colour, so it is quiet on a
      white plane and on a near-black one alike. */
@@ -155,6 +159,7 @@
     --surface-overlay: #ffffff;
     --surface-hover: #ececec;
     --surface-active: #e5e5e5;
+    --surface-pressed: #d9d9d9;
     --surface-bubble: #f4f4f4;
     --bubble-user: var(--surface-bubble);
 
@@ -193,6 +198,7 @@
     --surface-overlay: #2f2f2f;
     --surface-hover: #2a2a2a;
     --surface-active: #3a3a3a;
+    --surface-pressed: #454545;
 
     --text-primary: #ececec;
     --text-secondary: #c4c4c4;
@@ -229,6 +235,7 @@
   --color-surface-overlay: var(--surface-overlay);
   --color-surface-hover: var(--surface-hover);
   --color-surface-active: var(--surface-active);
+  --color-surface-pressed: var(--surface-pressed);
   --color-bubble-user: var(--bubble-user);
   --color-surface-sidebar: var(--surface-sidebar);
   --color-surface-bubble: var(--surface-bubble);
@@ -258,6 +265,8 @@
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
   --radius-xl: var(--radius-xl);
+  --radius-card: var(--radius-card);
+  --radius-row: var(--radius-row);
 
   /* rem-based type scale (Resize Text / SC 1.4.4, never px, never clamp()). */
   --text-2xs: 0.75rem;
@@ -414,8 +423,7 @@ input[type="radio"] {
 @layer components {
   /* --- surfaces --------------------------------------------------------- */
   .panel {
-    border: 1px solid var(--line-subtle);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-card);
     background: var(--surface-raised);
   }
 
@@ -425,7 +433,6 @@ input[type="radio"] {
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    border-bottom: 1px solid var(--line-subtle);
     padding: 0.5rem 0.875rem;
   }
 
@@ -487,6 +494,10 @@ input[type="radio"] {
   .btn-primary:active:not(:disabled) {
     background: var(--accent-press);
   }
+  /* Dimmed fill, not a grey slab: the primary colour at 40%. */
+  .btn-primary:disabled {
+    opacity: 0.4;
+  }
   /* Touch has no hover, so the press itself is the feedback. */
   @media (pointer: coarse) {
     .btn:not(:disabled):active {
@@ -494,16 +505,31 @@ input[type="radio"] {
     }
   }
 
+  /* Tonal, no outline: the fill is the boundary. Hover one step up, press one more. */
   .btn-secondary {
-    border-color: var(--line-strong);
-    background: var(--surface-hover);
+    background: var(--surface-raised);
     color: var(--text-primary);
   }
   @media (hover: hover) {
     .btn-secondary:hover:not(:disabled) {
-      border-color: var(--neutral-600);
       background: var(--surface-active);
     }
+  }
+  .btn-secondary:active:not(:disabled) {
+    background: var(--surface-pressed);
+  }
+  /* On a raised surface (panel, dialog, sheet, menu, card, the Ask box, anything
+     filled surface-raised/overlay) the tonal fill would vanish: one step up. */
+  :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary {
+    background: var(--surface-active);
+  }
+  @media (hover: hover) {
+    :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary:hover:not(:disabled) {
+      background: var(--surface-pressed);
+    }
+  }
+  :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary:active:not(:disabled) {
+    background: var(--surface-pressed);
   }
 
   .btn-quiet {
@@ -519,7 +545,6 @@ input[type="radio"] {
   }
 
   .btn-danger {
-    border-color: color-mix(in oklch, var(--status-danger) 45%, transparent);
     background: color-mix(in oklch, var(--status-danger) 12%, transparent);
     color: var(--status-danger);
   }
@@ -577,7 +602,7 @@ input[type="radio"] {
     display: inline-flex;
     align-items: center;
     gap: 0.375rem;
-    border: 1px solid var(--line-strong);
+    border: 1px solid transparent;
     border-radius: 999px;
     padding: 0.25rem 0.625rem 0.25rem 0.5rem;
     font-size: 0.8125rem;
@@ -595,26 +620,22 @@ input[type="radio"] {
   }
 
   .chip-running {
-    border-color: color-mix(in oklch, var(--status-running) 42%, transparent);
     background: color-mix(in oklch, var(--status-running) 12%, transparent);
     color: var(--status-running);
   }
   .chip-review {
-    border-color: color-mix(in oklch, var(--status-review) 42%, transparent);
     background: color-mix(in oklch, var(--status-review) 12%, transparent);
     color: var(--status-review);
   }
   .chip-committed {
-    border-color: color-mix(in oklch, var(--status-committed) 38%, transparent);
     background: color-mix(in oklch, var(--status-committed) 10%, transparent);
     color: var(--status-committed);
   }
   .chip-stopped {
-    border-color: var(--line-strong);
+    background: var(--surface-raised);
     color: var(--text-muted);
   }
   .chip-danger {
-    border-color: color-mix(in oklch, var(--status-danger) 45%, transparent);
     background: color-mix(in oklch, var(--status-danger) 12%, transparent);
     color: var(--status-danger);
   }
@@ -625,9 +646,8 @@ input[type="radio"] {
     min-width: 1.25rem;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
-    background: var(--surface-hover);
+    background: var(--surface-active);
     padding: 0.0625rem 0.3125rem;
     font-family: var(--font-mono);
     font-size: 0.75rem;
@@ -711,9 +731,7 @@ input[type="radio"] {
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 1rem;
-  /* Real translucency rather than a faux alpha fill. */
-  background: color-mix(in oklch, var(--surface-base) 82%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--surface-base);
 }
 
 /* Above the shell breakpoint the sidebar is always present and every surface
@@ -757,7 +775,7 @@ input[type="radio"] {
   align-items: center;
   gap: 0.625rem;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-row);
   padding: 0.25rem 0.5rem;
   color: var(--text-secondary);
   text-align: start;
@@ -765,8 +783,10 @@ input[type="radio"] {
     color var(--duration-fast-02) var(--ease-standard);
 }
 
+/* A project row hovered anywhere, including over its More button, highlights the pill. */
 @media (hover: hover) {
-  .sidebar-row:hover {
+  .sidebar-row:hover,
+  .sidebar-item:hover > .sidebar-row:not([data-selected="true"]) {
     background: var(--surface-hover);
     color: var(--text-primary);
   }
@@ -779,7 +799,85 @@ input[type="radio"] {
   color: var(--text-primary);
 }
 
-/* The only status shown in the rail: needs you, or ready to check. */
+/* Project rows: the link is the pill (36px, row radius, full sidebar width). The
+   status dot and the More button share one slot at its right edge, inside the
+   pill: the button replaces the dot while the row is hovered, focused, selected
+   or open. The link reserves that slot in its right padding so long names end
+   in an ellipsis before it. */
+.sidebar-item {
+  position: relative;
+  display: flex;
+  width: 100%;
+  border-radius: var(--radius-row);
+}
+.sidebar-item > .sidebar-link {
+  padding-inline-end: 2.25rem;
+}
+.sidebar[data-collapsed="true"] .sidebar-item > .sidebar-link {
+  padding-inline-end: 0;
+}
+
+.sidebar-status {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: grid;
+  width: 2.25rem;
+  place-items: center;
+  pointer-events: none;
+}
+
+.sidebar-more {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 0.25rem;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast-02) var(--ease-standard), background-color var(--duration-fast-02) var(--ease-standard);
+}
+/* Collapsed desktop rail has no room for it. Unlayered, so it beats the display utility. */
+@media (min-width: 56.25rem) {
+  .sidebar[data-collapsed="true"] .sidebar-more {
+    display: none;
+  }
+}
+/* Touch: 44px hit area, shown only on the selected or open row (long press also opens it). */
+@media (pointer: coarse) {
+  .sidebar-more {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}
+@media (hover: hover) {
+  .sidebar-more:hover {
+    background: var(--surface-pressed);
+    color: var(--text-primary);
+  }
+}
+.sidebar-item:is(:hover, :focus-within, [data-selected="true"], [data-menu-open="true"]) > .sidebar-more {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidebar-item:is(:hover, :focus-within, [data-selected="true"], [data-menu-open="true"]) > .sidebar-status {
+  opacity: 0;
+}
+
+/* Rail header stacks its controls when collapsed: expand, back, forward. */
+.sidebar[data-collapsed="true"] .sidebar-head {
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.25rem;
+  padding-block: 0.5rem;
+}
+
+/* The one status shown in the rail: needs you, or ready to check. */
 .sidebar-dot {
   width: 0.4375rem;
   height: 0.4375rem;
@@ -798,7 +896,7 @@ input[type="radio"] {
   height: 1.75rem;
   flex: none;
   place-items: center;
-  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
   border-radius: var(--radius-md);
   font-size: 0.8125rem;
   font-weight: 600;
@@ -923,24 +1021,13 @@ input[type="radio"] {
    tight contact shadow plus a wide ambient one). No ornament, no glow, nothing
    that animates, so nothing here can cost contrast or reduced-motion. */
 .auth-stage {
-  /* One light source above the card, so it reads as sitting in a lit space
-     rather than floating on a flat fill. The only gradient in the app, and it
-     is light, not a pattern. */
-  background:
-    radial-gradient(
-      70rem 28rem at 50% -10rem,
-      color-mix(in oklch, var(--accent) 5%, transparent),
-      transparent 70%
-    ),
-    var(--surface-base);
+  background: var(--surface-base);
 }
 
 .auth-card {
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   background: var(--surface-raised);
   box-shadow:
-    inset 0 1px 0 0 color-mix(in oklch, var(--text-primary) 9%, transparent),
     0 1px 2px -1px oklch(0.1 0.002 286 / 0.6),
     0 1.5rem 3rem -1rem oklch(0.1 0.002 286 / 0.7);
 }
@@ -1185,8 +1272,7 @@ input[type="radio"] {
   inset-block-start: 22%;
   width: min(30rem, calc(100% - 2rem));
   margin-inline: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   background: var(--surface-overlay);
   box-shadow: 0 1.5rem 4rem oklch(0.08 0.002 286 / 0.55);
 }
@@ -1536,8 +1622,7 @@ input[type="radio"] {
 .menu {
   z-index: var(--z-overlay);
   min-width: 11rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card);
   background: var(--surface-overlay);
   padding: 0.25rem;
   box-shadow: 0 0.75rem 2rem oklch(0.08 0.002 286 / 0.5);
@@ -1548,7 +1633,7 @@ input[type="radio"] {
   min-height: var(--control-h);
   align-items: center;
   gap: 0.5rem;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-row);
   padding: 0 0.625rem;
   font-size: 0.8125rem;
   color: var(--text-secondary);

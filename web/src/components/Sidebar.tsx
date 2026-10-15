@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
+  ArrowRight,
   CaretDoubleLeft,
   CaretDoubleRight,
   DotsThree,
@@ -175,6 +177,11 @@ export default function Sidebar({ open, onClose }: Props) {
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
+  const navIndex = useApp((s) => s.navIndex);
+  const navMax = useApp((s) => s.navMax);
+  // Back needs an earlier entry in this app's history; Forward needs one we already left.
+  const canBack = navIndex > 0;
+  const canForward = navIndex < navMax;
   const refresh = useApp((s) => s.refresh);
   const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
@@ -274,6 +281,32 @@ export default function Sidebar({ open, onClose }: Props) {
           kohlab
         </button>
         <div className="sidebar-head-fill flex-1" />
+        <Tooltip content="Back (Alt+←)" side="bottom">
+          <Button
+            variant="quiet"
+            iconOnly
+            size="sm"
+            className="sidebar-nav"
+            aria-label="Back"
+            disabled={!canBack}
+            onClick={() => history.back()}
+          >
+            <ArrowLeft size={16} />
+          </Button>
+        </Tooltip>
+        <Tooltip content="Forward (Alt+→)" side="bottom">
+          <Button
+            variant="quiet"
+            iconOnly
+            size="sm"
+            className="sidebar-nav"
+            aria-label="Forward"
+            disabled={!canForward}
+            onClick={() => history.forward()}
+          >
+            <ArrowRight size={16} />
+          </Button>
+        </Tooltip>
         <Button
           variant="quiet"
           iconOnly
@@ -356,7 +389,9 @@ export default function Sidebar({ open, onClose }: Props) {
                   onOpenChange={(next) => setMenuFor(next ? workspace.id : null)}
                 >
                   <div
-                    className="group flex items-center gap-0.5"
+                    className="sidebar-item"
+                    data-selected={selected}
+                    data-menu-open={menuFor === workspace.id}
                     onPointerDown={canMenu && !editing ? (e) => holdStart(e, workspace.id) : undefined}
                     onPointerUp={holdEnd}
                     onPointerCancel={holdEnd}
@@ -370,7 +405,7 @@ export default function Sidebar({ open, onClose }: Props) {
                     }
                   >
                     {editing ? (
-                      <div className="sidebar-row min-w-0 flex-1" data-selected={selected}>
+                      <div className="sidebar-row" data-selected={selected}>
                         <RenameField
                           initial={title}
                           onDone={(next) => {
@@ -383,7 +418,7 @@ export default function Sidebar({ open, onClose }: Props) {
                       <Tooltip content={title} disabled={!collapsed}>
                         <button
                           type="button"
-                          className="sidebar-row min-w-0 flex-1"
+                          className="sidebar-row sidebar-link"
                           data-selected={selected}
                           aria-current={selected ? "page" : undefined}
                           onClick={() => {
@@ -396,7 +431,7 @@ export default function Sidebar({ open, onClose }: Props) {
                           }}
                         >
                           <span
-                            className={cn("sidebar-initial", needsYou && "border-accent text-text-primary")}
+                            className={cn("sidebar-initial", needsYou && "bg-surface-active text-text-primary")}
                             aria-hidden="true"
                           >
                             {title.charAt(0).toUpperCase()}
@@ -404,33 +439,25 @@ export default function Sidebar({ open, onClose }: Props) {
                           <span className="sidebar-label min-w-0 flex-1 truncate text-base text-text-primary" title={workspace.id}>
                             {title}
                           </span>
-                          {dotLabel ? (
-                            <>
-                              <span className="sidebar-dot sidebar-label" aria-hidden="true" />
-                              <span className="sr-only">{dotLabel}</span>
-                            </>
-                          ) : null}
+                          {dotLabel ? <span className="sr-only">{dotLabel}</span> : null}
                         </button>
                       </Tooltip>
                     )}
+                    {/* The status dot and the More button share one slot at the pill's right edge: the button replaces the dot when the row is hovered, focused, selected or open. */}
+                    {dotLabel && !editing ? (
+                      <span className="sidebar-status sidebar-label" aria-hidden="true">
+                        <span className="sidebar-dot" />
+                      </span>
+                    ) : null}
                     {canMenu && !editing ? (
-                      // 36px hit area, 28px visible. Hidden until the row is hovered or focused;
-                      // always shown on touch screens, which have no hover.
                       <DropdownMenu.Trigger asChild>
                         <button
                           type="button"
                           aria-label={`More actions for ${title}`}
                           tabIndex={collapsed ? -1 : undefined}
-                          className={cn(
-                            "shrink-0 place-items-center text-text-muted opacity-0 transition-opacity duration-150",
-                            "group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100",
-                            // The collapsed rail is too narrow for it, but the menu still anchors to it.
-                            collapsed ? "shell:w-0 shell:overflow-hidden" : "grid size-9 pointer-coarse:size-11",
-                          )}
+                          className={cn("sidebar-more", collapsed && "shell:hidden")}
                         >
-                          <span className="grid size-7 place-items-center rounded-md hover:bg-surface-active hover:text-text-primary">
-                            <DotsThree size={16} weight="bold" aria-hidden="true" />
-                          </span>
+                          <DotsThree size={16} aria-hidden="true" />
                         </button>
                       </DropdownMenu.Trigger>
                     ) : null}
@@ -455,11 +482,11 @@ export default function Sidebar({ open, onClose }: Props) {
                             renameNext.current = workspace.id;
                           }}
                         >
-                          <PencilSimple size={14} aria-hidden="true" />
+                          <PencilSimple size={16} aria-hidden="true" />
                           Rename
                         </MenuItem>
                         <MenuItem tone="danger" onSelect={() => setConfirmDelete(workspace.id)}>
-                          <Trash size={14} aria-hidden="true" />
+                          <Trash size={16} aria-hidden="true" />
                           Delete project…
                         </MenuItem>
                       </DropdownMenu.Content>
@@ -490,12 +517,12 @@ export default function Sidebar({ open, onClose }: Props) {
           <DropdownMenu.Portal>
             <DropdownMenu.Content className="menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
               <MenuItem onSelect={() => navigate({ kind: "settings" })}>
-                <GearSix size={14} aria-hidden="true" />
+                <GearSix size={16} aria-hidden="true" />
                 Settings
               </MenuItem>
               {installEvent && !standalone ? (
                 <MenuItem onSelect={() => void install()}>
-                  <DownloadSimple size={14} aria-hidden="true" />
+                  <DownloadSimple size={16} aria-hidden="true" />
                   Install app
                 </MenuItem>
               ) : null}

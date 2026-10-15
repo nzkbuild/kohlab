@@ -49,6 +49,10 @@ export interface AppState {
   navigate: (route: Route, opts?: { replace?: boolean }) => void;
   /** Adopt the current URL without touching history (Back/Forward). */
   adoptRoute: (route: Route) => void;
+  /** Position of this entry in the app's own history (0 = first entry the app saw). */
+  navIndex: number;
+  /** Highest position reached in this session: forward is possible below it. */
+  navMax: number;
 }
 
 export type PanelAction = "terminal" | "continue" | "files" | "changes" | "preview";
@@ -76,9 +80,17 @@ function writePowerTools(value: boolean) {
   }
 }
 
-export const useApp = create<AppState>((set) => ({
+/** Each in-app entry carries its position in history.state, which survives a reload. An entry without one (the page the app loaded on) is position 0. */
+function historyIndex(): number {
+  const i = (history.state as { i?: unknown } | null)?.i;
+  return typeof i === "number" ? i : 0;
+}
+
+export const useApp = create<AppState>((set, get) => ({
   authed: false,
   route: parseRoute(location.pathname),
+  navIndex: historyIndex(),
+  navMax: historyIndex(),
   workspaces: [],
   loading: true,
   error: null,
@@ -122,12 +134,22 @@ export const useApp = create<AppState>((set) => ({
   navigate: (route, opts) => {
     // Preserve the query string: an access key or share token may live there.
     const url = `${routePath(route)}${location.search}`;
-    if (opts?.replace) history.replaceState(null, "", url);
-    else history.pushState(null, "", url);
-    set({ route });
+    if (opts?.replace) {
+      const navIndex = get().navIndex;
+      history.replaceState({ i: navIndex }, "", url);
+      set({ route });
+      return;
+    }
+    // A push discards any forward entries, so the new position is also the maximum.
+    const navIndex = get().navIndex + 1;
+    history.pushState({ i: navIndex }, "", url);
+    set({ route, navIndex, navMax: navIndex });
   },
 
-  adoptRoute: (route) => set({ route }),
+  adoptRoute: (route) => {
+    const navIndex = historyIndex();
+    set((s) => ({ route, navIndex, navMax: Math.max(s.navMax, navIndex) }));
+  },
 }));
 
 /** Selector kept beside the store so consumers do not hand-roll the lookup. */

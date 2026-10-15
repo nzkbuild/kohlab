@@ -180,7 +180,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
     <Dialog.Root open={open} onOpenChange={(o) => (o ? null : onClose())}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="fixed top-1/2 left-1/2 z-[var(--z-dialog)] max-h-[90vh] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[18px] border border-line-strong bg-surface-raised p-6 text-text-primary shadow-[0_1.5rem_4rem_oklch(0.08_0.002_286/0.55)] max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:max-h-[90dvh] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-t-[18px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:px-4 max-md:pt-0 max-md:pb-[max(1rem,var(--safe-bottom))] max-md:before:mx-auto max-md:before:mt-2.5 max-md:before:mb-4 max-md:before:block max-md:before:h-1 max-md:before:w-9 max-md:before:rounded-full max-md:before:bg-line-strong max-md:before:content-[''] max-md:motion-safe:animate-[kohlab-sheet-up_240ms_ease-out]">
+        <Dialog.Content className="fixed top-1/2 left-1/2 z-[var(--z-dialog)] max-h-[90vh] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-card bg-surface-raised p-6 text-text-primary shadow-[0_1.5rem_4rem_oklch(0.08_0.002_286/0.55)] max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:max-h-[90dvh] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-t-[18px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:px-4 max-md:pt-0 max-md:pb-[max(1rem,var(--safe-bottom))] max-md:before:mx-auto max-md:before:mt-2.5 max-md:before:mb-4 max-md:before:block max-md:before:h-1 max-md:before:w-9 max-md:before:rounded-full max-md:before:bg-line-strong max-md:before:content-[''] max-md:motion-safe:animate-[kohlab-sheet-up_240ms_ease-out]">
           <header className="flex items-center justify-between gap-4">
             <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">New project</Dialog.Title>
             <Dialog.Close asChild>
@@ -200,7 +200,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
 
 /** Starter ideas: each one fills the composer. "Something else" just puts the cursor there. */
 const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator"];
-const CHIP = "inline-flex h-9 items-center rounded-full border border-line-subtle px-3.5 text-[14px] text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none";
+const CHIP = "inline-flex h-9 items-center rounded-full bg-surface-raised px-3.5 text-[14px] text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none";
 
 /**
  * Home, and the same screen for a first run with no projects: one question, one
@@ -347,7 +347,7 @@ export function HomeScreen() {
                   disabled={busy || !idea.trim()}
                   className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
                 >
-                  <ArrowUp size={18} weight="bold" aria-hidden="true" />
+                  <ArrowUp size={18} aria-hidden="true" />
                 </Button>
               </div>
 

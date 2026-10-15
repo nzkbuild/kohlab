@@ -9,6 +9,23 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.44.0] - 2026-10-15
+
+### Added
+- Back and Forward arrows at the top of the sidebar, like the Claude desktop app (also in the collapsed sidebar). On a phone, a back arrow replaces the menu button on pages you opened from somewhere else.
+
+### Changed
+- No more thin white outlines. Secondary buttons, cards, menus, dialogs, the question box and the ideas on Home are soft filled shapes instead, like ChatGPT and Claude. A button on a card is one shade lighter, so it still stands out.
+- Each project in the sidebar is one full-width rounded highlight, with its ⋯ button inside it (it shows on hover or on the open project, in place of the dot).
+- The Chat | Changes | Files switch has equal halves and stays centred over the page, also when Preview is open. On a phone it fills the width.
+- Preview has a browser-window icon instead of the eye, and matches the project name button on the other side of the header.
+- A button that can't be pressed yet (like Keep this version while Claude works) is a faded version of itself, not a grey block.
+- The Copy button only appears under something Claude actually wrote.
+- Icons use one weight and size throughout.
+
+### Fixed
+- Back and Forward kept their place after signing in or joining from an invite link.
+
 ## [1.43.0] - 2026-10-15
 
 ### Added

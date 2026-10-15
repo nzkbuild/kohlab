@@ -48,7 +48,7 @@ export default function ConfirmDialog({
           <div className="flex items-start gap-3">
             <span
               className={cn(
-                "grid size-8 shrink-0 place-items-center rounded-lg border border-line-strong",
+                "grid size-8 shrink-0 place-items-center rounded-lg bg-surface-hover",
                 tone === "danger" ? "text-status-danger" : "text-accent",
               )}
               aria-hidden="true"

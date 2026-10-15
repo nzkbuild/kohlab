@@ -497,11 +497,11 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 {/* The code is mounted only once opened: the editor is the heavy part. */}
                 <details className="group mt-4" onToggle={(e) => setShowCode(e.currentTarget.open)}>
                   <summary className="flex min-h-11 w-fit cursor-pointer list-none select-none items-center gap-1.5 rounded-lg px-3 text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary [&::-webkit-details-marker]:hidden">
-                    <CaretRight size={14} weight="bold" aria-hidden="true" className="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+                    <CaretRight size={14} aria-hidden="true" className="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
                     Show the code
                   </summary>
                   {showCode && current ? (
-                    <div className="dark-pane mt-2 h-[min(60vh,32rem)] min-h-64 overflow-hidden rounded-xl border border-line-subtle bg-surface-sunken">
+                    <div className="dark-pane mt-2 h-[min(60vh,32rem)] min-h-64 overflow-hidden rounded-card bg-surface-sunken">
                       <FileDiff name={current.name} diff={current.diff} />
                     </div>
                   ) : null}
@@ -598,7 +598,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
       {error ? (
         <div
           role="alert"
-          className="flex items-center gap-2 border-b border-line-subtle px-3 py-2 text-xs text-status-danger"
+          className="flex items-center gap-2 px-3 py-2 text-xs text-status-danger"
         >
           <WarningCircle size={14} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 break-words">{error}</span>
@@ -667,7 +667,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
         <div className="split-view flex-col shell:flex-row">
           <div className={LIST_CLASS}>
             <div
-              className="flex flex-wrap items-center gap-1.5 border-b border-line-subtle px-2 py-1.5"
+              className="flex flex-wrap items-center gap-1.5 px-2 py-1.5"
               role="group"
               aria-label="Filter changed files by review state"
             >
@@ -757,7 +757,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
           <div className={PANE_CLASS}>
             {current ? (
               <>
-                <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-3 py-1.5">
+                <div className="flex flex-wrap items-center gap-2 px-3 py-1.5">
                   <span className="mono min-w-0 flex-1 truncate text-xs text-text-primary">{current.name}</span>
                   {currentStats ? (
                     <Totals added={currentStats.added} removed={currentStats.removed} />
@@ -790,11 +790,11 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
       )}
 
       {!can.mutate ? (
-        <footer className="border-t border-line-subtle bg-surface-raised px-3 py-2.5 text-xs text-text-muted">
+        <footer className="bg-surface-raised px-3 py-2.5 text-xs text-text-muted">
           Your role can read this diff. An owner or member commits, discards or merges it.
         </footer>
       ) : (
-      <footer className="sticky bottom-0 z-(--z-sticky) border-t border-line-subtle bg-surface-raised px-3 py-2">
+      <footer className="sticky bottom-0 z-(--z-sticky) bg-surface-raised px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="commit-message">
             Commit message

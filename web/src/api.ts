@@ -11,7 +11,7 @@ let key = urlKey || localStorage.getItem("kohlab_key") || "";
 if (urlKey) {
   try {
     localStorage.setItem("kohlab_key", urlKey);
-    history.replaceState(null, "", location.pathname + location.hash);
+    history.replaceState(history.state, "", location.pathname + location.hash);
   } catch {
     /* private mode: the session still works, it just will not persist */
   }

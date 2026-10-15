@@ -123,7 +123,7 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose, onNew
   if (!sheet) {
     return (
       <>
-        <div role="toolbar" aria-label="Preview actions" className="flex items-center gap-2 border-b border-line-subtle px-2 py-2">
+        <div role="toolbar" aria-label="Preview actions" className="flex items-center gap-2 px-2 py-2">
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-sunken px-3 py-1.5 text-xs text-text-muted">
             <Globe size={14} className="shrink-0" aria-hidden="true" />
             <span className="truncate">Preview</span>
@@ -148,7 +148,7 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose, onNew
           {workspaceId ? (
             <Menu label="More preview actions" trigger={<Button variant="quiet" size="sm" iconOnly className="size-8"><DotsThree size={16} weight="bold" aria-hidden="true" /></Button>}>
               <MenuItem onSelect={() => setConfirmNew(true)}>
-                <LinkSimple size={14} aria-hidden="true" />
+                <LinkSimple size={16} aria-hidden="true" />
                 Make a new link
               </MenuItem>
             </Menu>
@@ -158,7 +158,7 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose, onNew
           </Button>
         </div>
         <div className="flex min-h-0 flex-1 flex-col bg-surface-sunken p-2">
-          <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-line-subtle bg-white">
+          <div className="min-h-0 flex-1 overflow-hidden rounded-card bg-white">
             <iframe
               src={`${shownUrl}?t=${t}`}
               sandbox="allow-scripts allow-forms allow-popups allow-modals"
@@ -184,7 +184,7 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose, onNew
       style={dragY > 0 ? { transform: `translateY(${dragY}px)`, transition: "none" } : undefined}
     >
       <div
-        className="shrink-0 touch-none border-b border-line-subtle pt-[var(--safe-top,env(safe-area-inset-top))]"
+        className="shrink-0 touch-none pt-[var(--safe-top,env(safe-area-inset-top))]"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={() => endDrag(true)}
@@ -214,7 +214,7 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose, onNew
           {workspaceId ? (
             <Menu label="More preview actions" trigger={<Button variant="quiet" iconOnly className="size-11 shrink-0"><DotsThree size={20} weight="bold" aria-hidden="true" /></Button>}>
               <MenuItem onSelect={() => setConfirmNew(true)}>
-                <LinkSimple size={14} aria-hidden="true" />
+                <LinkSimple size={16} aria-hidden="true" />
                 Make a new link
               </MenuItem>
             </Menu>

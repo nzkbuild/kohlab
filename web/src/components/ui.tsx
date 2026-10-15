@@ -22,12 +22,12 @@ export * as Dialog from "@radix-ui/react-dialog";
 
 /** Shape cue per status, drawn from the icon set rather than text glyphs. The one source for status icons: StatusChip and the sidebar both use it. */
 export const STATUS_ICON: Record<WorkspaceStatus, ReactNode> = {
-  "needs-you": <BellRinging size={14} weight="fill" />,
+  "needs-you": <BellRinging size={14} />,
   running: <Circle size={10} weight="fill" />,
-  "needs-review": <Eye size={14} weight="bold" />,
-  committed: <CheckCircle size={14} weight="fill" />,
-  discarded: <ArrowCounterClockwise size={14} weight="bold" />,
-  stopped: <PauseCircle size={14} weight="fill" />,
+  "needs-review": <Eye size={14} />,
+  committed: <CheckCircle size={14} />,
+  discarded: <ArrowCounterClockwise size={14} />,
+  stopped: <PauseCircle size={14} />,
 };
 
 /* ------------------------------------------------------------------ button -- */
@@ -138,7 +138,10 @@ export const Tabs = RadixTabs.Root;
 /** The project page's segmented switch: a pill track, the selected segment is the lighter thumb. */
 export function TabList({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
-    <RadixTabs.List aria-label={label} className={cn("inline-flex items-center rounded-full bg-surface-hover p-[3px]", className)}>
+    <RadixTabs.List
+      aria-label={label}
+      className={cn("inline-grid grid-flow-col auto-cols-[minmax(6rem,1fr)] items-center rounded-full bg-surface-hover p-[3px]", className)}
+    >
       {children}
     </RadixTabs.List>
   );
@@ -148,7 +151,7 @@ export function Tab({ className, ...rest }: RadixTabs.TabsTriggerProps) {
   return (
     <RadixTabs.Trigger
       className={cn(
-        "inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent",
+        "flex h-[30px] items-center justify-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-line-accent",
         "aria-selected:bg-surface-active aria-selected:font-medium aria-selected:text-text-primary",
         className,
       )}
@@ -276,7 +279,7 @@ export function EmptyState({
     <div className="grid place-items-center px-6 py-12 text-center">
       <div className="max-w-md">
         {icon ? (
-          <div className="mx-auto mb-3 grid size-10 place-items-center rounded-lg border border-line-subtle bg-surface-hover text-text-muted">
+          <div className="mx-auto mb-3 grid size-10 place-items-center rounded-lg bg-surface-hover text-text-muted">
             {icon}
           </div>
         ) : null}
@@ -302,7 +305,7 @@ export function SkeletonRows({ rows = 4, className }: { rows?: number; className
   return (
     <div className={className} aria-hidden="true">
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="flex items-center gap-3 border-t border-line-subtle px-3.5 py-3 first:border-t-0">
+        <div key={i} className="flex items-center gap-3 px-3.5 py-3">
           <Skeleton className="size-2 rounded-full" />
           <Skeleton className="h-3 w-40" />
           <Skeleton className="h-3 flex-1" />

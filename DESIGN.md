@@ -8,6 +8,7 @@ colors:
   surface-bubble: "#303030 / #f4f4f4"
   surface-hover: "#2a2a2a / #ececec"
   surface-active: "#3a3a3a / #e5e5e5"
+  surface-pressed: "#454545 / #d9d9d9"
   surface-terminal: "#181818 in both modes"
   text-primary: "#ececec / #0d0d0d"
   text-secondary: "#c4c4c4 / #3d3d3d"
@@ -31,14 +32,14 @@ rounded:
 
 **North star: "A calm place to build."** Someone describes what they want, Claude builds it, asks before anything risky, and they look at a preview and keep or undo it. The look is ChatGPT / Claude desktop: charcoal in dark, white in light, nothing decorative. The app follows the OS (`prefers-color-scheme`); dark values live in `:root` of `web/src/index.css`, light values in the media block under it.
 
-Copy is plain English in sentence case, no developer words in the main path. Icons are Phosphor only. Geist is self-hosted; Geist Mono is only for whole machine values (file names, code, terminal output).
+Copy is plain English in sentence case, no developer words in the main path. Icons are Phosphor only, regular weight (the running status dot is a filled shape, not an icon), 16px in rows and menus, 18px in header buttons. Geist is self-hosted; Geist Mono is only for whole machine values (file names, code, terminal output).
 
 ## Principles
 
 - **No spinners, no pulsing, no "Working" badge or chip.** Claude working is one grey line in the chat ("Writing menu.html", or "Working") plus the send button turning into a round Stop button.
 - **No status chip beside project names.** In the sidebar, status is one 7px dot in the text colour on the right of a row, only when the project needs you or is ready to check. It has an accessible label ("Needs you" / "Ready to check"). Nothing otherwise.
-- **Separation by background, not borders.** No line between sidebar and page or under headers. Cards and the Ask box may use a 1px `line-subtle`; control boundaries use `line-strong` (3:1 against their surface).
-- **One primary per view.** The filled pill in `text-primary` colour (white in dark, near-black in light). A second action is secondary (outline pill) or quiet.
+- **Separation by background, not borders.** No line between sidebar and page or under headers. Cards, the Ask box, icon tiles and secondary buttons are tonal fills with no border. The only lines left are focus rings, true dividers (between panes, a palette's search field, above a footnote), and the boundary of a text field (`line-strong`, 3:1 against its surface). The composer has none.
+- **One primary per view.** The filled pill in `text-primary` colour (white in dark, near-black in light). A second action is secondary (tonal pill) or quiet.
 - **Status never relies on hue.** Word and shape carry it; red means destructive only.
 
 ## Colours
@@ -52,7 +53,8 @@ Defined only in `web/src/index.css`, in two tiers: primitive ramps (`--neutral-*
 | Field, composer, raised | #2f2f2f | #f4f4f4 |
 | User message bubble | #303030 | #f4f4f4 |
 | Hover | #2a2a2a | #ececec |
-| Active row, segmented thumb | #3a3a3a | #e5e5e5 |
+| Active row, segmented thumb, hovered secondary button | #3a3a3a | #e5e5e5 |
+| Pressed secondary button | #454545 | #d9d9d9 |
 | Text primary / secondary / muted / faint | #ececec / #c4c4c4 / #a3a3a3 / #9a9a9a | #0d0d0d / #3d3d3d / #5d5d5d / #6e6e6e |
 | Terminal surface (always dark, `.dark-pane`) | #181818 | #181818 |
 
@@ -66,17 +68,17 @@ Body and controls 15-16px, nothing below 12px. Home heading 28px weight 500. Hea
 
 - **Shell:** sidebar 260px on desktop (collapsible), off-canvas drawer below the `shell` breakpoint (900px); a 52px top bar on phones (menu, "kohlab", new-project pencil) with 44px hit areas. The composer is pinned at the bottom.
 - **Radii:** rows 8px, cards 16px, composer 24px, user bubble 20px, buttons pills.
-- **Sidebar:** wordmark + search (opens the command palette) + collapse; a "New project" row; a small "Projects" label and one flat list (needs-you first, then most recent), 36px rows, selected row on the active background; no group headings, counts, times or status icons. Bottom: one account row that opens a menu with Settings and Install app (when available).
-- **Project header (56px, no border):** left, project name with a ⌄ menu (Rename, Restart/Stop Claude for terminal projects, Delete project); centre, a segmented pill switch "Chat | Changes" (terminal projects: "Claude | Changes"; Changes shows a muted count when above 0); right, a quiet Preview button.
-- **Chat:** 720px centred column. User message: right-aligned bubble. Claude text: plain, no label. Tools: one muted 14px summary line with a chevron. Ready to check sits under the reply: "Changed N files", then Keep this version (primary), Preview (outline pill), Undo (quiet). An Ask is a 16px-radius box with a 1px line: bold title, muted reason, Allow (primary), Don't allow (secondary), "Show details" quiet. Composer: 24px field-coloured box, + attach, input, round 36px send button (square Stop while working, dimmed when empty).
-- **Home:** centred "What should we build?", the composer, starter chips (pill, 1px line). If a project needs you, at most one quiet link line under the chips.
+- **Sidebar:** wordmark, then Back and Forward arrows (Alt+← / Alt+→; disabled when there is nowhere to go inside the app), search (opens the command palette) and collapse; a "New project" row; a small "Projects" label and one flat list (needs-you first, then most recent). Each project row is one full-width 36px pill with an 8px radius: the name on the left, and on the right the status dot or, on hover, keyboard focus, selection or an open menu, the ⋯ button inside the pill. Hover is `surface-hover`, selected `surface-active`. No group headings, counts, times or status icons. Bottom: one account row that opens a menu with Settings and Install app (when available).
+- **Project header (56px, no border):** left, project name with a ⌄ menu (Rename, Restart/Stop Claude for terminal projects, Delete project); centre, a segmented pill switch "Chat | Changes" (terminal projects: "Claude | Changes"; Changes shows a muted count when above 0), segments of equal width and centred on the content column, beside an open preview pane too; right, a quiet Preview button with the Browser icon, pressed (`surface-active`, `aria-pressed`) while the pane is open. Title, switch and Preview are all 36px tall; the header's left and right padding are equal.
+- **Chat:** 720px centred column. User message: right-aligned bubble. Claude text: plain, no label. Tools: one muted 14px summary line with a chevron. Ready to check sits under the reply: "Changed N files", then Keep this version (primary), Preview (secondary pill), Undo (quiet). Copy shows only under a Claude reply that has text. An Ask is a 16px-radius tonal card with no line: semibold title, muted reason, Allow (primary), Don't allow (secondary), "Show details" quiet, 12px between buttons. Composer: 24px field-coloured box, + attach, input, round 36px send button (square Stop while working, dimmed when empty).
+- **Home:** centred "What should we build?", the composer, starter chips (tonal pills, no line). If a project needs you, at most one quiet link line under the chips.
 - **Terminal project:** the terminal sits in a #181818 panel, radius 14px, 12px from the edges (not the top), 20/24px inner padding. Attach and Copy float inside it.
 
 ## Components
 
 Radix primitives are styled once in `web/src/components/ui.tsx` (Button, Menu, Tabs, Dialog, Tooltip, Field, Panel, EmptyState, Skeleton, Kbd, ...); surfaces import from there, never from `@radix-ui/*`. The status icon comes only from `STATUS_ICON` in `ui.tsx`; running is a small static filled dot, never a spinner glyph.
 
-Buttons: min-height 40px (44px on touch), weight 550. Primary filled; secondary outline; quiet borderless; danger red text on a red tint. Icon-only buttons are square with an `aria-label`. Focus is a 2px outline offset 2px in the accent colour, never a box-shadow ring.
+Buttons: min-height 40px (44px on touch), weight 550. Primary filled, dimmed to 40% when disabled; secondary tonal (`surface-raised` fill, hover `surface-active`, pressed `surface-pressed`, no border); quiet borderless; danger red text on a red tint. Icon-only buttons are square with an `aria-label`. Focus is a 2px outline offset 2px in the accent colour, never a box-shadow ring.
 
 Menus, dialogs and the palette sit on `surface-overlay` with a soft shadow; in-page cards and rows are flat. Forced-colors maps borders and outlines to system colours.
 

@@ -133,7 +133,7 @@ export default function UpdatePanel() {
       {status?.available && status.notes ? (
         <div>
           <p className="mb-1.5 text-sm font-semibold text-text-primary">What's new in {status.latest}</p>
-          <div className="max-h-64 overflow-auto rounded-[10px] border border-line-subtle bg-surface-sunken p-3">
+          <div className="max-h-64 overflow-auto rounded-card bg-surface-sunken p-3">
             <pre className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">{status.notes}</pre>
           </div>
         </div>
@@ -187,7 +187,7 @@ export default function UpdatePanel() {
       {status?.log && (failed || status?.running) ? (
         <details>
           <summary className="min-h-11 cursor-pointer select-none py-2 text-sm text-text-muted hover:text-text-primary">Show details</summary>
-          <div className="max-h-56 overflow-auto rounded-[10px] border border-line-subtle bg-surface-sunken p-3">
+          <div className="max-h-56 overflow-auto rounded-card bg-surface-sunken p-3">
             <pre className="whitespace-pre-wrap text-sm leading-relaxed text-text-muted">{status.log}</pre>
           </div>
         </details>
