@@ -18,11 +18,11 @@ import {
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
-import { diffStats } from "../lib/format";
+import { diffStats, sidebarWhen } from "../lib/format";
 import { languageForFile, splitUnifiedDiff } from "../lib/diff";
 import { workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
-import type { DiffFile } from "../types";
+import type { DiffFile, Version } from "../types";
 import { Button, EmptyState, Kbd, Skeleton, SkeletonRows } from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -161,6 +161,10 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
   const [keeping, setKeeping] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
+  /** Simple (chat) view only: the earlier versions, and the one the user chose to go back to. */
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [restoreTarget, setRestoreTarget] = useState<Version | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -173,6 +177,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
       );
       // Drop review marks for files that no longer differ.
       setReviewed((prev) => new Set([...prev].filter((name) => next.some((f) => f.name === name))));
+      if (simple) setVersions(await api.versions(workspaceId).catch(() => versions));
     } catch (e) {
       // Keep the files already loaded: a failed refresh must not cost the
       // reviewer the diffs they can still read.
@@ -365,7 +370,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
             ? "Nothing new since you last kept"
             : "What Claude changed";
     // Same guard as the developer view's discard: the server refuses a reset under a live agent.
-    const simpleBusy = keeping || undoing || !!workspace?.running;
+    const simpleBusy = keeping || undoing || restoring || !!workspace?.running;
 
     const keepSimple = async () => {
       setKeeping(true);
@@ -393,6 +398,22 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
       } finally {
         setUndoing(false);
         setConfirmUndo(false);
+      }
+    };
+
+    const goBack = async () => {
+      if (!restoreTarget) return;
+      setRestoring(true);
+      try {
+        await api.restoreVersion(workspaceId, restoreTarget.id);
+        await load();
+        await refresh();
+        toast.success("Went back");
+      } catch (e) {
+        toast.error(`Could not go back, ${(e as Error).message}`);
+      } finally {
+        setRestoring(false);
+        setRestoreTarget(null);
       }
     };
 
@@ -487,6 +508,31 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 </details>
               </>
             ) : null}
+
+            {versions.length >= 2 ? (
+              <section className="mt-6" aria-labelledby="earlier-versions-heading">
+                <h3 id="earlier-versions-heading" className="text-sm font-medium text-text-primary">
+                  Earlier versions
+                </h3>
+                <ul className="mt-2 flex flex-col">
+                  {versions.map((v, i) => (
+                    <li key={v.id} className="flex min-h-11 items-center gap-3 rounded-lg px-3 max-md:min-h-13">
+                      <span className="tnum shrink-0 text-sm text-text-muted">{sidebarWhen(v.at)}</span>
+                      <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary" title={v.label}>
+                        {v.label}
+                      </span>
+                      {i === 0 ? (
+                        <span className="shrink-0 text-sm text-text-muted">Current</span>
+                      ) : can.mutate ? (
+                        <Button variant="quiet" size="sm" className="shrink-0" disabled={simpleBusy} onClick={() => setRestoreTarget(v)}>
+                          Go back to this one
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
           </div>
         </div>
 
@@ -500,6 +546,18 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
           confirmLabel="Undo"
           busy={undoing}
           onConfirm={() => void undoSimple()}
+        />
+        <ConfirmDialog
+          open={restoreTarget !== null}
+          onOpenChange={(v) => {
+            if (!v) setRestoreTarget(null);
+          }}
+          title="Go back to this version?"
+          description={`Your project will look the way it did then. Nothing is lost: you can come back to the current version from this list.${count > 0 ? " Changes you haven't kept will be thrown away." : ""}`}
+          confirmLabel="Go back"
+          tone={count > 0 ? "danger" : "commit"}
+          busy={restoring}
+          onConfirm={() => void goBack()}
         />
       </div>
     );

@@ -1,10 +1,11 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowUp, CaretRight, Check, Copy, Eye, Warning, X } from "@phosphor-icons/react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowCounterClockwise, ArrowUp, CaretRight, Check, Copy, Eye, Paperclip, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
+import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
 import { copyText } from "../lib/clipboard";
 import { findWorkspace, useApp, useCan } from "../store";
 import { workspaceStatus } from "../lib/status";
@@ -17,6 +18,18 @@ import { Button, Tooltip } from "./ui";
 type ChatEvent = StoredChatEvent & { why?: string };
 type ToolEvent = Extract<ChatEvent, { kind: "tool" }>;
 type AskEvent = Extract<ChatEvent, { kind: "ask" }>;
+
+const MAX_FILES = 10;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const TOO_BIG = "That file is too big. Files up to 20 MB work.";
+
+/** A file waiting in the composer. `path` is set once it is saved in the project, so a retry does not save it twice. */
+interface Attachment {
+  key: number;
+  file: File;
+  url: string | null;
+  path?: string;
+}
 
 interface Props {
   workspaceId: string;
@@ -359,6 +372,15 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
   const [keeping, setKeeping] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachNote, setAttachNote] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const attachKey = useRef(0);
+  const attachRef = useRef(attachments);
+  attachRef.current = attachments;
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Release the preview links of files still in the composer when the chat closes.
+  useEffect(() => () => attachRef.current.forEach((a) => a.url && URL.revokeObjectURL(a.url)), []);
   // iOS Safari does not shrink the layout viewport for the keyboard, so the composer
   // would sit under it. While the composer is focused on a phone, the chat is lifted by the keyboard's height.
   const [keyboard, setKeyboard] = useState(0);
@@ -557,10 +579,88 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
     }
   };
 
+  /** Adds picked, pasted or dropped files to the composer, within the count and size limits. */
+  const takeFiles = (list: FileList | File[], pasted = false) => {
+    if (busy || sending || uploading) return;
+    const picked = Array.from(list).map((f) => (pasted && !f.name ? new File([f], pastedName(f.type, Date.now()), { type: f.type }) : f));
+    if (picked.length === 0) return;
+    let note: string | null = null;
+    const sized: File[] = [];
+    for (const f of picked) {
+      if (f.size > MAX_FILE_BYTES) note = TOO_BIG;
+      else sized.push(f);
+    }
+    const room = Math.max(0, MAX_FILES - attachments.length);
+    if (sized.length > room) note = `You can attach up to ${MAX_FILES} files at a time.`;
+    const fits = sized.slice(0, room);
+    setAttachNote(note);
+    if (fits.length === 0) return;
+    const next: Attachment[] = fits.map((file) => ({
+      key: ++attachKey.current,
+      file,
+      url: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+    }));
+    setAttachments((prev) => [...prev, ...next]);
+  };
+
+  const removeAttachment = (key: number) => {
+    const gone = attachments.find((a) => a.key === key);
+    if (gone?.url) URL.revokeObjectURL(gone.url);
+    setAttachments((prev) => prev.filter((a) => a.key !== key));
+    setAttachNote(null);
+  };
+
+  const clearAttachments = () => {
+    attachments.forEach((a) => a.url && URL.revokeObjectURL(a.url));
+    setAttachments([]);
+    setAttachNote(null);
+  };
+
+  /** Saves each file that is not saved yet into uploads/, adding -2, -3 ... when the name is taken. Returns every saved path. */
+  const uploadAll = async (): Promise<string[]> => {
+    const paths: string[] = [];
+    for (const a of attachments) {
+      if (a.path) {
+        paths.push(a.path);
+        continue;
+      }
+      const base = safeAttachName(a.file.name);
+      let saved: string | null = null;
+      for (let i = 1; i <= 20 && saved === null; i++) {
+        const res = await api.uploadFile(workspaceId, `uploads/${i === 1 ? base : withSuffix(base, i)}`, a.file);
+        if (res.ok) saved = res.path;
+      }
+      if (saved === null) throw new Error(`Could not save ${a.file.name}. Try a shorter name.`);
+      const done = saved;
+      setAttachments((prev) => prev.map((x) => (x.key === a.key ? { ...x, path: done } : x)));
+      paths.push(done);
+    }
+    return paths;
+  };
+
   const send = async () => {
     const text = draft.trim();
-    if (!text || busy || sending) return;
-    if (await sendText(text)) setDraft("");
+    if ((!text && attachments.length === 0) || busy || sending || uploading) return;
+    let message = text;
+    if (attachments.length > 0) {
+      setUploading(true);
+      setSendError(null);
+      let paths: string[];
+      try {
+        paths = await uploadAll();
+      } catch (e) {
+        setSendError((e as Error).message);
+        return;
+      } finally {
+        setUploading(false);
+      }
+      const line = `Attached: ${paths.join(", ")}`;
+      message = text ? `${text}\n\n${line}` : line;
+    }
+    if (await sendText(message)) {
+      setDraft("");
+      clearAttachments();
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -656,12 +756,26 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
 
   const renderEvent = (e: ChatEvent) => {
     switch (e.kind) {
-      case "user":
+      case "user": {
+        const { body, files } = splitAttached(e.text);
         return (
           <div className="flex justify-end" data-turn-start={e.n === lastUserN ? "" : undefined}>
-            <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-[15px] leading-6 text-text-primary max-md:text-base">{e.text}</div>
+            <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-[15px] leading-6 text-text-primary max-md:text-base">
+              {body}
+              {files.length > 0 ? (
+                <ul className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
+                  {files.map((name, i) => (
+                    <li key={i} className="flex max-w-full items-center gap-1 rounded-lg bg-surface-raised px-2 py-0.5 text-[13px] text-text-secondary">
+                      <Paperclip size={12} aria-hidden="true" className="shrink-0" />
+                      <span className="truncate">{name}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </div>
         );
+      }
       case "assistant":
         return <Prose text={e.text} />;
       case "ask": {
@@ -822,7 +936,67 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
                 </p>
               ) : null}
 
-              <div className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5 focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-line-strong">
+              {attachNote ? (
+                <p role="alert" className="mb-2 text-[13px] text-status-danger">
+                  {attachNote}
+                </p>
+              ) : null}
+              {attachments.length > 0 ? (
+                <ul aria-label="Files to send" className="mb-2 flex flex-wrap gap-1.5">
+                  {attachments.map((a) => (
+                    <li key={a.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-raised py-1 pr-1 pl-1.5 text-[13px] text-text-secondary">
+                      {a.url ? (
+                        <img src={a.url} alt="" className="size-8 shrink-0 rounded-md object-cover" />
+                      ) : (
+                        <Paperclip size={14} aria-hidden="true" className="shrink-0" />
+                      )}
+                      <span className="min-w-0 truncate">{a.file.name}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${a.file.name}`}
+                        disabled={uploading}
+                        onClick={() => removeAttachment(a.key)}
+                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
+                      >
+                        <X size={12} aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              <div
+                className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5 focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-line-strong"
+                onDragOver={(e: DragEvent<HTMLDivElement>) => {
+                  if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+                }}
+                onDrop={(e: DragEvent<HTMLDivElement>) => {
+                  if (e.dataTransfer.files.length === 0) return;
+                  e.preventDefault();
+                  takeFiles(e.dataTransfer.files);
+                }}
+              >
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    takeFiles(e.target.files ?? []);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="quiet"
+                  iconOnly
+                  aria-label="Attach a file"
+                  title="Attach a file"
+                  className="-ml-3 size-11 shrink-0 rounded-full text-text-secondary shell:size-9"
+                  disabled={busy || sending || uploading}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <Paperclip size={18} aria-hidden="true" />
+                </Button>
                 <textarea
                   ref={taRef}
                   aria-label="Message Claude"
@@ -833,6 +1007,11 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
                   placeholder={placeholder}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={onKeyDown}
+                  onPaste={(e: ClipboardEvent<HTMLTextAreaElement>) => {
+                    if (e.clipboardData.files.length === 0) return;
+                    e.preventDefault();
+                    takeFiles(e.clipboardData.files, true);
+                  }}
                 />
                 {waiting !== null ? null : busy ? (
                   <Button variant="primary" iconOnly aria-label="Stop Claude" title="Stop Claude" className="size-11 shrink-0 rounded-full shell:size-9" onClick={() => void stop()}>
@@ -845,7 +1024,7 @@ export default function ChatView({ workspaceId, onPreview, previewing, previewOp
                     aria-label="Send"
                     title="Send"
                     className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
-                    disabled={sending || draft.trim() === ""}
+                    disabled={sending || uploading || (draft.trim() === "" && attachments.length === 0)}
                     onClick={() => void send()}
                   >
                     <ArrowUp size={18} weight="bold" aria-hidden="true" />

@@ -27,6 +27,8 @@ import {
   commitWorkspace,
   mergeWorkspace,
   discardWorkspace,
+  listVersions,
+  restoreVersion,
   worktreePath,
   imagesDir,
   identityOf,
@@ -264,9 +266,9 @@ async function handleRename(id: string, req: Request): Promise<Response> {
   }
 }
 
-async function handlePreviewCreate(id: string): Promise<Response> {
+async function handlePreviewCreate(id: string, fresh: boolean): Promise<Response> {
   try {
-    return json(await previewWorkspace(id));
+    return json(await previewWorkspace(id, fresh));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -470,6 +472,24 @@ async function handleDiscard(id: string): Promise<Response> {
   try {
     const res = await discardWorkspace(id);
     return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+async function handleVersions(id: string): Promise<Response> {
+  try {
+    return json(await listVersions(id));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+async function handleRestore(id: string, req: Request): Promise<Response> {
+  try {
+    const body = (await req.json().catch(() => ({}))) as { version?: unknown };
+    if (typeof body.version !== "string" || !body.version) return json({ error: "version is required" }, 400);
+    return json(await restoreVersion(id, body.version));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -1136,7 +1156,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       return handleHookPost(hookM[1], req);
     }
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|rename|log)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|rename|log|versions|restore)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -1232,7 +1252,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       // v1.8 ownership: a named member/viewer may only touch their own
       // workspaces (share-token reads already returned above). Owners and
       // the legacy/anonymous single-user flows pass through.
-      const readOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "log";
+      const readOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "log" || action === "versions";
       if (!(await mayAccessWorkspace(auth, id))) {
         return json({ error: "forbidden, not your workspace" }, 403);
       }
@@ -1271,7 +1291,16 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
           containFailure(audit(actor, "image", id), "audit");
           return handleImageUpload(id, req);
         case "share": containFailure(audit(actor, "share", id), "audit"); return handleShare(id);
-        case "preview": containFailure(audit(actor, "preview", id), "audit"); return handlePreviewCreate(id);
+        case "preview": {
+          const fresh = url.searchParams.get("new") === "1";
+          containFailure(audit(actor, fresh ? "preview.new" : "preview", id), "audit");
+          return handlePreviewCreate(id, fresh);
+        }
+        case "versions": return handleVersions(id);
+        case "restore":
+          if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+          containFailure(audit(actor, "restore", id), "audit");
+          return handleRestore(id, req);
         case "rename": containFailure(audit(actor, "rename", id), "audit"); return handleRename(id, req);
       }
     }

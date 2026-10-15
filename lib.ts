@@ -3,6 +3,7 @@
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
 import type { Workspace, User, Role, WorkspaceLimits } from "./types";
+import { restoreTree, type Version } from "./versions";
 import { chmodSync, chownSync, rmSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
@@ -1989,12 +1990,12 @@ export async function workspaceByShare(token: string) {
   return ws;
 }
 
-/** Make (once) the unguessable token that serves a workspace's web preview. */
-export async function previewWorkspace(id: string) {
+/** Make (once) the unguessable token that serves a workspace's web preview. `fresh` replaces it, so the old link stops working. */
+export async function previewWorkspace(id: string, fresh = false) {
   return mutateState(async (s) => {
     const ws = s.workspaces.find((w) => w.id === id);
     if (!ws) throw new Error(`no workspace '${id}'`);
-    if (!ws.previewToken) {
+    if (!ws.previewToken || fresh) {
       ws.previewToken = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
     }
     return { url: `/p/${ws.previewToken}/` };
@@ -2226,6 +2227,53 @@ export async function discardWorkspace(id: string): Promise<{ ok: true }> {
     const w = st.workspaces.find((x) => x.id === id);
     if (!w) throw new Error(`no workspace '${id}'`);
     w.discardedAt = Date.now();
+    return { ok: true };
+  });
+}
+
+/** The workspace's recent versions (its commits), newest first. Empty when nothing has been kept yet. */
+export async function listVersions(id: string): Promise<Version[]> {
+  const ws = await getWorkspace(id);
+  const tree = worktreePath(ws);
+  const head = await runOut(tree, "git", ["rev-parse", "--verify", "--quiet", "HEAD"], [1]);
+  if (head.code !== 0) return [];
+  const { stdout } = await runOut(tree, "git", ["log", "--first-parent", "-n", "50", "--format=%H%x09%ct%x09%s", "HEAD"]);
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [sha, ct, ...subject] = line.split("\t");
+      return { id: sha, at: Number(ct) * 1000, label: subject.join("\t") };
+    });
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "15 Oct, 14:05", server local time. */
+function versionStamp(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * Go back to an earlier version. Adds a new version on top; never rewrites history.
+ * Refuses while the agent runs, and refuses any sha that is not one of this
+ * project's own versions, so user input never reaches git unchecked.
+ */
+export async function restoreVersion(id: string, sha: string): Promise<{ ok: true }> {
+  const ws = await getWorkspace(id);
+  if (await isAlive(ws)) throw new Error("Wait until Claude has finished, then try again.");
+  const picked = (await listVersions(id)).find((v) => v.id === sha);
+  if (!picked) throw new Error("that version is not one of this project's versions");
+  const tree = worktreePath(ws);
+  const head = await runOut(tree, "git", ["rev-parse", "HEAD"]);
+  if (head.stdout.trim() === picked.id) return { ok: true };
+  await restoreTree(tree, picked.id, `Went back to the version from ${versionStamp(picked.at)}`);
+  return mutateState(async (st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) throw new Error(`no workspace '${id}'`);
+    w.lastCommitAt = Date.now();
     return { ok: true };
   });
 }

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { ArrowClockwise, ArrowSquareOut, CaretLeft, Globe, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowSquareOut, CaretLeft, DotsThree, Globe, LinkSimple, X } from "@phosphor-icons/react";
+import { toast } from "sonner";
+import { api } from "../api";
+import { copyText } from "../lib/clipboard";
+import { useApp } from "../store";
 import { cn } from "../lib/utils";
-import { Button } from "./ui";
+import ConfirmDialog from "./ConfirmDialog";
+import { Button, Menu, MenuItem } from "./ui";
 
 interface Props {
   url: string;
@@ -11,6 +16,8 @@ interface Props {
   variant: "pane" | "sheet";
   onReload: () => void;
   onClose: () => void;
+  /** Told the new link after "Make a new link", so the parent can keep it. */
+  onNewLink?: (url: string) => void;
 }
 
 /** A downward drag from the sheet's top bar this far closes it. */
@@ -20,22 +27,30 @@ const SWIPE_CLOSE_PX = 80;
  * The live preview of the project. The frame is sandboxed without allow-same-origin,
  * so the project's pages cannot reach the app. Keep the sandbox list as it is.
  */
-export default function PreviewPanel({ url, t, variant, onReload, onClose }: Props) {
+export default function PreviewPanel({ url, t, variant, onReload, onClose, onNewLink }: Props) {
   const sheet = variant === "sheet";
+  // The project this preview belongs to: the panel only ever opens inside a workspace.
+  const workspaceId = useApp((s) => (s.route.kind === "workspace" ? s.route.id : null));
+  // The link on screen. "Make a new link" changes it here too, so the frame reloads even before the parent catches up.
+  const [shownUrl, setShownUrl] = useState(url);
+  const [confirmNew, setConfirmNew] = useState(false);
+  const [making, setMaking] = useState(false);
   // The sheet slides up from the bottom on mount. Reduced motion skips the transition (see classes).
   const [entered, setEntered] = useState(false);
   const [dragY, setDragY] = useState(0);
   const drag = useRef<{ y: number; dy: number; id: number; captured: boolean } | null>(null);
 
-  // Escape backs out of the phone sheet, as a dialog would.
+  useEffect(() => setShownUrl(url), [url]);
+
+  // Escape backs out of the phone sheet, as a dialog would. Not while the confirm asks: that Escape is the dialog's.
   useEffect(() => {
     if (!sheet) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !confirmNew) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheet, onClose]);
+  }, [sheet, onClose, confirmNew]);
 
   useEffect(() => {
     if (!sheet) return;
@@ -66,6 +81,45 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose }: Pro
     else setDragY(0);
   };
 
+  const copyLink = async () => {
+    try {
+      await copyText(location.origin + shownUrl);
+      toast.success("Link copied. Anyone who can reach this Kohlab can open it.");
+    } catch (e) {
+      toast.error(`Could not copy the link, ${(e as Error).message}`);
+    }
+  };
+
+  const makeNew = async () => {
+    if (!workspaceId) return;
+    setMaking(true);
+    try {
+      const { url: next } = await api.preview(workspaceId, true);
+      setShownUrl(next);
+      onNewLink?.(next);
+      setConfirmNew(false);
+      toast.success("New link made. The old link no longer works.");
+    } catch (e) {
+      toast.error(`Could not make a new link, ${(e as Error).message}`);
+    } finally {
+      setMaking(false);
+    }
+  };
+
+  const newLinkConfirm = (
+    <ConfirmDialog
+      open={confirmNew}
+      onOpenChange={(v) => {
+        if (!v) setConfirmNew(false);
+      }}
+      title="Make a new link?"
+      description="The old link will stop working for anyone you sent it to."
+      confirmLabel="Make a new link"
+      busy={making}
+      onConfirm={() => void makeNew()}
+    />
+  );
+
   if (!sheet) {
     return (
       <>
@@ -84,10 +138,21 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose }: Pro
             aria-label="Open the preview in a new tab"
             title="Open in a new tab"
             className="size-8"
-            onClick={() => window.open(location.origin + url, "_blank", "noopener")}
+            onClick={() => window.open(location.origin + shownUrl, "_blank", "noopener")}
           >
             <ArrowSquareOut size={16} aria-hidden="true" />
           </Button>
+          <Button variant="quiet" size="sm" iconOnly aria-label="Copy link" title="Copy link" className="size-8" onClick={() => void copyLink()}>
+            <LinkSimple size={16} aria-hidden="true" />
+          </Button>
+          {workspaceId ? (
+            <Menu label="More preview actions" trigger={<Button variant="quiet" size="sm" iconOnly className="size-8"><DotsThree size={16} weight="bold" aria-hidden="true" /></Button>}>
+              <MenuItem onSelect={() => setConfirmNew(true)}>
+                <LinkSimple size={14} aria-hidden="true" />
+                Make a new link
+              </MenuItem>
+            </Menu>
+          ) : null}
           <Button variant="quiet" size="sm" iconOnly aria-label="Close preview" title="Close preview" className="size-8" onClick={onClose}>
             <X size={16} aria-hidden="true" />
           </Button>
@@ -95,13 +160,14 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose }: Pro
         <div className="flex min-h-0 flex-1 flex-col bg-surface-sunken p-2">
           <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-line-subtle bg-white">
             <iframe
-              src={`${url}?t=${t}`}
+              src={`${shownUrl}?t=${t}`}
               sandbox="allow-scripts allow-forms allow-popups allow-modals"
               title="Preview of your project"
               className="block size-full border-0 bg-white"
             />
           </div>
         </div>
+        {newLinkConfirm}
       </>
     );
   }
@@ -138,20 +204,32 @@ export default function PreviewPanel({ url, t, variant, onReload, onClose }: Pro
             aria-label="Open the preview in a new tab"
             title="Open in a new tab"
             className="size-11 shrink-0"
-            onClick={() => window.open(location.origin + url, "_blank", "noopener")}
+            onClick={() => window.open(location.origin + shownUrl, "_blank", "noopener")}
           >
             <ArrowSquareOut size={20} aria-hidden="true" />
           </Button>
+          <Button variant="quiet" iconOnly aria-label="Copy link" title="Copy link" className="size-11 shrink-0" onClick={() => void copyLink()}>
+            <LinkSimple size={20} aria-hidden="true" />
+          </Button>
+          {workspaceId ? (
+            <Menu label="More preview actions" trigger={<Button variant="quiet" iconOnly className="size-11 shrink-0"><DotsThree size={20} weight="bold" aria-hidden="true" /></Button>}>
+              <MenuItem onSelect={() => setConfirmNew(true)}>
+                <LinkSimple size={14} aria-hidden="true" />
+                Make a new link
+              </MenuItem>
+            </Menu>
+          ) : null}
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col bg-surface-sunken">
         <iframe
-          src={`${url}?t=${t}`}
+          src={`${shownUrl}?t=${t}`}
           sandbox="allow-scripts allow-forms allow-popups allow-modals"
           title="Preview of your project"
           className="block min-h-0 flex-1 border-0 bg-white"
         />
       </div>
+      {newLinkConfirm}
     </div>
   );
 }

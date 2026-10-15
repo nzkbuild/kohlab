@@ -46,6 +46,13 @@ export interface DiffFile {
   diff: string;
 }
 
+/** One kept version of a project: the commit's full sha, its time in ms, and its subject. */
+export interface Version {
+  id: string;
+  at: number;
+  label: string;
+}
+
 export type AgentStatus = Record<string, boolean> & { claudeSignedIn?: boolean | null };
 
 /** What `/api/release` reports: the published version, and any update in flight. */

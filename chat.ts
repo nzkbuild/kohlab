@@ -38,6 +38,7 @@ const CHAT_SYSTEM_PROMPT =
   "When they ask for something visual (a website, page, game or small tool), build it with plain HTML, CSS and JavaScript " +
   "and put an index.html at the project root, so it works by opening that file; use another technology only if they ask for it. " +
   "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes. " +
+  "Files the person attaches are saved in the uploads folder of the project; open them with your Read tool, and use pictures from there directly in the page when they ask for that. " +
   "When you run a command, always give it a short plain-English description of what it does and why.";
 const MAX_TEXT = 20000;
 

@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.42.0] - 2026-10-15
+
+### Added
+- Attach pictures and files in the chat: use the paperclip, paste a screenshot, or drop files on the message box. They are saved in the project's uploads folder, so Claude can look at them and use pictures in the page.
+- Earlier versions, under Changes: every version you kept is listed, and Go back to this one brings the project back to how it was. Nothing is lost, because going back adds a new version that you can undo the same way.
+- Preview has Copy link, to send the page to someone who can reach your Kohlab, and Make a new link, so an old link stops working.
+
 ## [1.41.0] - 2026-10-15
 
 ### Added

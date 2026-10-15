@@ -1,4 +1,4 @@
-import type { AgentStatus, ChatEvent, DiffFile, ReleaseStatus, TreeNode, Workspace } from "./types";
+import type { AgentStatus, ChatEvent, DiffFile, ReleaseStatus, TreeNode, Version, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -122,7 +122,15 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title }),
     }),
-  preview: (id: string) => json<{ url: string }>(`/api/workspaces/${id}/preview`, { method: "POST" }),
+  /** `fresh` makes a new link and stops the old one working. */
+  preview: (id: string, fresh = false) => json<{ url: string }>(`/api/workspaces/${id}/preview${fresh ? "?new=1" : ""}`, { method: "POST" }),
+  versions: (id: string) => json<Version[]>(`/api/workspaces/${id}/versions`),
+  restoreVersion: (id: string, version: string) =>
+    json<{ ok: true }>(`/api/workspaces/${id}/restore`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version }),
+    }),
   diff: (id: string) => json<DiffFile[]>(`/api/workspaces/${id}/diff`),
   commit: (id: string, message: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${id}/commit`, {
@@ -216,6 +224,18 @@ export const api = {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
     return body as { path: string; mimeType: string; bytes: number };
+  },
+  /** Saves a file into the project folder at `path`. `ok: false` means that path already exists (409), so the caller can try another name. */
+  uploadFile: async (id: string, path: string, file: Blob): Promise<{ ok: boolean; path: string }> => {
+    const res = await req(`/api/workspaces/${encodeURIComponent(id)}/fs?op=upload&path=${encodeURIComponent(path)}`, {
+      method: "POST",
+      headers: { "content-type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    if (res.status === 409) return { ok: false, path };
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
+    return { ok: true, path: (body as { path?: string }).path ?? path };
   },
 };
 
