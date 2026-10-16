@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.52.3] - 2026-10-16
+
+### Fixed
+- On phones, the / and @ menus have room between rows, and the Stop button next to Send is a clean square instead of a cut-off word.
+
 ## [1.52.2] - 2026-10-16
 
 ### Fixed

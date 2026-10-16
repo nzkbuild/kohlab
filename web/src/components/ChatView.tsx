@@ -241,12 +241,12 @@ function PickList({ id, label, options, active, onPick }: { id: string; label: s
             onPick(i);
           }}
           className={cn(
-            "menu-item min-h-9 min-w-0 cursor-pointer items-center text-left pointer-coarse:min-h-11",
+            "menu-item min-h-9 min-w-0 cursor-pointer items-center text-left pointer-coarse:min-h-11 max-md:my-0.5 max-md:py-2",
             i === active && "bg-surface-hover text-text-primary",
           )}
         >
           {/* One line on desktop: name, then detail. On phones the detail drops under the name. */}
-          <span className="flex min-w-0 flex-1 flex-col md:flex-row md:items-baseline md:gap-2">
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 md:flex-row md:items-baseline md:gap-2">
             <span className="min-w-0 truncate text-text-primary md:max-w-[60%] md:shrink-0">{o.title}</span>
             {o.detail ? <span className="min-w-0 truncate text-text-muted md:flex-1">{o.detail}</span> : null}
           </span>
@@ -1551,7 +1551,15 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       />
                     ) : null}
                     {working && hasDraft ? (
-                      <ComposerChip icon={<Stop size={14} aria-hidden="true" />} label="Stop" aria-label="Stop Claude" title="Stop Claude" onClick={() => void stop()} />
+                      <ComposerChip
+                        className="shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0"
+                        icon={<Stop size={14} aria-hidden="true" />}
+                        label="Stop"
+                        hideLabelOnPhone
+                        aria-label="Stop Claude"
+                        title="Stop"
+                        onClick={() => void stop()}
+                      />
                     ) : null}
                     {working && !hasDraft ? (
                       <Button variant="secondary" iconOnly aria-label="Stop Claude" title="Stop Claude" onClick={() => void stop()}>
