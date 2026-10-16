@@ -83,7 +83,7 @@ import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, 
 import { resolvePreviewFile } from "./preview";
 import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, touchBrowser } from "./browser";
 import { stopAllDevServers } from "./devserver";
-import { ChatError, answer as answerChat, restoreWaiting, send as sendChat, snapshot as chatSnapshot } from "./chat";
+import { ChatError, answer as answerChat, chatControl, restoreWaiting, send as sendChat, snapshot as chatSnapshot } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -312,13 +312,16 @@ async function handleChatGet(id: string, req: Request): Promise<Response> {
   }
 }
 
-async function handleChatPost(id: string, req: Request, actor: string, isAnswer: boolean): Promise<Response> {
+async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined): Promise<Response> {
   try {
-    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown };
-    if (isAnswer) {
+    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown };
+    if (sub === "/answer") {
       if (typeof body.requestId !== "string" || typeof body.allow !== "boolean") return json({ error: "requestId and allow are required" }, 400);
       containFailure(audit(actor, "chat.answer", id), "audit");
       await answerChat(id, body.requestId, body.allow);
+    } else if (sub === "/control") {
+      containFailure(audit(actor, "chat.control", id), "audit");
+      await chatControl(id, body.action, body.value);
     } else {
       containFailure(audit(actor, "chat", id), "audit");
       await sendChat(id, typeof body.text === "string" ? body.text : "");
@@ -1258,18 +1261,18 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (server.upgrade(req, upgradeOpts)) return undefined;
     }
 
-    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer)?$/);
+    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control)?$/);
     if (chatM) {
-      const [, chatId, answerPath] = chatM;
+      const [, chatId, sub] = chatM;
       if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, chatId))) return json({ error: "forbidden, not your workspace" }, 403);
-      if (req.method === "GET" && !answerPath) {
+      if (req.method === "GET" && !sub) {
         if (denied) return json({ error: "unauthorized" }, 401);
         return handleChatGet(chatId, req);
       }
       if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
-      return handleChatPost(chatId, req, actor, !!answerPath);
+      return handleChatPost(chatId, req, actor, sub);
     }
 
     // The shared browser (browser.ts): read its page URL, or navigate it. Share links never reach it.

@@ -45,6 +45,8 @@ export interface Workspace {
   limits?: WorkspaceLimits;
   /** Claude model for this project. Undefined = the account default. */
   model?: "opus" | "sonnet" | "haiku";
+  /** Claude effort level chosen in the chat; re-applied when its process restarts. */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 export interface WorkspaceLimits {

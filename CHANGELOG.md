@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.50.0] - 2026-10-16
+
+### Added
+- Pick the model, effort and mode right under the message box. Model: Opus, Sonnet, Fable, Haiku or Default. Effort: low to max. Mode: Asks first, Edits allowed, Auto or Plan first. Changes apply at once, without restarting Claude, and your effort choice is remembered.
+- Stop now pauses Claude like Esc in the terminal: it keeps what was written and Claude stays ready.
+- Keep typing while Claude works: messages you send are queued and answered in order.
+- Type / in a terminal project's chat to see Claude's commands and your skills.
+- The chat no longer pulls you to the bottom while you read further up; a Scroll to latest button takes you back.
+
 ## [1.49.0] - 2026-10-16
 
 ### Added

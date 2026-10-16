@@ -1,9 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowUp, Browser, CaretRight, Check, Copy, Paperclip, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, Copy, Paperclip, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
-import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
 import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
 import { copyText } from "../lib/clipboard";
@@ -12,7 +11,7 @@ import { workspaceStatus } from "../lib/status";
 import { inline, parseBlocks, type Inline } from "../lib/markdown";
 import { cn } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
-import { Button, Tooltip } from "./ui";
+import { Button, Menu, MenuRadioGroup, MenuRadioItem, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
 type ChatEvent = StoredChatEvent & { why?: string };
@@ -112,6 +111,32 @@ const MODE_LABEL: Record<string, string> = {
   bypassPermissions: "No questions",
   plan: "Plan mode",
 };
+
+/** The modes the Mode menu offers, in plain words. */
+const MODE_CHOICES = [
+  { value: "default", label: "Asks first" },
+  { value: "acceptEdits", label: "Edits allowed" },
+  { value: "auto", label: "Auto" },
+  { value: "plan", label: "Plan first" },
+];
+
+const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
+
+/** A slash command and a model, as the chat's snapshot lists them. */
+interface CommandInfo {
+  name: string;
+  description: string;
+  argumentHint: string;
+}
+interface ModelInfo {
+  value: string;
+  displayName: string;
+  description: string;
+  supportedEffortLevels: string[];
+}
+
+/** The footer's quiet menu buttons. */
+const FOOT_BTN = "min-w-0 truncate rounded-full px-2.5 py-1 text-xs text-text-muted hover:bg-surface-hover hover:text-text-primary";
 
 /** The working line: a pulsing dot, the current action, how long the turn has run, and background tasks. The timer ticks only while this line is shown. */
 function WorkingLine({ action, since, background }: { action: string; since: number | null; background: number }) {
@@ -417,6 +442,15 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const [model, setModel] = useState<string | null>(null);
   const [mode, setMode] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<string | null>(null);
+  // The effort level set in this Claude, and what the CLI offers: slash commands and models.
+  const [effort, setEffort] = useState<string | null>(null);
+  const [commands, setCommands] = useState<CommandInfo[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  // The "/" menu: which command is highlighted, and whether Esc closed it for this text.
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashShut, setSlashShut] = useState(false);
+  // Scrolled up from the newest message: the "Scroll to latest" button shows.
+  const [farFromEnd, setFarFromEnd] = useState(false);
   // Whether the project's terminal Claude is open: sending from here closes it.
   const [terminalOpen, setTerminalOpen] = useState(false);
   // Claude's reply as it is being written (streamed by the server, not yet an event).
@@ -484,6 +518,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         setModel(res.model);
         setMode(res.mode);
         setWaiting(res.waiting);
+        setEffort(res.effort);
+        setCommands(res.commands);
+        setModels(res.models);
         setStreamed(res.draft);
         setTerminalOpen(res.terminalOpen ?? false);
         schedule(res.busy ? 500 : res.waiting !== null || res.background > 0 ? 1000 : 4000);
@@ -609,7 +646,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
 
   const onScroll = () => {
     const el = scrollRef.current;
-    if (el) nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setFarFromEnd(!nearBottomRef.current);
+  };
+
+  const scrollToLatest = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    nearBottomRef.current = true;
+    setFarFromEnd(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
   // Grow the composer with its text, up to about eight lines.
@@ -631,6 +678,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await api.chatSend(workspaceId, text);
       setBusy(true);
       nearBottomRef.current = true;
+      setFarFromEnd(false);
       return true;
     } catch (e) {
       // 409 "still working": Claude is busy, so the composer locks until it is not.
@@ -645,7 +693,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
 
   /** Adds picked, pasted or dropped files to the composer, within the count and size limits. */
   const takeFiles = (list: FileList | File[], pasted = false) => {
-    if (busy || sending || uploading) return;
+    if (waiting !== null || sending || uploading) return;
     const picked = Array.from(list).map((f) => (pasted && !f.name ? new File([f], pastedName(f.type, Date.now()), { type: f.type }) : f));
     if (picked.length === 0) return;
     let note: string | null = null;
@@ -704,7 +752,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
 
   const send = async () => {
     const text = draft.trim();
-    if ((!text && attachments.length === 0) || busy || sending || uploading) return;
+    // While Claude works, a message is queued: the CLI runs it after the turn.
+    if ((!text && attachments.length === 0) || waiting !== null || sending || uploading) return;
     let message = text;
     if (attachments.length > 0) {
       setUploading(true);
@@ -727,7 +776,40 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  // The "/" menu: while the text is a command name with no space yet, the commands that start with it.
+  const slashQuery = draft.startsWith("/") && !/\s/.test(draft) ? draft.slice(1).toLowerCase() : null;
+  const slashMatches = slashQuery === null || slashShut ? [] : commands.filter((c) => c.name.toLowerCase().startsWith(slashQuery));
+  const slashOn = slashMatches.length > 0;
+  const slashActive = Math.max(0, Math.min(slashIndex, slashMatches.length - 1));
+  useEffect(() => {
+    if (slashOn) document.getElementById(`slash-opt-${slashActive}`)?.scrollIntoView({ block: "nearest" });
+  }, [slashOn, slashActive]);
+
+  /** Puts a picked command in the composer, ready for its details. */
+  const pickCommand = (c: CommandInfo) => {
+    setDraft(`/${c.name} `);
+    taRef.current?.focus();
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashOn && !e.nativeEvent.isComposing) {
+      const n = slashMatches.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        pickCommand(slashMatches[slashActive]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashShut(true);
+        return;
+      }
+    }
     // Touch keyboards have no Shift+Enter: Enter is a newline there, and the send button sends.
     const touch = window.matchMedia("(pointer: coarse)").matches;
     if (e.key === "Enter" && !touch && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -748,13 +830,26 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  /** Stops the current turn. The chat stays open: the process is kept, so the next message needs no restart. */
   const stop = async () => {
     try {
-      await toastAction(workspaceId, "stop");
-      await refresh();
+      await api.chatControl(workspaceId, "interrupt", null);
       announce("Claude stopped");
     } catch {
       announce("Claude could not stop");
+    } finally {
+      repoll();
+    }
+  };
+
+  /** A menu pick: shown at once and sent to Claude; the old choice comes back with a toast if the server refuses. */
+  const pick = async (action: "model" | "mode" | "effort", value: string, current: string | null, set: (v: string | null) => void) => {
+    set(value);
+    try {
+      await api.chatControl(workspaceId, action, value);
+    } catch (e) {
+      set(current);
+      toast.error(`Could not change that, ${(e as Error).message}`);
     } finally {
       repoll();
     }
@@ -904,8 +999,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
-  // Under the composer: which model answers and how it asks, in plain words. Hidden until the CLI has reported them.
-  const footer = [model ? modelName(model) : null, mode ? (MODE_LABEL[mode] ?? mode) : null].filter(Boolean).join(" · ");
+  // Under the composer: the model, effort and mode menus, each showing the CLI's current choice. Effort only when the model supports it.
+  // The snapshot names the model in full (claude-haiku-5-5); the menu lists it by alias (haiku). Both match by the display name.
+  const modelInfo = model === null ? undefined : models.find((m) => m.value === model || m.displayName === modelName(model));
+  const levels = modelInfo?.supportedEffortLevels ?? [];
+  const modelText = modelInfo?.displayName ?? (model ? modelName(model) : "Model");
+  const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Effort";
+  const modeText = MODE_CHOICES.find((c) => c.value === mode)?.label ?? (mode ? (MODE_LABEL[mode] ?? mode) : "Mode");
 
   const placeholder = waiting !== null ? "Claude is waiting for your answer above" : busy ? "Claude is working…" : terminalProject ? "Message Claude…" : "Ask Claude for a change…";
 
@@ -997,6 +1097,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           </div>
           {/* A subtle fade under the tab bar, so scrolled text does not hit the edge. */}
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-[linear-gradient(var(--surface-base),transparent)]" />
+          {farFromEnd ? (
+            <button
+              type="button"
+              aria-label="Scroll to latest"
+              title="Scroll to latest"
+              onClick={scrollToLatest}
+              className="absolute bottom-3 left-1/2 z-10 flex size-10 -translate-x-1/2 items-center justify-center rounded-full bg-surface-raised text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:size-11"
+            >
+              <ArrowDown size={18} aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
 
         {can ? (
@@ -1042,6 +1153,30 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   Sending from here closes Claude's terminal screen. The conversation carries on here, and in Terminal when you switch back.
                 </p>
               ) : null}
+              {slashOn ? (
+                <ul id="slash-menu" role="listbox" aria-label="Commands" className="mb-2 max-h-80 overflow-y-auto rounded-2xl bg-surface-raised p-1">
+                  {slashMatches.map((c, i) => (
+                    <li
+                      key={c.name}
+                      id={`slash-opt-${i}`}
+                      role="option"
+                      aria-selected={i === slashActive}
+                      // a pointer press picks the command without taking focus from the composer
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        pickCommand(c);
+                      }}
+                      className={cn("flex cursor-pointer flex-col rounded-xl px-3 py-2", i === slashActive && "bg-surface-hover")}
+                    >
+                      <span className="text-[14px] text-text-primary">
+                        /{c.name}
+                        {c.argumentHint ? <span className="text-text-muted"> {c.argumentHint}</span> : null}
+                      </span>
+                      {c.description ? <span className="truncate text-xs text-text-muted">{c.description}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               <div
                 className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5"
                 onDragOver={(e: DragEvent<HTMLDivElement>) => {
@@ -1069,7 +1204,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   aria-label="Attach a file"
                   title="Attach a file"
                   className="-ml-3 size-11 shrink-0 rounded-full text-text-secondary shell:size-9"
-                  disabled={busy || sending || uploading}
+                  disabled={waiting !== null || sending || uploading}
                   onClick={() => fileRef.current?.click()}
                 >
                   <Paperclip size={18} aria-hidden="true" />
@@ -1080,9 +1215,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   className="block min-h-9 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-text-primary placeholder:text-text-muted outline-none! disabled:cursor-not-allowed max-md:text-base"
                   rows={1}
                   value={draft}
-                  disabled={busy}
+                  disabled={waiting !== null}
                   placeholder={placeholder}
-                  onChange={(e) => setDraft(e.target.value)}
+                  aria-autocomplete="list"
+                  aria-expanded={slashOn}
+                  aria-controls={slashOn ? "slash-menu" : undefined}
+                  aria-activedescendant={slashOn ? `slash-opt-${slashActive}` : undefined}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    setSlashIndex(0);
+                    setSlashShut(false);
+                  }}
                   onKeyDown={onKeyDown}
                   onPaste={(e: ClipboardEvent<HTMLTextAreaElement>) => {
                     if (e.clipboardData.files.length === 0) return;
@@ -1090,25 +1233,76 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     takeFiles(e.clipboardData.files, true);
                   }}
                 />
-                {waiting !== null ? null : busy ? (
-                  <Button variant="primary" iconOnly aria-label="Stop Claude" title="Stop Claude" className="size-11 shrink-0 rounded-full shell:size-9" onClick={() => void stop()}>
-                    <span aria-hidden="true" className="size-[11px] rounded-[2px] bg-current" />
-                  </Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    iconOnly
-                    aria-label="Send"
-                    title="Send"
-                    className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
-                    disabled={sending || uploading || (draft.trim() === "" && attachments.length === 0)}
-                    onClick={() => void send()}
-                  >
-                    <ArrowUp size={18} aria-hidden="true" />
-                  </Button>
+                {waiting !== null ? null : (
+                  <>
+                    {busy ? (
+                      <Button variant="secondary" iconOnly aria-label="Stop Claude" title="Stop Claude" className="size-11 shrink-0 rounded-full shell:size-9" onClick={() => void stop()}>
+                        <span aria-hidden="true" className="size-[11px] rounded-[2px] bg-current" />
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="primary"
+                      iconOnly
+                      aria-label="Send"
+                      title={busy ? "Send (queued until Claude is ready)" : "Send"}
+                      className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
+                      disabled={sending || uploading || (draft.trim() === "" && attachments.length === 0)}
+                      onClick={() => void send()}
+                    >
+                      <ArrowUp size={18} aria-hidden="true" />
+                    </Button>
+                  </>
                 )}
               </div>
-              {footer ? <p className="mt-2 px-4 text-center text-xs text-text-faint">{footer}</p> : null}
+              {models.length > 0 || mode !== null ? (
+                <div className="mt-1.5 flex min-w-0 items-center justify-center gap-0.5">
+                  {models.length > 0 ? (
+                    <Menu
+                      label={`Model: ${modelText}`}
+                      align="start"
+                      trigger={<button type="button" className={cn(FOOT_BTN, "max-w-[9rem]")}>{modelText}</button>}
+                    >
+                      <MenuRadioGroup value={modelInfo?.value ?? ""} onValueChange={(v) => void pick("model", v, model, setModel)}>
+                        {models.map((m) => (
+                          <MenuRadioItem key={m.value} value={m.value}>
+                            {m.displayName}
+                          </MenuRadioItem>
+                        ))}
+                      </MenuRadioGroup>
+                    </Menu>
+                  ) : null}
+                  {levels.length > 0 ? (
+                    <Menu
+                      label={`Effort: ${effortText}`}
+                      align="start"
+                      trigger={<button type="button" className={FOOT_BTN}>{effortText}</button>}
+                    >
+                      <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
+                        {levels.map((l) => (
+                          <MenuRadioItem key={l} value={l}>
+                            {EFFORT_LABEL[l] ?? l}
+                          </MenuRadioItem>
+                        ))}
+                      </MenuRadioGroup>
+                    </Menu>
+                  ) : null}
+                  {mode !== null ? (
+                    <Menu
+                      label={`Mode: ${modeText}`}
+                      align="start"
+                      trigger={<button type="button" className={FOOT_BTN}>{modeText}</button>}
+                    >
+                      <MenuRadioGroup value={mode} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
+                        {MODE_CHOICES.map((c) => (
+                          <MenuRadioItem key={c.value} value={c.value}>
+                            {c.label}
+                          </MenuRadioItem>
+                        ))}
+                      </MenuRadioGroup>
+                    </Menu>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}

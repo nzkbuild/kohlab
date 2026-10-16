@@ -116,6 +116,12 @@ export const api = {
       waiting: string | null;
       draft: string;
       terminalOpen?: boolean;
+      /** the current effort level, when one was set in this process */
+      effort: string | null;
+      /** slash commands the CLI offers (at most 200) */
+      commands: { name: string; description: string; argumentHint: string }[];
+      /** models the CLI offers, with the effort levels each supports */
+      models: { value: string; displayName: string; description: string; supportedEffortLevels: string[] }[];
     }>(`/api/workspaces/${encodeURIComponent(id)}/chat?after=${after}`),
   chatSend: (id: string, text: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat`, {
@@ -128,6 +134,13 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ requestId, allow }),
+    }),
+  /** The chat's menu actions: "interrupt" (stop the turn), "model", "mode" or "effort" with a value. */
+  chatControl: (id: string, action: string, value: unknown) =>
+    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, value }),
     }),
   /** Give a project a new name (its title in the UI). The server checks the name. */
   rename: (id: string, title: string) =>

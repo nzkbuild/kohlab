@@ -31,6 +31,7 @@ import {
   mutateState,
   notifyWorkspaceDone,
   ownBase,
+  parseModel,
   worktreeIsClean,
   worktreePath,
 } from "./lib";
@@ -186,6 +187,26 @@ interface Live {
   /** the model and permission mode the CLI reports in its init line */
   model: string | null;
   mode: string | null;
+  /** control requests waiting for the CLI's reply, by request id */
+  pending: Map<string, Pending>;
+  /** the init reply: the menus are known once it has come */
+  ready?: Promise<unknown>;
+  /** the person stopped the turn: its non-success result is not an error */
+  interrupted: boolean;
+  /** effort level set in this process; a new process starts at the model's own default */
+  effort?: string;
+}
+
+interface Pending {
+  resolve: (r: any) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** What the CLI says it can do, for the chat's menus. In memory only, kept after the process exits. */
+interface Caps {
+  commands: { name: string; description: string; argumentHint: string }[];
+  models: { value: string; displayName: string; description: string; supportedEffortLevels: string[] }[];
 }
 
 interface Chat {
@@ -196,6 +217,49 @@ interface Chat {
 const chats = new Map<string, Chat>();
 /** Live claude processes per workspace id. */
 const procs = new Map<string, Live>();
+/** Commands and models per workspace id, from the CLI's init reply and its command list. */
+const caps = new Map<string, Caps>();
+let requestSeq = 0;
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk"];
+
+function capsOf(id: string): Caps {
+  let c = caps.get(id);
+  if (!c) caps.set(id, (c = { commands: [], models: [] }));
+  return c;
+}
+
+function commandList(x: any): Caps["commands"] {
+  return Array.isArray(x)
+    ? x.filter((c) => typeof c?.name === "string").map((c) => ({ name: c.name, description: String(c.description ?? ""), argumentHint: String(c.argumentHint ?? "") }))
+    : [];
+}
+
+function modelList(x: any): Caps["models"] {
+  return Array.isArray(x)
+    ? x
+        .filter((m) => typeof m?.value === "string")
+        .map((m) => ({
+          value: m.value,
+          displayName: String(m.displayName ?? m.value),
+          description: String(m.description ?? ""),
+          supportedEffortLevels: Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels.filter((l: unknown) => typeof l === "string") : [],
+        }))
+    : [];
+}
+
+/** Send a control request to the CLI and wait for its reply. Gives up after 10 s. */
+function ask(live: Live, request: Record<string, unknown>, requestId = `ctl-${++requestSeq}`): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if (live.closed || live.stopping) return reject(new Error("Claude stopped"));
+    const timer = setTimeout(() => {
+      live.pending.delete(requestId);
+      reject(new Error("Claude did not answer in time"));
+    }, 10_000);
+    live.pending.set(requestId, { resolve, reject, timer });
+    live.child.stdin!.write(JSON.stringify({ type: "control_request", request_id: requestId, request }) + "\n");
+  });
+}
 
 const chatsDir = () => join(WORKS_DIR, "chats");
 const transcriptPath = (id: string) => join(chatsDir(), `${id}.jsonl`);
@@ -419,6 +483,26 @@ function onLine(id: string, live: Live, line: string) {
     live.background = Array.isArray(m.tasks) ? m.tasks.length : 0;
     return;
   }
+  if (m.type === "system" && m.subtype === "commands_changed") {
+    capsOf(id).commands = commandList(m.commands);
+    return;
+  }
+  if (m.type === "control_response") {
+    const r = m.response ?? {};
+    if (r.request_id === "init-1" && r.subtype === "success") {
+      const c = capsOf(id);
+      c.commands = commandList(r.response?.commands);
+      c.models = modelList(r.response?.models);
+    }
+    const waiting = live.pending.get(r.request_id);
+    if (waiting) {
+      live.pending.delete(r.request_id);
+      clearTimeout(waiting.timer);
+      if (r.subtype === "success") waiting.resolve(r.response);
+      else waiting.reject(new Error(String(r.error ?? "Claude refused that")));
+    }
+    return;
+  }
   if (m.type === "system" && m.subtype === "init") {
     live.resuming = undefined;
     if (typeof m.model === "string") live.model = m.model;
@@ -461,9 +545,11 @@ function onLine(id: string, live: Live, line: string) {
   }
   if (m.type === "result") {
     live.draft = "";
+    const byPerson = live.interrupted; // a stopped turn ends without an error
+    live.interrupted = false;
     if (m.subtype !== "success" && resumeFailed(id, live)) return;
     markSeen(id, live);
-    if (m.subtype !== "success") {
+    if (m.subtype !== "success" && !byPerson) {
       const raw = String(m.result ?? m.subtype ?? "unknown");
       console.warn("[chat] claude result error:", raw.slice(0, 200));
       emit(id, { kind: "error", text: friendlyError(raw) });
@@ -483,6 +569,11 @@ function onExit(id: string, live: Live) {
     chatWaiting.delete(id);
   }
   live.asks.clear();
+  for (const p of live.pending.values()) {
+    clearTimeout(p.timer);
+    p.reject(new Error("Claude stopped"));
+  }
+  live.pending.clear();
   if (live.stopping || !chatBusy.has(id)) return;
   if (resumeFailed(id, live)) return;
   markSeen(id, live);
@@ -559,6 +650,8 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     background: 0,
     model: null,
     mode: null,
+    pending: new Map(),
+    interrupted: false,
   };
   procs.set(id, live);
   child.stdin!.on("error", () => {}); // a dead process: its exit event reports it
@@ -569,7 +662,18 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   child.on("error", () => onExit(id, live));
   child.on("exit", () => onExit(id, live));
   // The host announces itself first, as the SDK does; otherwise the CLI cannot ask us for permissions.
-  child.stdin!.write(JSON.stringify({ type: "control_request", request_id: "init-1", request: { subtype: "initialize" } }) + "\n");
+  live.ready = ask(live, { subtype: "initialize" }, "init-1");
+  live.ready.catch(() => {}); // a missed init is reported to the control that waits for it
+  // The effort level the person chose survives a restart: the new process starts at the model's own default.
+  const effort = ws.effort;
+  if (effort && EFFORTS.includes(effort)) {
+    live.ready
+      .then(() => ask(live, { subtype: "apply_flag_settings", settings: { effortLevel: effort } }))
+      .then(() => {
+        live.effort = effort;
+      })
+      .catch((e) => console.warn("[chat] could not restore effort:", (e as Error).message));
+  }
   return live;
 }
 
@@ -589,6 +693,10 @@ export async function snapshot(id: string, after: number) {
     background: live?.background ?? 0,
     model: live?.model ?? lastSeen.get(id)?.model ?? null,
     mode: live?.mode ?? lastSeen.get(id)?.mode ?? null,
+    effort: live?.effort ?? ws.effort ?? null,
+    // clean chats run with --disable-slash-commands: they get no "/" menu
+    commands: term ? (caps.get(id)?.commands ?? []).slice(0, 200) : [],
+    models: caps.get(id)?.models ?? [],
     waiting: live?.asks.keys().next().value ?? null,
     draft: live?.draft ?? "",
     terminalOpen: term && (await isAlive(ws)),
@@ -624,23 +732,113 @@ export async function send(id: string, text: string): Promise<void> {
       if (w) w.resumeInTerminal = true;
     });
   }
-  // check and claim in one synchronous step, so two posts cannot both start a turn
-  if (chatBusy.has(id)) throw new ChatError(409, "still working");
-  chatBusy.add(id);
-  chatWaiting.delete(id); // a new message clears a stale "needs you" from before
+  // check and claim in one synchronous step, so two posts cannot both start a turn.
+  // While a turn runs, a live process takes the message as a queued one: the CLI runs it after the turn.
+  const queued = chatBusy.has(id);
+  if (queued && !procs.has(id)) throw new ChatError(409, "still working");
+  if (!queued) chatBusy.add(id);
+  if (!queued) chatWaiting.delete(id); // a new message clears a stale "needs you" from before
   emit(id, { kind: "user", text: t });
   try {
-    await markStarted(id);
+    if (!queued) await markStarted(id);
     const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
-    live.msg = t;
-    live.busySince = Date.now();
+    if (!queued) {
+      live.msg = t;
+      live.busySince = Date.now();
+    }
     live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
   } catch (e) {
-    chatBusy.delete(id);
     console.error("[chat] could not start:", (e as Error).message);
     emit(id, { kind: "error", text: friendlyError((e as Error).message) });
-    await finish(id);
+    if (!queued) {
+      chatBusy.delete(id);
+      await finish(id);
+    }
   }
+}
+
+/** The project's live claude process, started if none runs. Waits for its init reply, so the menus are known. */
+async function liveFor(id: string): Promise<Live> {
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  let live = procs.get(id);
+  if (!live) {
+    // a terminal's Claude runs in its own screen: the chat can only control a process it started
+    if (term) throw new ChatError(409, "Send a message first, then change this.");
+    live = await start(ws, id);
+  }
+  await live.ready;
+  return live;
+}
+
+/** The chat's menu actions: stop the turn, or change the model, permission mode or effort of its claude process. */
+export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true }> {
+  if (action === "interrupt" && !procs.has(id)) throw new ChatError(409, "Claude is not running");
+  const live = await liveFor(id);
+  switch (action) {
+    case "interrupt": {
+      await ask(live, { subtype: "interrupt" });
+      if (chatBusy.has(id)) {
+        live.interrupted = true;
+        const since = live.busySince;
+        // the CLI ends the turn with a result; if none comes, end it here so the chat is not stuck working
+        setTimeout(() => {
+          if (procs.get(id) !== live || !chatBusy.has(id) || live.busySince !== since) return;
+          live.interrupted = false;
+          live.draft = "";
+          markSeen(id, live);
+          chatBusy.delete(id);
+          live.busySince = undefined;
+          emit(id, { kind: "done" });
+          finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+        }, 5000);
+      }
+      break;
+    }
+    case "model": {
+      const known = value === "default" || capsOf(id).models.some((m) => m.value === value);
+      if (!known) throw new ChatError(400, "unknown model");
+      await ask(live, { subtype: "set_model", model: value });
+      // "default" shows as chosen until the next init reports the real model
+      live.model = String(value);
+      lastSeen.set(id, { model: live.model, mode: live.mode });
+      const levels = capsOf(id).models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
+      const dropEffort = !!live.effort && !levels.includes(live.effort);
+      if (dropEffort) live.effort = undefined;
+      // the three aliases are kept, so a restarted process uses the same model
+      const picked = parseModel(value);
+      if (picked) {
+        await mutateState((s) => {
+          const w = s.workspaces.find((x) => x.id === id);
+          if (!w) return;
+          w.model = picked === "default" ? undefined : picked;
+          if (dropEffort) w.effort = undefined;
+        });
+      }
+      break;
+    }
+    case "mode": {
+      if (typeof value !== "string" || !MODES.includes(value)) throw new ChatError(400, "unknown mode");
+      await ask(live, { subtype: "set_permission_mode", mode: value });
+      live.mode = value;
+      lastSeen.set(id, { model: live.model, mode: live.mode });
+      break;
+    }
+    case "effort": {
+      if (typeof value !== "string" || !EFFORTS.includes(value)) throw new ChatError(400, "unknown effort level");
+      await ask(live, { subtype: "apply_flag_settings", settings: { effortLevel: value } });
+      live.effort = value;
+      await mutateState((s) => {
+        const w = s.workspaces.find((x) => x.id === id);
+        if (w) w.effort = value as Workspace["effort"];
+      });
+      break;
+    }
+    default:
+      throw new ChatError(400, "unknown action");
+  }
+  return { ok: true };
 }
 
 /** Claude's answer to a permission question: allow echoes the input back. */
