@@ -9,6 +9,12 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.52.1] - 2026-10-16
+
+### Changed
+- The Commands, Model and Mode buttons in the message box are plain text with a small arrow, no icons. On phones Commands is tucked away (type / instead), so Model and Mode fit without being cut off.
+- The / and @ menus are tidy lists: name on the left, a one-line description beside it, no sideways scrolling.
+
 ## [1.52.0] - 2026-10-16
 
 ### Changed

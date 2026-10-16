@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, Copy, Cpu, Lightning, Paperclip, Shield, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, Copy, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
@@ -223,8 +223,12 @@ interface PickOption {
   detail?: string;
 }
 function PickList({ id, label, options, active, onPick }: { id: string; label: string; options: PickOption[]; active: number; onPick: (i: number) => void }) {
+  // Keep the arrow-key row in view. Mounts with the list, so the first row is in view too.
+  useEffect(() => {
+    document.getElementById(`${id}-opt-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [id, active]);
   return (
-    <ul id={id} role="listbox" aria-label={label} className="menu mb-2 max-h-80 overflow-y-auto">
+    <ul id={id} role="listbox" aria-label={label} className="menu mb-2 max-h-80 w-full overflow-x-hidden overflow-y-auto text-left">
       {options.map((o, i) => (
         <li
           key={o.key}
@@ -236,10 +240,16 @@ function PickList({ id, label, options, active, onPick }: { id: string; label: s
             e.preventDefault();
             onPick(i);
           }}
-          className={cn("menu-item cursor-pointer flex-col items-start justify-center py-1.5", i === active && "bg-surface-active text-text-primary")}
+          className={cn(
+            "menu-item min-h-9 min-w-0 cursor-pointer items-center text-left pointer-coarse:min-h-11",
+            i === active && "bg-surface-hover text-text-primary",
+          )}
         >
-          <span className="text-text-primary">{o.title}</span>
-          {o.detail ? <span className="truncate text-xs text-text-muted">{o.detail}</span> : null}
+          {/* One line on desktop: name, then detail. On phones the detail drops under the name. */}
+          <span className="flex min-w-0 flex-1 flex-col md:flex-row md:items-baseline md:gap-2">
+            <span className="min-w-0 truncate text-text-primary md:max-w-[60%] md:shrink-0">{o.title}</span>
+            {o.detail ? <span className="min-w-0 truncate text-text-muted md:flex-1">{o.detail}</span> : null}
+          </span>
         </li>
       ))}
     </ul>
@@ -875,9 +885,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // Typing "/" before the command list has loaded: a single row says so.
   const slashLoading = slashQuery !== null && !slashShut && commands.length === 0;
   const slashActive = Math.max(0, Math.min(slashIndex, slashMatches.length - 1));
-  useEffect(() => {
-    if (slashOn) document.getElementById(`slash-menu-opt-${slashActive}`)?.scrollIntoView({ block: "nearest" });
-  }, [slashOn, slashActive]);
 
   // The "@" menu: an "@" that starts a word at the end of the text, with no space after it yet. Files come from the CLI, 150 ms after the last key.
   // ponytail: only at the end of the text; a mention in the middle is typed as plain text. Upgrade path: read the caret position.
@@ -1375,8 +1382,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     key: c.name,
                     title: (
                       <>
-                        /{c.name}
-                        {c.argumentHint ? <span className="text-text-muted"> {c.argumentHint}</span> : null}
+                        <span className="font-medium">/{c.name}</span>
+                        {c.argumentHint ? <span className="text-text-faint"> {c.argumentHint}</span> : null}
                       </>
                     ),
                     detail: c.description || undefined,
@@ -1471,9 +1478,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       onClick={() => fileRef.current?.click()}
                     />
                     <ComposerChip
-                      icon={<Lightning size={14} aria-hidden="true" />}
                       label="Commands"
-                      hideLabelOnPhone
+                      className="max-md:hidden"
                       aria-label="Commands"
                       title={commands.length === 0 ? "Commands load when Claude starts" : undefined}
                       disabled={commands.length === 0}
@@ -1485,7 +1491,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       label={`Model: ${modelText}`}
                       trigger={
                         <ComposerChip
-                          icon={<Cpu size={14} aria-hidden="true" />}
+                          className="max-w-48 shrink-0"
                           label={modelText}
                           menu
                           disabled={models.length === 0}
@@ -1519,7 +1525,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       side="top"
                       align="start"
                       label={`Mode: ${modeText}`}
-                      trigger={<ComposerChip icon={<Shield size={14} aria-hidden="true" />} label={modeText} menu disabled={mode === null} />}
+                      trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu disabled={mode === null} />}
                     >
                       <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
                         {MODE_CHOICES.map((value) => (
