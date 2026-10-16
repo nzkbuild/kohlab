@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.51.0] - 2026-10-16
+
+### Added
+- See what runs in the background: click "1 in background" for the list, and stop any task.
+- A context and usage meter under the message box: how full the conversation is, and your 5-hour and weekly plan use with reset times (only you see your plan; viewers never do).
+- Type @ to mention a file from your project.
+- Undo changes since your last message: Kohlab shows which files would change back, then restores them.
+- Quiet notices when Claude retries, switches model, or compacts a long conversation.
+
 ## [1.50.0] - 2026-10-16
 
 ### Added

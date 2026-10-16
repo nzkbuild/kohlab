@@ -6,7 +6,7 @@
  *
  * Run:  bun scripts/check-chat.mjs
  */
-import { describeAsk, describeTool, friendlyError } from "../chat.ts";
+import { describeAsk, describeTool, friendlyError, noticeText, usageOf } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -57,6 +57,24 @@ check("usage limit: plain sentence", friendlyError("Claude AI usage limit reache
 check("sign-in problem: plain sentence", friendlyError("Invalid API key · Please run /login"), "Claude is signed out on this server. Open Settings → Agents to check the connection.");
 check("anything else: generic sentence", friendlyError("something odd happened"), "Something went wrong on Claude's side. Try again.");
 check("not installed: set-up sentence", friendlyError("claude is not installed on this server"), "Claude is not set up on this server yet. Open Settings → Agents.");
+
+// quiet lines for what the CLI notices on its own
+check("model switch: names the model", noticeText({ subtype: "model_fallback", fallback_model: "claude-haiku-5-5" }), "Switched to claude-haiku-5-5 because the first choice was unavailable");
+check("model switch without a name", noticeText({ subtype: "model_fallback" }), "Switched to another model because the first choice was unavailable");
+check("compaction: one quiet line", noticeText({ subtype: "compact_boundary" }), "Conversation compacted to save space");
+check("retry is not a quiet line", noticeText({ subtype: "api_retry" }), null);
+
+// the footer's usage, from the two CLI replies
+const used = usageOf(
+  { totalTokens: 15962, maxTokens: 1000000 },
+  { rate_limits_available: true, subscription_type: "pro", rate_limits: { five_hour: { utilization: 29, resets_at: "2026-10-16T07:50:00Z" }, seven_day: null } },
+);
+check("context: used, limit and percent", used.context, { used: 15962, limit: 1000000, percent: 2 });
+check("plan: five-hour window, resets as given", used.plan.fiveHour, { percent: 29, resetsAt: "2026-10-16T07:50:00Z" });
+check("plan: a window the CLI leaves out is null", used.plan.week, null);
+check("plan: subscription name", used.plan.subscription, "pro");
+check("no plan limits: plan is null", usageOf({ totalTokens: 1, maxTokens: 10 }, { rate_limits_available: false }).plan, null);
+check("no context size: context is null", usageOf({}, {}).context, null);
 
 if (failures) {
   console.log(`\n${failures} failed`);

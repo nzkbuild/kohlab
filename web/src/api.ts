@@ -2,6 +2,13 @@ import type { AgentStatus, ChatEvent, DiffFile, ReleaseStatus, TreeNode, Version
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
+/** A plan window's use in percent, and when it resets (an ISO time). */
+export interface ChatUsageWindow { percent: number; resetsAt: string | null; }
+/** The chat footer's usage: the context window, and the plan's limits when the CLI reports them. */
+export interface ChatUsage {
+  context: { used: number; limit: number; percent: number } | null;
+  plan: { subscription: string | null; fiveHour: ChatUsageWindow | null; week: ChatUsageWindow | null } | null;
+}
 
 // A ?key= arrival (bookmark or tunnel link) is adopted into storage once, so
 // the key leaves the URL bar and never leaks into history or Referer again.
@@ -111,6 +118,12 @@ export const api = {
       now: number;
       /** background tasks still running */
       background: number;
+      /** the same tasks, by id, for the Stop list */
+      tasks: { id: string; type: string; description: string }[];
+      /** the CLI is retrying a failed request: which try, of how many */
+      retry: { attempt: number; max: number } | null;
+      /** context in use and plan limits, read when the last turn ended */
+      usage: ChatUsage | null;
       model: string | null;
       mode: string | null;
       waiting: string | null;
@@ -135,9 +148,10 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ requestId, allow }),
     }),
-  /** The chat's menu actions: "interrupt" (stop the turn), "model", "mode" or "effort" with a value. */
+  /** The chat's menu actions: "interrupt" (stop the turn), "model", "mode" or "effort" with a value; "files" (@ mentions),
+   *  "stop_task", and Undo's "rewind_preview" and "rewind" with the message id. Some answer with data. */
   chatControl: (id: string, action: string, value: unknown) =>
-    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/control`, {
+    json<{ ok: boolean; files?: string[]; insertions?: number; deletions?: number }>(`/api/workspaces/${encodeURIComponent(id)}/chat/control`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, value }),

@@ -9,6 +9,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
@@ -51,7 +52,8 @@ const CHAT_SYSTEM_PROMPT =
 const MAX_TEXT = 20000;
 
 type Body =
-  | { kind: "user"; text: string }
+  /** uuid: the id Claude keeps for this message, which Undo names. Not set on lines imported from a terminal's transcript. */
+  | { kind: "user"; text: string; uuid?: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string }
   | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string }
@@ -183,7 +185,9 @@ interface Live {
   /** when the current turn started (ms), by a send or by Claude itself; cleared at its result */
   busySince?: number;
   /** background tasks still running (Bash or helper runs), from the CLI's own list */
-  background: number;
+  tasks: BgTask[];
+  /** the CLI is retrying a failed request: which try, and how many tries in all */
+  retry?: { attempt: number; max: number };
   /** the model and permission mode the CLI reports in its init line */
   model: string | null;
   mode: string | null;
@@ -203,6 +207,25 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/** A background task the CLI is running: its id (to stop it), its kind and what it does. */
+export interface BgTask {
+  id: string;
+  type: string;
+  description: string;
+}
+
+/** A plan window's use (percent) and when it resets. */
+export interface UsageWindow {
+  percent: number;
+  resetsAt: string | null;
+}
+
+/** The context window in use, and the plan's limits, as the CLI reports them. Read when a turn ends. */
+export interface Usage {
+  context: { used: number; limit: number; percent: number } | null;
+  plan: { subscription: string | null; fiveHour: UsageWindow | null; week: UsageWindow | null } | null;
+}
+
 /** What the CLI says it can do, for the chat's menus. In memory only, kept after the process exits. */
 interface Caps {
   commands: { name: string; description: string; argumentHint: string }[];
@@ -219,6 +242,11 @@ const chats = new Map<string, Chat>();
 const procs = new Map<string, Live>();
 /** Commands and models per workspace id, from the CLI's init reply and its command list. */
 const caps = new Map<string, Caps>();
+/** Context and plan usage per workspace id, read when a turn ends. Kept after the process exits, like caps. */
+const usages = new Map<string, Usage>();
+/** When each workspace's usage was last read, and which reads are running: a failed read is not retried on every poll. */
+const usageAt = new Map<string, number>();
+const usageReading = new Set<string>();
 let requestSeq = 0;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk"];
@@ -294,6 +322,39 @@ function taskFinishedLine(text: string): string {
   return summary ? `Background task finished: ${summary}` : "A background task finished";
 }
 
+/** The quiet line for a CLI system notice (a model switch, a compaction), or null for any other notice. Pure. */
+export function noticeText(m: any): string | null {
+  if (m?.subtype === "model_fallback") {
+    const model = typeof m.fallback_model === "string" ? m.fallback_model : "another model";
+    return `Switched to ${model} because the first choice was unavailable`;
+  }
+  if (m?.subtype === "compact_boundary") return "Conversation compacted to save space";
+  return null;
+}
+
+/** The background tasks a background_tasks_changed line lists. Pure. */
+function bgTasks(x: unknown): BgTask[] {
+  if (!Array.isArray(x)) return [];
+  return x
+    .filter((t) => typeof t?.task_id === "string")
+    .map((t) => ({ id: t.task_id, type: String(t.task_type ?? ""), description: String(t.description ?? "").slice(0, 200) }));
+}
+
+/** The usage the footer shows, from the two replies: get_context_usage and get_usage. Pure. */
+export function usageOf(context: any, plan: any): Usage {
+  const used = Number(context?.totalTokens);
+  const limit = Number(context?.maxTokens);
+  const rl = plan?.rate_limits;
+  const window = (w: any): UsageWindow | null =>
+    w && typeof w.utilization === "number" ? { percent: Math.round(w.utilization), resetsAt: typeof w.resets_at === "string" ? w.resets_at : null } : null;
+  return {
+    context: Number.isFinite(used) && Number.isFinite(limit) && limit > 0 ? { used, limit, percent: Math.round((used / limit) * 100) } : null,
+    plan: plan?.rate_limits_available && rl
+      ? { subscription: typeof plan.subscription_type === "string" ? plan.subscription_type : null, fiveHour: window(rl.five_hour), week: window(rl.seven_day) }
+      : null,
+  };
+}
+
 /** Claude Code's transcript lines as chat events: what the person wrote and what Claude said and did. Pure. */
 export function transcriptEvents(lines: string[], cwd: string): Body[] {
   const out: Body[] = [];
@@ -305,6 +366,8 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
       continue; // a torn or foreign line: skip it
     }
     if (!m || typeof m !== "object" || m.isSidechain || m.isMeta) continue; // a helper agent's work, or a note for Claude itself
+    // a compaction note: one quiet line. Model switches are live-only, so they are not read from the transcript.
+    if (m.type === "system" && m.subtype === "compact_boundary") out.push({ kind: "tool", text: noticeText(m) ?? "" });
     if (m.type === "user") {
       const content = m.message?.content;
       let text = "";
@@ -480,7 +543,19 @@ function onLine(id: string, live: Live, line: string) {
     return;
   }
   if (m.type === "system" && m.subtype === "background_tasks_changed") {
-    live.background = Array.isArray(m.tasks) ? m.tasks.length : 0;
+    live.tasks = bgTasks(m.tasks);
+    return;
+  }
+  // A retry notice lasts until the next line that is not one.
+  if (!(m.type === "system" && m.subtype === "api_retry")) live.retry = undefined;
+  if (m.type === "system" && m.subtype === "api_retry") {
+    live.retry = { attempt: Number(m.attempt) || 1, max: Number(m.max_retries) || 0 };
+    return;
+  }
+  // A model switch always shows. A compaction shows once: a terminal project's importer reads it from the transcript.
+  if (m.type === "system" && (m.subtype === "model_fallback" || m.subtype === "compact_boundary")) {
+    const text = noticeText(m);
+    if (text && (m.subtype === "model_fallback" || !live.transcriptHome)) emit(id, { kind: "tool", text });
     return;
   }
   if (m.type === "system" && m.subtype === "commands_changed") {
@@ -558,6 +633,7 @@ function onLine(id: string, live: Live, line: string) {
     chatBusy.delete(id);
     live.busySince = undefined;
     finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+    void readUsage(id, live, true);
   }
 }
 
@@ -633,6 +709,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   const env: Record<string, string> = {};
   for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
   env.HOME = home;
+  // A copy of each file before Claude edits it, so Undo can put it back.
+  // ponytail: the copies live under this home's .claude/file-history and grow with every edit; nothing prunes them yet.
+  env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = "1";
   if (!term) env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "1";
   const cwd = worktreePath(ws);
   const child = spawn(bin, args, { cwd, uid: who?.uid, gid: who?.gid, env, stdio: ["pipe", "pipe", "pipe"] });
@@ -647,7 +726,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     draft: "",
     sid: ws.chatSession,
     transcriptHome: term ? home : undefined,
-    background: 0,
+    tasks: [],
     model: null,
     mode: null,
     pending: new Map(),
@@ -678,19 +757,24 @@ async function start(ws: Workspace, id: string): Promise<Live> {
 }
 
 /** The chat transcript after event `after`, and whether a turn is in flight. */
-export async function snapshot(id: string, after: number) {
+export async function snapshot(id: string, after: number, see: { usage: boolean; owner: boolean } = { usage: false, owner: false }) {
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
   if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
   if (term) await syncFromTerminal(ws);
   const events = load(id).events.filter((e) => e.n > after);
   const live = procs.get(id);
+  // the first read of usage comes with the first poll that finds none (a restart, or a chat not yet used)
+  if (live && !usages.has(id)) void readUsage(id, live, false);
   return {
     events,
     busy: chatBusy.has(id),
     busySince: chatBusy.has(id) ? (live?.busySince ?? null) : null,
     now: Date.now(),
-    background: live?.background ?? 0,
+    background: live?.tasks.length ?? 0,
+    tasks: live?.tasks ?? [],
+    retry: live?.retry ?? null,
+    usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
     model: live?.model ?? lastSeen.get(id)?.model ?? null,
     mode: live?.mode ?? lastSeen.get(id)?.mode ?? null,
     effort: live?.effort ?? ws.effort ?? null,
@@ -738,7 +822,9 @@ export async function send(id: string, text: string): Promise<void> {
   if (queued && !procs.has(id)) throw new ChatError(409, "still working");
   if (!queued) chatBusy.add(id);
   if (!queued) chatWaiting.delete(id); // a new message clears a stale "needs you" from before
-  emit(id, { kind: "user", text: t });
+  // The id is ours, so the message can be named for Undo at once. The CLI keeps the id it is sent with.
+  const uuid = randomUUID();
+  emit(id, { kind: "user", text: t, uuid });
   try {
     if (!queued) await markStarted(id);
     const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
@@ -746,7 +832,7 @@ export async function send(id: string, text: string): Promise<void> {
       live.msg = t;
       live.busySince = Date.now();
     }
-    live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
+    live.child.stdin!.write(JSON.stringify({ type: "user", uuid, message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
     emit(id, { kind: "error", text: friendlyError((e as Error).message) });
@@ -772,8 +858,74 @@ async function liveFor(id: string): Promise<Live> {
   return live;
 }
 
-/** The chat's menu actions: stop the turn, or change the model, permission mode or effort of its claude process. */
-export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true }> {
+/** Plan usage is the server owner's account data: only people who can change this workspace see the context and windows, only the owner sees the plan name. */
+function shownUsage(u: Usage | undefined, owner: boolean): Usage | null {
+  if (!u) return null;
+  return { context: u.context, plan: u.plan ? { ...u.plan, subscription: owner ? u.plan.subscription : null } : null };
+}
+
+/** Context and plan usage: read from the live process when a turn ends (or on the first poll that finds none), kept in memory. Never throws. */
+async function readUsage(id: string, live: Live, force: boolean): Promise<void> {
+  if (usageReading.has(id) || live.closed || live.stopping) return;
+  const last = usageAt.get(id) ?? 0;
+  if (!force && (usages.has(id) || Date.now() - last < 30_000)) return;
+  usageReading.add(id);
+  usageAt.set(id, Date.now());
+  try {
+    const [context, plan] = await Promise.all([ask(live, { subtype: "get_context_usage", detail: "summary" }), ask(live, { subtype: "get_usage" })]);
+    usages.set(id, usageOf(context, plan));
+  } catch (e) {
+    console.warn("[chat] usage:", (e as Error).message);
+  } finally {
+    usageReading.delete(id);
+  }
+}
+
+/** The files an @ mention can pick, from the CLI's own index. Empty when no process runs: a mention never starts one. */
+async function fileMentions(id: string, query: unknown): Promise<string[]> {
+  const live = procs.get(id);
+  if (!live || typeof query !== "string" || query.length > 200) return [];
+  try {
+    const reply = await ask(live, { subtype: "file_suggestions", query });
+    const paths: unknown[] = Array.isArray(reply?.suggestions) ? reply.suggestions.map((s: any) => s?.path) : [];
+    return paths.filter((p): p is string => typeof p === "string" && p !== "" && !isAbsolute(p) && !p.split("/").some((d) => d === ".." || d === ".git")).slice(0, 20);
+  } catch {
+    return []; // the menu just shows nothing
+  }
+}
+
+/** Stop one background task the CLI listed. The id must be in the current list. */
+async function stopTask(id: string, value: unknown): Promise<{ ok: true }> {
+  const live = procs.get(id);
+  const task = live?.tasks.find((t) => t.id === value);
+  if (!live || !task) throw new ChatError(400, "that task is not running");
+  await ask(live, { subtype: "stop_task", task_id: task.id });
+  return { ok: true };
+}
+
+/** Undo: the files Claude changed since a message. A dry run lists them; the real run puts them back. Only the last message can be undone. */
+async function rewindFiles(id: string, value: unknown, dryRun: boolean): Promise<{ ok: true } & Record<string, unknown>> {
+  if (typeof value !== "string") throw new ChatError(400, "message id is required");
+  if (chatBusy.has(id)) throw new ChatError(409, "Claude is still working. Wait until it finishes, then undo.");
+  let last: string | undefined; // the newest message's id; a message from before this feature, or a terminal's, has none
+  for (const e of load(id).events) if (e.kind === "user") last = e.uuid;
+  if (last === undefined || last !== value) throw new ChatError(400, "only the last message can be undone");
+  const live = await liveFor(id);
+  const r = await ask(live, { subtype: "rewind_files", user_message_id: value, ...(dryRun ? { dry_run: true } : {}) });
+  if (r?.canRewind === false || r?.error) throw new ChatError(409, String(r.error ?? "Those changes can't be undone."));
+  const raw: unknown[] = Array.isArray(r?.filesChanged) ? r.filesChanged : [];
+  const inside = (p: unknown) => typeof p === "string" && (!isAbsolute(p) ? !p.split("/").includes("..") : p.startsWith(live.cwd + "/"));
+  if (!raw.every(inside)) throw new ChatError(409, "Some of those changes are outside this project, so they can't be undone here.");
+  const files = raw.map((p) => rel(p, live.cwd));
+  return { ok: true, files, insertions: Number(r?.insertions) || 0, deletions: Number(r?.deletions) || 0 };
+}
+
+/** The chat's menu actions: stop the turn, or change the model, permission mode or effort of its claude process.
+ *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo). */
+export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
+  if (action === "files") return { ok: true, files: await fileMentions(id, value) };
+  if (action === "stop_task") return stopTask(id, value);
+  if (action === "rewind_preview" || action === "rewind") return rewindFiles(id, value, action === "rewind_preview");
   if (action === "interrupt" && !procs.has(id)) throw new ChatError(409, "Claude is not running");
   const live = await liveFor(id);
   switch (action) {

@@ -79,6 +79,16 @@ check(
   [{ kind: "tool", text: "A background task finished" }],
 );
 check("helper message to Claude is skipped", transcriptEvents([user('<agent-message from="helper">done</agent-message>')], cwd), []);
+check(
+  "compaction line: one quiet line",
+  transcriptEvents([JSON.stringify({ type: "system", subtype: "compact_boundary", compactMetadata: {} })], cwd),
+  [{ kind: "tool", text: "Conversation compacted to save space" }],
+);
+check(
+  "other system lines (a retry) are skipped",
+  transcriptEvents([JSON.stringify({ type: "system", subtype: "api_retry", attempt: 1 })], cwd),
+  [],
+);
 
 if (failures > 0) {
   console.log(`\n${failures} check(s) failed`);

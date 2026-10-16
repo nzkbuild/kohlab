@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, Copy, Paperclip, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import { api } from "../api";
+import { api, type ChatUsage, type ChatUsageWindow } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
 import { announce } from "../lib/announce";
 import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
@@ -138,8 +138,8 @@ interface ModelInfo {
 /** The footer's quiet menu buttons. */
 const FOOT_BTN = "min-w-0 truncate rounded-full px-2.5 py-1 text-xs text-text-muted hover:bg-surface-hover hover:text-text-primary";
 
-/** The working line: a pulsing dot, the current action, how long the turn has run, and background tasks. The timer ticks only while this line is shown. */
-function WorkingLine({ action, since, background }: { action: string; since: number | null; background: number }) {
+/** The working line: a pulsing dot, the current action, how long the turn has run, and background tasks (a button that opens their list). The timer ticks only while this line is shown. */
+function WorkingLine({ action, since, background, tasksOpen, onTasks }: { action: string; since: number | null; background: number; tasksOpen: boolean; onTasks: () => void }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 1000);
@@ -151,8 +151,105 @@ function WorkingLine({ action, since, background }: { action: string; since: num
       <span className="shimmer-text min-w-0">{action}</span>
       {/* aria-hidden: the timer changes every second and must not be read out */}
       {since !== null ? <span aria-hidden="true" className="tabular-nums text-text-faint">{formatElapsed(now - since)}</span> : null}
-      {background > 0 ? <span>· {background} in background</span> : null}
+      {background > 0 ? (
+        <button type="button" aria-expanded={tasksOpen} onClick={onTasks} className="rounded px-1 hover:bg-surface-hover hover:text-text-primary">
+          · {background} in background
+        </button>
+      ) : null}
     </p>
+  );
+}
+
+/** A background task the CLI runs: its id (to stop it), its kind and what it does. */
+interface BgTask {
+  id: string;
+  type: string;
+  description: string;
+}
+
+/** The background tasks, each with a Stop. Opened from the "in background" text. */
+function TaskList({ tasks, stopping, onStop }: { tasks: BgTask[]; stopping: string | null; onStop: (id: string) => void }) {
+  return (
+    <ul aria-label="Background tasks" className="flex flex-col gap-1 pl-5 text-[13px] text-text-muted">
+      {tasks.map((t) => (
+        <li key={t.id} className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate">{t.description || "A background task"}</span>
+          <Button
+            variant="quiet"
+            size="sm"
+            className="text-[12px] text-text-secondary"
+            disabled={stopping !== null}
+            aria-label={`Stop ${t.description || "background task"}`}
+            onClick={() => onStop(t.id)}
+          >
+            Stop
+          </Button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** "Fri, 7:00 AM": when a plan limit resets, in this device's time. Empty when the time is not known. */
+function resetText(iso: string | null): string {
+  const d = iso ? new Date(iso) : null;
+  return d && !Number.isNaN(d.getTime()) ? d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
+}
+
+/** The footer's usage panel: the context window in use, and the plan's limits when the CLI reports them. */
+function UsagePanel({ usage }: { usage: ChatUsage }) {
+  const rows: string[] = [];
+  if (usage.context) {
+    rows.push(`Context: ${usage.context.used.toLocaleString()} of ${usage.context.limit.toLocaleString()} tokens used (${usage.context.percent}%)`);
+  }
+  const planRow = (label: string, w: ChatUsageWindow | null) => {
+    if (!w) return;
+    const reset = resetText(w.resetsAt);
+    rows.push(`${label} ${w.percent}%${reset ? ` · resets ${reset}` : ""}`);
+  };
+  if (usage.plan) {
+    planRow("5-hour limit", usage.plan.fiveHour);
+    planRow("Week", usage.plan.week);
+  }
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 rounded-2xl bg-surface-raised px-4 py-3 text-[13px] text-text-secondary">
+      <ul className="flex flex-col gap-1">
+        {rows.map((r) => (
+          <li key={r}>{r}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** A menu of options the arrow keys move through, and a press picks: the "/" commands and the "@" files. */
+interface PickOption {
+  key: string;
+  title: ReactNode;
+  detail?: string;
+}
+function PickList({ id, label, options, active, onPick }: { id: string; label: string; options: PickOption[]; active: number; onPick: (i: number) => void }) {
+  return (
+    <ul id={id} role="listbox" aria-label={label} className="mb-2 max-h-80 overflow-y-auto rounded-2xl bg-surface-raised p-1">
+      {options.map((o, i) => (
+        <li
+          key={o.key}
+          id={`${id}-opt-${i}`}
+          role="option"
+          aria-selected={i === active}
+          // a pointer press picks the option without taking focus from the composer
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onPick(i);
+          }}
+          className={cn("flex cursor-pointer flex-col rounded-xl px-3 py-2", i === active && "bg-surface-hover")}
+        >
+          <span className="text-[14px] text-text-primary">{o.title}</span>
+          {o.detail ? <span className="truncate text-xs text-text-muted">{o.detail}</span> : null}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -438,7 +535,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const [busy, setBusy] = useState(false);
   // When the current turn started (ms), whoever started it; background tasks still running; the model and mode the CLI reports.
   const [busySince, setBusySince] = useState<number | null>(null);
-  const [background, setBackground] = useState(0);
+  const [tasks, setTasks] = useState<BgTask[]>([]);
+  const background = tasks.length;
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [stopping, setStopping] = useState<string | null>(null);
+  // The CLI is retrying a request: which try, of how many. And the footer's usage, read when the last turn ended.
+  const [retry, setRetry] = useState<{ attempt: number; max: number } | null>(null);
+  const [usage, setUsage] = useState<ChatUsage | null>(null);
+  const [usageOpen, setUsageOpen] = useState(false);
+  // Undo: the newest message's id while its files are being checked, and the list the person is asked to confirm.
+  const [rewindBusy, setRewindBusy] = useState(false);
+  const [rewindPlan, setRewindPlan] = useState<{ uuid: string; files: string[]; insertions: number; deletions: number } | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [mode, setMode] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<string | null>(null);
@@ -449,6 +556,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The "/" menu: which command is highlighted, and whether Esc closed it for this text.
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashShut, setSlashShut] = useState(false);
+  // The "@" menu: Esc closes it for this text.
+  const [mentionShut, setMentionShut] = useState(false);
   // Scrolled up from the newest message: the "Scroll to latest" button shows.
   const [farFromEnd, setFarFromEnd] = useState(false);
   // Whether the project's terminal Claude is open: sending from here closes it.
@@ -514,7 +623,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         // elapsed on the server's clock, moved onto this device's; kept steady across polls
         const start = res.busySince === null ? null : Date.now() - (res.now - res.busySince);
         setBusySince((prev) => (prev !== null && start !== null && Math.abs(prev - start) < 2000 ? prev : start));
-        setBackground(res.background);
+        setTasks(res.tasks);
+        setRetry(res.retry);
+        setUsage(res.usage);
         setModel(res.model);
         setMode(res.mode);
         setWaiting(res.waiting);
@@ -545,6 +656,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   }, [workspaceId, kick]);
 
   const repoll = () => setKick((k) => k + 1);
+
+  // The task list closes itself when the last task is gone.
+  useEffect(() => {
+    if (tasks.length === 0) setTasksOpen(false);
+  }, [tasks.length]);
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -782,8 +898,47 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const slashOn = slashMatches.length > 0;
   const slashActive = Math.max(0, Math.min(slashIndex, slashMatches.length - 1));
   useEffect(() => {
-    if (slashOn) document.getElementById(`slash-opt-${slashActive}`)?.scrollIntoView({ block: "nearest" });
+    if (slashOn) document.getElementById(`slash-menu-opt-${slashActive}`)?.scrollIntoView({ block: "nearest" });
   }, [slashOn, slashActive]);
+
+  // The "@" menu: an "@" that starts a word at the end of the text, with no space after it yet. Files come from the CLI, 150 ms after the last key.
+  // ponytail: only at the end of the text; a mention in the middle is typed as plain text. Upgrade path: read the caret position.
+  const mentionMatch = /(?:^|\s)@(\S*)$/.exec(draft);
+  const mentionQuery = mentionMatch && !slashOn && !mentionShut ? mentionMatch[1] : null;
+  const [mentionFiles, setMentionFiles] = useState<string[]>([]);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setMentionFiles([]);
+      return;
+    }
+    let alive = true;
+    const t = window.setTimeout(() => {
+      api
+        .chatControl(workspaceId, "files", mentionQuery)
+        .then((r) => {
+          if (!alive) return;
+          setMentionFiles(r.files ?? []);
+          setMentionIndex(0);
+        })
+        .catch(() => {
+          if (alive) setMentionFiles([]);
+        });
+    }, 150);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [mentionQuery, workspaceId]);
+  const mentionOn = mentionQuery !== null && mentionFiles.length > 0;
+  const mentionActive = Math.max(0, Math.min(mentionIndex, mentionFiles.length - 1));
+
+  /** Puts a picked file in the composer as "@path ", in place of the "@" being typed. */
+  const pickFile = (path: string) => {
+    setDraft((d) => d.replace(/@(\S*)$/, () => `@${path} `));
+    setMentionFiles([]);
+    taRef.current?.focus();
+  };
 
   /** Puts a picked command in the composer, ready for its details. */
   const pickCommand = (c: CommandInfo) => {
@@ -792,6 +947,24 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOn && !e.nativeEvent.isComposing) {
+      const n = mentionFiles.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        pickFile(mentionFiles[mentionActive]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionShut(true);
+        return;
+      }
+    }
     if (slashOn && !e.nativeEvent.isComposing) {
       const n = slashMatches.length;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -859,7 +1032,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The line under the last message: the newest tool line of this turn if the code has one, else "Working".
   const lastUserAllN = Math.max(0, ...events.filter((e) => e.kind === "user").map((e) => e.n));
   const latestTool = [...events].reverse().find((e): e is ToolEvent => e.kind === "tool" && e.n > lastUserAllN);
-  const currentAction = latestTool ? workingLine(latestTool.text) : "Working";
+  // While the CLI retries a failed request, the working line says which try it is on.
+  const currentAction = retry ? `Retrying (attempt ${retry.attempt}${retry.max ? ` of ${retry.max}` : ""})…` : latestTool ? workingLine(latestTool.text) : "Working";
 
   // Keep / Undo only while the AI's changes are waiting to be kept or undone.
   const ws = findWorkspace(workspaces, workspaceId);
@@ -913,12 +1087,61 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  /** Stops one background task the CLI runs. */
+  const stopTask = async (taskId: string) => {
+    setStopping(taskId);
+    try {
+      await api.chatControl(workspaceId, "stop_task", taskId);
+      announce("Task stopped");
+    } catch (e) {
+      toast.error(`Could not stop that, ${(e as Error).message}`);
+    } finally {
+      setStopping(null);
+      repoll();
+    }
+  };
+
+  /** Undo, step 1: which files Claude changed since this message. None: say so. Otherwise the list to confirm. */
+  const previewUndo = async (uuid: string) => {
+    setRewindBusy(true);
+    try {
+      const r = await api.chatControl(workspaceId, "rewind_preview", uuid);
+      const files = r.files ?? [];
+      if (files.length === 0) toast("No files changed since that message");
+      else setRewindPlan({ uuid, files, insertions: r.insertions ?? 0, deletions: r.deletions ?? 0 });
+    } catch (e) {
+      toast.error(`Could not undo, ${(e as Error).message}`);
+    } finally {
+      setRewindBusy(false);
+    }
+  };
+
+  /** Undo, step 2: put the files back as they were before the message. */
+  const confirmRewind = async () => {
+    if (!rewindPlan) return;
+    setRewindBusy(true);
+    try {
+      await api.chatControl(workspaceId, "rewind", rewindPlan.uuid);
+      const n = rewindPlan.files.length;
+      toast.success(`Undid changes to ${n} ${n === 1 ? "file" : "files"}`);
+      await refresh();
+    } catch (e) {
+      toast.error(`Could not undo, ${(e as Error).message}`);
+    } finally {
+      setRewindBusy(false);
+      setRewindPlan(null);
+    }
+  };
+
   const renderEvent = (e: ChatEvent) => {
     switch (e.kind) {
       case "user": {
         const { body, files } = splitAttached(e.text);
+        // Undo only for the newest message, and only once it has an id (a terminal's imported history has none).
+        const uuid = e.uuid;
+        const undoable = uuid !== undefined && e.n === lastUserAllN && !busy && waiting === null && can;
         return (
-          <div className="flex justify-end" data-turn-start={e.n === lastUserN ? "" : undefined}>
+          <div className="flex flex-col items-end gap-1" data-turn-start={e.n === lastUserN ? "" : undefined}>
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-[15px] leading-6 text-text-primary max-md:text-base">
               {body}
               {files.length > 0 ? (
@@ -932,6 +1155,20 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </ul>
               ) : null}
             </div>
+            {undoable ? (
+              <Button
+                variant="quiet"
+                size="sm"
+                className="text-[13px] text-text-secondary"
+                disabled={rewindBusy}
+                onClick={() => {
+                  if (uuid) void previewUndo(uuid);
+                }}
+              >
+                <ArrowCounterClockwise size={14} aria-hidden="true" />
+                Undo these changes
+              </Button>
+            ) : null}
           </div>
         );
       }
@@ -1086,13 +1323,21 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               </div>
             </div>
               ) : null}
-              {working ? <WorkingLine action={currentAction} since={busySince} background={background} /> : null}
+              {working ? (
+                <WorkingLine action={currentAction} since={busySince} background={background} tasksOpen={tasksOpen} onTasks={() => setTasksOpen((o) => !o)} />
+              ) : null}
               {!busy && background > 0 ? (
-                <p className="flex items-center gap-2 text-[14px] text-text-muted">
+                <button
+                  type="button"
+                  aria-expanded={tasksOpen}
+                  onClick={() => setTasksOpen((o) => !o)}
+                  className="flex min-h-11 items-center gap-2 rounded-lg px-1 text-left text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
+                >
                   <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
                   {background === 1 ? "1 task still running in the background" : `${background} tasks still running in the background`}
-                </p>
+                </button>
               ) : null}
+              {tasksOpen && background > 0 ? <TaskList tasks={tasks} stopping={stopping} onStop={(id) => void stopTask(id)} /> : null}
             </div>
           </div>
           {/* A subtle fade under the tab bar, so scrolled text does not hit the edge. */}
@@ -1154,28 +1399,31 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </p>
               ) : null}
               {slashOn ? (
-                <ul id="slash-menu" role="listbox" aria-label="Commands" className="mb-2 max-h-80 overflow-y-auto rounded-2xl bg-surface-raised p-1">
-                  {slashMatches.map((c, i) => (
-                    <li
-                      key={c.name}
-                      id={`slash-opt-${i}`}
-                      role="option"
-                      aria-selected={i === slashActive}
-                      // a pointer press picks the command without taking focus from the composer
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        pickCommand(c);
-                      }}
-                      className={cn("flex cursor-pointer flex-col rounded-xl px-3 py-2", i === slashActive && "bg-surface-hover")}
-                    >
-                      <span className="text-[14px] text-text-primary">
+                <PickList
+                  id="slash-menu"
+                  label="Commands"
+                  active={slashActive}
+                  onPick={(i) => pickCommand(slashMatches[i])}
+                  options={slashMatches.map((c) => ({
+                    key: c.name,
+                    title: (
+                      <>
                         /{c.name}
                         {c.argumentHint ? <span className="text-text-muted"> {c.argumentHint}</span> : null}
-                      </span>
-                      {c.description ? <span className="truncate text-xs text-text-muted">{c.description}</span> : null}
-                    </li>
-                  ))}
-                </ul>
+                      </>
+                    ),
+                    detail: c.description || undefined,
+                  }))}
+                />
+              ) : null}
+              {mentionOn ? (
+                <PickList
+                  id="mention-menu"
+                  label="Files"
+                  active={mentionActive}
+                  onPick={(i) => pickFile(mentionFiles[i])}
+                  options={mentionFiles.map((p) => ({ key: p, title: p }))}
+                />
               ) : null}
               <div
                 className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5"
@@ -1218,13 +1466,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   disabled={waiting !== null}
                   placeholder={placeholder}
                   aria-autocomplete="list"
-                  aria-expanded={slashOn}
-                  aria-controls={slashOn ? "slash-menu" : undefined}
-                  aria-activedescendant={slashOn ? `slash-opt-${slashActive}` : undefined}
+                  aria-expanded={slashOn || mentionOn}
+                  aria-controls={slashOn ? "slash-menu" : mentionOn ? "mention-menu" : undefined}
+                  aria-activedescendant={slashOn ? `slash-menu-opt-${slashActive}` : mentionOn ? `mention-menu-opt-${mentionActive}` : undefined}
                   onChange={(e) => {
                     setDraft(e.target.value);
                     setSlashIndex(0);
                     setSlashShut(false);
+                    setMentionShut(false);
                   }}
                   onKeyDown={onKeyDown}
                   onPaste={(e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1301,13 +1550,49 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       </MenuRadioGroup>
                     </Menu>
                   ) : null}
+                  {usage?.context ? (
+                    <button type="button" aria-expanded={usageOpen} onClick={() => setUsageOpen((o) => !o)} className={FOOT_BTN}>
+                      <span className="hidden md:inline">Context</span> {usage.context.percent}%
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
+              {usageOpen && usage ? <UsagePanel usage={usage} /> : null}
             </div>
           </div>
         ) : null}
       </div>
 
+      <ConfirmDialog
+        open={rewindPlan !== null}
+        onOpenChange={(v) => {
+          if (!v) setRewindPlan(null);
+        }}
+        title="Undo these changes?"
+        description={
+          rewindPlan
+            ? `Claude changed ${rewindPlan.files.length} ${rewindPlan.files.length === 1 ? "file" : "files"} since that message. They go back to how they were before it.`
+            : ""
+        }
+        details={
+          rewindPlan ? (
+            <>
+              <ul className="mono flex flex-col gap-0.5 break-all">
+                {rewindPlan.files.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+              <p className="mt-1">
+                {rewindPlan.insertions} lines added, {rewindPlan.deletions} removed
+              </p>
+            </>
+          ) : null
+        }
+        confirmLabel="Undo"
+        tone="danger"
+        busy={rewindBusy}
+        onConfirm={() => void confirmRewind()}
+      />
       <ConfirmDialog
         open={confirmUndo}
         onOpenChange={(v) => {

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Dialog } from "./ui";
 import { CheckCircle, Warning } from "@phosphor-icons/react";
 import { cn } from "../lib/utils";
@@ -8,6 +9,8 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   title: string;
   description: string;
+  /** Optional detail under the description, such as a list of files. Kept out of the description paragraph. */
+  details?: ReactNode;
   confirmLabel?: string;
   busy?: boolean;
   /** `danger` destroys something (delete, discard, revoke). `commit` is final but
@@ -32,6 +35,7 @@ export default function ConfirmDialog({
   onOpenChange,
   title,
   description,
+  details,
   confirmLabel = "delete",
   busy = false,
   tone = "danger",
@@ -60,6 +64,7 @@ export default function ConfirmDialog({
               <Dialog.Description className="mt-1 text-xs leading-5 text-text-muted">
                 {description}
               </Dialog.Description>
+              {details ? <div className="mt-2 max-h-48 overflow-y-auto text-xs text-text-secondary">{details}</div> : null}
             </div>
           </div>
 

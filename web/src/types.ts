@@ -30,7 +30,7 @@ export interface Workspace {
 
 /** One entry in a chat workspace's conversation. `n` is the sequence number used for polling. */
 export type ChatEvent = { n: number; at: number } & (
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; uuid?: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string }
   | { kind: "ask"; requestId: string; text: string; why?: string; detail?: string }

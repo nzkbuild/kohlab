@@ -303,10 +303,10 @@ async function shareId(req: Request): Promise<string | null> {
 }
 
 /** Chat workspaces: the task is the first chat message, sent once the workspace exists. */
-async function handleChatGet(id: string, req: Request): Promise<Response> {
+async function handleChatGet(id: string, req: Request, see: { usage: boolean; owner: boolean }): Promise<Response> {
   try {
     const after = Math.max(0, Number(new URL(req.url).searchParams.get("after")) || 0);
-    return json(await chatSnapshot(id, after));
+    return json(await chatSnapshot(id, after, see));
   } catch (e) {
     return json({ error: (e as Error).message }, e instanceof ChatError ? e.status : 400);
   }
@@ -315,18 +315,20 @@ async function handleChatGet(id: string, req: Request): Promise<Response> {
 async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined): Promise<Response> {
   try {
     const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown };
+    // a control action may answer with data (the files, the undo list): it is sent back as it is
+    let reply: Record<string, unknown> = { ok: true };
     if (sub === "/answer") {
       if (typeof body.requestId !== "string" || typeof body.allow !== "boolean") return json({ error: "requestId and allow are required" }, 400);
       containFailure(audit(actor, "chat.answer", id), "audit");
       await answerChat(id, body.requestId, body.allow);
     } else if (sub === "/control") {
       containFailure(audit(actor, "chat.control", id), "audit");
-      await chatControl(id, body.action, body.value);
+      reply = await chatControl(id, body.action, body.value);
     } else {
       containFailure(audit(actor, "chat", id), "audit");
       await sendChat(id, typeof body.text === "string" ? body.text : "");
     }
-    return json({ ok: true });
+    return json(reply);
   } catch (e) {
     return json({ error: (e as Error).message }, e instanceof ChatError ? e.status : 400);
   }
@@ -1267,7 +1269,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, chatId))) return json({ error: "forbidden, not your workspace" }, 403);
       if (req.method === "GET" && !sub) {
         if (denied) return json({ error: "unauthorized" }, 401);
-        return handleChatGet(chatId, req);
+        return handleChatGet(chatId, req, { usage: canMutate, owner: isOwner });
       }
       if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
