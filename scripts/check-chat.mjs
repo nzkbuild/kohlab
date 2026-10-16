@@ -6,7 +6,10 @@
  *
  * Run:  bun scripts/check-chat.mjs
  */
-import { describeAsk, describeTool, friendlyError, noticeText, usageOf } from "../chat.ts";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describeAsk, describeTool, friendlyError, noticeText, readCapsFile, usageOf, writeCapsFile } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -75,6 +78,30 @@ check("plan: a window the CLI leaves out is null", used.plan.week, null);
 check("plan: subscription name", used.plan.subscription, "pro");
 check("no plan limits: plan is null", usageOf({ totalTokens: 1, maxTokens: 10 }, { rate_limits_available: false }).plan, null);
 check("no context size: context is null", usageOf({}, {}).context, null);
+
+// the menus and settings kept across a restart (chats/<id>.caps.json)
+const dir = mkdtempSync(join(tmpdir(), "caps-check-"));
+try {
+  const file = join(dir, "x.caps.json");
+  const saved = {
+    commands: [{ name: "review", description: "Review", argumentHint: "" }],
+    models: [{ value: "sonnet", displayName: "Sonnet", description: "", supportedEffortLevels: ["low"] }],
+    model: "sonnet",
+    mode: "acceptEdits",
+  };
+  writeCapsFile(file, { ...saved, savedAt: 1 });
+  check("caps round trip: what was saved is read back", readCapsFile(file), saved);
+  check("caps file is private (0600)", statSync(file).mode & 0o777, 0o600);
+  check("caps file: a missing file reads as nothing", readCapsFile(join(dir, "none.caps.json")), null);
+  writeFileSync(file, "{not json");
+  check("caps file: a corrupt file reads as nothing", readCapsFile(file), null);
+  writeFileSync(file, "5");
+  check("caps file: a non-object reads as nothing", readCapsFile(file), null);
+  writeFileSync(file, JSON.stringify({ commands: "x", models: [{ value: 3 }], model: 4 }));
+  check("caps file: wrong shapes are dropped, not crashed on", readCapsFile(file), { commands: [], models: [], model: null, mode: null });
+} finally {
+  rmSync(dir, { recursive: true, force: true });
+}
 
 if (failures) {
   console.log(`\n${failures} failed`);

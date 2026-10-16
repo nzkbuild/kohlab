@@ -47,6 +47,8 @@ export interface Workspace {
   model?: "opus" | "sonnet" | "haiku";
   /** Claude effort level chosen in the chat; re-applied when its process restarts. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
+/** Permission mode the person picked in the chat, passed to claude when it starts. Undefined = "default" for a chat, the project's own settings for a terminal. */
+permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk";
 }
 
 export interface WorkspaceLimits {

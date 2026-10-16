@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.52.2] - 2026-10-16
+
+### Fixed
+- After an update or restart, the chat remembers each project's commands, models and mode, so the message box is ready at once instead of greyed out until your next message.
+- You can pick a model or mode before Claude has started; it is used the next time Claude starts, and a mode you pick is remembered across restarts.
+- Simple chat projects no longer show "Loading commands…" when you type /.
+
 ## [1.52.1] - 2026-10-16
 
 ### Changed

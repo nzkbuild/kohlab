@@ -131,6 +131,8 @@ export const api = {
       terminalOpen?: boolean;
       /** the current effort level, when one was set in this process */
       effort: string | null;
+      /** false for a clean chat, which runs without slash commands: no "/" menu */
+      commandsEnabled: boolean;
       /** slash commands the CLI offers (at most 200) */
       commands: { name: string; description: string; argumentHint: string }[];
       /** models the CLI offers, with the effort levels each supports */

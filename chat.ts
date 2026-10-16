@@ -8,10 +8,10 @@
  * flight at restart is lost. Upgrade path: host it in the PTY daemon.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import type { Workspace } from "./types";
 import { notifyNeedsYou } from "./push";
@@ -226,11 +226,14 @@ export interface Usage {
   plan: { subscription: string | null; fiveHour: UsageWindow | null; week: UsageWindow | null } | null;
 }
 
-/** What the CLI says it can do, for the chat's menus. In memory only, kept after the process exits. */
-interface Caps {
+/** What the CLI says it can do, for the chat's menus. Kept after the process exits, and in chats/<id>.caps.json across restarts. */
+export interface Caps {
   commands: { name: string; description: string; argumentHint: string }[];
   models: { value: string; displayName: string; description: string; supportedEffortLevels: string[] }[];
 }
+
+/** chats/<id>.caps.json: the menus, and the model and mode last seen, so a restarted server can show them before Claude starts. */
+export type CapsFile = Caps & { model: string | null; mode: string | null; savedAt?: number };
 
 interface Chat {
   events: ChatEvent[];
@@ -292,6 +295,7 @@ function ask(live: Live, request: Record<string, unknown>, requestId = `ctl-${++
 const chatsDir = () => join(WORKS_DIR, "chats");
 const transcriptPath = (id: string) => join(chatsDir(), `${id}.jsonl`);
 const cursorPath = (id: string) => join(chatsDir(), `${id}.cursor.json`);
+const capsPath = (id: string) => join(chatsDir(), `${id}.caps.json`);
 /** A terminal project's first import reads at most this many bytes of Claude's transcript, and shows its last FIRST_IMPORT events. */
 const TAIL_BYTES = 8 * 1024 * 1024;
 const FIRST_IMPORT = 300;
@@ -314,6 +318,44 @@ function readCursor(id: string): { sid: string; offset: number } | null {
 function writeCursor(id: string, sid: string, offset: number) {
   mkdirSync(chatsDir(), { recursive: true, mode: 0o700 });
   writeFileSync(cursorPath(id), JSON.stringify({ sid, offset }), { mode: 0o600 });
+}
+
+/** A caps file's contents, or null when it is missing or corrupt. Never throws. */
+export function readCapsFile(file: string): Omit<CapsFile, "savedAt"> | null {
+  try {
+    // never through a link, though only root writes this folder
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let j: any;
+    try {
+      j = JSON.parse(readFileSync(fd, "utf8"));
+    } finally {
+      closeSync(fd);
+    }
+    if (!j || typeof j !== "object") return null;
+    return {
+      commands: commandList(j.commands),
+      models: modelList(j.models),
+      model: typeof j.model === "string" ? j.model : null,
+      mode: typeof j.mode === "string" && MODES.includes(j.mode) ? j.mode : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Writes a caps file atomically: a temp file beside it, then a rename, so a crash never leaves half a file. */
+export function writeCapsFile(file: string, data: CapsFile): void {
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+  // temp files left by a crash mid-write
+  for (const f of readdirSync(dirname(file))) if (f.startsWith(`${basename(file)}.`) && f.endsWith(".tmp")) rmSync(join(dirname(file), f), { force: true });
 }
 
 /** The one-line note for a finished background task, from its <task-notification> text. */
@@ -516,6 +558,37 @@ function persistSession(id: string, sid: string) {
 
 /** The model and mode last reported per project: kept after the process exits, so the footer stays between turns. */
 const lastSeen = new Map<string, { model: string | null; mode: string | null }>();
+/** Projects whose caps file has been looked at since this server started. */
+const capsLoaded = new Set<string>();
+/** The content last saved (or loaded) per project, so an unchanged caps file is not rewritten. */
+const capsSaved = new Map<string, string>();
+
+/** After a restart: the menus and settings last saved for a project, until its Claude reports again. Looked at once per project; never overwrites what is already known. */
+function loadCaps(id: string): void {
+  if (capsLoaded.has(id)) return;
+  capsLoaded.add(id);
+  const saved = readCapsFile(capsPath(id));
+  if (!saved || caps.has(id) || lastSeen.has(id)) return;
+  caps.set(id, { commands: saved.commands, models: saved.models });
+  lastSeen.set(id, { model: saved.model, mode: saved.mode });
+  capsSaved.set(id, JSON.stringify(saved));
+}
+
+/** Saves the menus and settings when they differ from the file. Never throws: a failed save must not stop the chat. */
+function persistCaps(id: string): void {
+  const c = caps.get(id);
+  const s = lastSeen.get(id);
+  const body = { commands: c?.commands ?? [], models: c?.models ?? [], model: s?.model ?? null, mode: s?.mode ?? null };
+  const key = JSON.stringify(body);
+  if (capsSaved.get(id) === key) return;
+  capsSaved.set(id, key);
+  try {
+    writeCapsFile(capsPath(id), { ...body, savedAt: Date.now() });
+  } catch (e) {
+    capsSaved.delete(id);
+    console.warn(`[chat] caps save: ${(e as Error).message}`);
+  }
+}
 
 /** A line that opens a turn. Only the opening lines count: a stream_event or assistant line can trail a result, and would leave the chat stuck working. */
 function isTurnStart(m: any): boolean {
@@ -560,6 +633,7 @@ function onLine(id: string, live: Live, line: string) {
   }
   if (m.type === "system" && m.subtype === "commands_changed") {
     capsOf(id).commands = commandList(m.commands);
+    persistCaps(id);
     return;
   }
   if (m.type === "control_response") {
@@ -568,6 +642,7 @@ function onLine(id: string, live: Live, line: string) {
       const c = capsOf(id);
       c.commands = commandList(r.response?.commands);
       c.models = modelList(r.response?.models);
+      persistCaps(id);
     }
     const waiting = live.pending.get(r.request_id);
     if (waiting) {
@@ -583,6 +658,7 @@ function onLine(id: string, live: Live, line: string) {
     if (typeof m.model === "string") live.model = m.model;
     if (typeof m.permissionMode === "string") live.mode = m.permissionMode;
     lastSeen.set(id, { model: live.model, mode: live.mode });
+    persistCaps(id);
     if (typeof m.session_id === "string") {
       live.sid = m.session_id;
       persistSession(id, m.session_id);
@@ -686,6 +762,7 @@ async function retryFresh(id: string, msg: string) {
 }
 
 async function start(ws: Workspace, id: string): Promise<Live> {
+  loadCaps(id); // before the new process can save over the file
   const s = await loadState();
   const cmd = (s.agents?.claude || "claude").split(/\s+/)[0];
   const bin = Bun.which(cmd);
@@ -698,8 +775,11 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   // CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies.
   // --include-partial-messages streams Claude's reply as it is written (stream_event lines). --model only when the project chose one; otherwise the account default.
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"];
-  // A terminal project's chat keeps the person's own permission mode from their settings, as their terminal does. Chat users get "default".
-  if (!term) args.push("--permission-mode", "default", "--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
+  // The mode the person picked in the chat. Otherwise a terminal project keeps its own settings, as its terminal does, and chat users get "default".
+  const picked = MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined;
+  const mode = picked ?? (term ? undefined : "default");
+  if (mode) args.push("--permission-mode", mode);
+  if (!term) args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
   // strict: only our browser tools load, never the user's MCP servers
   const mcpFile = writeBrowserMcp(ws, who);
   if (mcpFile) args.push("--mcp-config", mcpFile);
@@ -761,6 +841,7 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
   if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  loadCaps(id);
   if (term) await syncFromTerminal(ws);
   const events = load(id).events.filter((e) => e.n > after);
   const live = procs.get(id);
@@ -775,10 +856,12 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     tasks: live?.tasks ?? [],
     retry: live?.retry ?? null,
     usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
-    model: live?.model ?? lastSeen.get(id)?.model ?? null,
-    mode: live?.mode ?? lastSeen.get(id)?.mode ?? null,
+    // one rule: a live process, else the project's saved choice, else what was last seen
+    model: live?.model ?? ws.model ?? lastSeen.get(id)?.model ?? null,
+    mode: live?.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined) ?? lastSeen.get(id)?.mode ?? null,
     effort: live?.effort ?? ws.effort ?? null,
     // clean chats run with --disable-slash-commands: they get no "/" menu
+    commandsEnabled: term,
     commands: term ? (caps.get(id)?.commands ?? []).slice(0, 200) : [],
     models: caps.get(id)?.models ?? [],
     waiting: live?.asks.keys().next().value ?? null,
@@ -920,12 +1003,91 @@ async function rewindFiles(id: string, value: unknown, dryRun: boolean): Promise
   return { ok: true, files, insertions: Number(r?.insertions) || 0, deletions: Number(r?.deletions) || 0 };
 }
 
-/** The chat's menu actions: stop the turn, or change the model, permission mode or effort of its claude process.
+/** A model, mode or effort change. With a live process it goes to that process. With none, it is saved and the next start uses it. */
+async function setting(id: string, action: "model" | "mode" | "effort", value: unknown): Promise<void> {
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  loadCaps(id);
+  const live = procs.get(id);
+  if (live) await live.ready;
+  switch (action) {
+    case "model": {
+      const models = capsOf(id).models;
+      const picked = parseModel(value);
+      if (live) {
+        const known = value === "default" || models.some((m) => m.value === value);
+        if (!known) throw new ChatError(400, "unknown model");
+        await ask(live, { subtype: "set_model", model: value });
+        // "default" shows as chosen until the next init reports the real model
+        live.model = String(value);
+        lastSeen.set(id, { model: live.model, mode: live.mode });
+        const levels = models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
+        const dropEffort = !!live.effort && !levels.includes(live.effort);
+        if (dropEffort) live.effort = undefined;
+        // the three aliases are kept, so a restarted process uses the same model
+        if (picked) {
+          await mutateState((s) => {
+            const w = s.workspaces.find((x) => x.id === id);
+            if (!w) return;
+            w.model = picked === "default" ? undefined : picked;
+            if (dropEffort) w.effort = undefined;
+          });
+        }
+      } else {
+        // no process: only an alias is saved, and a listed model when the list is known
+        const known = picked !== null && (picked === "default" || models.length === 0 || models.some((m) => m.value === value));
+        if (!known) throw new ChatError(400, "unknown model");
+        const levels = models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
+        await mutateState((s) => {
+          const w = s.workspaces.find((x) => x.id === id);
+          if (!w) return;
+          w.model = picked === "default" ? undefined : picked;
+          if (w.effort && !levels.includes(w.effort)) w.effort = undefined;
+        });
+      }
+      break;
+    }
+    case "mode": {
+      if (typeof value !== "string" || !MODES.includes(value)) throw new ChatError(400, "unknown mode");
+      if (live) {
+        await ask(live, { subtype: "set_permission_mode", mode: value });
+        live.mode = value;
+      }
+      // saved on the project, so it survives a restart and applies when Claude next starts
+      await mutateState((s) => {
+        const w = s.workspaces.find((x) => x.id === id);
+        if (w) w.permissionMode = value as Workspace["permissionMode"];
+      });
+      lastSeen.set(id, { model: live ? live.model : (lastSeen.get(id)?.model ?? null), mode: value });
+      break;
+    }
+    case "effort": {
+      if (typeof value !== "string" || !EFFORTS.includes(value)) throw new ChatError(400, "unknown effort level");
+      if (live) {
+        await ask(live, { subtype: "apply_flag_settings", settings: { effortLevel: value } });
+        live.effort = value;
+      }
+      await mutateState((s) => {
+        const w = s.workspaces.find((x) => x.id === id);
+        if (w) w.effort = value as Workspace["effort"];
+      });
+      break;
+    }
+  }
+  persistCaps(id);
+}
+
+/** The chat's menu actions: stop the turn, or change the model, permission mode or effort (saved even with no process running).
  *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo). */
 export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
   if (action === "files") return { ok: true, files: await fileMentions(id, value) };
   if (action === "stop_task") return stopTask(id, value);
   if (action === "rewind_preview" || action === "rewind") return rewindFiles(id, value, action === "rewind_preview");
+  if (action === "model" || action === "mode" || action === "effort") {
+    await setting(id, action, value);
+    return { ok: true };
+  }
   if (action === "interrupt" && !procs.has(id)) throw new ChatError(409, "Claude is not running");
   const live = await liveFor(id);
   switch (action) {
@@ -946,45 +1108,6 @@ export async function chatControl(id: string, action: unknown, value: unknown): 
           finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
         }, 5000);
       }
-      break;
-    }
-    case "model": {
-      const known = value === "default" || capsOf(id).models.some((m) => m.value === value);
-      if (!known) throw new ChatError(400, "unknown model");
-      await ask(live, { subtype: "set_model", model: value });
-      // "default" shows as chosen until the next init reports the real model
-      live.model = String(value);
-      lastSeen.set(id, { model: live.model, mode: live.mode });
-      const levels = capsOf(id).models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
-      const dropEffort = !!live.effort && !levels.includes(live.effort);
-      if (dropEffort) live.effort = undefined;
-      // the three aliases are kept, so a restarted process uses the same model
-      const picked = parseModel(value);
-      if (picked) {
-        await mutateState((s) => {
-          const w = s.workspaces.find((x) => x.id === id);
-          if (!w) return;
-          w.model = picked === "default" ? undefined : picked;
-          if (dropEffort) w.effort = undefined;
-        });
-      }
-      break;
-    }
-    case "mode": {
-      if (typeof value !== "string" || !MODES.includes(value)) throw new ChatError(400, "unknown mode");
-      await ask(live, { subtype: "set_permission_mode", mode: value });
-      live.mode = value;
-      lastSeen.set(id, { model: live.model, mode: live.mode });
-      break;
-    }
-    case "effort": {
-      if (typeof value !== "string" || !EFFORTS.includes(value)) throw new ChatError(400, "unknown effort level");
-      await ask(live, { subtype: "apply_flag_settings", settings: { effortLevel: value } });
-      live.effort = value;
-      await mutateState((s) => {
-        const w = s.workspaces.find((x) => x.id === id);
-        if (w) w.effort = value as Workspace["effort"];
-      });
       break;
     }
     default:

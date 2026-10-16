@@ -549,6 +549,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The effort level set in this Claude, and what the CLI offers: slash commands and models.
   const [effort, setEffort] = useState<string | null>(null);
   const [commands, setCommands] = useState<CommandInfo[]>([]);
+  const [commandsEnabled, setCommandsEnabled] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   // The "/" menu: which command is highlighted, and whether Esc closed it for this text.
   const [slashIndex, setSlashIndex] = useState(0);
@@ -628,6 +629,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         setWaiting(res.waiting);
         setEffort(res.effort);
         setCommands(res.commands);
+        setCommandsEnabled(res.commandsEnabled);
         setModels(res.models);
         setStreamed(res.draft);
         setTerminalOpen(res.terminalOpen ?? false);
@@ -879,7 +881,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   };
 
   // The "/" menu: while the text is a command name with no space yet, the commands that start with it.
-  const slashQuery = draft.startsWith("/") && !/\s/.test(draft) ? draft.slice(1).toLowerCase() : null;
+  const slashQuery = commandsEnabled && draft.startsWith("/") && !/\s/.test(draft) ? draft.slice(1).toLowerCase() : null;
   const slashMatches = slashQuery === null || slashShut ? [] : commands.filter((c) => c.name.toLowerCase().startsWith(slashQuery));
   const slashOn = slashMatches.length > 0;
   // Typing "/" before the command list has loaded: a single row says so.
@@ -1237,7 +1239,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         ? "Claude is working…"
         : isPhone()
           ? "Message Claude"
-          : "Message Claude — / for commands, @ for files";
+          : commandsEnabled ? "Message Claude — / for commands, @ for files" : "Message Claude — @ for files";
   // Stop is the round button only while busy with nothing typed; with text, Send queues it and a quiet Stop sits beside it.
   const hasDraft = draft.trim() !== "" || attachments.length > 0;
 
@@ -1477,6 +1479,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       disabled={waiting !== null || sending || uploading}
                       onClick={() => fileRef.current?.click()}
                     />
+                    {commandsEnabled ? (
                     <ComposerChip
                       label="Commands"
                       className="max-md:hidden"
@@ -1485,6 +1488,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       disabled={commands.length === 0}
                       onClick={openCommands}
                     />
+                    ) : null}
                     <Menu
                       side="top"
                       align="start"
@@ -1525,7 +1529,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       side="top"
                       align="start"
                       label={`Mode: ${modeText}`}
-                      trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu disabled={mode === null} />}
+                      trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu />}
                     >
                       <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
                         {MODE_CHOICES.map((value) => (
