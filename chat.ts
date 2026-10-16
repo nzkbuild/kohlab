@@ -437,7 +437,7 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
   return out;
 }
 
-/** A terminal project: copy the lines the terminal's Claude wrote since the last look into the chat. Never throws. */
+/** A terminal project: copy the lines the terminal's Claude wrote since the last look into the chat. Also runs once for a chat project that switched to an earlier conversation. Never throws. */
 async function syncFromTerminal(ws: Workspace): Promise<void> {
   const sid = ws.chatSession;
   if (chatBusy.has(ws.id) || !sid || !/^[\w-]+$/.test(sid)) return;
@@ -1191,4 +1191,96 @@ export function restoreWaiting(): void {
     const answered = events.slice(lastAsk + 1).some((e) => e.kind === "answer" || e.kind === "done" || e.kind === "error" || e.kind === "user");
     if (!answered) chatWaiting.add(id);
   }
+}
+
+/** How much of an earlier conversation is read to title it, and the title's length. */
+const TITLE_BYTES = 256 * 1024;
+const TITLE_CHARS = 80;
+const MAX_SESSIONS = 30;
+
+/** The first thing the person asked in one conversation file, as a short title; null when it has no message of theirs. Reads at most TITLE_BYTES. */
+function titleOf(file: string, cwd: string): string | null {
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let chunk: Buffer;
+  try {
+    const size = fstatSync(fd).size;
+    chunk = Buffer.alloc(Math.min(size, TITLE_BYTES));
+    const got = readSync(fd, chunk, 0, chunk.length, 0);
+    chunk = chunk.subarray(0, got);
+    if (got < size) chunk = chunk.subarray(0, chunk.lastIndexOf(0x0a) + 1); // a window cut mid-line: its last line is not read
+  } finally {
+    closeSync(fd);
+  }
+  for (const e of transcriptEvents(chunk.toString("utf8").split("\n"), cwd)) {
+    if (e.kind !== "user") continue;
+    const t = e.text.replace(/\s+/g, " ").trim();
+    return t.length > TITLE_CHARS ? `${t.slice(0, TITLE_CHARS)}…` : t;
+  }
+  return null;
+}
+
+/** A Claude project's earlier conversations, newest first, each titled by what the person first asked. Reads only the folder given. Never throws for one bad file. */
+export function listSessions(dir: string, cwd: string): { id: string; title: string; at: number }[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return []; // no folder yet: no earlier conversations
+  }
+  const found: { id: string; title: string; at: number }[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".jsonl")) continue;
+    const id = name.slice(0, -".jsonl".length);
+    if (!/^[\w-]+$/.test(id)) continue;
+    try {
+      const file = join(dir, name);
+      const st = lstatSync(file);
+      if (!st.isFile()) continue; // never follow a link
+      const title = titleOf(file, cwd);
+      if (title !== null) found.push({ id, title, at: st.mtimeMs });
+    } catch (e) {
+      console.warn(`[chat] conversation list: ${(e as Error).message}`); // one bad file is skipped
+    }
+  }
+  return found.sort((a, b) => b.at - a.at).slice(0, MAX_SESSIONS);
+}
+
+/** Claude's folder for a project's conversations: the transcripts of its worktree. */
+function sessionDir(ws: Workspace): string {
+  return dirname(transcriptFile(identityOf(ws)?.home || homedir(), worktreePath(ws), "x"));
+}
+
+/** A Claude project's earlier conversations, and which one is current (null for a new one). */
+export async function sessions(id: string): Promise<{ current: string | null; sessions: { id: string; title: string; at: number }[] }> {
+  const ws = await getWorkspace(id);
+  if (!ws.chat && !(await viaTerminal(ws))) throw new ChatError(400, "not a Claude project");
+  return { current: ws.chatSession ?? null, sessions: listSessions(sessionDir(ws), worktreePath(ws)) };
+}
+
+/** Start a new conversation (sid null), or switch to an earlier one. The chat's file is kept as one backup, and an earlier conversation's last messages are imported. */
+export async function switchSession(id: string, sid: unknown): Promise<void> {
+  if (sid !== null && typeof sid !== "string") throw new ChatError(400, "sid must be a conversation id or null");
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "not a Claude project");
+  if (chatBusy.has(id)) throw new ChatError(409, "Claude is working. Stop it or wait, then try again.");
+  if (term ? await isAlive(ws) : await resumeOpen(id)) throw new ChatError(409, "Claude is open in the terminal. Stop it there first.");
+  if (typeof sid === "string" && !listSessions(sessionDir(ws), worktreePath(ws)).some((s) => s.id === sid)) {
+    throw new ChatError(404, "That conversation was not found.");
+  }
+  if (chatBusy.has(id)) throw new ChatError(409, "Claude is working. Stop it or wait, then try again."); // a send began while we looked
+  stop(id);
+  // one backup of the chat as it was: the person's messages are never deleted outright
+  if (existsSync(transcriptPath(id))) renameSync(transcriptPath(id), `${transcriptPath(id)}.prev`);
+  rmSync(cursorPath(id), { force: true });
+  usages.delete(id);
+  usageAt.delete(id);
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) return;
+    w.chatSession = sid ?? undefined;
+    w.chatReset = Date.now();
+    if (!w.chat) w.resumeInTerminal = sid !== null;
+  });
+  if (typeof sid === "string") await syncFromTerminal(await getWorkspace(id));
 }

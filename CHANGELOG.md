@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.53.0] - 2026-10-16
+
+### Added
+- Conversations: from the project menu you can start a new conversation with Claude, or go back to an earlier one. Each project keeps its past conversations, newest first, named after your first message.
+
 ## [1.52.3] - 2026-10-16
 
 ### Fixed

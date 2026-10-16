@@ -24,6 +24,8 @@ export interface Workspace {
   chatSession?: string;
   /** the conversation last moved on in the chat view, so the terminal's next Claude resumes it. */
   resumeInTerminal?: boolean;
+  /** When the chat switched conversation: the web view remounts on change. */
+  chatReset?: number;
   /** terminal Claude: when its last prompt was submitted (UserPromptSubmit hook); cleared on start. Mid-turn when set and not stopped after it. */
   promptAt?: number;
   /** owner's workspace root under their home; legacy records omit it and live

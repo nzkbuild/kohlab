@@ -22,6 +22,8 @@ export interface Workspace {
   chatSession?: string;
   /** The conversation last moved on in the chat view, so the terminal's next Claude resumes it. */
   resumeInTerminal?: boolean;
+  /** When the chat switched conversation: the web view remounts on change. */
+  chatReset?: number;
   /** From the listing: a chat permission question is pending (unanswered). */
   waiting?: boolean;
   /** Claude model for this project. Undefined = the account default. */

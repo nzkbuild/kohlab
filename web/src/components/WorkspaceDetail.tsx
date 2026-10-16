@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ArrowsClockwise,
   Browser,
+  Check,
+  ChatCircle,
   CaretDown,
   CaretLeft,
   DownloadSimple,
@@ -22,7 +24,7 @@ import { announce } from "../lib/announce";
 import { useApp, useCan } from "../store";
 import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
-import { projectTitle } from "../lib/format";
+import { projectTitle, relativeTime } from "../lib/format";
 import { canContinue } from "../lib/projectActions";
 import { cn } from "../lib/utils";
 import { useDragSize } from "../lib/useDragSize";
@@ -37,6 +39,7 @@ import {
   Menu,
   MenuItem,
   MenuSeparator,
+  MenuSub,
   SkeletonRows,
   Tab,
   TabList,
@@ -99,6 +102,59 @@ const ACTION_DONE: Record<string, string> = {
 };
 
 const TEXT_ENTRY_TAGS: Record<string, true> = { INPUT: true, TEXTAREA: true, SELECT: true };
+
+/** The Conversations submenu: a new conversation, or an earlier one of this project. Loads when it opens. */
+function ConversationItems({ workspaceId, onSwitched }: { workspaceId: string; onSwitched: () => void }) {
+  const refresh = useApp((s) => s.refresh);
+  const [list, setList] = useState<{ current: string | null; sessions: { id: string; title: string; at: number }[] } | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .chatSessions(workspaceId)
+      .then((r) => {
+        if (live) setList(r);
+      })
+      .catch((e: Error) => {
+        if (live) setFailed(e.message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [workspaceId]);
+
+  const pick = async (sid: string | null) => {
+    try {
+      await api.chatSwitch(workspaceId, sid);
+      await refresh();
+      onSwitched();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  if (failed) return <MenuItem disabled>{failed}</MenuItem>;
+  if (!list) return <MenuItem disabled>Loading…</MenuItem>;
+  return (
+    <>
+      <MenuItem onSelect={() => void pick(null)}>
+        <Plus size={16} aria-hidden="true" />
+        New conversation
+      </MenuItem>
+      {list.sessions.length ? <MenuSeparator /> : null}
+      {list.sessions.map((s) => {
+        const current = s.id === list.current;
+        return (
+          <MenuItem key={s.id} disabled={current} onSelect={() => void pick(s.id)}>
+            {current ? <Check size={14} aria-hidden="true" /> : <span className="w-3.5 shrink-0" aria-hidden="true" />}
+            <span className="min-w-0 flex-1 truncate">{s.title}</span>
+            <span className="shrink-0 text-xs text-text-faint">{relativeTime(s.at)}</span>
+          </MenuItem>
+        );
+      })}
+    </>
+  );
+}
 
 /** Focus is busy in a field or a live terminal: bare keys belong there, not to the page. */
 function isTextEntry(target: EventTarget | null): boolean {
@@ -468,6 +524,14 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         Rename
       </MenuItem>
       <MenuSeparator />
+      {(chat || claudeTerminal) && can.mutate ? (
+        <>
+          <MenuSub label="Conversations" icon={<ChatCircle size={16} aria-hidden="true" />}>
+            <ConversationItems workspaceId={workspaceId} onSwitched={() => goTo("chat")} />
+          </MenuSub>
+          <MenuSeparator />
+        </>
+      ) : null}
       <MenuItem onSelect={() => openPanel()}>
         <Terminal size={14} aria-hidden="true" />
         <span className="flex-1">Open terminal</span>
@@ -642,7 +706,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             <TabPanel value="chat" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
               <ErrorBoundary label="Chat">
                 <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
-                  <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} terminalProject={claudeTerminal} />
+                  <ChatView key={`${workspaceId}:${w?.chatReset ?? 0}`} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} terminalProject={claudeTerminal} />
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>

@@ -83,7 +83,7 @@ import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, 
 import { resolvePreviewFile } from "./preview";
 import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, touchBrowser } from "./browser";
 import { stopAllDevServers } from "./devserver";
-import { ChatError, answer as answerChat, chatControl, restoreWaiting, send as sendChat, snapshot as chatSnapshot } from "./chat";
+import { ChatError, answer as answerChat, chatControl, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -302,6 +302,15 @@ async function shareId(req: Request): Promise<string | null> {
   }
 }
 
+/** A Claude project's earlier conversations, for the Conversations menu. */
+async function handleChatSessions(id: string): Promise<Response> {
+  try {
+    return json(await chatSessions(id));
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof ChatError ? e.status : 400);
+  }
+}
+
 /** Chat workspaces: the task is the first chat message, sent once the workspace exists. */
 async function handleChatGet(id: string, req: Request, see: { usage: boolean; owner: boolean }): Promise<Response> {
   try {
@@ -314,7 +323,7 @@ async function handleChatGet(id: string, req: Request, see: { usage: boolean; ow
 
 async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined): Promise<Response> {
   try {
-    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown };
+    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown };
     // a control action may answer with data (the files, the undo list): it is sent back as it is
     let reply: Record<string, unknown> = { ok: true };
     if (sub === "/answer") {
@@ -324,6 +333,9 @@ async function handleChatPost(id: string, req: Request, actor: string, sub: stri
     } else if (sub === "/control") {
       containFailure(audit(actor, "chat.control", id), "audit");
       reply = await chatControl(id, body.action, body.value);
+    } else if (sub === "/session") {
+      containFailure(audit(actor, "chat.session", id), "audit");
+      await switchSession(id, body.sid);
     } else {
       containFailure(audit(actor, "chat", id), "audit");
       await sendChat(id, typeof body.text === "string" ? body.text : "");
@@ -1263,7 +1275,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (server.upgrade(req, upgradeOpts)) return undefined;
     }
 
-    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control)?$/);
+    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control|\/sessions|\/session)?$/);
     if (chatM) {
       const [, chatId, sub] = chatM;
       if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, chatId))) return json({ error: "forbidden, not your workspace" }, 403);
@@ -1271,7 +1283,8 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         if (denied) return json({ error: "unauthorized" }, 401);
         return handleChatGet(chatId, req, { usage: canMutate, owner: isOwner });
       }
-      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      if (req.method === "GET" && sub === "/sessions") return handleChatSessions(chatId);
+      if (req.method !== "POST" || sub === "/sessions") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
       return handleChatPost(chatId, req, actor, sub);

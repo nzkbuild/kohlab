@@ -138,6 +138,16 @@ export const api = {
       /** models the CLI offers, with the effort levels each supports */
       models: { value: string; displayName: string; description: string; supportedEffortLevels: string[] }[];
     }>(`/api/workspaces/${encodeURIComponent(id)}/chat?after=${after}`),
+  /** The project's earlier conversations, newest first, and which one is current (null for a new one). */
+  chatSessions: (id: string) =>
+    json<{ current: string | null; sessions: { id: string; title: string; at: number }[] }>(`/api/workspaces/${encodeURIComponent(id)}/chat/sessions`),
+  /** Start a new conversation (sid null), or switch to an earlier one by its id. */
+  chatSwitch: (id: string, sid: string | null) =>
+    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sid }),
+    }),
   chatSend: (id: string, text: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat`, {
       method: "POST",

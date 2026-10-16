@@ -2185,6 +2185,7 @@ export async function deleteWorkspace(id: string) {
   await rm(join(WORKS_DIR, "chats", `${id}.jsonl`), { force: true });
   await rm(join(WORKS_DIR, "chats", `${id}.cursor.json`), { force: true });
   await rm(join(WORKS_DIR, "chats", `${id}.caps.json`), { force: true });
+  await rm(join(WORKS_DIR, "chats", `${id}.jsonl.prev`), { force: true });
   // close every named PTY session for this workspace
   const sessions = (await ptyList()) ?? [];
   for (const sess of sessions) {

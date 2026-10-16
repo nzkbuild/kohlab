@@ -465,7 +465,7 @@ function Files({ workspaceId }: Props) {
           <div className="relative min-h-0 flex-1">
             <div className="absolute inset-0">
               <Suspense fallback={null}>
-                <ChatView workspaceId={workspaceId} compact onTurnEnd={refreshAll} />
+                <ChatView key={`${workspaceId}:${workspace?.chatReset ?? 0}`} workspaceId={workspaceId} compact onTurnEnd={refreshAll} />
               </Suspense>
             </div>
           </div>
