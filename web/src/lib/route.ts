@@ -5,9 +5,10 @@
  * context, links are shareable, and Back/Forward work. Four routes do not
  * justify a router dependency.
  */
-export type WorkspaceTab = "terminal" | "files" | "review";
+/** "terminal" is the old name of the Claude view: it still opens the remembered Chat or Terminal view. */
+export type WorkspaceTab = "chat" | "terminal" | "files" | "review";
 
-export const WORKSPACE_TABS: readonly WorkspaceTab[] = ["terminal", "files", "review"];
+export const WORKSPACE_TABS: readonly WorkspaceTab[] = ["chat", "terminal", "files", "review"];
 
 export type SettingsSection = "account" | "appearance" | "team" | "agents" | "notifications" | "server" | "updates";
 

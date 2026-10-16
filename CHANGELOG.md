@@ -9,6 +9,17 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.52.0] - 2026-10-16
+
+### Changed
+- One coherent chat. The message box now works like Claude desktop: attach, Commands (/), Model (with effort inside) and Mode sit as chips inside the box, each mode explains itself in one line, and there is one round button that is Send, or Stop while Claude works.
+- One switch at the top of a project: Chat · Terminal · Changes · Files, instead of two stacked switches.
+- The model is chosen in one place, the message box. The project menu, the command palette and the status bar no longer show a second, conflicting model.
+- "Chat 72% full" appears only when a chat gets long, with details in a small popover.
+- The two Undos say what they do: "Undo this message's changes" and "Undo all since last keep" (red, because it cannot be reversed).
+- Copy appears only under finished replies; on phones the Scroll to latest button no longer covers text, and every chat control is big enough to tap.
+- Home and the chat share one message box, and buttons, chips and menus share one style.
+
 ## [1.51.0] - 2026-10-16
 
 ### Added

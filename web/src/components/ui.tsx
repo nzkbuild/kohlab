@@ -15,6 +15,7 @@ import * as RadixTooltip from "@radix-ui/react-tooltip";
 import {
   ArrowCounterClockwise,
   BellRinging,
+  CaretDown,
   CaretRight,
   Check,
   CheckCircle,
@@ -120,6 +121,43 @@ export function Chip({ tone = "neutral", children }: { tone?: "neutral" | "dange
   return <span className={cn("chip", tone === "danger" && "chip-danger")}>{children}</span>;
 }
 
+interface ComposerChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** A Phosphor icon at 14px, drawn before the label. */
+  icon?: ReactNode;
+  label?: string;
+  /** Shows the small down caret: the chip opens a menu. */
+  menu?: boolean;
+  /** Icon only: the label must then be an aria-label. */
+  iconOnly?: boolean;
+  /** The label is hidden on phones; the button keeps its accessible name. */
+  hideLabelOnPhone?: boolean;
+  ref?: Ref<HTMLButtonElement>;
+}
+
+/**
+ * A quiet pill trigger for the composer's controls. Forwards its ref and every
+ * prop, so it can be a Radix Menu trigger. No border: the hover fill is the edge.
+ */
+export function ComposerChip({
+  icon,
+  label,
+  menu = false,
+  iconOnly = false,
+  hideLabelOnPhone = false,
+  className,
+  type = "button",
+  ref,
+  ...rest
+}: ComposerChipProps) {
+  return (
+    <button ref={ref} type={type} className={cn("chip-trigger", iconOnly && "chip-trigger-icon", className)} {...rest}>
+      {icon}
+      {label ? <span className={cn(hideLabelOnPhone && "max-md:hidden")}>{label}</span> : null}
+      {menu ? <CaretDown size={12} aria-hidden="true" className="shrink-0 text-text-faint" /> : null}
+    </button>
+  );
+}
+
 /* ------------------------------------------------------------------ panels -- */
 
 export function Panel({ className, children }: { className?: string; children: ReactNode }) {
@@ -177,7 +215,7 @@ export function Tab({ className, ...rest }: RadixTabs.TabsTriggerProps) {
   return (
     <RadixTabs.Trigger
       className={cn(
-        "flex h-[30px] items-center justify-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+        "flex h-[30px] items-center justify-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:h-11",
         "aria-selected:bg-surface-active aria-selected:font-medium aria-selected:text-text-primary",
         className,
       )}
@@ -194,11 +232,13 @@ export function Menu({
   trigger,
   label,
   align = "end",
+  side,
   children,
 }: {
   trigger: ReactNode;
   label: string;
   align?: "start" | "end";
+  side?: "top" | "bottom";
   children: ReactNode;
 }) {
   const triggerRef = useRef<HTMLElement>(null);
@@ -213,6 +253,7 @@ export function Menu({
         <RadixMenu.Content
           className="menu"
           align={align}
+          side={side}
           sideOffset={4}
           collisionPadding={8}
           onCloseAutoFocus={(e) => restoreFocusAfterClose(e, triggerRef.current)}
@@ -257,6 +298,11 @@ export function MenuRadioItem({ className, children, ...rest }: RadixMenu.Dropdo
 
 export function MenuSeparator() {
   return <RadixMenu.Separator className="my-1 h-px bg-line-subtle" />;
+}
+
+/** A heading for a group of items. It is not a choice. */
+export function MenuLabel({ children }: { children: ReactNode }) {
+  return <RadixMenu.Label className="px-2.5 pt-1.5 pb-1 text-xs text-text-muted">{children}</RadixMenu.Label>;
 }
 
 export function MenuItem({ tone, className, ...rest }: RadixMenu.DropdownMenuItemProps & { tone?: "danger" }) {

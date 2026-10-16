@@ -23,7 +23,7 @@ import { useApp, useCan } from "../store";
 import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
 import { projectTitle } from "../lib/format";
-import { canContinue, changeModel, modelOf, type ModelChoice } from "../lib/projectActions";
+import { canContinue } from "../lib/projectActions";
 import { cn } from "../lib/utils";
 import { useDragSize } from "../lib/useDragSize";
 import ConfirmDialog from "./ConfirmDialog";
@@ -36,10 +36,7 @@ import {
   EmptyState,
   Menu,
   MenuItem,
-  MenuRadioGroup,
-  MenuRadioItem,
   MenuSeparator,
-  MenuSub,
   SkeletonRows,
   Tab,
   TabList,
@@ -53,12 +50,8 @@ import {
 const TerminalView = lazy(() => import("./TerminalView"));
 const ChatView = lazy(() => import("./ChatView"));
 
-/** Which view a terminal project's Claude tab shows: its conversation as a chat, or the terminal. Remembered per project. */
+/** Which view a terminal project's Claude shows: its conversation as a chat, or the terminal. Remembered per project. */
 type ClaudeView = "chat" | "terminal";
-const CLAUDE_VIEWS: { view: ClaudeView; label: string }[] = [
-  { view: "chat", label: "Chat" },
-  { view: "terminal", label: "Terminal" },
-];
 const claudeViewKey = (id: string) => `kohlab.claudeView.${id}`;
 // localStorage can throw (private mode, storage disabled): the view then just is not remembered.
 function readClaudeView(id: string): ClaudeView {
@@ -164,7 +157,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // A terminal project whose agent is Claude also has a chat view of its conversation.
   const claudeTerminal = !chat && w?.agent === "claude";
   const claudeView = claudeViewState.id === workspaceId ? claudeViewState.view : readClaudeView(workspaceId);
-  const chatOfTerminal = claudeTerminal && claudeView === "chat";
 
   // Lifecycle toggles are bounded single-object mutations, so they may show
   // their outcome before the server confirms it. Deleting and committing never do.
@@ -274,13 +266,24 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // The Files pane is hidden while power tools are off, and falls back like no pane.
   const hiddenTab = routeTab === "files" && !powerTools;
   // A chat workspace opens on its chat even when it needs review; the review button is still there.
-  const tab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
+  // The old "terminal" tab id means the Claude view: the chat or the terminal, whichever was remembered.
+  // A chat has no terminal tab, and a project without Claude has no chat tab.
+  const rawTab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
+  const tab: TabId =
+    rawTab === "terminal" && (chat || claudeTerminal)
+      ? chat
+        ? "chat"
+        : claudeView
+      : rawTab === "chat" && !chat && !claudeTerminal
+        ? "terminal"
+        : rawTab;
   useEffect(() => {
     if (w && tab !== routeTab) setTab(tab);
   }, [w === undefined, routeTab]);
 
   const tabs: { id: TabId; label: string }[] = [
-    { id: "terminal", label: chat ? "Chat" : "Claude" },
+    ...(chat || claudeTerminal ? [{ id: "chat" as const, label: "Chat" }] : []),
+    ...(chat ? [] : [{ id: "terminal" as const, label: "Terminal" }]),
     { id: "review", label: "Changes" },
     ...(powerTools ? [{ id: "files" as const, label: "Files" }] : []),
   ];
@@ -312,20 +315,20 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       if (isTextEntry(e.target)) return;
       if (e.key === ".") {
         e.preventDefault();
-        setTab("terminal");
+        goTo(chat ? "chat" : "terminal");
         setFocusTick((t) => t + 1);
         return;
       }
       const index = Number(e.key) - 1;
       if (Number.isInteger(index) && index >= 0 && index < tabs.length) {
         e.preventDefault();
-        setTab(tabs[index].id);
+        goTo(tabs[index].id);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // The tab list depends on power tools and on chat, so the handler is rebound when either changes.
-  }, [workspaceId, powerTools, chat]);
+  }, [workspaceId, powerTools, chat, claudeTerminal]);
 
   // Ctrl+` (and Ctrl+J, as in VS Code) open and close the terminal panel. Ctrl+`
   // works from anywhere; Ctrl+J stays out of fields and terminals, where it is a newline.
@@ -429,6 +432,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     if (view === "terminal" && w?.resumeInTerminal && can.mutate) run("start");
   };
 
+  // Chat and Terminal remember the choice. Other tabs just switch.
+  const goTo = (next: TabId) => {
+    if (claudeTerminal && (next === "chat" || next === "terminal")) pickClaudeView(next);
+    setTab(next);
+  };
+
   const badges: Partial<Record<TabId, Badge>> = {};
   if (reviewCount > 0) badges.review = { count: reviewCount, noun: reviewCount === 1 ? "changed file" : "changed files" };
 
@@ -458,24 +467,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <PencilSimple size={16} aria-hidden="true" />
         Rename
       </MenuItem>
-      <MenuSub label="Model">
-        <MenuRadioGroup value={modelOf(w)} onValueChange={(v) => void changeModel(w, v as ModelChoice)}>
-          <MenuRadioItem value="opus">
-            <span className="block">Opus 5.5</span>
-            <span className="block text-xs text-text-muted">Most capable, uses your limit fastest</span>
-          </MenuRadioItem>
-          <MenuRadioItem value="sonnet">
-            <span className="block">Sonnet 5.5</span>
-            <span className="block text-xs text-text-muted">Good for most projects</span>
-          </MenuRadioItem>
-          <MenuRadioItem value="haiku">
-            <span className="block">Haiku 5.5</span>
-            <span className="block text-xs text-text-muted">Fastest, for small changes</span>
-          </MenuRadioItem>
-          <MenuSeparator />
-          <MenuRadioItem value="default">Account default</MenuRadioItem>
-        </MenuRadioGroup>
-      </MenuSub>
       <MenuSeparator />
       <MenuItem onSelect={() => openPanel()}>
         <Terminal size={14} aria-hidden="true" />
@@ -596,7 +587,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
   return (
     <div className="cockpit max-md:overflow-hidden">
-      <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="flex min-h-0 flex-1">
+      <Tabs value={tab} onValueChange={(v) => goTo(v as TabId)} className="flex min-h-0 flex-1">
       <div className="flex min-w-0 min-h-0 flex-1 flex-col">
       {/* One 56px row per project: the title (its menu), the segmented switch centred, and Preview. On a phone the title row is 52px and the switch sits on its own row below. */}
       <header className="grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 px-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
@@ -633,19 +624,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </TabList>
 
         <div className="flex shrink-0 items-center justify-self-end gap-1.5 max-md:h-13">
-          <button
-            type="button"
-            aria-pressed={paneOpen}
-            className={cn(
-              "inline-flex h-9 shrink-0 items-center gap-2 rounded-row px-3 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50",
-              paneOpen && "bg-surface-active text-text-primary",
-            )}
-            disabled={previewing}
-            onClick={() => void preview()}
-          >
+          <Button variant="quiet" aria-pressed={paneOpen} disabled={previewing} onClick={() => void preview()}>
             <Browser size={18} aria-hidden="true" />
             Preview
-          </button>
+          </Button>
           {can.mutate ? null : (
             <span className="chip chip-stopped" title="You can look at this project but not change it.">
               View only
@@ -656,33 +638,20 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
       <div className="flex min-h-0 flex-1">
         <div className="cockpit-body min-w-0">
+          {chat || claudeTerminal ? (
+            <TabPanel value="chat" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
+              <ErrorBoundary label="Chat">
+                <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
+                  <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} terminalProject={claudeTerminal} />
+                </Suspense>
+              </ErrorBoundary>
+            </TabPanel>
+          ) : null}
+
           <TabPanel value="terminal" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
             <ErrorBoundary label="Terminal">
               <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
-                {claudeTerminal ? (
-                  <div role="group" aria-label="Claude view" className="flex h-10 shrink-0 items-center justify-end gap-1 px-3">
-                    {CLAUDE_VIEWS.map(({ view, label }) => (
-                      <button
-                        key={view}
-                        type="button"
-                        aria-pressed={claudeView === view}
-                        onClick={() => pickClaudeView(view)}
-                        className={cn("inline-flex h-8 items-center rounded-full px-3 text-sm", claudeView === view ? "bg-surface-active text-text-primary" : "text-text-muted hover:text-text-primary")}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                {chat ? (
-                  <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} />
-                ) : null}
-                {chatOfTerminal ? (
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <ChatView key={workspaceId} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} terminalProject />
-                  </div>
-                ) : null}
-                {!chat && !chatOfTerminal ? (
+                {!chat ? (
                   // The terminal is mounted even when the workspace is not
                   // running, because the daemon retains the final screen of a
                   // finished session, replacing it with a notice would throw

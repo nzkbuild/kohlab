@@ -117,6 +117,8 @@
   /* Cards are 16px, sidebar and menu rows 8px (DESIGN.md, Layout and shapes). */
   --radius-card: 1rem;
   --radius-row: 0.5rem;
+  /* The chat and Home composer box (DESIGN.md, Layout and shapes). */
+  --radius-composer: 1.5rem;
 
   /* Scrollbar thumb: a 22% tint of the primary text colour, so it is quiet on a
      white plane and on a near-black one alike. */
@@ -272,14 +274,18 @@
   --radius-xl: var(--radius-xl);
   --radius-card: var(--radius-card);
   --radius-row: var(--radius-row);
+  --radius-composer: var(--radius-composer);
 
-  /* rem-based type scale (Resize Text / SC 1.4.4, never px, never clamp()). */
+  /* rem-based type scale (Resize Text / SC 1.4.4, never px, never clamp()).
+     12 = xs, 13 = sm (controls, menus), 14 = small, 15 = base (body). */
   --text-2xs: 0.75rem;
   --text-2xs--line-height: 1.0625rem;
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.0625rem;
   --text-sm: 0.8125rem;
   --text-sm--line-height: 1.1875rem;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.25rem;
   --text-base: 0.9375rem;
   --text-base--line-height: 1.375rem;
   --text-lg: 1rem;
@@ -470,10 +476,10 @@ input[type="radio"] {
     justify-content: center;
     gap: 0.4375rem;
     border: 1px solid transparent;
-    border-radius: var(--radius-md);
+    border-radius: 9999px;
     padding: 0.5rem 0.875rem;
     font-size: 0.9375rem;
-    font-weight: 500;
+    font-weight: 550;
     line-height: 1.2;
     transition: background-color var(--duration-fast-02) var(--ease-standard),
       border-color var(--duration-fast-02) var(--ease-standard),
@@ -558,6 +564,50 @@ input[type="radio"] {
       background: var(--surface-hover);
       color: var(--text-primary);
     }
+  }
+  /* A toggle that is on (Preview while its pane is open) reads as pressed. */
+  .btn-quiet[aria-pressed="true"] {
+    background: var(--surface-active);
+    color: var(--text-primary);
+  }
+
+  /* Composer chips: quiet pill triggers. Min-height is the small control token,
+     which is 44px on touch (see the coarse-pointer block below). */
+  .chip-trigger {
+    display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
+    min-height: var(--control-h-sm);
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    padding: 0 0.625rem;
+    font-size: 0.8125rem;
+    line-height: 1.2;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    transition: background-color var(--duration-fast-02) var(--ease-standard), color var(--duration-fast-02) var(--ease-standard);
+  }
+  .chip-trigger > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chip-trigger-icon {
+    width: var(--control-h-sm);
+    padding: 0;
+    justify-content: center;
+  }
+  @media (hover: hover) {
+    .chip-trigger:hover:not(:disabled) {
+      background: var(--surface-hover);
+      color: var(--text-primary);
+    }
+  }
+  .chip-trigger:active:not(:disabled),
+  .chip-trigger[aria-expanded="true"] {
+    background: var(--surface-active);
+    color: var(--text-primary);
   }
 
   .btn-danger {

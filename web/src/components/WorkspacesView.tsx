@@ -6,6 +6,7 @@ import { announce } from "../lib/announce";
 import { projectTitle } from "../lib/format";
 import { workspaceStatus } from "../lib/status";
 import { Button, Dialog, Field, Panel } from "./ui";
+import { Composer } from "./Composer";
 import { projectNameFromIdea } from "./homeName";
 import { isPhone } from "../lib/viewport";
 
@@ -319,37 +320,34 @@ export function HomeScreen() {
                   </div>
                 </Panel>
               ) : null}
-              <div className="mt-8 flex w-full items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5">
-                <label htmlFor="home-idea" className="sr-only">
-                  Describe what you want to build
-                </label>
-                <textarea
-                  id="home-idea"
-                  ref={composer}
-                  rows={1}
-                  value={idea}
-                  readOnly={busy}
-                  onChange={(e) => setIdea(e.target.value)}
-                  onKeyDown={onComposerKeyDown}
-                  // The keyboard covers the lower half of a phone: bring the composer up into view.
-                  onFocus={(e) => {
-                    if (isPhone()) e.currentTarget.scrollIntoView({ block: "center" });
-                  }}
-                  placeholder="Describe it in a sentence or two"
-                  className="field-sizing-content block max-h-40 min-h-9 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-base leading-6 text-text-primary outline-none! placeholder:text-text-muted"
-                />
-                <Button
-                  variant="primary"
-                  iconOnly
-                  aria-label="Start building"
-                  title="Start building"
-                  onClick={() => void start()}
-                  disabled={busy || !idea.trim()}
-                  className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
-                >
-                  <ArrowUp size={18} aria-hidden="true" />
-                </Button>
-              </div>
+              <Composer
+                className="mt-8 w-full"
+                id="home-idea"
+                ariaLabel="Describe what you want to build"
+                textareaRef={composer}
+                value={idea}
+                onChange={(v) => setIdea(v)}
+                readOnly={busy}
+                onKeyDown={onComposerKeyDown}
+                // The keyboard covers the lower half of a phone: bring the composer up into view.
+                onFocus={(e) => {
+                  if (isPhone()) e.currentTarget.scrollIntoView({ block: "center" });
+                }}
+                placeholder="Describe it in a sentence or two"
+                trailing={
+                  <Button
+                    variant="primary"
+                    iconOnly
+                    aria-label="Start building"
+                    title="Start building"
+                    onClick={() => void start()}
+                    disabled={busy || !idea.trim()}
+                    className="disabled:opacity-40"
+                  >
+                    <ArrowUp size={18} aria-hidden="true" />
+                  </Button>
+                }
+              />
 
               {error ? (
                 <p role="alert" className="mt-3 w-full text-sm text-status-danger">

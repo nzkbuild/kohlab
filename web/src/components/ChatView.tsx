@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, Copy, Paperclip, Warning, X } from "@phosphor-icons/react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, Copy, Cpu, Lightning, Paperclip, Shield, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
@@ -10,8 +10,11 @@ import { findWorkspace, useApp, useCan } from "../store";
 import { workspaceStatus } from "../lib/status";
 import { inline, parseBlocks, type Inline } from "../lib/markdown";
 import { cn } from "../lib/utils";
+import { isPhone } from "../lib/viewport";
+import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import ConfirmDialog from "./ConfirmDialog";
-import { Button, Menu, MenuRadioGroup, MenuRadioItem, Tooltip } from "./ui";
+import { Composer } from "./Composer";
+import { Button, ComposerChip, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
 type ChatEvent = StoredChatEvent & { why?: string };
@@ -102,23 +105,18 @@ function modelName(id: string): string {
   return ["opus", "sonnet", "haiku"].includes(id) ? cap(id) : id;
 }
 
-/** The permission mode the CLI reports, in plain words. */
-const MODE_LABEL: Record<string, string> = {
-  auto: "Auto mode",
-  default: "Asks first",
-  manual: "Asks first",
-  acceptEdits: "Edits allowed",
-  bypassPermissions: "No questions",
-  plan: "Plan mode",
+/** Permission modes in plain words: the Mode menu's choices, plus the CLI's other names for them. One table for every label. */
+const MODES: Record<string, { label: string; detail?: string }> = {
+  default: { label: "Asks first", detail: "Asks before changing files or running commands" },
+  acceptEdits: { label: "Edits allowed", detail: "Edits files without asking, asks before commands" },
+  auto: { label: "Auto", detail: "Decides for itself what needs your OK" },
+  plan: { label: "Plan first", detail: "Plans and explains before changing anything" },
+  manual: { label: "Asks first" },
+  bypassPermissions: { label: "No questions" },
 };
 
-/** The modes the Mode menu offers, in plain words. */
-const MODE_CHOICES = [
-  { value: "default", label: "Asks first" },
-  { value: "acceptEdits", label: "Edits allowed" },
-  { value: "auto", label: "Auto" },
-  { value: "plan", label: "Plan first" },
-];
+/** The modes the Mode menu offers, in order. */
+const MODE_CHOICES = ["default", "acceptEdits", "auto", "plan"];
 
 const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
 
@@ -135,9 +133,6 @@ interface ModelInfo {
   supportedEffortLevels: string[];
 }
 
-/** The footer's quiet menu buttons. */
-const FOOT_BTN = "min-w-0 truncate rounded-full px-2.5 py-1 text-xs text-text-muted hover:bg-surface-hover hover:text-text-primary";
-
 /** The working line: a pulsing dot, the current action, how long the turn has run, and background tasks (a button that opens their list). The timer ticks only while this line is shown. */
 function WorkingLine({ action, since, background, tasksOpen, onTasks }: { action: string; since: number | null; background: number; tasksOpen: boolean; onTasks: () => void }) {
   const [now, setNow] = useState(() => Date.now());
@@ -146,7 +141,7 @@ function WorkingLine({ action, since, background, tasksOpen, onTasks }: { action
     return () => window.clearInterval(t);
   }, []);
   return (
-    <p className="flex items-center gap-2 text-[14px] text-text-muted">
+    <p className="flex items-center gap-2 text-small text-text-muted">
       <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
       <span className="shimmer-text min-w-0">{action}</span>
       {/* aria-hidden: the timer changes every second and must not be read out */}
@@ -170,14 +165,14 @@ interface BgTask {
 /** The background tasks, each with a Stop. Opened from the "in background" text. */
 function TaskList({ tasks, stopping, onStop }: { tasks: BgTask[]; stopping: string | null; onStop: (id: string) => void }) {
   return (
-    <ul aria-label="Background tasks" className="flex flex-col gap-1 pl-5 text-[13px] text-text-muted">
+    <ul aria-label="Background tasks" className="flex flex-col gap-1 pl-5 text-sm text-text-muted">
       {tasks.map((t) => (
         <li key={t.id} className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 flex-1 truncate">{t.description || "A background task"}</span>
           <Button
             variant="quiet"
             size="sm"
-            className="text-[12px] text-text-secondary"
+            className="text-xs text-text-secondary"
             disabled={stopping !== null}
             aria-label={`Stop ${t.description || "background task"}`}
             onClick={() => onStop(t.id)}
@@ -196,7 +191,7 @@ function resetText(iso: string | null): string {
   return d && !Number.isNaN(d.getTime()) ? d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
 }
 
-/** The footer's usage panel: the context window in use, and the plan's limits when the CLI reports them. */
+/** The chat's usage details: the context window in use, and the plan's limits when the CLI reports them. */
 function UsagePanel({ usage }: { usage: ChatUsage }) {
   const rows: string[] = [];
   if (usage.context) {
@@ -213,17 +208,15 @@ function UsagePanel({ usage }: { usage: ChatUsage }) {
   }
   if (rows.length === 0) return null;
   return (
-    <div className="mt-2 rounded-2xl bg-surface-raised px-4 py-3 text-[13px] text-text-secondary">
-      <ul className="flex flex-col gap-1">
-        {rows.map((r) => (
-          <li key={r}>{r}</li>
-        ))}
-      </ul>
-    </div>
+    <ul className="flex flex-col gap-1 text-sm text-text-secondary">
+      {rows.map((r) => (
+        <li key={r}>{r}</li>
+      ))}
+    </ul>
   );
 }
 
-/** A menu of options the arrow keys move through, and a press picks: the "/" commands and the "@" files. */
+/** A menu of options the arrow keys move through, and a press picks: the "/" commands and the "@" files. Same surface and items as the Radix menus. */
 interface PickOption {
   key: string;
   title: ReactNode;
@@ -231,7 +224,7 @@ interface PickOption {
 }
 function PickList({ id, label, options, active, onPick }: { id: string; label: string; options: PickOption[]; active: number; onPick: (i: number) => void }) {
   return (
-    <ul id={id} role="listbox" aria-label={label} className="mb-2 max-h-80 overflow-y-auto rounded-2xl bg-surface-raised p-1">
+    <ul id={id} role="listbox" aria-label={label} className="menu mb-2 max-h-80 overflow-y-auto">
       {options.map((o, i) => (
         <li
           key={o.key}
@@ -243,9 +236,9 @@ function PickList({ id, label, options, active, onPick }: { id: string; label: s
             e.preventDefault();
             onPick(i);
           }}
-          className={cn("flex cursor-pointer flex-col rounded-xl px-3 py-2", i === active && "bg-surface-hover")}
+          className={cn("menu-item cursor-pointer flex-col items-start justify-center py-1.5", i === active && "bg-surface-active text-text-primary")}
         >
-          <span className="text-[14px] text-text-primary">{o.title}</span>
+          <span className="text-text-primary">{o.title}</span>
           {o.detail ? <span className="truncate text-xs text-text-muted">{o.detail}</span> : null}
         </li>
       ))}
@@ -324,7 +317,7 @@ function CopyReply({ text, latest }: { text: string; latest: boolean }) {
           iconOnly
           aria-label="Copy reply"
           className={cn(
-            "size-8 text-text-faint hover:text-text-primary max-md:size-11 [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100",
+            "text-text-faint hover:text-text-primary [@media(pointer:coarse)]:opacity-100",
             "motion-safe:transition-opacity",
             latest ? "opacity-100" : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
           )}
@@ -344,19 +337,19 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   return (
     <div className="overflow-hidden rounded-card bg-surface-sunken">
       <div className="flex items-center justify-between gap-3 py-0.5 pr-1 pl-3.5">
-        <span className="mono min-w-0 truncate text-[12px] text-text-muted">{lang}</span>
+        <span className="mono min-w-0 truncate text-xs text-text-muted">{lang}</span>
         <Button
           variant="quiet"
           size="sm"
           aria-label="Copy code"
-          className="text-[12px] text-text-secondary max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="text-xs text-text-secondary"
           onClick={() => void copy(code)}
         >
           <Icon size={14} aria-hidden="true" />
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <pre className="mono overflow-x-auto px-3.5 py-3 text-[13px] leading-5 text-text-primary">
+      <pre className="mono overflow-x-auto px-3.5 py-3 text-sm leading-5 text-text-primary">
         <code>{code}</code>
       </pre>
     </div>
@@ -366,10 +359,10 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 /** What Claude said, in a measure a person can read without losing their place. */
 function Prose({ text }: { text: string }) {
   return (
-    <div className="flex max-w-[66ch] min-w-0 flex-col gap-3 text-[15px] leading-6 text-text-primary max-md:max-w-none max-md:w-full max-md:text-base">
+    <div className="flex max-w-[66ch] min-w-0 flex-col gap-3 text-base leading-6 text-text-primary max-md:max-w-none max-md:w-full max-md:text-base">
       {parseBlocks(text).map((block, i) => {
         if (block.kind === "p") return <p key={i} className="whitespace-pre-line">{rich(block.lines.join("\n"))}</p>;
-        if (block.kind === "h") return <p key={i} className="text-[16px] font-semibold text-text-primary">{rich(block.text)}</p>;
+        if (block.kind === "h") return <p key={i} className="text-lg font-semibold text-text-primary">{rich(block.text)}</p>;
         if (block.kind === "hr") return <hr key={i} className="border-line-subtle" />;
         if (block.kind === "code") return <CodeBlock key={i} lang={block.lang} code={block.code} />;
         if (block.kind === "ul") {
@@ -398,30 +391,25 @@ function Prose({ text }: { text: string }) {
   );
 }
 
-/** A run of tool actions: one muted line; the caret opens the list of each action. */
-function ToolRun({ lines, live = false }: { lines: ChatEvent[]; live?: boolean }) {
-  // The run Claude is in now opens by itself, with its last three steps, and folds again when the turn ends.
-  const [open, setOpen] = useState(live);
-  useEffect(() => {
-    if (!live) setOpen(false);
-  }, [live]);
+/** A run of tool actions: one muted line; the caret opens the list of each action. Collapsed while live too: the working line shows the current step. */
+function ToolRun({ lines }: { lines: ChatEvent[] }) {
+  const [open, setOpen] = useState(false);
   const tools = lines.filter((e): e is ToolEvent => e.kind === "tool");
   const summary = summarizeTools(tools.map((e) => e.text));
-  const shown = live ? tools.slice(-3) : tools;
   return (
     <div>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-left text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
+        className="flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-left text-small text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
       >
         <CaretRight size={14} aria-hidden="true" className={cn("shrink-0 motion-safe:transition-transform", open && "rotate-90")} />
         {cap(summary)}
       </button>
       {open ? (
-        <ul className="mt-1 flex flex-col gap-1 pl-6 text-[13px] text-text-muted">
-          {shown.map((e) => (
+        <ul className="mt-1 flex flex-col gap-1 pl-6 text-sm text-text-muted">
+          {tools.map((e) => (
             <li key={e.n}>{e.text}</li>
           ))}
         </ul>
@@ -436,7 +424,7 @@ function AnsweredAsk({ e, allowed }: { e: AskEvent; allowed: boolean }) {
   const what = e.text.replace(/^Claude wants to /, "").replace(/^(create|change) the file /, "$1 ");
   const Icon = allowed ? Check : X;
   return (
-    <div className="text-[14px] text-text-muted">
+    <div className="text-small text-text-muted">
       <p className="flex items-start gap-1.5">
         <Icon size={14} className="mt-[5px] shrink-0" aria-hidden="true" />
         <span className="min-w-0">{allowed ? `You allowed Claude to ${what}` : `You didn't allow Claude to ${what}`}</span>
@@ -476,12 +464,12 @@ function AnsweredGroup({ events, answers }: { events: ChatEvent[]; answers: Map<
   if (files.size === 1 && changes && !commands && !others) text += ` to ${[...files][0]}`;
   if (denied) text += `${text ? ", and you" : "You"} didn't allow ${n(denied, "step", "steps")}`;
   return (
-    <div className="text-[14px] text-text-muted">
+    <div className="text-small text-text-muted">
       <p className="flex items-start gap-1.5">
         <Check size={14} className="mt-[5px] shrink-0" aria-hidden="true" />
         <span className="min-w-0">{text}</span>
       </p>
-      <details className="ml-5 text-[13px] text-text-muted">
+      <details className="ml-5 text-sm text-text-muted">
         <summary className="flex min-h-11 cursor-pointer select-none items-center hover:text-text-primary shell:min-h-8">Show details</summary>
         <ul className="mb-2 flex flex-col gap-1">
           {events.map((e) =>
@@ -504,11 +492,11 @@ function AnsweredGroup({ events, answers }: { events: ChatEvent[]; answers: Map<
 /** The command behind an ask (and its reason, when the card does not already show it), behind a disclosure. */
 function Details({ detail, why, className }: { detail?: string; why?: string; className?: string }) {
   return (
-    <details className={cn("text-[13px] text-text-muted", className)}>
+    <details className={cn("text-sm text-text-muted", className)}>
       <summary className="flex min-h-11 cursor-pointer select-none items-center hover:text-text-primary shell:min-h-8">Show details</summary>
       {why ? <p className="pb-2 text-text-secondary">{why}</p> : null}
       {detail ? (
-        <pre className="mono mb-2 overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-surface-sunken px-3 py-2 text-[13px] text-text-secondary">
+        <pre className="mono mb-2 overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-surface-sunken px-3 py-2 text-sm text-text-secondary">
           {detail}
         </pre>
       ) : null}
@@ -539,10 +527,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const background = tasks.length;
   const [tasksOpen, setTasksOpen] = useState(false);
   const [stopping, setStopping] = useState<string | null>(null);
-  // The CLI is retrying a request: which try, of how many. And the footer's usage, read when the last turn ended.
+  // The CLI is retrying a request: which try, of how many. And the chat's usage, read when the last turn ended.
   const [retry, setRetry] = useState<{ attempt: number; max: number } | null>(null);
   const [usage, setUsage] = useState<ChatUsage | null>(null);
-  const [usageOpen, setUsageOpen] = useState(false);
   // Undo: the newest message's id while its files are being checked, and the list the person is asked to confirm.
   const [rewindBusy, setRewindBusy] = useState(false);
   const [rewindPlan, setRewindPlan] = useState<{ uuid: string; files: string[]; insertions: number; deletions: number } | null>(null);
@@ -775,17 +762,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
-  // Grow the composer with its text, up to about eight lines.
-  useLayoutEffect(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const lines = window.matchMedia("(max-width: 767.98px)").matches ? 5 : 8;
-    const max = (parseFloat(getComputedStyle(el).lineHeight) || 24) * lines;
-    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
-    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
-  }, [draft]);
-
   // Sends one message. Returns true when the server took it.
   const sendText = async (text: string): Promise<boolean> => {
     setSending(true);
@@ -896,6 +872,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const slashQuery = draft.startsWith("/") && !/\s/.test(draft) ? draft.slice(1).toLowerCase() : null;
   const slashMatches = slashQuery === null || slashShut ? [] : commands.filter((c) => c.name.toLowerCase().startsWith(slashQuery));
   const slashOn = slashMatches.length > 0;
+  // Typing "/" before the command list has loaded: a single row says so.
+  const slashLoading = slashQuery !== null && !slashShut && commands.length === 0;
   const slashActive = Math.max(0, Math.min(slashIndex, slashMatches.length - 1));
   useEffect(() => {
     if (slashOn) document.getElementById(`slash-menu-opt-${slashActive}`)?.scrollIntoView({ block: "nearest" });
@@ -946,6 +924,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     taRef.current?.focus();
   };
 
+  /** The "/" chip: an empty draft becomes "/", which opens the command list. */
+  const openCommands = () => {
+    if (draft === "") setDraft("/");
+    setSlashShut(false);
+    taRef.current?.focus();
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (mentionOn && !e.nativeEvent.isComposing) {
       const n = mentionFiles.length;
@@ -982,12 +967,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         setSlashShut(true);
         return;
       }
-    }
-    // Touch keyboards have no Shift+Enter: Enter is a newline there, and the send button sends.
-    const touch = window.matchMedia("(pointer: coarse)").matches;
-    if (e.key === "Enter" && !touch && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      void send();
     }
   };
 
@@ -1142,12 +1121,12 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         const undoable = uuid !== undefined && e.n === lastUserAllN && !busy && waiting === null && can;
         return (
           <div className="flex flex-col items-end gap-1" data-turn-start={e.n === lastUserN ? "" : undefined}>
-            <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-[15px] leading-6 text-text-primary max-md:text-base">
+            <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
               {body}
               {files.length > 0 ? (
                 <ul className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
                   {files.map((name, i) => (
-                    <li key={i} className="flex max-w-full items-center gap-1 rounded-lg bg-surface-raised px-2 py-0.5 text-[13px] text-text-secondary">
+                    <li key={i} className="flex max-w-full items-center gap-1 rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-text-secondary">
                       <Paperclip size={12} aria-hidden="true" className="shrink-0" />
                       <span className="truncate">{name}</span>
                     </li>
@@ -1159,14 +1138,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               <Button
                 variant="quiet"
                 size="sm"
-                className="text-[13px] text-text-secondary"
+                className="text-sm text-text-secondary"
                 disabled={rewindBusy}
                 onClick={() => {
                   if (uuid) void previewUndo(uuid);
                 }}
               >
                 <ArrowCounterClockwise size={14} aria-hidden="true" />
-                Undo these changes
+                {"Undo this message's changes"}
               </Button>
             ) : null}
           </div>
@@ -1183,9 +1162,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           const repeatable = e.n === latestAskN && !events.some((x) => x.kind === "user" && x.n > e.n) && !busy && waiting === null && can;
           return (
             <div className="flex flex-col items-start gap-3">
-              <p className="text-[14px] text-text-muted">Kohlab restarted before you answered, so Claude stopped here.</p>
+              <p className="text-small text-text-muted">Kohlab restarted before you answered, so Claude stopped here.</p>
               {repeatable ? (
-                <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={sending} onClick={() => void sendText("Please carry on with what you were doing.")}>
+                <Button variant="secondary" disabled={sending} onClick={() => void sendText("Please carry on with what you were doing.")}>
                   Ask Claude again
                 </Button>
               ) : null}
@@ -1194,14 +1173,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         }
         return (
           <section aria-label="Claude is asking" className="rounded-card bg-surface-raised px-5 py-[18px]">
-            <p className="text-[15px] font-semibold text-text-primary">{e.text}</p>
-            {e.why ? <p className="mt-1 text-[14px] leading-5 text-text-muted">{e.why}</p> : null}
+            <p className="text-base font-semibold text-text-primary">{e.text}</p>
+            {e.why ? <p className="mt-1 text-small leading-5 text-text-muted">{e.why}</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {can ? (
                 <>
                   <Button
                     variant="primary"
-                    className="min-h-11 rounded-full shell:min-h-9"
                     disabled={answering !== null}
                     onClick={() => void answer(e.requestId, true)}
                   >
@@ -1209,7 +1187,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   </Button>
                   <Button
                     variant="secondary"
-                    className="min-h-11 rounded-full shell:min-h-9"
                     disabled={answering !== null}
                     onClick={() => void answer(e.requestId, false)}
                   >
@@ -1217,7 +1194,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   </Button>
                 </>
               ) : (
-                <p className="text-[14px] text-text-muted">Waiting for an answer.</p>
+                <p className="text-small text-text-muted">Waiting for an answer.</p>
               )}
               {e.detail ? <Details className="ml-auto" detail={e.detail} /> : null}
             </div>
@@ -1226,7 +1203,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       }
       case "error":
         return (
-          <p className="flex items-center gap-1.5 text-[13px] text-status-danger">
+          <p className="flex items-center gap-1.5 text-sm text-status-danger">
             <Warning size={12} aria-hidden="true" />
             {e.text}
           </p>
@@ -1236,15 +1213,26 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
-  // Under the composer: the model, effort and mode menus, each showing the CLI's current choice. Effort only when the model supports it.
+  // The composer's chips show the CLI's current choices. Effort lives in the model menu, and only when the model supports it.
   // The snapshot names the model in full (claude-haiku-5-5); the menu lists it by alias (haiku). Both match by the display name.
+  // Until the snapshot arrives, the project's stored model shows and the mode reads "…".
   const modelInfo = model === null ? undefined : models.find((m) => m.value === model || m.displayName === modelName(model));
   const levels = modelInfo?.supportedEffortLevels ?? [];
-  const modelText = modelInfo?.displayName ?? (model ? modelName(model) : "Model");
-  const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Effort";
-  const modeText = MODE_CHOICES.find((c) => c.value === mode)?.label ?? (mode ? (MODE_LABEL[mode] ?? mode) : "Mode");
+  const storedModel = modelOf(ws ?? undefined);
+  const modelText = modelInfo?.displayName ?? (model ? modelName(model) : storedModel === "default" ? "Default" : MODEL_LABEL[storedModel]);
+  const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Default";
+  const modeText = mode === null ? "Mode" : (MODES[mode]?.label ?? mode);
 
-  const placeholder = waiting !== null ? "Claude is waiting for your answer above" : busy ? "Claude is working…" : terminalProject ? "Message Claude…" : "Ask Claude for a change…";
+  const placeholder =
+    waiting !== null
+      ? "Claude is waiting for your answer above"
+      : busy
+        ? "Claude is working…"
+        : isPhone()
+          ? "Message Claude"
+          : "Message Claude — / for commands, @ for files";
+  // Stop is the round button only while busy with nothing typed; with text, Send queues it and a quiet Stop sits beside it.
+  const hasDraft = draft.trim() !== "" || attachments.length > 0;
 
   return (
     <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
@@ -1263,7 +1251,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               {events.length === 0 && !busy ? (
                 <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
                   <h2 className="text-xl font-semibold text-text-primary">What should Claude build?</h2>
-                  <p className="text-[15px] text-text-muted">Describe it in your own words. Claude will ask before changing anything important.</p>
+                  <p className="text-base text-text-muted">Describe it in your own words. Claude will ask before changing anything important.</p>
                 </div>
               ) : null}
               {turns.map((turn, ti) => {
@@ -1275,7 +1263,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     {turn.map((row) => (
                       <Fragment key={row[0].n}>
                         {row[0].kind === "tool" ? (
-                          <ToolRun lines={row} live={working && ti === turns.length - 1 && row === turn[turn.length - 1]} />
+                          <ToolRun lines={row} />
                         ) : row.length > 1 ? (
                           <AnsweredGroup events={row} answers={answers} />
                         ) : (
@@ -1283,14 +1271,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                         )}
                         {row[0].n === events.at(-1)?.n && row[0].kind === "error" && !busy && can && lastRequest ? (
                           <div>
-                            <Button variant="secondary" className="min-h-11 rounded-full shell:min-h-9" disabled={sending} onClick={() => void sendText(lastRequest)}>
+                            <Button variant="secondary" disabled={sending} onClick={() => void sendText(lastRequest)}>
                               Try again
                             </Button>
                           </div>
                         ) : null}
                       </Fragment>
                     ))}
-                    {replies.length > 0 ? <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} /> : null}
+                    {/* Copy only under a finished reply that ends in text: not mid-turn, not under a tool run. */}
+                    {replies.length > 0 && !(busy && ti === turns.length - 1) && turn[turn.length - 1][0].kind === "assistant" ? (
+                      <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} />
+                    ) : null}
                   </div>
                 );
               })}
@@ -1302,23 +1293,23 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               ) : null}
               {!compact && !busy && hasChanges && can ? (
             <div role="region" aria-label="Changes to check" className="flex flex-col gap-3">
-              <p className="text-[14px] text-text-muted">
+              <p className="text-small text-text-muted">
                 {changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Button variant="primary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={keeping} onClick={() => void keep()}>
+                <Button variant="primary" className="max-md:px-3" disabled={keeping} onClick={() => void keep()}>
                   <Check size={16} className="max-md:hidden" aria-hidden="true" />
                   Keep this version
                 </Button>
                 {previewOpen ? null : (
-                  <Button variant="secondary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={previewing} onClick={onPreview}>
+                  <Button variant="secondary" className="max-md:px-3" disabled={previewing} onClick={onPreview}>
                     <Browser size={16} className="max-md:hidden" aria-hidden="true" />
                     Preview
                   </Button>
                 )}
-                <Button variant="quiet" className="min-h-11 text-text-secondary max-md:px-2.5 shell:min-h-9" disabled={undoing} onClick={() => setConfirmUndo(true)}>
+                <Button variant="quiet" className="text-text-secondary max-md:px-2.5" disabled={undoing} onClick={() => setConfirmUndo(true)}>
                   <ArrowCounterClockwise size={16} aria-hidden="true" />
-                  Undo
+                  Undo all since last keep
                 </Button>
               </div>
             </div>
@@ -1331,7 +1322,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   type="button"
                   aria-expanded={tasksOpen}
                   onClick={() => setTasksOpen((o) => !o)}
-                  className="flex min-h-11 items-center gap-2 rounded-lg px-1 text-left text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
+                  className="flex min-h-11 items-center gap-2 rounded-lg px-1 text-left text-small text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
                 >
                   <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
                   {background === 1 ? "1 task still running in the background" : `${background} tasks still running in the background`}
@@ -1342,55 +1333,31 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           </div>
           {/* A subtle fade under the tab bar, so scrolled text does not hit the edge. */}
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-[linear-gradient(var(--surface-base),transparent)]" />
-          {farFromEnd ? (
-            <button
-              type="button"
-              aria-label="Scroll to latest"
-              title="Scroll to latest"
-              onClick={scrollToLatest}
-              className="absolute bottom-3 left-1/2 z-10 flex size-10 -translate-x-1/2 items-center justify-center rounded-full bg-surface-raised text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:size-11"
-            >
-              <ArrowDown size={18} aria-hidden="true" />
-            </button>
-          ) : null}
+          {/* The same fade above the composer, on phones. */}
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-6 bg-[linear-gradient(transparent,var(--surface-base))] max-md:block" />
         </div>
+        {/* Outside the scroll area, so the button never covers prose. */}
+        {farFromEnd ? (
+          <div className={cn("flex shrink-0 justify-center px-3 pt-2", !compact && "mx-auto w-full max-w-[720px]")}>
+            <Button variant="secondary" iconOnly aria-label="Scroll to latest" title="Scroll to latest" onClick={scrollToLatest}>
+              <ArrowDown size={18} aria-hidden="true" />
+            </Button>
+          </div>
+        ) : null}
 
         {can ? (
           <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pb-[max(12px,var(--safe-bottom,env(safe-area-inset-bottom)))] shell:px-6">
             <div className={compact ? "w-full" : "mx-auto w-full max-w-[720px]"}>
               {sendError ? (
-                <p role="alert" className="mb-2 text-[13px] text-status-danger">
+                <p role="alert" className="mb-2 text-sm text-status-danger">
                   {sendError}
                 </p>
               ) : null}
 
               {attachNote ? (
-                <p role="alert" className="mb-2 text-[13px] text-status-danger">
+                <p role="alert" className="mb-2 text-sm text-status-danger">
                   {attachNote}
                 </p>
-              ) : null}
-              {attachments.length > 0 ? (
-                <ul aria-label="Files to send" className="mb-2 flex flex-wrap gap-1.5">
-                  {attachments.map((a) => (
-                    <li key={a.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-raised py-1 pr-1 pl-1.5 text-[13px] text-text-secondary">
-                      {a.url ? (
-                        <img src={a.url} alt="" className="size-8 shrink-0 rounded-md object-cover" />
-                      ) : (
-                        <Paperclip size={14} aria-hidden="true" className="shrink-0" />
-                      )}
-                      <span className="min-w-0 truncate">{a.file.name}</span>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${a.file.name}`}
-                        disabled={uploading}
-                        onClick={() => removeAttachment(a.key)}
-                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
-                      >
-                        <X size={12} aria-hidden="true" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
               ) : null}
 
               {terminalProject && terminalOpen && !busy && waiting === null ? (
@@ -1416,6 +1383,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   }))}
                 />
               ) : null}
+              {slashLoading ? (
+                <div role="status" className="menu mb-2 px-2.5 py-2 text-sm text-text-muted">
+                  Loading commands…
+                </div>
+              ) : null}
               {mentionOn ? (
                 <PickList
                   id="mention-menu"
@@ -1425,142 +1397,200 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   options={mentionFiles.map((p) => ({ key: p, title: p }))}
                 />
               ) : null}
-              <div
-                className="flex items-end gap-2 rounded-3xl bg-surface-raised py-2.5 pr-2.5 pl-5"
-                onDragOver={(e: DragEvent<HTMLDivElement>) => {
-                  if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+
+              <Composer
+                ariaLabel="Message Claude"
+                textareaRef={taRef}
+                value={draft}
+                onChange={(v) => {
+                  setDraft(v);
+                  setSlashIndex(0);
+                  setSlashShut(false);
+                  setMentionShut(false);
                 }}
-                onDrop={(e: DragEvent<HTMLDivElement>) => {
-                  if (e.dataTransfer.files.length === 0) return;
+                placeholder={placeholder}
+                disabled={waiting !== null}
+                textareaAria={{
+                  "aria-autocomplete": "list",
+                  "aria-expanded": slashOn || mentionOn,
+                  "aria-controls": slashOn ? "slash-menu" : mentionOn ? "mention-menu" : undefined,
+                  "aria-activedescendant": slashOn ? `slash-menu-opt-${slashActive}` : mentionOn ? `mention-menu-opt-${mentionActive}` : undefined,
+                }}
+                onKeyDown={onKeyDown}
+                onSubmit={() => void send()}
+                onPaste={(e) => {
+                  if (e.clipboardData.files.length === 0) return;
                   e.preventDefault();
-                  takeFiles(e.dataTransfer.files);
+                  takeFiles(e.clipboardData.files, true);
                 }}
-              >
-                <input
-                  ref={fileRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    takeFiles(e.target.files ?? []);
-                    e.target.value = "";
-                  }}
-                />
-                <Button
-                  variant="quiet"
-                  iconOnly
-                  aria-label="Attach a file"
-                  title="Attach a file"
-                  className="-ml-3 size-11 shrink-0 rounded-full text-text-secondary shell:size-9"
-                  disabled={waiting !== null || sending || uploading}
-                  onClick={() => fileRef.current?.click()}
-                >
-                  <Paperclip size={18} aria-hidden="true" />
-                </Button>
-                <textarea
-                  ref={taRef}
-                  aria-label="Message Claude"
-                  className="block min-h-9 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-text-primary placeholder:text-text-muted outline-none! disabled:cursor-not-allowed max-md:text-base"
-                  rows={1}
-                  value={draft}
-                  disabled={waiting !== null}
-                  placeholder={placeholder}
-                  aria-autocomplete="list"
-                  aria-expanded={slashOn || mentionOn}
-                  aria-controls={slashOn ? "slash-menu" : mentionOn ? "mention-menu" : undefined}
-                  aria-activedescendant={slashOn ? `slash-menu-opt-${slashActive}` : mentionOn ? `mention-menu-opt-${mentionActive}` : undefined}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    setSlashIndex(0);
-                    setSlashShut(false);
-                    setMentionShut(false);
-                  }}
-                  onKeyDown={onKeyDown}
-                  onPaste={(e: ClipboardEvent<HTMLTextAreaElement>) => {
-                    if (e.clipboardData.files.length === 0) return;
-                    e.preventDefault();
-                    takeFiles(e.clipboardData.files, true);
-                  }}
-                />
-                {waiting !== null ? null : (
+                onDropFiles={(files) => takeFiles(files)}
+                attachments={
+                  attachments.length > 0 ? (
+                    <ul aria-label="Files to send" className="flex flex-wrap gap-1.5 pt-1">
+                      {attachments.map((a) => (
+                        <li key={a.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-active py-1 pr-1 pl-1.5 text-sm text-text-secondary">
+                          {a.url ? (
+                            <img src={a.url} alt="" className="size-8 shrink-0 rounded-md object-cover" />
+                          ) : (
+                            <Paperclip size={14} aria-hidden="true" className="shrink-0" />
+                          )}
+                          <span className="min-w-0 truncate">{a.file.name}</span>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${a.file.name}`}
+                            disabled={uploading}
+                            onClick={() => removeAttachment(a.key)}
+                            className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
+                          >
+                            <X size={12} aria-hidden="true" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null
+                }
+                leading={
                   <>
-                    {busy ? (
-                      <Button variant="secondary" iconOnly aria-label="Stop Claude" title="Stop Claude" className="size-11 shrink-0 rounded-full shell:size-9" onClick={() => void stop()}>
-                        <span aria-hidden="true" className="size-[11px] rounded-[2px] bg-current" />
-                      </Button>
-                    ) : null}
-                    <Button
-                      variant="primary"
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      multiple
+                      aria-label="Add files"
+                      className="hidden"
+                      onChange={(e) => {
+                        takeFiles(e.target.files ?? []);
+                        e.target.value = "";
+                      }}
+                    />
+                    <ComposerChip
                       iconOnly
-                      aria-label="Send"
-                      title={busy ? "Send (queued until Claude is ready)" : "Send"}
-                      className="size-11 shrink-0 rounded-full shell:size-9 disabled:opacity-40"
-                      disabled={sending || uploading || (draft.trim() === "" && attachments.length === 0)}
-                      onClick={() => void send()}
-                    >
-                      <ArrowUp size={18} aria-hidden="true" />
-                    </Button>
-                  </>
-                )}
-              </div>
-              {models.length > 0 || mode !== null ? (
-                <div className="mt-1.5 flex min-w-0 items-center justify-center gap-0.5">
-                  {models.length > 0 ? (
+                      aria-label="Add files"
+                      title="Add files"
+                      icon={<Paperclip size={14} aria-hidden="true" />}
+                      disabled={waiting !== null || sending || uploading}
+                      onClick={() => fileRef.current?.click()}
+                    />
+                    <ComposerChip
+                      icon={<Lightning size={14} aria-hidden="true" />}
+                      label="Commands"
+                      hideLabelOnPhone
+                      aria-label="Commands"
+                      title={commands.length === 0 ? "Commands load when Claude starts" : undefined}
+                      disabled={commands.length === 0}
+                      onClick={openCommands}
+                    />
                     <Menu
-                      label={`Model: ${modelText}`}
+                      side="top"
                       align="start"
-                      trigger={<button type="button" className={cn(FOOT_BTN, "max-w-[9rem]")}>{modelText}</button>}
+                      label={`Model: ${modelText}`}
+                      trigger={
+                        <ComposerChip
+                          icon={<Cpu size={14} aria-hidden="true" />}
+                          label={modelText}
+                          menu
+                          disabled={models.length === 0}
+                          title={models.length === 0 ? "Models load when Claude starts" : undefined}
+                        />
+                      }
                     >
                       <MenuRadioGroup value={modelInfo?.value ?? ""} onValueChange={(v) => void pick("model", v, model, setModel)}>
                         {models.map((m) => (
                           <MenuRadioItem key={m.value} value={m.value}>
-                            {m.displayName}
+                            <span className="block">{m.displayName}</span>
+                            {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
                           </MenuRadioItem>
                         ))}
                       </MenuRadioGroup>
+                      {levels.length > 0 ? (
+                        <>
+                          <MenuSeparator />
+                          <MenuLabel>{`Effort: ${effortText}`}</MenuLabel>
+                          <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
+                            {levels.map((l) => (
+                              <MenuRadioItem key={l} value={l}>
+                                {EFFORT_LABEL[l] ?? l}
+                              </MenuRadioItem>
+                            ))}
+                          </MenuRadioGroup>
+                        </>
+                      ) : null}
                     </Menu>
-                  ) : null}
-                  {levels.length > 0 ? (
                     <Menu
-                      label={`Effort: ${effortText}`}
+                      side="top"
                       align="start"
-                      trigger={<button type="button" className={FOOT_BTN}>{effortText}</button>}
-                    >
-                      <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
-                        {levels.map((l) => (
-                          <MenuRadioItem key={l} value={l}>
-                            {EFFORT_LABEL[l] ?? l}
-                          </MenuRadioItem>
-                        ))}
-                      </MenuRadioGroup>
-                    </Menu>
-                  ) : null}
-                  {mode !== null ? (
-                    <Menu
                       label={`Mode: ${modeText}`}
-                      align="start"
-                      trigger={<button type="button" className={FOOT_BTN}>{modeText}</button>}
+                      trigger={<ComposerChip icon={<Shield size={14} aria-hidden="true" />} label={modeText} menu disabled={mode === null} />}
                     >
-                      <MenuRadioGroup value={mode} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
-                        {MODE_CHOICES.map((c) => (
-                          <MenuRadioItem key={c.value} value={c.value}>
-                            {c.label}
+                      <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
+                        {MODE_CHOICES.map((value) => (
+                          <MenuRadioItem key={value} value={value}>
+                            <span className="block">{MODES[value].label}</span>
+                            <span className="block text-xs text-text-muted">{MODES[value].detail}</span>
                           </MenuRadioItem>
                         ))}
                       </MenuRadioGroup>
                     </Menu>
-                  ) : null}
-                  {usage?.context ? (
-                    <button type="button" aria-expanded={usageOpen} onClick={() => setUsageOpen((o) => !o)} className={FOOT_BTN}>
-                      <span className="hidden md:inline">Context</span> {usage.context.percent}%
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-              {usageOpen && usage ? <UsagePanel usage={usage} /> : null}
+                  </>
+                }
+                trailing={
+                  <>
+                    {usage?.context && usage.context.percent >= 50 ? (
+                      <ComposerChip
+                        label={usage.context.percent >= 85 ? "Chat almost full" : `Chat ${usage.context.percent}% full`}
+                        popoverTarget="context-popover"
+                      />
+                    ) : null}
+                    {working && hasDraft ? (
+                      <ComposerChip icon={<Stop size={14} aria-hidden="true" />} label="Stop" aria-label="Stop Claude" title="Stop Claude" onClick={() => void stop()} />
+                    ) : null}
+                    {working && !hasDraft ? (
+                      <Button variant="secondary" iconOnly aria-label="Stop Claude" title="Stop Claude" onClick={() => void stop()}>
+                        <Stop size={16} aria-hidden="true" />
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        iconOnly
+                        aria-label="Send"
+                        title={busy ? "Send (queued until Claude is ready)" : "Send"}
+                        disabled={waiting !== null || sending || uploading || !hasDraft}
+                        onClick={() => void send()}
+                      >
+                        <ArrowUp size={18} aria-hidden="true" />
+                      </Button>
+                    )}
+                  </>
+                }
+              />
             </div>
           </div>
         ) : null}
+
+        {/* Native popover: Esc and an outside click close it, no modal. Placed above the chip when it opens. */}
+        <div
+          id="context-popover"
+          popover="auto"
+          aria-label="How full this chat is"
+          className="menu m-0 inset-auto h-fit w-80 max-w-[calc(100vw-1rem)] p-4"
+          onToggle={(e) => {
+            const pop = e.currentTarget;
+            const chip = document.querySelector<HTMLElement>('[popovertarget="context-popover"]');
+            if ((e.nativeEvent as ToggleEvent).newState !== "open" || !chip) return;
+            const r = chip.getBoundingClientRect();
+            pop.style.left = `${Math.max(8, Math.min(r.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8))}px`;
+            pop.style.top = `${Math.max(8, r.top - pop.offsetHeight - 8)}px`;
+          }}
+        >
+          <p className="text-base font-semibold text-text-primary">How full this chat is</p>
+          <p className="mt-1 text-sm leading-5 text-text-muted">
+            Long chats get summarised automatically. Start a fresh project chat for a new task.
+          </p>
+          {usage ? (
+            <div className="mt-3">
+              <UsagePanel usage={usage} />
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <ConfirmDialog
@@ -1601,6 +1631,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         title="Undo the changes?"
         description="Everything Claude changed since you last pressed Keep will be removed. This can't be reversed."
         confirmLabel="Undo"
+        tone="danger"
         busy={undoing}
         onConfirm={() => void undo()}
       />

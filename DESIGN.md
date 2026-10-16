@@ -36,7 +36,7 @@ Copy is plain English in sentence case, no developer words in the main path. Ico
 
 ## Principles
 
-- **No spinners, no pulsing, no "Working" badge or chip.** Claude working is one grey line in the chat ("Writing menu.html", or "Working") plus the send button turning into a round Stop button.
+- **No spinners, no looping animation, no "Working" badge or chip.** Claude working is one grey line in the chat ("Writing menu.html", or "Working") with a small dot that breathes (the one animation allowed; reduced motion turns it off), plus the send button turning into a round Stop button.
 - **No status chip beside project names.** In the sidebar, status is one 7px dot in the text colour on the right of a row, only when the project needs you or is ready to check. It has an accessible label ("Needs you" / "Ready to check"). Nothing otherwise.
 - **Separation by background, not borders.** No line between sidebar and page or under headers. Cards, the Ask box, icon tiles and secondary buttons are tonal fills with no border. The only lines left are focus rings, true dividers (between panes, a palette's search field, above a footnote), and the boundary of a text field (`line-strong`, 3:1 against its surface). The composer has none.
 - **One primary per view.** The filled pill in `text-primary` colour (white in dark, near-black in light). A second action is secondary (tonal pill) or quiet.
@@ -62,15 +62,17 @@ Lime (`status-running`) survives only in Settings and update panels as a "health
 
 ## Typography
 
-Body and controls 15-16px, nothing below 12px. Home heading 28px weight 500. Headings are sentence case, no uppercase kickers. Counters and timestamps use tabular numerals. Mono only for a whole machine value, never for labels or a word in a sentence.
+Body and controls 15-16px, nothing below 12px. The type scale is tokens in `web/src/index.css`: `text-xs` 12px (meta, counts), `text-sm` 13px (controls, menu items, chips), `text-small` 14px (tool lines, the working line), `text-base` 15px (body, composer), `text-lg` 16px (prose headings). Use the tokens, never a bracketed pixel size. Home heading 28px weight 500. Headings are sentence case, no uppercase kickers. Counters and timestamps use tabular numerals. Mono only for a whole machine value, never for labels or a word in a sentence.
 
 ## Layout and shapes
 
 - **Shell:** sidebar 260px on desktop (collapsible), off-canvas drawer below the `shell` breakpoint (900px); a 52px top bar on phones (menu, "kohlab", new-project pencil) with 44px hit areas. The composer is pinned at the bottom.
 - **Radii:** rows 8px, cards 16px, composer 24px, user bubble 20px, buttons pills.
 - **Sidebar:** wordmark, then Back and Forward arrows (Alt+← / Alt+→; disabled when there is nowhere to go inside the app), search (opens the command palette) and collapse; a "New project" row; a small "Projects" label and one flat list (needs-you first, then most recent). Each project row is one full-width 36px pill with an 8px radius: the name on the left, and on the right the status dot or, on hover, keyboard focus, selection or an open menu, the ⋯ button inside the pill. Hover is `surface-hover`, selected `surface-active`. No group headings, counts, times or status icons. Bottom: one account row that opens a menu with Settings and Install app (when available).
-- **Project header (56px, no border):** left, project name with a ⌄ menu (Rename, Restart/Stop Claude for terminal projects, Delete project); centre, a segmented pill switch "Chat | Changes" (terminal projects: "Claude | Changes"; Changes shows a muted count when above 0), segments of equal width and centred on the content column, beside an open preview pane too; right, a quiet Preview button with the Browser icon, pressed (`surface-active`, `aria-pressed`) while the pane is open. Title, switch and Preview are all 36px tall; the header's left and right padding are equal.
-- **Chat:** 720px centred column. User message: right-aligned bubble. Claude text: plain, no label. Tools: one muted 14px summary line with a chevron. Ready to check sits under the reply: "Changed N files", then Keep this version (primary), Preview (secondary pill), Undo (quiet). Copy shows only under a Claude reply that has text. An Ask is a 16px-radius tonal card with no line: semibold title, muted reason, Allow (primary), Don't allow (secondary), "Show details" quiet, 12px between buttons. Composer: 24px field-coloured box, + attach, input, round 36px send button (square Stop while working, dimmed when empty).
+- **Project header (56px, no border):** left, project name with a ⌄ menu (Rename, Restart/Stop Claude for terminal projects, Delete project); centre, one segmented pill switch. A project that runs Claude shows "Chat · Terminal · Changes" (Files too once power tools are on); a chat project shows "Chat · Changes"; a project without Claude shows "Terminal · Changes". Changes shows a muted count when above 0. Segments are of equal width and centred on the content column, beside an open preview pane too. The Chat or Terminal choice is remembered per project, and an old `terminal` link opens the remembered view. Right, a quiet Preview button with the Browser icon, pressed (`surface-active`, `aria-pressed`) while the pane is open. Title, switch and Preview are all 36px tall; the header's left and right padding are equal.
+- **Chat:** 720px centred column. User message: right-aligned bubble. Claude text: plain, no label. Tools: one muted 14px summary line with a chevron; a live run stays folded and the working line names the current step. Ready to check sits under the reply: "Changed N files", then Keep this version (primary), Preview (secondary pill), "Undo all since last keep" (quiet, confirmed as a danger action). Copy shows only under a finished Claude reply that ends in text (not mid-turn, not under a tool run), with a "Copy" tooltip. An Ask is a 16px-radius tonal card with no line: semibold title, muted reason, Allow (primary), Don't allow (secondary), "Show details" quiet, 12px between buttons.
+- **Composer:** one 24px raised box with no border, in two rows. The top row holds attached files and the text. The bottom row, left: quiet chips for Add files (icon only), "/" Commands, the model (its effort sits inside the model menu) and the mode, each with its one-line detail in the menu. Right: the context chip when it applies, then one round button. It is Send when idle; Stop (square) while Claude works with nothing typed; Send, which queues, while Claude works with text typed, with a quiet Stop chip beside it. Never two round buttons side by side. The "/" and "@" lists open above the box. Placeholder on desktop: "Message Claude — / for commands, @ for files"; on a phone: "Message Claude".
+- **Context chip:** shown only at 50% of the context window or more: "Chat 72% full", and "Chat almost full" from 85%. Its click opens a small native popover above it (no modal; Esc closes it) with the usage details and "Long chats get summarised automatically. Start a fresh project chat for a new task."
 - **Home:** centred "What should we build?", the composer, starter chips (tonal pills, no line). If a project needs you, at most one quiet link line under the chips.
 - **Terminal project:** the terminal sits in a #181818 panel, radius 14px, 12px from the edges (not the top), 20/24px inner padding. Attach and Copy float inside it.
 
@@ -80,14 +82,16 @@ Radix primitives are styled once in `web/src/components/ui.tsx` (Button, Menu, T
 
 Buttons: min-height 40px (44px on touch), weight 550. Primary filled, dimmed to 40% when disabled; secondary tonal (`surface-raised` fill, hover `surface-active`, pressed `surface-pressed`, no border); quiet borderless; danger red text on a red tint. Icon-only buttons are square with an `aria-label`. Focus is a 2px soft grey (focus-ring token) outline, inset on full-width rows, shown for keyboard use only.
 
-Menus, dialogs and the palette sit on `surface-overlay` with a soft shadow; in-page cards and rows are flat. Forced-colors maps borders and outlines to system colours.
+Chip (`ComposerChip` in `ui.tsx`): a quiet pill trigger for composer controls. 32px tall (44px on touch), 13px secondary text, an optional 14px icon before the label and a 12px caret when it opens a menu. Hover `surface-hover`; open or pressed `surface-active`; no border. It forwards its ref, so it can be a Menu trigger. The status chip (`Chip`) is a different thing and stays for status words.
+
+Menus, dialogs and the palette sit on `surface-overlay` with a soft shadow; in-page cards and rows are flat. The "/" and "@" lists in the composer use the same surface, radius, shadow and item sizes as the menus. Forced-colors maps borders and outlines to system colours.
 
 ## Do and Don't
 
 - Do add colour by adding a primitive, aliasing it in the semantic tier and bridging it in `@theme inline`; give every colour a light and a dark value.
 - Do size controls with `--control-h`, `--control-h-sm`, `--row-h` as min-height; stack with the `--z-*` tokens.
 - Do keep one `<h1>` per surface.
-- Don't add spinners, pulses, looping animation (skeleton shimmer excepted), badges, or status chips next to names.
+- Don't add spinners, looping animation, badges, or status chips next to names. The skeleton shimmer and the working line's breathing dot are the only exceptions.
 - Don't put a border between sidebar and page or under a header.
 - Don't put a hex, OKLCH literal or primitive name in a component; don't import `@radix-ui/*` outside `ui.tsx`.
 - Don't add hero metrics or summary tiles to Home; don't load fonts from a third party.

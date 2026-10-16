@@ -12,7 +12,6 @@ import {
   House,
   MagnifyingGlass,
   Plus,
-  Sparkle,
   Terminal,
   TerminalWindow,
   X,
@@ -21,7 +20,7 @@ import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { isApple } from "../lib/platform";
-import { canContinue, changeModel, modelOf, type ModelChoice } from "../lib/projectActions";
+import { canContinue } from "../lib/projectActions";
 import type { PanelAction, PanelRequest } from "../store";
 import type { Workspace } from "../types";
 import { projectTitle } from "../lib/format";
@@ -74,24 +73,6 @@ function projectActionItems(
     { id: "project-file", label: "Open file…", group, icon: <File size={16} />, keywords: ["files", "code", "browse"], onAction: panel("files") },
     { id: "project-versions", label: "Earlier versions", group, icon: <ClockCounterClockwise size={16} />, keywords: ["changes", "history", "undo", "versions"], onAction: panel("changes") },
     { id: "project-download", label: "Download project", group, icon: <DownloadSimple size={16} />, keywords: ["zip", "save", "export", "archive"], onAction: () => api.download(w.id, "") },
-    ...(mutate
-      ? (
-          [
-            ["opus", "Use Opus 5.5"],
-            ["sonnet", "Use Sonnet 5.5"],
-            ["haiku", "Use Haiku 5.5"],
-            ["default", "Use the account default model"],
-          ] as [ModelChoice, string][]
-        ).map(([model, label]) => ({
-          id: `project-model-${model}`,
-          label,
-          group,
-          icon: <Sparkle size={16} />,
-          hint: modelOf(w) === model ? "Current" : undefined,
-          keywords: ["model", "claude"],
-          onAction: () => changeModel(w, model),
-        }))
-      : []),
     { id: "project-preview", label: "Preview", group, icon: <Eye size={16} />, keywords: ["site", "browser", "view", "page"], onAction: panel("preview") },
   ];
 }

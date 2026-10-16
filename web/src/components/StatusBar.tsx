@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useApp } from "../store";
-import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import { isApple } from "../lib/platform";
 import { Kbd } from "./ui";
 
@@ -33,7 +32,6 @@ export default function StatusBar() {
   return (
     <footer className="hidden h-[26px] shrink-0 items-center gap-4 bg-surface-sidebar px-3 text-xs text-text-faint min-[56.25rem]:flex">
       {connected === null ? null : <span>{connected ? "Claude connected" : "Claude isn't connected"}</span>}
-      {w ? <span className="shrink-0">{MODEL_LABEL[modelOf(w)]}</span> : null}
       {w ? <span className="mono min-w-0 truncate">{w.path}</span> : null}
       <span className="ml-auto flex shrink-0 items-center gap-3">
         <span className="flex items-center gap-1.5">
