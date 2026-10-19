@@ -9,6 +9,25 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.0.0] - 2026-10-19
+
+Kohlab now works with more than one AI, and the chat can show far more than text.
+
+### Added
+- Choose the AI for each project: Claude, Hermes, omp or Codex, from the new AI button in the message box. Switch AI in the middle of a chat, and the new one gets a short summary of the conversation so far. Switching back picks up where that AI left off.
+- Hermes, omp and Codex each have a model menu with search, and Kohlab remembers the last model you picked for each AI.
+- Sign in to Codex from Settings → Agents: Kohlab shows a code and a link, you sign in with your ChatGPT account, done. Only the owner can do this.
+- When Claude asks you a question with options, you get real buttons to pick from (or type your own answer) instead of raw text.
+- In "Plan first" mode Claude's plan shows as a readable card with **Build it** and **Change the plan**. After you approve, the chat goes back to the mode you had before.
+- A progress checklist above the message box ("2 of 5 done") while the AI works through its steps, and a line showing its helpers at work.
+- Open any step in the activity summary to see the command and its output, or the exact change to a file. Steps that failed are marked.
+- Pictures in replies: charts, mockups and small pages appear live in the chat, sealed off from Kohlab. Diagrams are drawn instead of shown as code. Images from your project show as thumbnails you can open full size, and attached pictures show in your own messages.
+- Under each of your messages: **What this changed** (exactly which files that message changed), **Go back to here** (put your files back to how they were before it; you can undo this from Earlier versions) and **New chat from here**.
+
+### Fixed
+- If Claude crashed in the middle of a reply, the chat could stay stuck on "still working".
+- Housekeeping steps no longer clutter the activity summary.
+
 ## [1.53.1] - 2026-10-19
 
 ### Fixed
