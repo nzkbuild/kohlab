@@ -27,16 +27,20 @@ function plainError(e: unknown): string {
 /* ------------------------------------------------------------ create form -- */
 
 /** The ACP agents a new chat project can use, besides Claude. Each is offered only when the server reports it installed. */
-const ACP_CHOICES = ["hermes", "omp"];
+const ACP_CHOICES = ["hermes", "omp", "codex"];
 
-/** The AI a new chat project talks through: Claude, or an installed ACP agent. Default Claude. */
+/** The AI a new chat project talks through: Claude, or an installed ACP agent. Default Claude. `codexNeedsSignIn` is set when Codex is offered but not signed in. */
 function useNewAgent() {
   const [agent, setAgent] = useState("claude");
   const [installed, setInstalled] = useState<string[]>([]);
+  const [codexSignedIn, setCodexSignedIn] = useState(true);
   useEffect(() => {
-    api.agentsStatus().then((s) => setInstalled(ACP_CHOICES.filter((n) => s[n] === true)), () => {});
+    api.agentsStatus().then((s) => {
+      setInstalled(ACP_CHOICES.filter((n) => s[n] === true));
+      setCodexSignedIn(s.codexSignedIn !== false);
+    }, () => {});
   }, []);
-  return { agent, setAgent, options: ["claude", ...installed] };
+  return { agent, setAgent, options: ["claude", ...installed], codexNeedsSignIn: !codexSignedIn };
 }
 
 /** The AI choice for a new project: a composer chip. On a phone it is the icon alone, so the composer does not crowd. */
@@ -356,6 +360,19 @@ export function HomeScreen() {
                       <p className="mt-0.5 text-sm text-text-secondary">
                         Kohlab needs Claude to build things. Open Settings to see how to connect it.
                       </p>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => navigate({ kind: "settings", section: "agents" })}>
+                      Open settings
+                    </Button>
+                  </div>
+                </Panel>
+              ) : null}
+              {newAgent.agent === "codex" && newAgent.codexNeedsSignIn ? (
+                <Panel className="mt-8 w-full">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-text-primary">Codex needs you to sign in first</p>
+                      <p className="mt-0.5 text-sm text-text-secondary">Open Settings to sign in with your ChatGPT account.</p>
                     </div>
                     <Button variant="secondary" size="sm" onClick={() => navigate({ kind: "settings", section: "agents" })}>
                       Open settings

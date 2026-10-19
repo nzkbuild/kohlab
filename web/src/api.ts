@@ -1,4 +1,4 @@
-import type { AgentStatus, ChatEvent, DiffFile, ReleaseStatus, TreeNode, Version, Workspace } from "./types";
+import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, ReleaseStatus, TreeNode, Version, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -81,6 +81,8 @@ export const api = {
   },
   workspaces: () => json<Workspace[]>("/api/workspaces"),
   agentsStatus: () => json<AgentStatus>("/api/agents-status"),
+  codexLogin: () => json<{ url: string; code: string }>("/api/agents/codex/login", { method: "POST" }),
+  codexLoginState: () => json<CodexLogin>("/api/agents/codex/login"),
   create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; location?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   paths: () => json<{ projects: string }>("/api/paths"),

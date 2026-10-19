@@ -79,7 +79,15 @@ export interface Version {
   label: string;
 }
 
-export type AgentStatus = Record<string, boolean> & { claudeSignedIn?: boolean | null };
+export type AgentStatus = Record<string, boolean> & { claudeSignedIn?: boolean | null; codexSignedIn?: boolean | null };
+
+/** Codex's sign-in as the server reports it: idle, waiting on the owner's approval (with the link and code), done, or failed. */
+export interface CodexLogin {
+  state: "idle" | "waiting" | "done" | "failed";
+  url?: string;
+  code?: string;
+  error?: string;
+}
 
 /** What `/api/release` reports: the published version, and any update in flight. */
 export interface ReleaseStatus {

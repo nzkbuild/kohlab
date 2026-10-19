@@ -18,12 +18,24 @@ export const ACP_AGENTS: Record<string, string[]> = {
   omp: ["omp", "acp"],
   gemini: ["gemini", "--experimental-acp"],
   opencode: ["opencode", "acp"],
+  codex: ["codex-acp"],
 };
 
 /** How each agent is named in the questions it asks. */
-const ACP_NAMES: Record<string, string> = { hermes: "Hermes", omp: "Omp", gemini: "Gemini", opencode: "OpenCode" };
+const ACP_NAMES: Record<string, string> = { hermes: "Hermes", omp: "Omp", gemini: "Gemini", opencode: "OpenCode", codex: "Codex" };
 
 export const isAcpAgent = (agent: string): boolean => Object.prototype.hasOwnProperty.call(ACP_AGENTS, agent);
+
+/** The ACP error code for "authentication required" (the protocol's -32000). */
+const AUTH_REQUIRED = -32000;
+
+/** The chat line for an agent that could not start. A sign-in refusal says so; anything else is the generic line. Pure. */
+export function acpStartFailure(agent: string, err: unknown): string {
+  if ((err as { code?: unknown } | null)?.code === AUTH_REQUIRED) {
+    return agent === "codex" ? "Codex isn't signed in yet. Ask the owner to sign in from Settings → Agents." : "The agent isn't signed in yet. Ask the owner to sign it in.";
+  }
+  return "The agent could not start. Try again.";
+}
 
 /** The models an ACP agent offers, from its session/new or session/load reply. hermes lists them under models (availableModels, currentModelId) and takes a change with session/set_model; omp lists the "model" config option and takes one with session/set_config_option. Pure. */
 export function acpModels(res: any): { models: Caps["models"]; current: string | null; how: "model" | "config" | null; configId: string } {
@@ -341,7 +353,7 @@ export class AcpClient {
     if (!p) return;
     this.rpc.delete(m.id);
     clearTimeout(p.timer);
-    if (m.error) p.reject(new Error(String(m.error.message ?? "agent error")));
+    if (m.error) p.reject(Object.assign(new Error(String(m.error.message ?? "agent error")), { code: m.error.code }));
     else p.resolve(m.result);
   }
 

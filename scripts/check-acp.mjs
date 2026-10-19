@@ -7,7 +7,8 @@
  *
  * Run:  bun scripts/check-acp.mjs
  */
-import { acpDetail, acpEffects, acpModels, isAcpAgent, permissionText, pickOption, planTodos } from "../acp.ts";
+import { acpDetail, acpEffects, acpModels, acpStartFailure, isAcpAgent, permissionText, pickOption, planTodos } from "../acp.ts";
+import { parseCodexDeviceAuth, parseCodexLoggedIn } from "../codex.ts";
 
 let failures = 0;
 
@@ -22,6 +23,7 @@ check("hermes is an ACP agent", isAcpAgent("hermes"), true);
 check("omp is an ACP agent", isAcpAgent("omp"), true);
 check("claude is not", isAcpAgent("claude"), false);
 check("a name from Object.prototype is not", isAcpAgent("constructor"), false);
+check("codex is an ACP agent", isAcpAgent("codex"), true);
 
 // text: the streamed draft
 check("message chunk is draft text", acpEffects({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hi" } }), [{ kind: "text", text: "Hi" }]);
@@ -122,6 +124,36 @@ check("omp current model is the option's currentValue", acpModels(ompNew).curren
 check("omp changes its model with set_config_option on the model option", [acpModels(ompNew).how, acpModels(ompNew).configId], ["config", "model"]);
 check("a reply with no model list gives none", acpModels({ sessionId: "x", configOptions: [{ id: "mode", options: [] }] }), { models: [], current: null, how: null, configId: "" });
 check("a model entry without a value is skipped", acpModels({ models: { availableModels: [{ name: "no id" }, { modelId: "m1" }] } }).models.map((m) => m.value), ["m1"]);
+
+// codex: the device sign-in text, as `codex login --device-auth` prints it (ANSI colours kept; the code is a placeholder of the same shape)
+const codexDeviceText = [
+  "Welcome to Codex [v\x1b[90m0.163.0\x1b[0m]",
+  "\x1b[90mOpenAI's command-line coding agent\x1b[0m",
+  "",
+  "Follow these steps to sign in with ChatGPT using device code authorization:",
+  "",
+  "1. Open this link in your browser and sign in to your account",
+  "   \x1b[94mhttps://auth.openai.com/codex/device\x1b[0m",
+  "",
+  "2. Enter this one-time code \x1b[90m(expires in 15 minutes)\x1b[0m",
+  "   \x1b[94mK7MQ-R2TXA\x1b[0m",
+  "",
+  "\x1b[90mContinue only if you started this login in Codex. If a website or another person gave you this code, cancel.\x1b[0m",
+  "",
+].join("\n");
+check("device sign-in: the link is read past the colour codes", parseCodexDeviceAuth(codexDeviceText)?.url, "https://auth.openai.com/codex/device");
+check("device sign-in: the one-time code is read", parseCodexDeviceAuth(codexDeviceText)?.code, "K7MQ-R2TXA");
+check("device sign-in: nothing until the code has printed", parseCodexDeviceAuth(codexDeviceText.split("K7MQ")[0]), null);
+check("device sign-in: plain text without colours works too", parseCodexDeviceAuth(codexDeviceText.replace(/\x1b\[[0-9;]*m/g, "")), { url: "https://auth.openai.com/codex/device", code: "K7MQ-R2TXA" });
+check("login status: not logged in is not signed in", parseCodexLoggedIn("Not logged in\n", 1), false);
+check("login status: a zero exit with no 'Not logged in' is signed in", parseCodexLoggedIn("Logged in using ChatGPT\n", 0), true);
+check("login status: a zero exit that says not logged in is not signed in", parseCodexLoggedIn("Not logged in", 0), false);
+check("login status: a failed run is not signed in", parseCodexLoggedIn("", 2), false);
+
+// a sign-in refusal from codex-acp (-32000) becomes the sign-in line; other errors stay generic
+check("codex refused for sign-in gets the sign-in line", acpStartFailure("codex", Object.assign(new Error("Authentication required"), { code: -32000 })), "Codex isn't signed in yet. Ask the owner to sign in from Settings → Agents.");
+check("another agent refused for sign-in gets its own line", acpStartFailure("hermes", Object.assign(new Error("Authentication required"), { code: -32000 })), "The agent isn't signed in yet. Ask the owner to sign it in.");
+check("any other start error is the generic line", acpStartFailure("codex", new Error("boom")), "The agent could not start. Try again.");
 
 if (failures) {
   console.log(`\n${failures} failing`);

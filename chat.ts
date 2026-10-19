@@ -17,7 +17,7 @@ import type { Workspace } from "./types";
 import { notifyNeedsYou } from "./push";
 import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
 import { devServerOrigin } from "./devserver";
-import { ACP_AGENTS, AcpClient, isAcpAgent, type AcpHost } from "./acp";
+import { ACP_AGENTS, AcpClient, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
 import {
   WORKS_DIR,
   chatBusy,
@@ -42,7 +42,7 @@ import {
  *  Same allowlist as the PTY daemon: see SAFE_ENV_KEYS in pty-daemon.cjs for why. */
 const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USER", "LOGNAME"];
 /** The environment a child agent gets: the allowlisted keys from the server's, and its own HOME. */
-function childEnv(home: string): Record<string, string> {
+export function childEnv(home: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
   env.HOME = home;
@@ -1230,7 +1230,7 @@ async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
     acp.prompt(t);
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
-    emit(id, { kind: "error", text: "The agent could not start. Try again." });
+    emit(id, { kind: "error", text: acpStartFailure(ws.agent, e) });
     chatBusy.delete(id);
     await finish(id);
   }

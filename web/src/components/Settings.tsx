@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { ArrowsClockwise, Bell, BellRinging, SignOut, Sparkle, SlidersHorizontal, UserCircle, WarningCircle } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ArrowsClockwise, Bell, BellRinging, Copy, SignOut, Sparkle, SlidersHorizontal, UserCircle, WarningCircle } from "@phosphor-icons/react";
 import type { SettingsSection } from "../lib/route";
 import { useApp, useCan } from "../store";
 import { api, clearKey } from "../api";
@@ -99,14 +99,101 @@ const AGENT_NAMES: [key: string, name: string][] = [
   ["omp", "Oh My Pi"],
 ];
 
+/** Codex sign-in for the owner: shows the code and link from `codex login --device-auth`, then polls until the browser approval lands. */
+function CodexSignIn({ onConnected }: { onConnected: () => void }) {
+  const [phase, setPhase] = useState<"idle" | "starting" | "waiting" | "failed">("idle");
+  const [login, setLogin] = useState<{ url: string; code: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const start = () => {
+    setPhase("starting");
+    setError(null);
+    api.codexLogin().then(
+      (l) => {
+        setLogin(l);
+        setPhase("waiting");
+      },
+      (e: Error) => {
+        setError(e.message);
+        setPhase("failed");
+      },
+    );
+  };
+
+  // Poll every 2 s while waiting; a failed poll is retried, not shown.
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = () => {
+      api.codexLoginState().then(
+        (s) => {
+          if (!alive) return;
+          if (s.state === "done") onConnected();
+          else if (s.state === "failed") {
+            setError(s.error ?? "Sign-in did not finish. Try again.");
+            setPhase("failed");
+          } else timer = setTimeout(tick, 2000);
+        },
+        () => {
+          if (alive) timer = setTimeout(tick, 2000);
+        },
+      );
+    };
+    timer = setTimeout(tick, 2000);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [phase, onConnected]);
+
+  const copy = () => {
+    if (!login) return;
+    void navigator.clipboard?.writeText(login.code);
+    announce("Code copied");
+  };
+
+  if (phase === "waiting" && login) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-text-secondary">Open the page, sign in with your ChatGPT account and enter this code.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="mono rounded-md bg-surface-sunken px-3 py-2 text-2xl tracking-widest text-text-primary">{login.code}</span>
+          <Button variant="secondary" size="sm" onClick={copy}>
+            <Copy size={14} aria-hidden="true" />
+            Copy
+          </Button>
+        </div>
+        {/^https:\/\//i.test(login.url) ? (
+          <a className="text-sm font-medium text-accent underline underline-offset-2" href={login.url} target="_blank" rel="noopener noreferrer">
+            Open sign-in page
+          </a>
+        ) : null}
+        <p className="text-xs text-text-muted">Waiting for you to finish in your browser.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {error ? <p className="text-sm text-status-danger">{error}</p> : null}
+      <div>
+        <Button variant="secondary" size="sm" disabled={phase === "starting"} onClick={start}>
+          {phase === "starting" ? "Starting…" : "Sign in to Codex"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** Agents: which AI helpers are set up on this computer, read from the server's own check. */
-function AgentsPane() {
-  // `status` is null until the first check answers; `claudeSignedIn` is null when the server could not tell.
+function AgentsPane({ owner }: { owner: boolean }) {
+  // `status` is null until the first check answers; `claudeSignedIn` and `codexSignedIn` are null when the server could not tell.
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [justConnected, setJustConnected] = useState(false);
 
-  const check = () => {
+  const check = useCallback(() => {
     setChecking(true);
     setFailed(false);
     api
@@ -114,11 +201,17 @@ function AgentsPane() {
       .then((s) => setStatus(s))
       .catch(() => setFailed(true))
       .finally(() => setChecking(false));
-  };
-  useEffect(check, []);
+  }, []);
+  useEffect(check, [check]);
+
+  const connected = useCallback(() => {
+    setJustConnected(true);
+    check();
+  }, [check]);
 
   const claudeInstalled = status?.claude === true;
   const notSignedIn = claudeInstalled && status?.claudeSignedIn === false;
+  const codexNeedsSignIn = status?.codex === true && status.codexSignedIn !== true;
 
   // Claude stays first; of the rest, installed ones come before the ones not set up.
   const rows = AGENT_NAMES.map(([key, name]) => ({ key, name, installed: status?.[key] === true }));
@@ -149,6 +242,17 @@ function AgentsPane() {
           Ready
         </span>
       );
+    }
+    if (row.key === "codex" && row.installed) {
+      if (status?.codexSignedIn === true) return <Chip>Signed in</Chip>;
+      if (status?.codexSignedIn === false) {
+        return (
+          <span className={cn("chip", "chip-danger")}>
+            <span className="chip-dot" aria-hidden="true" />
+            Not signed in
+          </span>
+        );
+      }
     }
     return row.installed ? (
       <span className={cn("chip", "chip-running")}>
@@ -187,6 +291,14 @@ function AgentsPane() {
             "New projects start with Claude Code. Other agents can run in a project's terminal; chat support for them comes later."
           )}
         </p>
+        {codexNeedsSignIn ? (
+          owner ? (
+            <CodexSignIn onConnected={connected} />
+          ) : (
+            <p className="text-sm text-text-secondary">Ask the owner to sign in to Codex.</p>
+          )
+        ) : null}
+        {justConnected && status?.codexSignedIn === true ? <p className="text-sm text-text-secondary">Codex is connected.</p> : null}
         <div>
           <Button variant="secondary" size="sm" disabled={checking} onClick={check}>
             {checking ? "Checking…" : "Check again"}
@@ -301,7 +413,7 @@ export default function Settings() {
   const content: Partial<Record<SettingsSection, ReactNode>> = {
     account: <AccountPane />,
     appearance: <AppearancePane />,
-    agents: <AgentsPane />,
+    agents: <AgentsPane owner={can.own} />,
     notifications,
     updates: (
       <Panel>

@@ -84,6 +84,7 @@ import { resolvePreviewFile } from "./preview";
 import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, touchBrowser } from "./browser";
 import { stopAllDevServers } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
+import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
 import { ChatError, answer as answerChat, chatControl, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -790,7 +791,7 @@ function claudeSignedIn(): Promise<boolean | null> {
 }
 
 async function handleAgentsStatus(): Promise<Response> {
-  const names = ["omp", "hermes", "claude", "codex", "opencode", "pi", "gemini"];
+  const names = ["omp", "hermes", "claude", "codex", "codex-acp", "opencode", "pi", "gemini"];
   const { execFile } = await import("child_process");
   const status: Record<string, boolean | null> = {};
   await Promise.all(
@@ -805,7 +806,15 @@ async function handleAgentsStatus(): Promise<Response> {
     ),
   );
   status.claudeSignedIn = status.claude ? await claudeSignedIn() : null;
+  // Codex chats need the CLI (to sign in) and codex-acp (the server they talk to).
+  status.codex = status.codex === true && status["codex-acp"] === true;
+  status.codexSignedIn = status.codex ? await codexSignedIn() : null;
   return json(status);
+}
+
+/** Owner only: starts Codex's device-code sign-in and answers with the link and code to show. */
+async function handleCodexLoginStart(): Promise<Response> {
+  return startCodexLogin().then(json, (e: Error) => json({ error: e.message }, 500));
 }
 
 /** A package name: `thing` or `@scope/thing`. Nothing else, no flags, no
@@ -1619,6 +1628,14 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       containFailure(audit(actor, "agent.install"), "audit");
       return handleAgentInstall(req);
     }
+    if (path === "/api/agents/codex/login" && (req.method === "POST" || req.method === "GET")) {
+      // Signing in makes the server's Codex work for every chat, so it is an owner action.
+      const refused = gate(isOwner, "forbidden, only an owner can sign in to Codex");
+      if (refused) return refused;
+      if (req.method === "GET") return json(codexLoginState());
+      containFailure(audit(actor, "codex.login"), "audit");
+      return handleCodexLoginStart();
+    }
     if (path === "/api/agents-status") {
       if (denied) return json({ error: "unauthorized" }, 401);
       return handleAgentsStatus();
@@ -1950,6 +1967,7 @@ serve({
 
 // The dev servers are detached, so they would outlive this process. Stop them on the way out; a signal is sent again once they are stopped, so the exit is the same as before.
 process.once("exit", stopAllDevServers);
+process.once("exit", stopCodexLogin);
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.once(sig, () => {
     stopAllDevServers();
