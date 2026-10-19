@@ -7,7 +7,8 @@ import { projectTitle } from "../lib/format";
 import { agentName } from "../lib/agentName";
 import { workspaceStatus } from "../lib/status";
 import { Button, ComposerChip, Dialog, Field, Menu, MenuRadioGroup, MenuRadioItem, Panel } from "./ui";
-import { Composer } from "./Composer";
+import { Composer, SaveLaterChip, SavedChip } from "./Composer";
+import { addSaved, readDraft, writeDraft, DRAFT_SAVE_MS } from "../lib/drafts";
 import { projectNameFromIdea } from "./homeName";
 import { isPhone } from "../lib/viewport";
 
@@ -262,7 +263,16 @@ export function HomeScreen() {
   const setNewOpen = useApp((s) => s.setNewOpen);
   const can = useCan();
 
-  const [idea, setIdea] = useState("");
+  // The unsent idea: restored on load, saved 300 ms after the last key.
+  const [idea, setIdea] = useState(() => readDraft("home"));
+  const ideaRef = useRef(idea);
+  ideaRef.current = idea;
+  useEffect(() => {
+    const t = window.setTimeout(() => writeDraft("home", idea), DRAFT_SAVE_MS);
+    return () => window.clearTimeout(t);
+  }, [idea]);
+  // Leaving Home keeps what was typed, even inside that 300 ms.
+  useEffect(() => () => writeDraft("home", ideaRef.current), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
@@ -281,6 +291,19 @@ export function HomeScreen() {
     setNewOpen(true);
     navigate({ kind: "workspaces" }, { replace: true });
   }, [wantsCreate, setNewOpen, navigate]);
+
+  // /new?prompt=… fills the box and takes the prompt out of the address bar (any other parameter, such as an access key, stays). It never sends.
+  const promptText = route.kind === "workspaces" ? route.prompt : undefined;
+  useEffect(() => {
+    if (promptText === undefined) return;
+    setIdea(promptText);
+    setError(null);
+    const url = new URL(location.href);
+    url.searchParams.delete("prompt");
+    history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    navigate({ kind: "workspaces" }, { replace: true });
+    composer.current?.focus();
+  }, [promptText, navigate]);
 
   const needsYou = useMemo(
     () =>
@@ -332,6 +355,16 @@ export function HomeScreen() {
       e.preventDefault();
       void start();
     }
+  };
+
+  /** Ctrl/Cmd+S and the Save button: the idea goes to the saved list and the box clears. */
+  const saveForLater = () => {
+    const text = idea.trim();
+    if (text === "") return;
+    addSaved(text);
+    setIdea("");
+    announce("Saved for later");
+    composer.current?.focus();
   };
 
   const fill = (text: string) => {
@@ -388,8 +421,20 @@ export function HomeScreen() {
                 value={idea}
                 onChange={(v) => setIdea(v)}
                 readOnly={busy}
-                leading={<AgentChip agent={newAgent.agent} options={newAgent.options} onChange={newAgent.setAgent} disabled={busy} />}
+                leading={
+                  <>
+                    <AgentChip agent={newAgent.agent} options={newAgent.options} onChange={newAgent.setAgent} disabled={busy} />
+                    {idea.trim() !== "" ? <SaveLaterChip onClick={saveForLater} /> : null}
+                    <SavedChip
+                      onPick={(text) => {
+                        setIdea(text);
+                        composer.current?.focus();
+                      }}
+                    />
+                  </>
+                }
                 onKeyDown={onComposerKeyDown}
+                onSaveLater={saveForLater}
                 // The keyboard covers the lower half of a phone: bring the composer up into view.
                 onFocus={(e) => {
                   if (isPhone()) e.currentTarget.scrollIntoView({ block: "center" });

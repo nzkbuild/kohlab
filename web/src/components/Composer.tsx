@@ -1,5 +1,10 @@
 import { useLayoutEffect, type AriaAttributes, type ClipboardEvent, type DragEvent, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { BookmarkSimple, X } from "@phosphor-icons/react";
 import { cn } from "../lib/utils";
+import { isApple } from "../lib/platform";
+import { relativeTime } from "../lib/format";
+import { savedPreview, takeSaved, useSaved } from "../lib/drafts";
+import { ComposerChip, Menu, MenuItem } from "./ui";
 
 interface ComposerProps {
   id?: string;
@@ -14,6 +19,8 @@ interface ComposerProps {
   onKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   /** Enter sends: not with Shift, not while composing, not on touch. Skipped when onKeyDown took the key. */
   onSubmit?: () => void;
+  /** Ctrl/Cmd+S: save the text for later and clear the box. */
+  onSaveLater?: () => void;
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   onFocus?: (e: FocusEvent<HTMLTextAreaElement>) => void;
   /** Files dropped on the box. */
@@ -43,6 +50,7 @@ export function Composer({
   textareaRef,
   onKeyDown,
   onSubmit,
+  onSaveLater,
   onPaste,
   onFocus,
   onDropFiles,
@@ -65,7 +73,13 @@ export function Composer({
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     onKeyDown?.(e);
-    if (e.defaultPrevented || !onSubmit) return;
+    if (e.defaultPrevented) return;
+    if (onSaveLater && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      onSaveLater();
+      return;
+    }
+    if (!onSubmit) return;
     // Touch keyboards have no Shift+Enter: Enter is a newline there, and the send button sends.
     const touch = window.matchMedia("(pointer: coarse)").matches;
     if (e.key === "Enter" && !touch && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -109,5 +123,61 @@ export function Composer({
         {trailing}
       </div>
     </div>
+  );
+}
+
+/** Saves the box's text for later. Shown only while there is text to save. */
+export function SaveLaterChip({ onClick }: { onClick: () => void }) {
+  const key = isApple ? "Cmd" : "Ctrl";
+  return (
+    <ComposerChip
+      iconOnly
+      className="max-md:hidden"
+      aria-label="Save for later"
+      title={`Save for later (${key}+S)`}
+      icon={<BookmarkSimple size={14} aria-hidden="true" />}
+      onClick={onClick}
+    />
+  );
+}
+
+/** "Saved (N)": the prompts saved for later, newest first. Choosing one puts it back in the box. Shown only when there are some. */
+export function SavedChip({ onPick }: { onPick: (text: string) => void }) {
+  const saved = useSaved();
+  if (saved.length === 0) return null;
+  return (
+    <Menu
+      side="top"
+      align="start"
+      label={`Saved prompts (${saved.length})`}
+      trigger={<ComposerChip icon={<BookmarkSimple size={14} aria-hidden="true" />} label={`Saved (${saved.length})`} hideLabelOnPhone menu />}
+    >
+      {saved.map((s, i) => (
+        <div key={`${s.at}-${i}`} className="flex items-center">
+          <MenuItem
+            className="min-w-0 flex-1"
+            onSelect={() => {
+              const text = takeSaved(i);
+              if (text !== null) onPick(text);
+            }}
+          >
+            <span className="block truncate">{savedPreview(s.text)}</span>
+            <span className="block text-xs text-text-muted">{relativeTime(s.at)}</span>
+          </MenuItem>
+          <MenuItem
+            aria-label={`Remove ${savedPreview(s.text)}`}
+            title="Remove"
+            className="shrink-0 px-2"
+            onSelect={(e) => {
+              // Keep the menu open: the list shrinks in place.
+              e.preventDefault();
+              takeSaved(i);
+            }}
+          >
+            <X size={12} aria-hidden="true" />
+          </MenuItem>
+        </div>
+      ))}
+    </Menu>
   );
 }

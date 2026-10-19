@@ -38,7 +38,7 @@ export function useSync(): void {
 
   // Back/Forward: the URL already changed, so adopt it without pushing again.
   useEffect(() => {
-    const onPopState = () => adoptRoute(parseRoute(location.pathname));
+    const onPopState = () => adoptRoute(parseRoute(location.pathname, location.search));
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [adoptRoute]);

@@ -5,7 +5,7 @@
  * The review surface is the product's headline feature and its diff splitter is
  * pure logic, so it gets a check. No framework: assertions and a non-zero exit.
  */
-import { splitUnifiedDiff, languageForFile } from "../web/src/lib/diff.ts";
+import { splitUnifiedDiff, languageForFile, parsePatch } from "../web/src/lib/diff.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -107,6 +107,55 @@ check("languageForFile Dockerfile", languageForFile("deploy/Dockerfile") === "do
 check("languageForFile unknown", languageForFile("LICENSE") === "plaintext");
 check("languageForFile dotfile", languageForFile(".gitignore") === "plaintext");
 check("languageForFile yaml", languageForFile("k8s/deploy.yaml") === "yaml");
+
+// --- parsePatch: per file, no headers, hunks as gaps -------------------------
+const multi = parsePatch(
+  [
+    "diff --git a/a.txt b/a.txt",
+    "index 1234567..89abcde 100644",
+    "--- a/a.txt",
+    "+++ b/a.txt",
+    "@@ -1,3 +1,3 @@",
+    " keep",
+    "-old",
+    "+new",
+    "@@ -10,2 +10,2 @@",
+    "--- a sql comment, removed",
+    "+++ kept",
+    "diff --git a/b.txt b/b.txt",
+    "new file mode 100644",
+    "index 0000000..1111111",
+    "--- /dev/null",
+    "+++ b/b.txt",
+    "@@ -0,0 +1 @@",
+    "+hello",
+    "diff --git a/c.png b/c.png",
+    "deleted file mode 100644",
+    "index 2222222..0000000",
+    "Binary files a/c.png and /dev/null differ",
+    "",
+  ].join("\n"),
+);
+check("parsePatch: three files", multi.length === 3, JSON.stringify(multi));
+check("parsePatch: modified path and status", multi[0].path === "a.txt" && multi[0].status === "modified");
+check(
+  "parsePatch: hunk break is a gap, headers are gone",
+  JSON.stringify(multi[0].lines) ===
+    JSON.stringify([
+      { kind: "ctx", text: "keep" },
+      { kind: "del", text: "old" },
+      { kind: "add", text: "new" },
+      { kind: "gap", text: "…" },
+      { kind: "del", text: "-- a sql comment, removed" },
+      { kind: "add", text: "++ kept" },
+    ]),
+  JSON.stringify(multi[0].lines),
+);
+check("parsePatch: new file status", multi[1].status === "added" && multi[1].lines.length === 1 && multi[1].lines[0].text === "hello");
+check("parsePatch: deleted binary file has no lines", multi[2].status === "deleted" && multi[2].binary && multi[2].lines.length === 0);
+const truncated = parsePatch("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n\n… the rest of these changes is not shown (over 500 KB).\n");
+check("parsePatch: truncation note is kept as a gap", truncated[0].lines.at(-1)?.text.startsWith("… the rest") === true, JSON.stringify(truncated));
+check("parsePatch: empty input has no files", parsePatch("").length === 0);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {

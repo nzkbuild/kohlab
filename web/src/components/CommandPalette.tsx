@@ -10,6 +10,7 @@ import {
   File,
   GearSix,
   House,
+  Link,
   MagnifyingGlass,
   Plus,
   Terminal,
@@ -19,6 +20,9 @@ import {
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
+import { copyText } from "../lib/clipboard";
+import { readDraft } from "../lib/drafts";
+import { PROMPT_MAX } from "../lib/route";
 import { isApple } from "../lib/platform";
 import { canContinue } from "../lib/projectActions";
 import type { PanelAction, PanelRequest } from "../store";
@@ -150,6 +154,9 @@ export default function CommandPalette() {
     ? ["Views", "Projects", projectGroup, "Actions"]
     : ["Views", "Projects", "Actions"];
   const projectItems: PaletteItem[] = openProject ? projectActionItems(openProject, projectGroup ?? "", can.mutate, requestPanel) : [];
+  // The draft of the screen behind the palette (its chat, or Home). The prompt link is offered only while it has text.
+  const draftScope = route.kind === "workspace" ? route.id : route.kind === "workspaces" ? "home" : null;
+  const draftText = draftScope ? readDraft(draftScope) : "";
 
   const items: PaletteItem[] = [
     {
@@ -192,6 +199,21 @@ export default function CommandPalette() {
             icon: <Plus size={16} />,
             keywords: ["create", "start", "clone", "github"],
             onAction: () => setNewOpen(true),
+          },
+        ]
+      : []),
+    ...(draftText.trim() !== ""
+      ? [
+          {
+            id: "action-prompt-link",
+            label: "Copy prompt link",
+            group: "Actions" as const,
+            icon: <Link size={16} />,
+            keywords: ["prompt", "share", "url", "link"],
+            onAction: async () => {
+              await copyText(`${location.origin}/new?prompt=${encodeURIComponent(draftText.slice(0, PROMPT_MAX))}`);
+              announce("Prompt link copied");
+            },
           },
         ]
       : []),

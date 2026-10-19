@@ -1,10 +1,13 @@
 import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, FastForward, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
 import type { ChatEvent as StoredChatEvent, TurnFile } from "../types";
 import { announce } from "../lib/announce";
 import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
+import { parsePatch, type PatchLine } from "../lib/diff";
+import { BIG_PASTE, DRAFT_SAVE_MS, addSaved, readDraft, writeDraft } from "../lib/drafts";
+import { isApple } from "../lib/platform";
 import { copyText } from "../lib/clipboard";
 import { findWorkspace, useApp, useCan } from "../store";
 import { workspaceStatus } from "../lib/status";
@@ -14,7 +17,7 @@ import { isPhone } from "../lib/viewport";
 import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import { agentName } from "../lib/agentName";
 import ConfirmDialog from "./ConfirmDialog";
-import { Composer } from "./Composer";
+import { Composer, SaveLaterChip, SavedChip } from "./Composer";
 import { AgentChip, useNewAgent } from "./WorkspacesView";
 import { Button, ComposerChip, Dialog, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
 
@@ -501,7 +504,7 @@ function diagramDoc(code: string, id: string, scheme: string): string {
   const theme = scheme === "dark" ? "dark" : "default";
   return (
     `<!doctype html><html><head><meta name="color-scheme" content="light dark"><base target="_blank">` +
-    `<style>html{color-scheme:${scheme}}body{margin:0;font-family:system-ui,sans-serif}</style></head><body>` +
+    `<style>html{color-scheme:${scheme}}body{margin:0;font-family:system-ui,sans-serif}.mermaid{display:flex;justify-content:center}</style></head><body>` +
     `<pre class="mermaid">${escapeHtml(code)}</pre>` +
     `<script type="module">try{const m=(await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")).default;` +
     `m.initialize({startOnLoad:false,securityLevel:"strict",theme:"${theme}"});await m.run();}` +
@@ -817,7 +820,7 @@ function ToolLine({ e, result }: { e: ToolEvent; result?: ToolResult }) {
   const [open, setOpen] = useState(false);
   if (!e.detail && !result?.output)
     return (
-      <li className="flex items-center gap-1.5">
+      <li className="flex items-center gap-1.5 pl-6">
         <span className="min-w-0 flex-1">{e.text}</span>
         {result?.failed ? <span className="shrink-0 text-xs font-medium text-status-danger">Failed</span> : null}
       </li>
@@ -1194,15 +1197,15 @@ function MessageActions({ onChanges, onBack, onBranch }: { onChanges: () => void
 
 const CHANGE_WORD: Record<TurnFile["status"], string> = { added: "New", deleted: "Removed", modified: "Changed" };
 
-/** One line of a patch, coloured the way the Changes tab colours its counts. */
-function patchLineClass(line: string): string {
-  if (/^(\+\+\+|---|@@|diff |index )/.test(line)) return "text-text-muted";
-  if (line.startsWith("+")) return "text-status-running";
-  if (line.startsWith("-")) return "text-status-danger";
-  return "text-text-secondary";
-}
+/** Each kind of patch line: its colour, and the mark it is shown with (the diff's + and -). */
+const PATCH_LINE: Record<PatchLine["kind"], { cls: string; mark: string }> = {
+  add: { cls: "text-status-running", mark: "+ " },
+  del: { cls: "text-status-danger", mark: "- " },
+  ctx: { cls: "text-text-secondary", mark: "  " },
+  gap: { cls: "text-text-muted", mark: "" },
+};
 
-/** What one message changed: the files, then the patch. Read from the server when it opens. */
+/** What one message changed: each file under its heading, then its lines. Read from the server when it opens. */
 function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; n: number; onOpenChange: (open: boolean) => void }) {
   const [turn, setTurn] = useState<{ files: TurnFile[]; diff: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1221,6 +1224,7 @@ function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; 
     };
   }, [workspaceId, n]);
   const count = turn?.files.length ?? 0;
+  const files = turn ? parsePatch(turn.diff) : [];
   return (
     <Dialog.Root open onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -1236,20 +1240,26 @@ function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; 
           ) : (
             <>
               <p className="text-small text-text-muted">{`${count} ${count === 1 ? "file" : "files"} changed`}</p>
-              <ul className="mono flex max-h-40 flex-col gap-0.5 overflow-y-auto text-xs break-all text-text-secondary">
-                {turn.files.map((f) => (
-                  <li key={f.path}>
-                    <span className="text-text-muted">{CHANGE_WORD[f.status]}</span> {f.path}
-                  </li>
+              <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
+                {files.map((f) => (
+                  <section key={f.path} className="flex min-w-0 flex-col gap-1.5">
+                    <h3 className="mono text-xs break-all text-text-secondary">
+                      <span className="text-text-muted">{CHANGE_WORD[f.status]}</span> {f.path}
+                    </h3>
+                    {f.binary ? (
+                      <p className="text-xs text-text-muted">Picture or other file changed</p>
+                    ) : (
+                      <pre className="mono overflow-x-auto rounded-lg bg-surface-base p-3 text-xs leading-5 whitespace-pre">
+                        {f.lines.map((line, i) => (
+                          <span key={i} className={cn("block", PATCH_LINE[line.kind].cls)}>
+                            {`${PATCH_LINE[line.kind].mark}${line.text}` || " "}
+                          </span>
+                        ))}
+                      </pre>
+                    )}
+                  </section>
                 ))}
-              </ul>
-              <pre className="mono min-h-0 flex-1 overflow-auto rounded-lg bg-surface-base p-3 text-xs leading-5 whitespace-pre">
-                {turn.diff.split("\n").map((line, i) => (
-                  <span key={i} className={cn("block", patchLineClass(line))}>
-                    {line || " "}
-                  </span>
-                ))}
-              </pre>
+              </div>
             </>
           )}
           <div className="flex justify-end">
@@ -1311,7 +1321,18 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // Claude's reply as it is being written (streamed by the server, not yet an event).
   const [streamed, setStreamed] = useState("");
   const [kick, setKick] = useState(0);
-  const [draft, setDraft] = useState("");
+  // The unsent text: restored for this chat, saved 300 ms after the last key.
+  const [draft, setDraft] = useState(() => readDraft(workspaceId));
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(() => {
+    const t = window.setTimeout(() => writeDraft(workspaceId, draft), DRAFT_SAVE_MS);
+    return () => window.clearTimeout(t);
+  }, [draft, workspaceId]);
+  // Leaving the chat keeps what was typed, even inside that 300 ms.
+  useEffect(() => () => writeDraft(workspaceId, draftRef.current), [workspaceId]);
+  // Set by Ctrl/Cmd+Shift+V: the next paste is text, however big.
+  const plainPaste = useRef(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [answering, setAnswering] = useState<string | null>(null);
@@ -1711,6 +1732,18 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "v") {
+      plainPaste.current = true;
+      window.setTimeout(() => {
+        plainPaste.current = false;
+      }, 1000);
+    }
+    // Ctrl/Cmd+Enter while the AI works: stop it and send this message now.
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && working && draft.trim() !== "" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void sendNow();
+      return;
+    }
     if (mentionOn && !e.nativeEvent.isComposing) {
       const n = mentionFiles.length;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -1771,6 +1804,36 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     } finally {
       repoll();
     }
+  };
+
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  /** Send now: stop the turn, wait for it to end (10 s at most), then send. The server would queue it anyway after the timeout. */
+  const sendingNow = useRef(false);
+  const sendNow = async () => {
+    const text = draft.trim();
+    if (text === "" || sendingNow.current) return;
+    sendingNow.current = true;
+    try {
+      await stop();
+      const until = Date.now() + 10_000;
+      while (busyRef.current && Date.now() < until) await new Promise((r) => window.setTimeout(r, 200));
+      // The box changed meanwhile (Enter queued it, or it was edited): this send is stale, drop it.
+      if (draftRef.current.trim() !== text) return;
+      await send();
+    } finally {
+      sendingNow.current = false;
+    }
+  };
+
+  /** Ctrl/Cmd+S and the Save button: the text goes to the saved list and the box clears. */
+  const saveForLater = () => {
+    const text = draft.trim();
+    if (text === "") return;
+    addSaved(text);
+    setDraft("");
+    announce("Saved for later");
+    taRef.current?.focus();
   };
 
   /** A menu pick: shown at once and sent to Claude; the old choice comes back with a toast if the server refuses. */
@@ -2272,10 +2335,20 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   }}
                   onKeyDown={onKeyDown}
                   onSubmit={() => void send()}
+                  onSaveLater={saveForLater}
                   onPaste={(e) => {
-                    if (e.clipboardData.files.length === 0) return;
+                    if (e.clipboardData.files.length > 0) {
+                      e.preventDefault();
+                      takeFiles(e.clipboardData.files, true);
+                      return;
+                    }
+                    const text = e.clipboardData.getData("text/plain");
+                    const asText = plainPaste.current;
+                    plainPaste.current = false;
+                    if (asText || text.length < BIG_PASTE) return;
+                    // A big paste becomes a .txt file in the box, sent like any other attachment.
                     e.preventDefault();
-                    takeFiles(e.clipboardData.files, true);
+                    takeFiles([new File([text], pastedName("text/plain", Date.now()), { type: "text/plain" })]);
                   }}
                   onDropFiles={(files) => takeFiles(files)}
                   attachments={
@@ -2324,6 +2397,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                         disabled={waiting !== null || sending || uploading}
                         onClick={() => fileRef.current?.click()}
                       />
+                      {draft.trim() !== "" ? <SaveLaterChip onClick={saveForLater} /> : null}
+                      <SavedChip onPick={(text) => {
+                        setDraft(text);
+                        taRef.current?.focus();
+                      }} />
                       {commandsEnabled ? (
                       <ComposerChip
                         label="Commands"
@@ -2401,13 +2479,25 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       ) : null}
                       {working && hasDraft ? (
                         <ComposerChip
-                          className="shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0"
+                          className={cn("shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0", draft.trim() !== "" && "max-md:hidden")}
                           icon={<Stop size={14} aria-hidden="true" />}
                           label="Stop"
                           hideLabelOnPhone
                           aria-label={`Stop ${who}`}
                           title="Stop"
                           onClick={() => void stop()}
+                        />
+                      ) : null}
+                      {working && draft.trim() !== "" ? (
+                        <ComposerChip
+                          className="shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0"
+                          icon={<FastForward size={14} aria-hidden="true" />}
+                          label="Send now"
+                          hideLabelOnPhone
+                          aria-label="Send now"
+                          title="Stop and send now"
+                          disabled={sending || uploading}
+                          onClick={() => void sendNow()}
                         />
                       ) : null}
                       {working && !hasDraft ? (
@@ -2429,6 +2519,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     </>
                   }
                 />
+                {working && draft.trim() !== "" && !isPhone() ? (
+                  <p className="mt-1 px-4 text-xs text-text-muted">{`Enter adds to the queue · ${isApple ? "Cmd" : "Ctrl"}+Enter stops and sends now`}</p>
+                ) : null}
               </div>
             </div>
           ) : null}

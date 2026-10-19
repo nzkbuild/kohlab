@@ -10,6 +10,7 @@ const EXT_BY_TYPE: Record<string, string> = {
   "image/webp": "webp",
   "image/svg+xml": "svg",
   "image/heic": "heic",
+  "text/plain": "txt",
 };
 
 /** Splits "a.b.png" into "a.b" and ".png". A dot at the start or a very long tail is not an extension. */

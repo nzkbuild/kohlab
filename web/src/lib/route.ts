@@ -15,8 +15,8 @@ export type SettingsSection = "account" | "appearance" | "team" | "agents" | "no
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = ["account", "appearance", "team", "agents", "notifications", "server", "updates"];
 
 export type Route =
-  /** Home: the review queue, then every workspace. `create` opens the form. */
-  | { kind: "workspaces"; create?: boolean }
+  /** Home: the review queue, then every workspace. `create` opens the form; `prompt` (from /new?prompt=) pre-fills the message box, never sends. */
+  | { kind: "workspaces"; create?: boolean; prompt?: string }
   /** `tab` absent means "the right pane for this workspace's state". */
   | { kind: "workspace"; id: string; tab?: WorkspaceTab }
   /** `section` absent means the first section the viewer may see. */
@@ -25,13 +25,20 @@ export type Route =
    *  the server. This is the one route rendered before the key gate. */
   | { kind: "join" };
 
-export function parseRoute(pathname: string): Route {
+/** Longest prompt a /new?prompt= link may pre-fill. */
+export const PROMPT_MAX = 20_000;
+
+export function parseRoute(pathname: string, search = ""): Route {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] === "w" && parts[1]) {
     const tab = WORKSPACE_TABS.find((t) => t === parts[2]);
     return { kind: "workspace", id: decodeURIComponent(parts[1]), ...(tab ? { tab } : {}) };
   }
-  if (parts[0] === "new") return { kind: "workspaces", create: true };
+  if (parts[0] === "new") {
+    const prompt = new URLSearchParams(search).get("prompt");
+    if (prompt !== null) return { kind: "workspaces", prompt: prompt.slice(0, PROMPT_MAX) };
+    return { kind: "workspaces", create: true };
+  }
   if (parts[0] === "settings") {
     const section = SETTINGS_SECTIONS.find((s) => s === parts[1]);
     return { kind: "settings", ...(section ? { section } : {}) };

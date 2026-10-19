@@ -124,3 +124,59 @@ export function languageForFile(path: string): string {
   if (dot <= 0) return "plaintext";
   return LANGUAGE_BY_EXTENSION[base.slice(dot + 1).toLowerCase()] ?? "plaintext";
 }
+
+/** One line of a file's diff for the Changes dialog. A "gap" is a hunk break or a note (such as the truncation notice). */
+export interface PatchLine {
+  kind: "add" | "del" | "ctx" | "gap";
+  text: string;
+}
+
+export interface PatchFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  /** A picture or other file git cannot show as text. It has no lines. */
+  binary: boolean;
+  lines: PatchLine[];
+}
+
+const FILE_START = /^diff --git a\/(.*) b\/(.*)$/;
+
+/**
+ * A unified diff split per file, for people who do not read patches. Header
+ * lines (diff, index, ---/+++, mode, similarity) are dropped; each hunk header
+ * becomes a "…" gap between hunks. Pure: scripts/check-diff.ts tests it.
+ */
+// ponytail: line-based, no quoted-path handling; git's quoted names for odd characters show as-is. Upgrade path: git -z.
+export function parsePatch(patch: string): PatchFile[] {
+  const files: PatchFile[] = [];
+  let file: PatchFile | null = null;
+  let inHunk = false;
+  for (const line of patch.replace(/\n$/, "").split("\n")) {
+    const start = FILE_START.exec(line);
+    if (start) {
+      file = { path: start[2], status: "modified", binary: false, lines: [] };
+      files.push(file);
+      inHunk = false;
+      continue;
+    }
+    if (!file) continue;
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      if (file.lines.length > 0) file.lines.push({ kind: "gap", text: "…" });
+      continue;
+    }
+    if (!inHunk) {
+      if (line.startsWith("new file mode")) file.status = "added";
+      else if (line.startsWith("deleted file mode")) file.status = "deleted";
+      else if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) file.binary = true;
+      continue;
+    }
+    if (line.startsWith("\\")) continue; // "\ No newline at end of file"
+    if (line.startsWith("+")) file.lines.push({ kind: "add", text: line.slice(1) });
+    else if (line.startsWith("-")) file.lines.push({ kind: "del", text: line.slice(1) });
+    else if (line.startsWith(" ")) file.lines.push({ kind: "ctx", text: line.slice(1) });
+    else if (line === "") file.lines.push({ kind: "ctx", text: "" });
+    else file.lines.push({ kind: "gap", text: line }); // the truncation note the server appends
+  }
+  return files;
+}

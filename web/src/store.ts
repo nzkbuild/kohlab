@@ -93,7 +93,7 @@ function historyIndex(): number {
 
 export const useApp = create<AppState>((set, get) => ({
   authed: false,
-  route: parseRoute(location.pathname),
+  route: parseRoute(location.pathname, location.search),
   navIndex: historyIndex(),
   navMax: historyIndex(),
   workspaces: [],
