@@ -2,8 +2,8 @@
  * Claude's replies, parsed into plain data. Nothing here produces HTML: the chat
  * turns these nodes into React elements, so a reply cannot inject markup.
  *
- * Deliberately small: fenced code, headings, rules, bullets, numbers, paragraphs,
- * **bold**, `code`, [text](url) and bare http(s) URLs. Anything else stays text.
+ * Deliberately small: fenced code, headings, rules, bullets, numbers, pipe tables,
+ * paragraphs, **bold**, `code`, [text](url) and bare http(s) URLs. Anything else stays text.
  */
 
 export type Block =
@@ -11,6 +11,7 @@ export type Block =
   | { kind: "h"; text: string }
   | { kind: "hr" }
   | { kind: "ul" | "ol"; items: string[] }
+  | { kind: "table"; head: string[]; rows: string[][] }
   | { kind: "code"; lang: string; code: string };
 
 export type Inline =
@@ -25,6 +26,28 @@ const HEADING = /^\s{0,3}#{1,3}\s+(\S.*)$/;
 const RULE = /^\s*-{3,}\s*$/;
 const BULLET = /^\s*[-*]\s+(.*)$/;
 const NUMBER = /^\s*\d+\.\s+(.*)$/;
+const DELIMITER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/;
+const DELIMITER_ONE = /^\s*\|\s*:?-+:?\s*\|\s*$/;
+
+/** Table cells of one row. Pipes inside `code` and escaped \| stay in the cell. Alignment colons are ignored. */
+function cells(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+  const out: string[] = [];
+  let cur = "";
+  let inCode = false;
+  for (let k = 0; k < s.length; k++) {
+    const ch = s[k];
+    if (ch === "`") inCode = !inCode;
+    if (ch === "|" && !inCode && s[k - 1] !== "\\") {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out.map((c) => c.replace(/\\\|/g, "|"));
+}
 
 /** Blocks in reading order. An unclosed fence (a reply still streaming) runs to the end of the text. */
 export function parseBlocks(text: string): Block[] {
@@ -41,6 +64,20 @@ export function parseBlocks(text: string): Block[] {
       while (j < lines.length && !CLOSE_FENCE.test(lines[j])) code.push(lines[j++]);
       blocks.push({ kind: "code", lang: open[1], code: code.join("\n") });
       i = j; // on the closing fence; the loop step moves past it
+      continue;
+    }
+    const next = lines[i + 1];
+    if (line.includes("|") && next !== undefined && (DELIMITER.test(next) || DELIMITER_ONE.test(next))) {
+      para = null;
+      const head = cells(line);
+      const rows: string[][] = [];
+      let j = i + 2;
+      while (j < lines.length && lines[j].includes("|") && lines[j].trim() !== "") {
+        const r = cells(lines[j++]);
+        rows.push(Array.from({ length: head.length }, (_, c) => r[c] ?? ""));
+      }
+      blocks.push({ kind: "table", head, rows });
+      i = j - 1; // on the last table row; the loop step moves past it
       continue;
     }
     const heading = HEADING.exec(line);

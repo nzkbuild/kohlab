@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [1.53.1] - 2026-10-19
+
+### Fixed
+- Tables in Claude's replies show as real tables, with a header row and lines between rows, instead of rows of | symbols. Wide tables scroll sideways on phones.
+
 ## [1.53.0] - 2026-10-16
 
 ### Added

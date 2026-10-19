@@ -375,6 +375,34 @@ function Prose({ text }: { text: string }) {
         if (block.kind === "h") return <p key={i} className="text-lg font-semibold text-text-primary">{rich(block.text)}</p>;
         if (block.kind === "hr") return <hr key={i} className="border-line-subtle" />;
         if (block.kind === "code") return <CodeBlock key={i} lang={block.lang} code={block.code} />;
+        if (block.kind === "table") {
+          return (
+            <div key={i} className="overflow-x-auto rounded-card bg-surface-sunken">
+              <table className="w-full border-collapse text-sm leading-5">
+                <thead>
+                  <tr>
+                    {block.head.map((c, j) => (
+                      <th key={j} scope="col" className="min-w-[8ch] px-3.5 py-2 text-left align-bottom font-semibold text-text-primary">
+                        {rich(c)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((r, k) => (
+                    <tr key={k} className="border-t border-line-subtle">
+                      {r.map((c, j) => (
+                        <td key={j} className="min-w-[8ch] px-3.5 py-2 align-top text-text-primary">
+                          {rich(c)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
         if (block.kind === "ul") {
           return (
             <ul key={i} className="space-y-1.5">

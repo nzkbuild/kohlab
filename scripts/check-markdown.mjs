@@ -90,6 +90,43 @@ check("'#tag' without a space is prose", parseBlocks("#tag"), [{ kind: "p", line
 check("--- is a rule", parseBlocks("---"), [{ kind: "hr" }]);
 check("bold stays bold", inline("**b**"), [{ kind: "strong", children: [{ kind: "text", text: "b" }] }]);
 
+// tables
+check(
+  "basic table with header and two rows",
+  parseBlocks("| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |"),
+  [{ kind: "table", head: ["a", "b", "c"], rows: [["1", "2", "3"], ["4", "5", "6"]] }],
+);
+check(
+  "table without leading and trailing pipes",
+  parseBlocks("a | b\n--- | ---\n1 | 2"),
+  [{ kind: "table", head: ["a", "b"], rows: [["1", "2"]] }],
+);
+check(
+  "paragraph, table, paragraph (blank line separated)",
+  parseBlocks("Intro\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter"),
+  [
+    { kind: "p", lines: ["Intro"] },
+    { kind: "table", head: ["a", "b"], rows: [["1", "2"]] },
+    { kind: "p", lines: ["After"] },
+  ],
+);
+check("header line with no delimiter stays a paragraph", parseBlocks("| a | b |"), [{ kind: "p", lines: ["| a | b |"] }]);
+check(
+  "escaped pipe and pipe in backticks stay in one cell",
+  parseBlocks("| a \\| b | `x|y` |\n|---|---|\n| 1 | 2 |"),
+  [{ kind: "table", head: ["a | b", "`x|y`"], rows: [["1", "2"]] }],
+);
+check(
+  "short body row is padded to the header length",
+  parseBlocks("| a | b | c |\n|---|---|---|\n| 1 |"),
+  [{ kind: "table", head: ["a", "b", "c"], rows: [["1", "", ""]] }],
+);
+check(
+  "exact streamed table text",
+  parseBlocks("| What | Today |\n|---|---|\n| **Question cards**: options | Raw text |"),
+  [{ kind: "table", head: ["What", "Today"], rows: [["**Question cards**: options", "Raw text"]] }],
+);
+
 if (failures) {
   console.log(`\n${failures} failed`);
   process.exit(1);
