@@ -154,11 +154,11 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text }),
     }),
-  chatAnswer: (id: string, requestId: string, allow: boolean) =>
+  chatAnswer: (id: string, requestId: string, allow: boolean, extra?: { answers?: Record<string, string>; message?: string }) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/answer`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId, allow }),
+      body: JSON.stringify({ requestId, allow, ...extra }),
     }),
   /** The chat's menu actions: "interrupt" (stop the turn), "model", "mode" or "effort" with a value; "files" (@ mentions),
    *  "stop_task", and Undo's "rewind_preview" and "rewind" with the message id. Some answer with data. */

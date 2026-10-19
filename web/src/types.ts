@@ -30,13 +30,30 @@ export interface Workspace {
   model?: "opus" | "sonnet" | "haiku";
 }
 
+/** One multiple-choice question Claude asks (AskUserQuestion). */
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: { label: string; description?: string }[];
+}
+
 /** One entry in a chat workspace's conversation. `n` is the sequence number used for polling. */
 export type ChatEvent = { n: number; at: number } & (
   | { kind: "user"; text: string; uuid?: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string }
-  | { kind: "ask"; requestId: string; text: string; why?: string; detail?: string }
-  | { kind: "answer"; requestId: string; allow: boolean }
+  | {
+      kind: "ask";
+      requestId: string;
+      text: string;
+      why?: string;
+      detail?: string;
+      form?: "question" | "plan";
+      questions?: AskQuestion[];
+      plan?: string;
+    }
+  | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
   | { kind: "done" }
   | { kind: "error"; text: string }
 );

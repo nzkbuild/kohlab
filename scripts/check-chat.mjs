@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describeAsk, describeTool, friendlyError, noticeText, readCapsFile, usageOf, writeCapsFile } from "../chat.ts";
+import { answerResponse, askForm, describeAsk, describeTool, friendlyError, noticeText, readCapsFile, usageOf, writeCapsFile } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -102,6 +102,33 @@ try {
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
+
+// the question and plan cards, and the answers that go back to Claude
+const q1 = askForm("AskUserQuestion", { questions: [{ question: "  Which colour?  ", header: "Colour", options: [{ label: "Red" }, { label: "" }, { label: "Blue", description: "Calm" }] }] });
+check("askForm: one question gives the one-question text", q1?.text, "Claude has a question");
+check("askForm: one question is a question form", q1?.form, "question");
+check("askForm: the question and its options are sanitized", q1 && "questions" in q1 ? q1.questions : null, [{ question: "  Which colour?  ", header: "Colour", options: [{ label: "Red" }, { label: "Blue", description: "Calm" }] }]);
+const qs = Array.from({ length: 5 }, (_, i) => ({ question: `Q${i}`, options: [{ label: "A" }] }));
+const q5 = askForm("AskUserQuestion", { questions: [{ question: "", options: [{ label: "x" }] }, ...qs] });
+check("askForm: a question with no text is dropped and 5 are capped to 4", q5 && "questions" in q5 ? [q5.text, q5.questions.length] : null, ["Claude has 4 questions", 4]);
+check("askForm: the question with no text is skipped, so the next one leads",q5 && "questions" in q5 ? q5.questions[0].question : null, "Q0");
+check("askForm: ExitPlanMode returns the plan", askForm("ExitPlanMode", { plan: "# Plan" }), { text: "Claude's plan is ready", form: "plan", plan: "# Plan" });
+check("askForm: an empty plan is null", askForm("ExitPlanMode", { plan: "   " }), null);
+check("askForm: an unrelated tool is null", askForm("Write", { file_path: "/x" }), null);
+
+const qin = { questions: [{ question: "Colour?", options: [{ label: "Red" }] }, { question: "Size?", options: [{ label: "S" }] }] };
+const qa = answerResponse("AskUserQuestion", qin, true, { answers: { "Colour?": "Red", "Size?": "L", "Nope?": "x" } });
+check("answerResponse: keeps only known question keys", qa.response, { behavior: "allow", updatedInput: { ...qin, answers: { "Colour?": "Red", "Size?": "L" } } });
+check("answerResponse: reply joins the answers", qa.reply, "Red; L");
+const longQ = "L".repeat(600);
+const lin = { questions: [{ question: longQ, options: [{ label: "A" }] }] };
+check("answerResponse: an answer under the cut question text lands under the full one", answerResponse("AskUserQuestion", lin, true, { answers: { [longQ.slice(0, 500)]: "A" } }).response.updatedInput.answers, { [longQ]: "A" });
+check("answerResponse: a __proto__ key is ignored", Object.keys(answerResponse("AskUserQuestion", qin, true, { answers: JSON.parse('{"__proto__":"x","Colour?":"Red"}') }).response.updatedInput.answers), ["Colour?"]);
+check("answerResponse: question deny message", answerResponse("AskUserQuestion", qin, false, {}), { response: { behavior: "deny", message: "The user chose not to answer." } });
+check("answerResponse: plan deny with text", answerResponse("ExitPlanMode", { plan: "p" }, false, { message: "  Add tests  " }), { response: { behavior: "deny", message: "The user wants changes to the plan: Add tests" }, reply: "Add tests" });
+check("answerResponse: plan deny without text", answerResponse("ExitPlanMode", { plan: "p" }, false, {}), { response: { behavior: "deny", message: "The user did not approve the plan." } });
+check("answerResponse: Write allow unchanged", answerResponse("Write", { file_path: "/x" }, true, {}), { response: { behavior: "allow", updatedInput: { file_path: "/x" } } });
+check("answerResponse: Write deny unchanged", answerResponse("Write", { file_path: "/x" }, false, {}), { response: { behavior: "deny", message: "The user said no." } });
 
 if (failures) {
   console.log(`\n${failures} failed`);

@@ -323,13 +323,17 @@ async function handleChatGet(id: string, req: Request, see: { usage: boolean; ow
 
 async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined): Promise<Response> {
   try {
-    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown };
+    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown; answers?: unknown; message?: unknown };
     // a control action may answer with data (the files, the undo list): it is sent back as it is
     let reply: Record<string, unknown> = { ok: true };
     if (sub === "/answer") {
       if (typeof body.requestId !== "string" || typeof body.allow !== "boolean") return json({ error: "requestId and allow are required" }, 400);
+      const answers = body.answers as Record<string, string> | undefined;
+      if (answers !== undefined && (typeof answers !== "object" || answers === null || Array.isArray(answers) || !Object.values(answers).every((v) => typeof v === "string")))
+        return json({ error: "answers must be text for each question" }, 400);
+      if (body.message !== undefined && typeof body.message !== "string") return json({ error: "message must be text" }, 400);
       containFailure(audit(actor, "chat.answer", id), "audit");
-      await answerChat(id, body.requestId, body.allow);
+      await answerChat(id, body.requestId, body.allow, { answers, message: body.message as string | undefined });
     } else if (sub === "/control") {
       containFailure(audit(actor, "chat.control", id), "audit");
       reply = await chatControl(id, body.action, body.value);

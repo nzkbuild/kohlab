@@ -51,13 +51,18 @@ const CHAT_SYSTEM_PROMPT =
   "You have a real browser that the person watches live: after you change a page, open it there and check it, using the http://127.0.0.1 address of a dev server you started, or else the project's Preview.";
 const MAX_TEXT = 20000;
 
+/** One multiple-choice question from AskUserQuestion, cleaned by askForm. */
+export type AskQuestion = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] };
+
 type Body =
   /** uuid: the id Claude keeps for this message, which Undo names. Not set on lines imported from a terminal's transcript. */
   | { kind: "user"; text: string; uuid?: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string }
-  | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string }
-  | { kind: "answer"; requestId: string; allow: boolean }
+  /** form: a question card ("question", with questions) or a plan card ("plan", with plan). Neither is set for a permission question. */
+  | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string; form?: "question" | "plan"; questions?: AskQuestion[]; plan?: string }
+  /** reply: what the person answered or asked for, when a question or plan card was answered with text. */
+  | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
   | { kind: "done" }
   | { kind: "error"; text: string };
 
@@ -155,6 +160,71 @@ export function describeAsk(name: string, input: Record<string, any>, cwd: strin
   }
 }
 
+/** A question card or plan card for AskUserQuestion / ExitPlanMode, or null for any other tool (and for an empty question or plan). Pure. */
+export function askForm(tool: string, input: Record<string, any>): { text: string; form: "question"; questions: AskQuestion[] } | { text: string; form: "plan"; plan: string } | null {
+  if (tool === "AskUserQuestion") {
+    const questions: AskQuestion[] = [];
+    for (const q of Array.isArray(input.questions) ? input.questions : []) {
+      const question = typeof q?.question === "string" ? q.question.slice(0, 500) : "";
+      if (!question.trim()) continue;
+      const options: AskQuestion["options"] = [];
+      for (const o of Array.isArray(q.options) ? q.options : []) {
+        const label = typeof o?.label === "string" ? o.label.slice(0, 200) : "";
+        if (!label.trim()) continue;
+        options.push({ label, ...(typeof o.description === "string" ? { description: o.description.slice(0, 500) } : {}) });
+        if (options.length === 8) break;
+      }
+      questions.push({
+        question,
+        ...(typeof q.header === "string" ? { header: q.header.slice(0, 40) } : {}),
+        ...(q.multiSelect === true ? { multiSelect: true } : {}),
+        options,
+      });
+      if (questions.length === 4) break;
+    }
+    if (questions.length === 0) return null;
+    return { text: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`, form: "question", questions };
+  }
+  if (tool === "ExitPlanMode") {
+    const plan = String(input.plan ?? "").slice(0, MAX_TEXT);
+    if (!plan.trim()) return null;
+    return { text: "Claude's plan is ready", form: "plan", plan };
+  }
+  return null;
+}
+
+/** The control_response body for a permission question, and the words the person gave (the reply, when there are any). Pure. */
+export function answerResponse(
+  tool: string,
+  input: Record<string, unknown>,
+  allow: boolean,
+  extra: { answers?: Record<string, string>; message?: string },
+): { response: Record<string, unknown>; reply?: string } {
+  if (tool === "AskUserQuestion") {
+    if (!allow) return { response: { behavior: "deny", message: "The user chose not to answer." } };
+    // The card shows a question cut to 500 characters, so its answer may come back under the cut text: file it under the full one.
+    const known = new Map<string, string>();
+    for (const q of Array.isArray(input.questions) ? input.questions : []) {
+      if (typeof q?.question !== "string") continue;
+      known.set(q.question, q.question);
+      known.set(q.question.slice(0, 500), q.question);
+    }
+    const answers: Record<string, string> = Object.create(null);
+    for (const [question, value] of Object.entries(extra.answers ?? {})) {
+      const full = known.get(question);
+      if (full !== undefined && typeof value === "string" && value.trim()) answers[full] = value.slice(0, 2000);
+    }
+    return { response: { behavior: "allow", updatedInput: { ...input, answers } }, reply: Object.values(answers).join("; ") };
+  }
+  if (tool === "ExitPlanMode") {
+    if (allow) return { response: { behavior: "allow", updatedInput: input } };
+    const message = String(extra.message ?? "").trim().slice(0, 2000);
+    if (!message) return { response: { behavior: "deny", message: "The user did not approve the plan." } };
+    return { response: { behavior: "deny", message: `The user wants changes to the plan: ${message}` }, reply: message };
+  }
+  return allow ? { response: { behavior: "allow", updatedInput: input } } : { response: { behavior: "deny", message: "The user said no." } };
+}
+
 /** What the user reads when Claude fails. The raw CLI text goes to the server log, not the chat. */
 export function friendlyError(raw: string): string {
   if (/usage limit|rate limit|limit reached|quota|overloaded|529/i.test(raw)) return "Claude has reached its usage limit for now. Try again in a little while.";
@@ -166,8 +236,8 @@ export function friendlyError(raw: string): string {
 interface Live {
   child: ChildProcess;
   cwd: string;
-  /** unanswered permission asks: requestId -> the input to echo back on allow */
-  asks: Map<string, Record<string, unknown>>;
+  /** unanswered permission asks: requestId -> the tool and its input (echoed back on allow) */
+  asks: Map<string, { tool: string; input: Record<string, unknown> }>;
   stderr: string;
   /** killed on purpose (stop or delete): its exit is not an error */
   stopping: boolean;
@@ -1116,18 +1186,24 @@ export async function chatControl(id: string, action: unknown, value: unknown): 
   return { ok: true };
 }
 
-/** Claude's answer to a permission question: allow echoes the input back. */
-function writeAnswer(live: Live, requestId: string, allow: boolean, input: Record<string, unknown>) {
-  const response = allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "The user said no." };
+/** Claude's answer to a permission question: the response object is built by answerResponse. */
+function writeAnswer(live: Live, requestId: string, response: Record<string, unknown>) {
   live.child.stdin!.write(JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: requestId, response } }) + "\n");
 }
 
-/** Show a permission question to the person and ping them. `url` is the browser's page, when the tool acts on one. */
+/** Show a permission question to the person and ping them. `url` is the browser's page, when the tool acts on one.
+ *  AskUserQuestion and ExitPlanMode get their own cards (askForm); every other tool gets the permission card. */
 function askPerson(id: string, live: Live, requestId: string, tool: string, input: Record<string, unknown>, url: string | null) {
-  live.asks.set(requestId, input);
-  const { text, detail, why } = describeAsk(tool, input as Record<string, any>, live.cwd, url);
+  live.asks.set(requestId, { tool, input });
   const wasWaiting = chatWaiting.has(id);
   chatWaiting.add(id);
+  const form = askForm(tool, input as Record<string, any>);
+  if (form) {
+    emit(id, { kind: "ask", requestId, ...form });
+    if (!wasWaiting) pingNeedsYou(id, form.text);
+    return;
+  }
+  const { text, detail, why } = describeAsk(tool, input as Record<string, any>, live.cwd, url);
   emit(id, { kind: "ask", requestId, text, ...(detail !== undefined ? { detail } : {}), ...(why !== undefined ? { why } : {}) });
   if (!wasWaiting) pingNeedsYou(id, text);
 }
@@ -1138,7 +1214,7 @@ async function browserAsk(id: string, live: Live, requestId: string, tool: strin
   const ws = browserToolPolicy(tool, null, NO_OWN_PAGES) === "ask" ? await getWorkspace(id).catch(() => null) : null;
   const url = ws ? await browserUrl(ws).catch(() => null) : null;
   if (live.stopping || live.closed) return;
-  if (browserToolPolicy(tool, url, ownPagesOf(ws)) === "allow") writeAnswer(live, requestId, true, input);
+  if (browserToolPolicy(tool, url, ownPagesOf(ws)) === "allow") writeAnswer(live, requestId, answerResponse(tool, input, true, {}).response);
   else askPerson(id, live, requestId, tool, input, url);
 }
 
@@ -1154,14 +1230,15 @@ function ownPagesOf(ws: Workspace | null): OwnPages {
 }
 
 /** Answer a pending permission question. */
-export async function answer(id: string, requestId: string, allow: boolean): Promise<void> {
+export async function answer(id: string, requestId: string, allow: boolean, extra: { answers?: Record<string, string>; message?: string } = {}): Promise<void> {
   const live = procs.get(id);
   if (!live || !live.asks.has(requestId)) throw new ChatError(404, "no such pending question");
-  const input = live.asks.get(requestId)!;
+  const { tool, input } = live.asks.get(requestId)!;
   live.asks.delete(requestId);
   if (live.asks.size === 0) chatWaiting.delete(id);
-  writeAnswer(live, requestId, allow, input);
-  emit(id, { kind: "answer", requestId, allow });
+  const { response, reply } = answerResponse(tool, input, allow, extra);
+  writeAnswer(live, requestId, response);
+  emit(id, { kind: "answer", requestId, allow, ...(reply ? { reply } : {}) });
 }
 
 /** After a server restart: a chat whose newest question has nothing answered after it is still waiting, so its "needs you" dot comes back. */
