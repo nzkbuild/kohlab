@@ -17,6 +17,7 @@ import type { Workspace } from "./types";
 import { notifyNeedsYou } from "./push";
 import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
 import { devServerOrigin } from "./devserver";
+import { ACP_AGENTS, AcpClient, isAcpAgent, type AcpHost } from "./acp";
 import {
   WORKS_DIR,
   chatBusy,
@@ -40,6 +41,13 @@ import {
 /** The only keys copied into the claude process, never the server's secrets (KOHLAB_KEY and friends).
  *  Same allowlist as the PTY daemon: see SAFE_ENV_KEYS in pty-daemon.cjs for why. */
 const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USER", "LOGNAME"];
+/** The environment a child agent gets: the allowlisted keys from the server's, and its own HOME. */
+function childEnv(home: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
+  env.HOME = home;
+  return env;
+}
 /** Appended to claude's system prompt: who it talks to, and the Preview / Keep / Undo buttons it can rely on. */
 const CHAT_SYSTEM_PROMPT =
   "The person you are working with is not a programmer. Use plain, friendly language and avoid jargon. Write short plain sentences; avoid Markdown headings. " +
@@ -55,7 +63,7 @@ const MAX_TEXT = 20000;
 /** One multiple-choice question from AskUserQuestion, cleaned by askForm. */
 export type AskQuestion = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] };
 
-type Body =
+export type Body =
   /** uuid: the id Claude keeps for this message, which Undo names. Not set on lines imported from a terminal's transcript. */
   | { kind: "user"; text: string; uuid?: string }
   | { kind: "assistant"; text: string }
@@ -376,6 +384,8 @@ interface Chat {
 const chats = new Map<string, Chat>();
 /** Live claude processes per workspace id. */
 const procs = new Map<string, Live>();
+/** Live ACP agents per workspace id (chat workspaces whose agent speaks ACP; see acp.ts). */
+const acps = new Map<string, AcpClient>();
 /** Commands and models per workspace id, from the CLI's init reply and its command list. */
 const caps = new Map<string, Caps>();
 /** Context and plan usage per workspace id, read when a turn ends. Kept after the process exits, like caps. */
@@ -731,6 +741,9 @@ function stop(id: string) {
     live.stopping = true;
     live.child.kill("SIGTERM");
   }
+  const acp = acps.get(id);
+  acps.delete(id);
+  acp?.stop();
 }
 
 /** Tell the phone that Claude is waiting on a question. A failed push must never stall the chat. */
@@ -964,6 +977,9 @@ function onExit(id: string, live: Live) {
   const last = live.stderr.trim().split("\n").pop()?.trim() ?? "";
   console.warn("[chat] claude stopped unexpectedly:", last.slice(0, 200));
   emit(id, { kind: "error", text: friendlyError(last) });
+  emit(id, { kind: "done" });
+  chatBusy.delete(id); // the turn died with the process: without this, send() answers 409 forever
+  live.busySince = undefined;
   finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
 }
 
@@ -1018,9 +1034,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   if (!term) args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
   if (ws.chatSession) args.push("--resume", ws.chatSession);
   if (ws.model) args.push("--model", ws.model);
-  const env: Record<string, string> = {};
-  for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
-  env.HOME = home;
+  const env = childEnv(home);
   // A copy of each file before Claude edits it, so Undo can put it back.
   // ponytail: the copies live under this home's .claude/file-history and grow with every edit; nothing prunes them yet.
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = "1";
@@ -1085,27 +1099,28 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
   const live = procs.get(id);
   // the first read of usage comes with the first poll that finds none (a restart, or a chat not yet used)
   if (live && !usages.has(id)) void readUsage(id, live, false);
+  const cur = live ?? acps.get(id); // an ACP agent's chat keeps the same fields
   return {
     events,
     busy: chatBusy.has(id),
-    busySince: chatBusy.has(id) ? (live?.busySince ?? null) : null,
+    busySince: chatBusy.has(id) ? (cur?.busySince ?? null) : null,
     now: Date.now(),
-    background: live?.tasks.length ?? 0,
-    tasks: live?.tasks ?? [],
-    todos: live?.todos ?? [],
-    helpers: [...(live?.helpers.values() ?? [])],
-    retry: live?.retry ?? null,
+    background: cur?.tasks.length ?? 0,
+    tasks: cur?.tasks ?? [],
+    todos: cur?.todos ?? [],
+    helpers: [...(cur?.helpers.values() ?? [])],
+    retry: cur?.retry ?? null,
     usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
     // one rule: a live process, else the project's saved choice, else what was last seen
-    model: live?.model ?? ws.model ?? lastSeen.get(id)?.model ?? null,
-    mode: live?.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined) ?? lastSeen.get(id)?.mode ?? null,
-    effort: live?.effort ?? ws.effort ?? null,
+    model: cur?.model ?? ws.model ?? lastSeen.get(id)?.model ?? null,
+    mode: cur?.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined) ?? lastSeen.get(id)?.mode ?? null,
+    effort: cur?.effort ?? ws.effort ?? null,
     // clean chats run with --disable-slash-commands: they get no "/" menu
     commandsEnabled: term,
     commands: term ? (caps.get(id)?.commands ?? []).slice(0, 200) : [],
     models: caps.get(id)?.models ?? [],
-    waiting: live?.asks.keys().next().value ?? null,
-    draft: live?.draft ?? "",
+    waiting: cur?.asks.keys().next().value ?? null,
+    draft: cur?.draft ?? "",
     terminalOpen: term && (await isAlive(ws)),
   };
 }
@@ -1117,6 +1132,74 @@ async function viaTerminal(ws: Workspace): Promise<boolean> {
   return basename(cmd) === "claude";
 }
 
+/** A chat whose agent speaks ACP (see acp.ts). Terminal projects are Claude's own and never ACP. */
+function isAcp(ws: Workspace): boolean {
+  return ws.chat === true && isAcpAgent(ws.agent);
+}
+
+/** What an ACP agent reports back to the chat: the same events, state and saves as a Claude process. */
+function acpHost(id: string): AcpHost {
+  return {
+    emit: (body) => {
+      emit(id, body);
+    },
+    persistSession: (sid) => persistSession(id, sid),
+    finish: () => {
+      finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+    },
+    pingNeedsYou: (text) => pingNeedsYou(id, text),
+    exited: (acp) => {
+      if (acps.get(id) === acp) acps.delete(id);
+    },
+  };
+}
+
+/** Starts the chat's ACP agent and opens its session (the chat's conversation, when the agent can load it). */
+async function startAcp(ws: Workspace, id: string): Promise<AcpClient> {
+  const [cmd, ...args] = ACP_AGENTS[ws.agent];
+  const bin = Bun.which(cmd);
+  if (!bin) throw new Error(`${cmd} is not installed on this server`);
+  const who = identityOf(ws);
+  const acp = new AcpClient(id, ws.agent, acpHost(id));
+  acps.set(id, acp);
+  try {
+    await acp.start({ bin, args, cwd: worktreePath(ws), uid: who?.uid, gid: who?.gid, env: childEnv(who?.home || homedir()), resumeSession: ws.chatSession });
+  } catch (e) {
+    acp.stop();
+    if (acps.get(id) === acp) acps.delete(id);
+    throw e;
+  }
+  return acp;
+}
+
+/** A message to an ACP agent: one prompt turn. A message sent while a turn runs is refused: the agent cannot take it mid-turn. */
+async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
+  if (chatBusy.has(id)) throw new ChatError(409, "still working");
+  chatBusy.add(id);
+  chatWaiting.delete(id); // a new message clears a stale "needs you" from before
+  emit(id, { kind: "user", text: t });
+  try {
+    await markStarted(id);
+    const cur = acps.get(id);
+    const acp = cur && !cur.closed ? cur : await startAcp(ws, id);
+    acp.prompt(t);
+  } catch (e) {
+    console.error("[chat] could not start:", (e as Error).message);
+    emit(id, { kind: "error", text: "The agent could not start. Try again." });
+    chatBusy.delete(id);
+    await finish(id);
+  }
+}
+
+/** Controls an ACP chat supports: only stopping the turn. The rest wait for ACP support. */
+function acpControl(id: string, action: unknown): { ok: true } {
+  if (action !== "interrupt") throw new ChatError(400, "Not available for this agent yet");
+  const acp = acps.get(id);
+  if (!acp || acp.closed) throw new ChatError(409, "The agent is not running");
+  acp.cancel();
+  return { ok: true };
+}
+
 /** Send a user message. Starts the claude process if none is alive. */
 export async function send(id: string, text: string): Promise<void> {
   const t = text.trim();
@@ -1125,6 +1208,7 @@ export async function send(id: string, text: string): Promise<void> {
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
   if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  if (isAcp(ws)) return sendAcp(ws, id, t);
   if (term) await syncFromTerminal(ws);
   if (!term && (await resumeOpen(id))) throw new ChatError(409, "Claude is open in the terminal. Close it there, then send your message again.");
   // The terminal's Claude moves into the chat: its terminal screen closes first, unless it is still working there.
@@ -1323,6 +1407,7 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
 /** The chat's menu actions: stop the turn, or change the model, permission mode or effort (saved even with no process running).
  *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo). */
 export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
+  if (isAcp(await getWorkspace(id))) return acpControl(id, action);
   if (action === "files") return { ok: true, files: await fileMentions(id, value) };
   if (action === "stop_task") return stopTask(id, value);
   if (action === "rewind_preview" || action === "rewind") return rewindFiles(id, value, action === "rewind_preview");
@@ -1403,6 +1488,12 @@ function ownPagesOf(ws: Workspace | null): OwnPages {
 
 /** Answer a pending permission question. */
 export async function answer(id: string, requestId: string, allow: boolean, extra: { answers?: Record<string, string>; message?: string } = {}): Promise<void> {
+  const acp = acps.get(id);
+  if (acp) {
+    if (!acp.asks.has(requestId)) throw new ChatError(404, "no such pending question");
+    acp.answer(requestId, allow);
+    return;
+  }
   const live = procs.get(id);
   if (!live || !live.asks.has(requestId)) throw new ChatError(404, "no such pending question");
   const { tool, input } = live.asks.get(requestId)!;

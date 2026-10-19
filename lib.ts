@@ -1495,6 +1495,7 @@ export const SCHEMA_VERSION = 1;
 
 const DEFAULT_AGENTS: Record<string, string> = {
   omp: "omp",
+  hermes: "hermes",
   claude: "claude",
   codex: "codex",
   opencode: "opencode",
