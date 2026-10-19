@@ -53,6 +53,12 @@ export interface Workspace {
 permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk";
   /** Model an ACP agent (hermes, omp) runs its chat on, as the agent names it (its model value). Undefined = the agent's own default. */
   agentModel?: string;
+  /** The last session id per agent for this chat project (Claude's or an ACP agent's), so switching back resumes it. */
+  agentSessions?: Record<string, string>;
+  /** The last event number each agent had seen when the person switched away from it. */
+  agentSeen?: Record<string, number>;
+  /** After a switch of AI: the events after this number are what the new agent has not seen. Cleared by its first message. */
+  handoffAfter?: number;
 }
 
 export interface WorkspaceLimits {

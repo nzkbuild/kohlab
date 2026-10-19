@@ -30,7 +30,7 @@ function plainError(e: unknown): string {
 const ACP_CHOICES = ["hermes", "omp", "codex"];
 
 /** The AI a new chat project talks through: Claude, or an installed ACP agent. Default Claude. `codexNeedsSignIn` is set when Codex is offered but not signed in. */
-function useNewAgent() {
+export function useNewAgent() {
   const [agent, setAgent] = useState("claude");
   const [installed, setInstalled] = useState<string[]>([]);
   const [codexSignedIn, setCodexSignedIn] = useState(true);
@@ -44,13 +44,13 @@ function useNewAgent() {
 }
 
 /** The AI choice for a new project: a composer chip. On a phone it is the icon alone, so the composer does not crowd. */
-function AgentChip({ agent, options, onChange, disabled = false }: { agent: string; options: string[]; onChange: (agent: string) => void; disabled?: boolean }) {
+export function AgentChip({ agent, options, onChange, disabled = false, title }: { agent: string; options: string[]; onChange: (agent: string) => void; disabled?: boolean; title?: string }) {
   return (
     <Menu
       side="top"
       align="start"
       label={`AI: ${agentName(agent)}`}
-      trigger={<ComposerChip className="max-w-48 shrink-0" icon={<Robot size={14} aria-hidden="true" />} label={agentName(agent)} hideLabelOnPhone menu disabled={disabled} />}
+      trigger={<ComposerChip className="max-w-48 shrink-0" icon={<Robot size={14} aria-hidden="true" />} label={agentName(agent)} hideLabelOnPhone menu disabled={disabled} title={title} />}
     >
       <MenuRadioGroup value={agent} onValueChange={onChange}>
         {options.map((o) => (

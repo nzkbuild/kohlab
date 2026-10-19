@@ -30,6 +30,12 @@ export interface Workspace {
   model?: "opus" | "sonnet" | "haiku";
   /** Model an ACP agent (hermes, omp) runs its chat on: the agent's own model value. */
   agentModel?: string;
+  /** The last session id per agent for this chat project. */
+  agentSessions?: Record<string, string>;
+  /** The last event number each agent had seen when the person switched away from it. */
+  agentSeen?: Record<string, number>;
+  /** After a switch of AI: the events after this number are what the new agent has not seen. */
+  handoffAfter?: number;
 }
 
 /** One multiple-choice question Claude asks (AskUserQuestion). */

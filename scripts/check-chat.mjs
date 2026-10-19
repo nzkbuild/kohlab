@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, helperLabel, noticeText, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile } from "../chat.ts";
+import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, handoffText, helperLabel, noticeText, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -193,6 +193,47 @@ check("answerResponse: plan deny with text", answerResponse("ExitPlanMode", { pl
 check("answerResponse: plan deny without text", answerResponse("ExitPlanMode", { plan: "p" }, false, {}), { response: { behavior: "deny", message: "The user did not approve the plan." } });
 check("answerResponse: Write allow unchanged", answerResponse("Write", { file_path: "/x" }, true, {}), { response: { behavior: "allow", updatedInput: { file_path: "/x" } } });
 check("answerResponse: Write deny unchanged", answerResponse("Write", { file_path: "/x" }, false, {}), { response: { behavior: "deny", message: "The user said no." } });
+
+// what a new AI is told about the conversation (handoffText)
+const hev = (n, body) => ({ n, at: 0, ...body });
+check("handoffText: nothing is empty", handoffText([], "omp"), "");
+check("handoffText: a switch line alone is empty", handoffText([hev(1, { kind: "tool", text: "Switched to omp" })], "claude"), "");
+check(
+  "handoffText: person, assistant and tool lines, oldest first, done and switch lines skipped",
+  handoffText(
+    [
+      hev(1, { kind: "user", text: "Make a page" }),
+      hev(2, { kind: "tool", text: "Created index.html" }),
+      hev(3, { kind: "assistant", text: "Done." }),
+      hev(4, { kind: "done" }),
+      hev(5, { kind: "tool", text: "Switched to omp" }),
+    ],
+    "claude",
+  ),
+  "Person: Make a page\nDid: Created index.html\nAssistant: Done.",
+);
+check("handoffText: whitespace runs become one space", handoffText([hev(1, { kind: "user", text: "  hello \n\n  there\t x " })], "omp"), "Person: hello there x");
+check("handoffText: a long line is cut to 240 characters, ending in ...", handoffText([hev(1, { kind: "user", text: "a".repeat(500) })], "omp"), `Person: ${"a".repeat(229)}...`);
+check(
+  "handoffText: an answered question shows its question; an open one does not",
+  handoffText(
+    [
+      hev(1, { kind: "ask", requestId: "r1", text: "Claude has a question", form: "question", questions: [{ question: "Colour?", options: [] }] }),
+      hev(2, { kind: "answer", requestId: "r1", allow: true, reply: "Red" }),
+      hev(3, { kind: "ask", requestId: "r2", text: "Claude wants to run a command" }),
+    ],
+    "claude",
+  ),
+  "Assistant asked: Colour?",
+);
+const bigEvents = [hev(1, { kind: "user", text: "first question" }), ...Array.from({ length: 60 }, (_, i) => hev(i + 2, { kind: "assistant", text: `reply ${i} ${"x".repeat(150)}` })), hev(99, { kind: "user", text: "latest question" })];
+const bigOut = handoffText(bigEvents, "omp", 1000);
+const bigLines = bigOut.split("\n");
+check("handoffText: the first message is always kept", bigLines[0], "Person: first question");
+check("handoffText: the line after the first says how many were left out", /^\(… \d+ earlier lines left out …\)$/.test(bigLines[1]), true);
+check("handoffText: the latest message is kept", bigLines.at(-1), "Person: latest question");
+check("handoffText: the summary stays within the budget", bigOut.length <= 1000, true);
+check("handoffText: a short conversation has no omission line", handoffText(bigEvents.slice(0, 3), "omp").includes("left out"), false);
 
 if (failures) {
   console.log(`\n${failures} failed`);

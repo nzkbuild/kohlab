@@ -15,6 +15,7 @@ import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import { agentName } from "../lib/agentName";
 import ConfirmDialog from "./ConfirmDialog";
 import { Composer } from "./Composer";
+import { AgentChip, useNewAgent } from "./WorkspacesView";
 import { Button, ComposerChip, Dialog, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
@@ -1178,6 +1179,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const agent = findWorkspace(workspaces, workspaceId)?.agent ?? "claude";
   const who = agentName(agent);
   const isClaude = agent === "claude";
+  // The AIs this chat can switch to: Claude, and the ACP agents the server reports installed.
+  const agentOptions = useNewAgent().options;
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
   // When the current turn started (ms), whoever started it; background tasks still running; the model and mode the CLI reports.
@@ -1691,6 +1694,18 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  /** Switches the chat's AI. Reversible, so no confirmation: the conversation stays, and the new AI gets what it missed with the next message. */
+  const switchAgent = async (value: string) => {
+    try {
+      await api.chatControl(workspaceId, "agent", value);
+      await refresh();
+    } catch (e) {
+      toast.error(`Could not switch, ${(e as Error).message}`);
+    } finally {
+      repoll();
+    }
+  };
+
   const working = busy && waiting === null;
   // The line under the last message: the newest tool line of this turn if the code has one, else "Working".
   const lastUserAllN = Math.max(0, ...events.filter((e) => e.kind === "user").map((e) => e.n));
@@ -2190,6 +2205,15 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                         disabled={commands.length === 0}
                         onClick={openCommands}
                       />
+                      ) : null}
+                      {!terminalProject && ws?.chat ? (
+                        <AgentChip
+                          agent={agent}
+                          options={agentOptions}
+                          onChange={(v) => void switchAgent(v)}
+                          disabled={busy}
+                          title={busy ? "Wait until the reply finishes" : undefined}
+                        />
                       ) : null}
                       <Menu
                         side="top"

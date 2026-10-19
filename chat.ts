@@ -294,6 +294,51 @@ export function friendlyError(raw: string): string {
   return "Something went wrong on Claude's side. Try again.";
 }
 
+/** The names the "Switched to" line shows: the same as web/src/lib/agentName.ts. */
+const AGENT_NAMES: Record<string, string> = { claude: "Claude", hermes: "Hermes", omp: "omp", codex: "Codex", gemini: "Gemini", opencode: "OpenCode" };
+
+/** The conversation as one line per message or action, oldest first, for an AI that joins it: the first message the person sent is always kept, then the latest lines as far as the budget goes, and a line says how many were left out. "" when there is nothing. Pure.
+ *  ponytail: the summary is cut by characters, not by tokens. _fromName is not used: the lines say "Assistant", so the new AI is not told which AI it replaces. */
+export function handoffText(events: ChatEvent[], _fromName: string, budget = 12000): string {
+  const oneLine = (s: string) => {
+    const t = s.replace(/\s+/g, " ").trim();
+    return t.length > 240 ? `${t.slice(0, 237)}...` : t;
+  };
+  const answered = new Set(events.flatMap((e) => (e.kind === "answer" ? [e.requestId] : [])));
+  const lines: string[] = [];
+  for (const e of events) {
+    if (e.kind === "user") lines.push(oneLine(`Person: ${e.text}`));
+    else if (e.kind === "assistant") lines.push(oneLine(`Assistant: ${e.text}`));
+    else if (e.kind === "tool" && e.text.trim() && !e.text.startsWith("Switched to ")) lines.push(oneLine(`Did: ${e.text}`));
+    else if (e.kind === "ask" && answered.has(e.requestId)) lines.push(oneLine(`Assistant asked: ${e.questions?.map((q) => q.question).join(" ") || e.plan || e.text}`));
+  }
+  if (lines.length === 0) return "";
+  const omit = (n: number) => `(… ${n} earlier lines left out …)`;
+  const reserve = omit(lines.length).length + 1;
+  const first = lines.findIndex((l) => l.startsWith("Person: "));
+  const keep = new Set<number>();
+  let used = 0;
+  if (first >= 0) {
+    keep.add(first);
+    used += lines[first].length + 1;
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (keep.has(i)) continue;
+    if (used + lines[i].length + 1 + reserve > budget) break;
+    keep.add(i);
+    used += lines[i].length + 1;
+  }
+  const omitted = lines.length - keep.size;
+  const out: string[] = [];
+  if (first < 0 && omitted > 0) out.push(omit(omitted));
+  lines.forEach((l, i) => {
+    if (!keep.has(i)) return;
+    out.push(l);
+    if (i === first && omitted > 0) out.push(omit(omitted));
+  });
+  return out.join("\n");
+}
+
 interface Live {
   child: ChildProcess;
   cwd: string;
@@ -882,6 +927,10 @@ function onLine(id: string, live: Live, line: string) {
       c.commands = commandList(r.response?.commands);
       c.models = modelList(r.response?.models);
       persistCaps(id);
+      if (c.models.length) {
+        agentInfo("claude").models = c.models;
+        saveAgentInfo("claude");
+      }
     }
     const waiting = live.pending.get(r.request_id);
     if (waiting) {
@@ -1145,7 +1194,7 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     // clean chats run with --disable-slash-commands: they get no "/" menu
     commandsEnabled: term,
     commands: term ? (caps.get(id)?.commands ?? []).slice(0, 200) : [],
-    models: caps.get(id)?.models.length ? caps.get(id)!.models : isAcp(ws) ? agentInfo(ws.agent).models : [],
+    models: caps.get(id)?.models.length ? caps.get(id)!.models : ws.chat ? agentInfo(ws.agent).models : [],
     waiting: cur?.asks.keys().next().value ?? null,
     draft: cur?.draft ?? "",
     terminalOpen: term && (await isAlive(ws)),
@@ -1217,17 +1266,36 @@ async function startAcpNow(ws: Workspace, id: string): Promise<AcpClient> {
   return acp;
 }
 
+/** The text an agent is sent for the person's message. After a switch of AI, its first message carries the conversation it has not seen; the chat still shows only the person's own words. */
+function handoffMessage(id: string, ws: Workspace, text: string): string {
+  if (ws.handoffAfter === undefined) return text;
+  const after = ws.handoffAfter;
+  const summary = handoffText(load(id).events.filter((e) => e.n > after), ws.agent);
+  if (!summary) return text;
+  return `Context: this conversation started with another assistant. What happened so far:\n${summary}\n\nThe person's new message:\n${text}`;
+}
+
+/** The catch-up a switch of AI left is spent: the message that carried it has been sent. */
+function clearHandoff(id: string) {
+  return mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (w) delete w.handoffAfter;
+  });
+}
+
 /** A message to an ACP agent: one prompt turn. A message sent while a turn runs is refused: the agent cannot take it mid-turn. */
 async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
   if (chatBusy.has(id)) throw new ChatError(409, "still working");
   chatBusy.add(id);
   chatWaiting.delete(id); // a new message clears a stale "needs you" from before
+  const sent = handoffMessage(id, ws, t);
   emit(id, { kind: "user", text: t });
   try {
     await markStarted(id);
     const cur = acps.get(id);
     const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
-    acp.prompt(t);
+    acp.prompt(sent);
+    if (ws.handoffAfter !== undefined) await clearHandoff(id).catch(() => {}); // only once the agent has the message
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
     emit(id, { kind: "error", text: acpStartFailure(ws.agent, e) });
@@ -1303,15 +1371,17 @@ export async function send(id: string, text: string): Promise<void> {
   if (!queued) chatWaiting.delete(id); // a new message clears a stale "needs you" from before
   // The id is ours, so the message can be named for Undo at once. The CLI keeps the id it is sent with.
   const uuid = randomUUID();
+  const sent = handoffMessage(id, ws, t);
   emit(id, { kind: "user", text: t, uuid });
   try {
     if (!queued) await markStarted(id);
     const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
     if (!queued) {
-      live.msg = t;
+      live.msg = sent;
       live.busySince = Date.now();
     }
-    live.child.stdin!.write(JSON.stringify({ type: "user", uuid, message: { role: "user", content: t }, parent_tool_use_id: null }) + "\n");
+    live.child.stdin!.write(JSON.stringify({ type: "user", uuid, message: { role: "user", content: sent }, parent_tool_use_id: null }) + "\n");
+    if (ws.handoffAfter !== undefined) await clearHandoff(id).catch(() => {}); // only once Claude has the message
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
     emit(id, { kind: "error", text: friendlyError((e as Error).message) });
@@ -1476,9 +1546,50 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
   persistCaps(id);
 }
 
+/** Switches a chat project's AI. The conversation stays; the agent it switches to gets what it has not seen, with the person's next message. */
+async function switchAgent(id: string, value: unknown): Promise<{ ok: true }> {
+  const ws = await getWorkspace(id);
+  if (!ws.chat) throw new ChatError(400, "not a chat workspace");
+  if (typeof value !== "string" || (value !== "claude" && !isAcpAgent(value))) throw new ChatError(400, "unknown agent");
+  const agent = value;
+  if (agent === ws.agent) return { ok: true };
+  const bin = agent === "claude" ? ((await loadState()).agents?.claude || "claude").split(/\s+/)[0] : ACP_AGENTS[agent][0];
+  if (!Bun.which(bin)) throw new ChatError(400, `${AGENT_NAMES[agent] ?? agent} is not installed on this server`);
+  if (chatBusy.has(id)) throw new ChatError(409, "Wait until the current reply finishes");
+  // nothing awaits between this check and the stop, so no turn can start in between
+  const lastN = load(id).events.at(-1)?.n ?? 0;
+  stop(id);
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) return;
+    const old = w.agent;
+    const sessions = { ...w.agentSessions };
+    if (w.chatSession) sessions[old] = w.chatSession;
+    else delete sessions[old];
+    const seen = { ...w.agentSeen, [old]: lastN };
+    const resumed = sessions[agent];
+    w.agentSessions = sessions;
+    w.agentSeen = seen;
+    w.agent = agent;
+    w.chatSession = resumed;
+    w.agentModel = undefined; // an ACP agent's model is its own: the new one starts on its last choice or its default
+    // a new AI has seen nothing; one that resumes its own conversation has seen up to when it last spoke
+    w.handoffAfter = resumed === undefined ? 0 : (seen[agent] ?? 0);
+  });
+  // the menus are the new agent's: the old ones are cleared, and an ACP agent is warmed up again for its list
+  loadCaps(id);
+  capsOf(id).models = [];
+  lastSeen.delete(id);
+  warmed.delete(id);
+  persistCaps(id);
+  emit(id, { kind: "tool", text: `Switched to ${AGENT_NAMES[agent] ?? agent}` });
+  return { ok: true };
+}
+
 /** The chat's menu actions: stop the turn, or change the model, permission mode or effort (saved even with no process running).
- *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo). */
+ *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo), and "agent" (switch the AI). */
 export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
+  if (action === "agent") return switchAgent(id, value);
   if (isAcp(await getWorkspace(id))) return acpControl(id, action, value);
   if (action === "files") return { ok: true, files: await fileMentions(id, value) };
   if (action === "stop_task") return stopTask(id, value);
