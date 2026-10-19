@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
@@ -14,7 +14,7 @@ import { isPhone } from "../lib/viewport";
 import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import ConfirmDialog from "./ConfirmDialog";
 import { Composer } from "./Composer";
-import { Button, ComposerChip, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
+import { Button, ComposerChip, Dialog, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
 type ChatEvent = StoredChatEvent & { why?: string };
@@ -368,6 +368,8 @@ function renderInline(nodes: Inline[]): ReactNode[] {
             {node.text}
           </a>
         );
+      case "image":
+        return <ProjectImage key={i} path={node.src} alt={node.alt} />;
     }
   });
 }
@@ -444,15 +446,285 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   );
 }
 
-/** What Claude said, in a measure a person can read without losing their place. */
-function Prose({ text }: { text: string }) {
+/** The workspace the reply's project pictures come from. Provided once, where the event list is drawn. */
+const WorkspaceCtx = createContext<string>("");
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+/** The app follows the system's light or dark (index.css), so a picture asks for the same. */
+const systemScheme = (): "light" | "dark" => (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+/** A short id from the block's text. The same block always gets the same id, so its page can be reused; two frames never mix, since messages are also checked against their own window. */
+const frameId = (text: string) => {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+};
+
+/** Where each picture page is kept, by workspace and page. The server keeps a page for an hour from its last use, so an entry is refetched after 50 minutes. */
+const pictureUrls = new Map<string, { url: Promise<string>; at: number }>();
+function pictureUrl(workspaceId: string, doc: string): Promise<string> {
+  const key = `${workspaceId}\n${doc}`;
+  const hit = pictureUrls.get(key);
+  if (hit && Date.now() - hit.at < 50 * 60 * 1000) return hit.url;
+  const url = api.picture(workspaceId, doc).then(
+    (r) => r.url,
+    (e: unknown) => {
+      pictureUrls.delete(key);
+      throw e;
+    },
+  );
+  if (pictureUrls.size >= 100) pictureUrls.delete(pictureUrls.keys().next().value as string);
+  pictureUrls.set(key, { url, at: Date.now() });
+  return url;
+}
+
+/** Posts the page's height to the chat as it changes. */
+const reportHeight = (id: string) =>
+  `<script>new ResizeObserver(()=>parent.postMessage({kohlabFrame:"${id}",h:document.documentElement.scrollHeight},"*")).observe(document.documentElement)</script>`;
+
+/** A picture's page: the reply's own HTML, with the theme and the height reporter around it. */
+function pictureDoc(code: string, id: string, scheme: string): string {
+  const head = `<meta name="color-scheme" content="light dark"><base target="_blank"><style>html{color-scheme:${scheme}}body{margin:0;font-family:system-ui,sans-serif}</style>`;
+  // A doctype has to stay first, or the browser renders the page in quirks mode.
+  const at = /^\s*<!doctype[^>]*>/i.exec(code)?.[0].length ?? 0;
+  return code.slice(0, at) + head + code.slice(at) + reportHeight(id);
+}
+
+/** A diagram's page: mermaid draws the source. If it cannot, the frame tells the chat, which then shows the code. */
+function diagramDoc(code: string, id: string, scheme: string): string {
+  const theme = scheme === "dark" ? "dark" : "default";
+  return (
+    `<!doctype html><html><head><meta name="color-scheme" content="light dark"><base target="_blank">` +
+    `<style>html{color-scheme:${scheme}}body{margin:0;font-family:system-ui,sans-serif}</style></head><body>` +
+    `<pre class="mermaid">${escapeHtml(code)}</pre>` +
+    `<script type="module">try{const m=(await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")).default;` +
+    `m.initialize({startOnLoad:false,securityLevel:"strict",theme:"${theme}"});await m.run();}` +
+    `catch(e){parent.postMessage({kohlabFrame:"${id}",failed:true},"*")}</script>` +
+    reportHeight(id) +
+    `</body></html>`
+  );
+}
+
+/** A finished html or mermaid block, drawn live in a sandboxed frame (no same-origin, no top navigation). Its toolbar shows the code, copies it, or opens it full screen. */
+function HtmlFrame({ kind, code }: { kind: "html" | "mermaid"; code: string }) {
+  const workspaceId = useContext(WorkspaceCtx);
+  const id = useMemo(() => frameId(kind + code), [kind, code]);
+  const [showCode, setShowCode] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [height, setHeight] = useState(320);
+  const [full, setFull] = useState(false);
+  const [copied, copy] = useCopied();
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const label = kind === "html" ? "Picture" : "Diagram";
+  const doc = useMemo(() => {
+    const scheme = systemScheme();
+    return kind === "html" ? pictureDoc(code, id, scheme) : diagramDoc(code, id, scheme);
+  }, [kind, code, id]);
+  // The page is kept on the server and framed from its own URL: the app's CSP would block its scripts as srcDoc.
+  const [src, setSrc] = useState<string | null>(null);
+  const [unshown, setUnshown] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setSrc(null);
+    setUnshown(false);
+    pictureUrl(workspaceId, doc).then(
+      (u) => alive && setSrc(u),
+      () => alive && setUnshown(true),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [workspaceId, doc]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== frameRef.current?.contentWindow) return;
+      const data = event.data as { kohlabFrame?: unknown; h?: unknown; failed?: unknown } | null;
+      if (!data || data.kohlabFrame !== id) return;
+      if (data.failed === true) setFailed(true);
+      else if (typeof data.h === "number") setHeight(Math.min(720, Math.max(120, data.h)));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [id]);
+
+  if (failed) {
+    return (
+      <>
+        <p className="text-small text-text-muted">Couldn&apos;t draw this diagram.</p>
+        <CodeBlock lang={kind} code={code} />
+      </>
+    );
+  }
+  if (unshown) {
+    return (
+      <>
+        <p className="text-small text-text-muted">Couldn&apos;t show this picture.</p>
+        <CodeBlock lang={kind} code={code} />
+      </>
+    );
+  }
+
+  // Empty at its height until the page has its URL.
+  const frame = (h: number | string, ref?: Ref<HTMLIFrameElement>) =>
+    src === null ? (
+      <div aria-hidden="true" style={{ height: h }} />
+    ) : (
+      <iframe
+        ref={ref}
+        title={kind === "html" ? "Picture from Claude" : "Diagram from Claude"}
+        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+        src={src}
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        style={{ height: h }}
+        className="block w-full border-0"
+      />
+    );
+
+  return (
+    <div className="overflow-hidden rounded-card bg-surface-sunken">
+      <div className="flex items-center justify-between gap-3 py-0.5 pr-1 pl-3.5">
+        <span className="min-w-0 truncate text-xs text-text-muted">{label}</span>
+        <div className="flex shrink-0 items-center">
+          <Button variant="quiet" size="sm" className="text-xs text-text-secondary" onClick={() => setShowCode((s) => !s)}>
+            {showCode ? "Show picture" : "Show code"}
+          </Button>
+          <Button variant="quiet" size="sm" className="text-xs text-text-secondary" onClick={() => void copy(code)}>
+            {copied ? "Copied" : "Copy"}
+          </Button>
+          {showCode ? null : (
+            <Button variant="quiet" size="sm" className="text-xs text-text-secondary" onClick={() => setFull(true)}>
+              Full screen
+            </Button>
+          )}
+        </div>
+      </div>
+      {showCode ? (
+        <pre className="mono overflow-x-auto px-3.5 py-3 text-sm leading-5 text-text-primary">
+          <code>{code}</code>
+        </pre>
+      ) : (
+        frame(height, frameRef)
+      )}
+      <Dialog.Root open={full} onOpenChange={setFull}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content aria-describedby={undefined} className="dialog-content w-[90vw]! max-w-[90vw]! p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <Dialog.Title className="text-sm font-semibold text-text-primary">{label}</Dialog.Title>
+              <Dialog.Close asChild>
+                <Button variant="quiet" size="sm" className="text-xs text-text-secondary">
+                  Close
+                </Button>
+              </Dialog.Close>
+            </div>
+            {frame("62vh")}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </div>
+  );
+}
+
+const PICTURE_TYPES = new Map([
+  ["png", "image/png"],
+  ["jpg", "image/jpeg"],
+  ["jpeg", "image/jpeg"],
+  ["gif", "image/gif"],
+  ["webp", "image/webp"],
+  ["svg", "image/svg+xml"],
+]);
+
+/** The picture's MIME type from its extension, or null when it is not a picture file. */
+function pictureType(path: string): string | null {
+  const ext = /\.([^./\\]+)$/.exec(path)?.[1].toLowerCase();
+  return ext ? (PICTURE_TYPES.get(ext) ?? null) : null;
+}
+
+/** The picture fit to the screen, with a Download and a Close. Escape closes it (Radix). */
+function ImageViewer({ url, alt, name, open, onOpenChange }: { url: string; alt: string; name: string; open: boolean; onOpenChange: (v: boolean) => void }) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content aria-describedby={undefined} className="dialog-content flex w-auto! max-w-[92vw]! flex-col items-center gap-3 p-3">
+          <Dialog.Title className="sr-only">{alt}</Dialog.Title>
+          <img src={url} alt={alt} className="max-h-[60vh] max-w-[92vw] object-contain" />
+          <div className="flex w-full items-center justify-end gap-2">
+            <a href={url} download={name} className="btn btn-quiet btn-sm text-xs text-text-secondary">
+              Download
+            </a>
+            <Dialog.Close asChild>
+              <Button variant="quiet" size="sm" className="text-xs text-text-secondary">
+                Close
+              </Button>
+            </Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+/** A picture from the project, loaded through the API. A thumbnail opens the viewer. */
+function ProjectImage({ path, alt, thumbClass = "max-h-48" }: { path: string; alt: string; thumbClass?: string }) {
+  const workspaceId = useContext(WorkspaceCtx);
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [open, setOpen] = useState(false);
+  const name = path.split("/").pop() ?? path;
+  const shown = alt || name;
+
+  useEffect(() => {
+    let cancelled = false;
+    let made: string | null = null;
+    setUrl(null);
+    setFailed(false);
+    const type = pictureType(path) ?? "application/octet-stream";
+    api
+      .rawBlob(workspaceId, path)
+      .then((blob) => {
+        if (cancelled) return;
+        made = URL.createObjectURL(new Blob([blob], { type }));
+        setUrl(made);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [workspaceId, path]);
+
+  if (failed) return <span className="text-small text-text-muted">Picture not found: {path}</span>;
+  if (url === null) return <span aria-hidden="true" className="block h-24 w-40 rounded-card bg-surface-sunken" />;
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="block max-w-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+        <img src={url} alt={shown} className={cn("block max-w-full rounded-card object-contain", thumbClass)} />
+      </button>
+      <ImageViewer url={url} alt={shown} name={name} open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
+
+/** What Claude said, in a measure a person can read without losing their place. A finished html or mermaid block is drawn, unless the reply is still streaming. */
+function Prose({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
     <div className="flex max-w-[66ch] min-w-0 flex-col gap-3 text-base leading-6 text-text-primary max-md:max-w-none max-md:w-full max-md:text-base">
       {parseBlocks(text).map((block, i) => {
         if (block.kind === "p") return <p key={i} className="whitespace-pre-line">{rich(block.lines.join("\n"))}</p>;
         if (block.kind === "h") return <p key={i} className="text-lg font-semibold text-text-primary">{rich(block.text)}</p>;
         if (block.kind === "hr") return <hr key={i} className="border-line-subtle" />;
-        if (block.kind === "code") return <CodeBlock key={i} lang={block.lang} code={block.code} />;
+        if (block.kind === "code") {
+          const lang = block.lang.toLowerCase();
+          if (!streaming && (lang === "html" || lang === "mermaid")) return <HtmlFrame key={i} kind={lang} code={block.code} />;
+          return <CodeBlock key={i} lang={block.lang} code={block.code} />;
+        }
         if (block.kind === "table") {
           return (
             <div key={i} className="overflow-x-auto rounded-card bg-surface-sunken">
@@ -1457,6 +1729,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     switch (e.kind) {
       case "user": {
         const { body, files } = splitAttached(e.text);
+        // Pictures show as thumbnails; the other files stay as chips. Attachments are always saved in uploads/.
+        const pictures = files.filter((name) => pictureType(name) !== null);
+        const others = files.filter((name) => pictureType(name) === null);
         // Undo only for the newest message, and only once it has an id (a terminal's imported history has none).
         const uuid = e.uuid;
         const undoable = uuid !== undefined && e.n === lastUserAllN && !busy && waiting === null && can;
@@ -1464,9 +1739,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           <div className="flex flex-col items-end gap-1" data-turn-start={e.n === lastUserN ? "" : undefined}>
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
               {body}
-              {files.length > 0 ? (
+              {pictures.map((name, i) => (
+                <div key={i} className="mt-1">
+                  <ProjectImage path={`uploads/${name}`} alt={name} thumbClass="max-h-32" />
+                </div>
+              ))}
+              {others.length > 0 ? (
                 <ul className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
-                  {files.map((name, i) => (
+                  {others.map((name, i) => (
                     <li key={i} className="flex max-w-full items-center gap-1 rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-text-secondary">
                       <Paperclip size={12} aria-hidden="true" className="shrink-0" />
                       <span className="truncate">{name}</span>
@@ -1578,430 +1858,432 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const hasDraft = draft.trim() !== "" || attachments.length > 0;
 
   return (
-    <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div className="relative min-h-0 flex-1">
-          <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overscroll-contain">
-            <div
-              role="log"
-              aria-live="polite"
-              aria-label="Conversation with Claude"
-              className={cn(
-                "flex w-full flex-col gap-6 px-4 pt-6 pb-8 max-md:gap-5 max-md:pt-4 max-md:pb-4",
-                compact ? "pt-4" : "mx-auto max-w-[720px] shell:px-6",
-              )}
-            >
-              {events.length === 0 && !busy ? (
-                <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
-                  <h2 className="text-xl font-semibold text-text-primary">What should Claude build?</h2>
-                  <p className="text-base text-text-muted">Describe it in your own words. Claude will ask before changing anything important.</p>
-                </div>
-              ) : null}
-              {turns.map((turn, ti) => {
-                // Everything Claude wrote in this turn, as its markdown source, for Copy.
-                // Only Claude text that is actually shown earns a Copy: a blank reply under a question has nothing to copy.
-                const replies = turn.flat().flatMap((e) => (e.kind === "assistant" && e.text.trim() !== "" ? [e.text] : []));
-                return (
-                  <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
-                    {turn.map((row) => (
-                      <Fragment key={row[0].n}>
-                        {row[0].kind === "tool" ? (
-                          <ToolRun lines={row} results={results} />
-                        ) : row.length > 1 ? (
-                          <AnsweredGroup events={row} answers={answers} />
-                        ) : (
-                          renderEvent(row[0])
-                        )}
-                        {row[0].n === events.at(-1)?.n && row[0].kind === "error" && !busy && can && lastRequest ? (
-                          <div>
-                            <Button variant="secondary" disabled={sending} onClick={() => void sendText(lastRequest)}>
-                              Try again
-                            </Button>
-                          </div>
-                        ) : null}
-                      </Fragment>
-                    ))}
-                    {/* Copy only under a finished reply that ends in text: not mid-turn, not under a tool run. */}
-                    {replies.length > 0 && !(busy && ti === turns.length - 1) && turn[turn.length - 1][0].kind === "assistant" ? (
-                      <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} />
-                    ) : null}
-                  </div>
-                );
-              })}
-              {busy && streamed ? (
-                // aria-live off: the reply is announced once, when its assistant message arrives.
-                <div aria-live="off">
-                  <Prose text={streamed} />
-                </div>
-              ) : null}
-              {!compact && !busy && hasChanges && can ? (
-            <div role="region" aria-label="Changes to check" className="flex flex-col gap-3">
-              <p className="text-small text-text-muted">
-                {changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}
-              </p>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Button variant="primary" className="max-md:px-3" disabled={keeping} onClick={() => void keep()}>
-                  <Check size={16} className="max-md:hidden" aria-hidden="true" />
-                  Keep this version
-                </Button>
-                {previewOpen ? null : (
-                  <Button variant="secondary" className="max-md:px-3" disabled={previewing} onClick={onPreview}>
-                    <Browser size={16} className="max-md:hidden" aria-hidden="true" />
-                    Preview
-                  </Button>
+    <WorkspaceCtx.Provider value={workspaceId}>
+      <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <div className="relative min-h-0 flex-1">
+            <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overscroll-contain">
+              <div
+                role="log"
+                aria-live="polite"
+                aria-label="Conversation with Claude"
+                className={cn(
+                  "flex w-full flex-col gap-6 px-4 pt-6 pb-8 max-md:gap-5 max-md:pt-4 max-md:pb-4",
+                  compact ? "pt-4" : "mx-auto max-w-[720px] shell:px-6",
                 )}
-                <Button variant="quiet" className="text-text-secondary max-md:px-2.5" disabled={undoing} onClick={() => setConfirmUndo(true)}>
-                  <ArrowCounterClockwise size={16} aria-hidden="true" />
-                  Undo all since last keep
-                </Button>
+              >
+                {events.length === 0 && !busy ? (
+                  <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
+                    <h2 className="text-xl font-semibold text-text-primary">What should Claude build?</h2>
+                    <p className="text-base text-text-muted">Describe it in your own words. Claude will ask before changing anything important.</p>
+                  </div>
+                ) : null}
+                {turns.map((turn, ti) => {
+                  // Everything Claude wrote in this turn, as its markdown source, for Copy.
+                  // Only Claude text that is actually shown earns a Copy: a blank reply under a question has nothing to copy.
+                  const replies = turn.flat().flatMap((e) => (e.kind === "assistant" && e.text.trim() !== "" ? [e.text] : []));
+                  return (
+                    <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
+                      {turn.map((row) => (
+                        <Fragment key={row[0].n}>
+                          {row[0].kind === "tool" ? (
+                            <ToolRun lines={row} results={results} />
+                          ) : row.length > 1 ? (
+                            <AnsweredGroup events={row} answers={answers} />
+                          ) : (
+                            renderEvent(row[0])
+                          )}
+                          {row[0].n === events.at(-1)?.n && row[0].kind === "error" && !busy && can && lastRequest ? (
+                            <div>
+                              <Button variant="secondary" disabled={sending} onClick={() => void sendText(lastRequest)}>
+                                Try again
+                              </Button>
+                            </div>
+                          ) : null}
+                        </Fragment>
+                      ))}
+                      {/* Copy only under a finished reply that ends in text: not mid-turn, not under a tool run. */}
+                      {replies.length > 0 && !(busy && ti === turns.length - 1) && turn[turn.length - 1][0].kind === "assistant" ? (
+                        <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} />
+                      ) : null}
+                    </div>
+                  );
+                })}
+                {busy && streamed ? (
+                  // aria-live off: the reply is announced once, when its assistant message arrives.
+                  <div aria-live="off">
+                    <Prose text={streamed} streaming />
+                  </div>
+                ) : null}
+                {!compact && !busy && hasChanges && can ? (
+              <div role="region" aria-label="Changes to check" className="flex flex-col gap-3">
+                <p className="text-small text-text-muted">
+                  {changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Button variant="primary" className="max-md:px-3" disabled={keeping} onClick={() => void keep()}>
+                    <Check size={16} className="max-md:hidden" aria-hidden="true" />
+                    Keep this version
+                  </Button>
+                  {previewOpen ? null : (
+                    <Button variant="secondary" className="max-md:px-3" disabled={previewing} onClick={onPreview}>
+                      <Browser size={16} className="max-md:hidden" aria-hidden="true" />
+                      Preview
+                    </Button>
+                  )}
+                  <Button variant="quiet" className="text-text-secondary max-md:px-2.5" disabled={undoing} onClick={() => setConfirmUndo(true)}>
+                    <ArrowCounterClockwise size={16} aria-hidden="true" />
+                    Undo all since last keep
+                  </Button>
+                </div>
+              </div>
+                ) : null}
+                {todos.length > 0 ? (
+                  <div className="mb-2">
+                    <Checklist todos={todos} />
+                  </div>
+                ) : null}
+                {working ? (
+                  <WorkingLine
+                    action={currentAction}
+                    since={busySince}
+                    background={background}
+                    tasksOpen={tasksOpen}
+                    onTasks={() => setTasksOpen((o) => !o)}
+                    helpers={helpers}
+                    helpersOpen={helpersOpen}
+                    onHelpers={() => setHelpersOpen((o) => !o)}
+                  />
+                ) : null}
+                {working && helpersOpen && helpers.length > 0 ? <HelperList helpers={helpers} /> : null}
+                {!busy && background > 0 ? (
+                  <button
+                    type="button"
+                    aria-expanded={tasksOpen}
+                    onClick={() => setTasksOpen((o) => !o)}
+                    className="flex min-h-11 items-center gap-2 rounded-lg px-1 text-left text-small text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
+                  >
+                    <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
+                    {background === 1 ? "1 task still running in the background" : `${background} tasks still running in the background`}
+                  </button>
+                ) : null}
+                {tasksOpen && background > 0 ? <TaskList tasks={tasks} stopping={stopping} onStop={(id) => void stopTask(id)} /> : null}
               </div>
             </div>
-              ) : null}
-              {todos.length > 0 ? (
-                <div className="mb-2">
-                  <Checklist todos={todos} />
-                </div>
-              ) : null}
-              {working ? (
-                <WorkingLine
-                  action={currentAction}
-                  since={busySince}
-                  background={background}
-                  tasksOpen={tasksOpen}
-                  onTasks={() => setTasksOpen((o) => !o)}
-                  helpers={helpers}
-                  helpersOpen={helpersOpen}
-                  onHelpers={() => setHelpersOpen((o) => !o)}
-                />
-              ) : null}
-              {working && helpersOpen && helpers.length > 0 ? <HelperList helpers={helpers} /> : null}
-              {!busy && background > 0 ? (
-                <button
-                  type="button"
-                  aria-expanded={tasksOpen}
-                  onClick={() => setTasksOpen((o) => !o)}
-                  className="flex min-h-11 items-center gap-2 rounded-lg px-1 text-left text-small text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
-                >
-                  <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
-                  {background === 1 ? "1 task still running in the background" : `${background} tasks still running in the background`}
-                </button>
-              ) : null}
-              {tasksOpen && background > 0 ? <TaskList tasks={tasks} stopping={stopping} onStop={(id) => void stopTask(id)} /> : null}
-            </div>
+            {/* A subtle fade under the tab bar, so scrolled text does not hit the edge. */}
+            <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-[linear-gradient(var(--surface-base),transparent)]" />
+            {/* The same fade above the composer, on phones. */}
+            <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-6 bg-[linear-gradient(transparent,var(--surface-base))] max-md:block" />
           </div>
-          {/* A subtle fade under the tab bar, so scrolled text does not hit the edge. */}
-          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-[linear-gradient(var(--surface-base),transparent)]" />
-          {/* The same fade above the composer, on phones. */}
-          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-6 bg-[linear-gradient(transparent,var(--surface-base))] max-md:block" />
-        </div>
-        {/* Outside the scroll area, so the button never covers prose. */}
-        {farFromEnd ? (
-          <div className={cn("flex shrink-0 justify-center px-3 pt-2", !compact && "mx-auto w-full max-w-[720px]")}>
-            <Button variant="secondary" iconOnly aria-label="Scroll to latest" title="Scroll to latest" onClick={scrollToLatest}>
-              <ArrowDown size={18} aria-hidden="true" />
-            </Button>
-          </div>
-        ) : null}
-
-        {can ? (
-          <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pb-[max(12px,var(--safe-bottom,env(safe-area-inset-bottom)))] shell:px-6">
-            <div className={compact ? "w-full" : "mx-auto w-full max-w-[720px]"}>
-              {sendError ? (
-                <p role="alert" className="mb-2 text-sm text-status-danger">
-                  {sendError}
-                </p>
-              ) : null}
-
-              {attachNote ? (
-                <p role="alert" className="mb-2 text-sm text-status-danger">
-                  {attachNote}
-                </p>
-              ) : null}
-
-              {terminalProject && terminalOpen && !busy && waiting === null ? (
-                <p className="mb-2 text-xs text-text-muted">
-                  Sending from here closes Claude's terminal screen. The conversation carries on here, and in Terminal when you switch back.
-                </p>
-              ) : null}
-              {slashOn ? (
-                <PickList
-                  id="slash-menu"
-                  label="Commands"
-                  active={slashActive}
-                  onPick={(i) => pickCommand(slashMatches[i])}
-                  options={slashMatches.map((c) => ({
-                    key: c.name,
-                    title: (
-                      <>
-                        <span className="font-medium">/{c.name}</span>
-                        {c.argumentHint ? <span className="text-text-faint"> {c.argumentHint}</span> : null}
-                      </>
-                    ),
-                    detail: c.description || undefined,
-                  }))}
-                />
-              ) : null}
-              {slashLoading ? (
-                <div role="status" className="menu mb-2 px-2.5 py-2 text-sm text-text-muted">
-                  Loading commands…
-                </div>
-              ) : null}
-              {mentionOn ? (
-                <PickList
-                  id="mention-menu"
-                  label="Files"
-                  active={mentionActive}
-                  onPick={(i) => pickFile(mentionFiles[i])}
-                  options={mentionFiles.map((p) => ({ key: p, title: p }))}
-                />
-              ) : null}
-
-              <Composer
-                ariaLabel="Message Claude"
-                textareaRef={taRef}
-                value={draft}
-                onChange={(v) => {
-                  setDraft(v);
-                  setSlashIndex(0);
-                  setSlashShut(false);
-                  setMentionShut(false);
-                }}
-                placeholder={placeholder}
-                disabled={waiting !== null}
-                textareaAria={{
-                  "aria-autocomplete": "list",
-                  "aria-expanded": slashOn || mentionOn,
-                  "aria-controls": slashOn ? "slash-menu" : mentionOn ? "mention-menu" : undefined,
-                  "aria-activedescendant": slashOn ? `slash-menu-opt-${slashActive}` : mentionOn ? `mention-menu-opt-${mentionActive}` : undefined,
-                }}
-                onKeyDown={onKeyDown}
-                onSubmit={() => void send()}
-                onPaste={(e) => {
-                  if (e.clipboardData.files.length === 0) return;
-                  e.preventDefault();
-                  takeFiles(e.clipboardData.files, true);
-                }}
-                onDropFiles={(files) => takeFiles(files)}
-                attachments={
-                  attachments.length > 0 ? (
-                    <ul aria-label="Files to send" className="flex flex-wrap gap-1.5 pt-1">
-                      {attachments.map((a) => (
-                        <li key={a.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-active py-1 pr-1 pl-1.5 text-sm text-text-secondary">
-                          {a.url ? (
-                            <img src={a.url} alt="" className="size-8 shrink-0 rounded-md object-cover" />
-                          ) : (
-                            <Paperclip size={14} aria-hidden="true" className="shrink-0" />
-                          )}
-                          <span className="min-w-0 truncate">{a.file.name}</span>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${a.file.name}`}
-                            disabled={uploading}
-                            onClick={() => removeAttachment(a.key)}
-                            className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
-                          >
-                            <X size={12} aria-hidden="true" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null
-                }
-                leading={
-                  <>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      multiple
-                      aria-label="Add files"
-                      className="hidden"
-                      onChange={(e) => {
-                        takeFiles(e.target.files ?? []);
-                        e.target.value = "";
-                      }}
-                    />
-                    <ComposerChip
-                      iconOnly
-                      aria-label="Add files"
-                      title="Add files"
-                      icon={<Paperclip size={14} aria-hidden="true" />}
-                      disabled={waiting !== null || sending || uploading}
-                      onClick={() => fileRef.current?.click()}
-                    />
-                    {commandsEnabled ? (
-                    <ComposerChip
-                      label="Commands"
-                      className="max-md:hidden"
-                      aria-label="Commands"
-                      title={commands.length === 0 ? "Commands load when Claude starts" : undefined}
-                      disabled={commands.length === 0}
-                      onClick={openCommands}
-                    />
-                    ) : null}
-                    <Menu
-                      side="top"
-                      align="start"
-                      label={`Model: ${modelText}`}
-                      trigger={
-                        <ComposerChip
-                          className="max-w-48 shrink-0"
-                          label={modelText}
-                          menu
-                          disabled={models.length === 0}
-                          title={models.length === 0 ? "Models load when Claude starts" : undefined}
-                        />
-                      }
-                    >
-                      <MenuRadioGroup value={modelInfo?.value ?? ""} onValueChange={(v) => void pick("model", v, model, setModel)}>
-                        {models.map((m) => (
-                          <MenuRadioItem key={m.value} value={m.value}>
-                            <span className="block">{m.displayName}</span>
-                            {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
-                          </MenuRadioItem>
-                        ))}
-                      </MenuRadioGroup>
-                      {levels.length > 0 ? (
-                        <>
-                          <MenuSeparator />
-                          <MenuLabel>{`Effort: ${effortText}`}</MenuLabel>
-                          <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
-                            {levels.map((l) => (
-                              <MenuRadioItem key={l} value={l}>
-                                {EFFORT_LABEL[l] ?? l}
-                              </MenuRadioItem>
-                            ))}
-                          </MenuRadioGroup>
-                        </>
-                      ) : null}
-                    </Menu>
-                    <Menu
-                      side="top"
-                      align="start"
-                      label={`Mode: ${modeText}`}
-                      trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu />}
-                    >
-                      <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
-                        {MODE_CHOICES.map((value) => (
-                          <MenuRadioItem key={value} value={value}>
-                            <span className="block">{MODES[value].label}</span>
-                            <span className="block text-xs text-text-muted">{MODES[value].detail}</span>
-                          </MenuRadioItem>
-                        ))}
-                      </MenuRadioGroup>
-                    </Menu>
-                  </>
-                }
-                trailing={
-                  <>
-                    {usage?.context && usage.context.percent >= 50 ? (
-                      <ComposerChip
-                        label={usage.context.percent >= 85 ? "Chat almost full" : `Chat ${usage.context.percent}% full`}
-                        popoverTarget="context-popover"
-                      />
-                    ) : null}
-                    {working && hasDraft ? (
-                      <ComposerChip
-                        className="shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0"
-                        icon={<Stop size={14} aria-hidden="true" />}
-                        label="Stop"
-                        hideLabelOnPhone
-                        aria-label="Stop Claude"
-                        title="Stop"
-                        onClick={() => void stop()}
-                      />
-                    ) : null}
-                    {working && !hasDraft ? (
-                      <Button variant="secondary" iconOnly aria-label="Stop Claude" title="Stop Claude" onClick={() => void stop()}>
-                        <Stop size={16} aria-hidden="true" />
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="primary"
-                        iconOnly
-                        aria-label="Send"
-                        title={busy ? "Send (queued until Claude is ready)" : "Send"}
-                        disabled={waiting !== null || sending || uploading || !hasDraft}
-                        onClick={() => void send()}
-                      >
-                        <ArrowUp size={18} aria-hidden="true" />
-                      </Button>
-                    )}
-                  </>
-                }
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {/* Native popover: Esc and an outside click close it, no modal. Placed above the chip when it opens. */}
-        <div
-          id="context-popover"
-          popover="auto"
-          aria-label="How full this chat is"
-          className="menu m-0 inset-auto h-fit w-80 max-w-[calc(100vw-1rem)] p-4"
-          onToggle={(e) => {
-            const pop = e.currentTarget;
-            const chip = document.querySelector<HTMLElement>('[popovertarget="context-popover"]');
-            if ((e.nativeEvent as ToggleEvent).newState !== "open" || !chip) return;
-            const r = chip.getBoundingClientRect();
-            pop.style.left = `${Math.max(8, Math.min(r.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8))}px`;
-            pop.style.top = `${Math.max(8, r.top - pop.offsetHeight - 8)}px`;
-          }}
-        >
-          <p className="text-base font-semibold text-text-primary">How full this chat is</p>
-          <p className="mt-1 text-sm leading-5 text-text-muted">
-            Long chats get summarised automatically. Start a fresh project chat for a new task.
-          </p>
-          {usage ? (
-            <div className="mt-3">
-              <UsagePanel usage={usage} />
+          {/* Outside the scroll area, so the button never covers prose. */}
+          {farFromEnd ? (
+            <div className={cn("flex shrink-0 justify-center px-3 pt-2", !compact && "mx-auto w-full max-w-[720px]")}>
+              <Button variant="secondary" iconOnly aria-label="Scroll to latest" title="Scroll to latest" onClick={scrollToLatest}>
+                <ArrowDown size={18} aria-hidden="true" />
+              </Button>
             </div>
           ) : null}
+  
+          {can ? (
+            <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pb-[max(12px,var(--safe-bottom,env(safe-area-inset-bottom)))] shell:px-6">
+              <div className={compact ? "w-full" : "mx-auto w-full max-w-[720px]"}>
+                {sendError ? (
+                  <p role="alert" className="mb-2 text-sm text-status-danger">
+                    {sendError}
+                  </p>
+                ) : null}
+  
+                {attachNote ? (
+                  <p role="alert" className="mb-2 text-sm text-status-danger">
+                    {attachNote}
+                  </p>
+                ) : null}
+  
+                {terminalProject && terminalOpen && !busy && waiting === null ? (
+                  <p className="mb-2 text-xs text-text-muted">
+                    Sending from here closes Claude's terminal screen. The conversation carries on here, and in Terminal when you switch back.
+                  </p>
+                ) : null}
+                {slashOn ? (
+                  <PickList
+                    id="slash-menu"
+                    label="Commands"
+                    active={slashActive}
+                    onPick={(i) => pickCommand(slashMatches[i])}
+                    options={slashMatches.map((c) => ({
+                      key: c.name,
+                      title: (
+                        <>
+                          <span className="font-medium">/{c.name}</span>
+                          {c.argumentHint ? <span className="text-text-faint"> {c.argumentHint}</span> : null}
+                        </>
+                      ),
+                      detail: c.description || undefined,
+                    }))}
+                  />
+                ) : null}
+                {slashLoading ? (
+                  <div role="status" className="menu mb-2 px-2.5 py-2 text-sm text-text-muted">
+                    Loading commands…
+                  </div>
+                ) : null}
+                {mentionOn ? (
+                  <PickList
+                    id="mention-menu"
+                    label="Files"
+                    active={mentionActive}
+                    onPick={(i) => pickFile(mentionFiles[i])}
+                    options={mentionFiles.map((p) => ({ key: p, title: p }))}
+                  />
+                ) : null}
+  
+                <Composer
+                  ariaLabel="Message Claude"
+                  textareaRef={taRef}
+                  value={draft}
+                  onChange={(v) => {
+                    setDraft(v);
+                    setSlashIndex(0);
+                    setSlashShut(false);
+                    setMentionShut(false);
+                  }}
+                  placeholder={placeholder}
+                  disabled={waiting !== null}
+                  textareaAria={{
+                    "aria-autocomplete": "list",
+                    "aria-expanded": slashOn || mentionOn,
+                    "aria-controls": slashOn ? "slash-menu" : mentionOn ? "mention-menu" : undefined,
+                    "aria-activedescendant": slashOn ? `slash-menu-opt-${slashActive}` : mentionOn ? `mention-menu-opt-${mentionActive}` : undefined,
+                  }}
+                  onKeyDown={onKeyDown}
+                  onSubmit={() => void send()}
+                  onPaste={(e) => {
+                    if (e.clipboardData.files.length === 0) return;
+                    e.preventDefault();
+                    takeFiles(e.clipboardData.files, true);
+                  }}
+                  onDropFiles={(files) => takeFiles(files)}
+                  attachments={
+                    attachments.length > 0 ? (
+                      <ul aria-label="Files to send" className="flex flex-wrap gap-1.5 pt-1">
+                        {attachments.map((a) => (
+                          <li key={a.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-active py-1 pr-1 pl-1.5 text-sm text-text-secondary">
+                            {a.url ? (
+                              <img src={a.url} alt="" className="size-8 shrink-0 rounded-md object-cover" />
+                            ) : (
+                              <Paperclip size={14} aria-hidden="true" className="shrink-0" />
+                            )}
+                            <span className="min-w-0 truncate">{a.file.name}</span>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${a.file.name}`}
+                              disabled={uploading}
+                              onClick={() => removeAttachment(a.key)}
+                              className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
+                            >
+                              <X size={12} aria-hidden="true" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null
+                  }
+                  leading={
+                    <>
+                      <input
+                        ref={fileRef}
+                        type="file"
+                        multiple
+                        aria-label="Add files"
+                        className="hidden"
+                        onChange={(e) => {
+                          takeFiles(e.target.files ?? []);
+                          e.target.value = "";
+                        }}
+                      />
+                      <ComposerChip
+                        iconOnly
+                        aria-label="Add files"
+                        title="Add files"
+                        icon={<Paperclip size={14} aria-hidden="true" />}
+                        disabled={waiting !== null || sending || uploading}
+                        onClick={() => fileRef.current?.click()}
+                      />
+                      {commandsEnabled ? (
+                      <ComposerChip
+                        label="Commands"
+                        className="max-md:hidden"
+                        aria-label="Commands"
+                        title={commands.length === 0 ? "Commands load when Claude starts" : undefined}
+                        disabled={commands.length === 0}
+                        onClick={openCommands}
+                      />
+                      ) : null}
+                      <Menu
+                        side="top"
+                        align="start"
+                        label={`Model: ${modelText}`}
+                        trigger={
+                          <ComposerChip
+                            className="max-w-48 shrink-0"
+                            label={modelText}
+                            menu
+                            disabled={models.length === 0}
+                            title={models.length === 0 ? "Models load when Claude starts" : undefined}
+                          />
+                        }
+                      >
+                        <MenuRadioGroup value={modelInfo?.value ?? ""} onValueChange={(v) => void pick("model", v, model, setModel)}>
+                          {models.map((m) => (
+                            <MenuRadioItem key={m.value} value={m.value}>
+                              <span className="block">{m.displayName}</span>
+                              {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
+                            </MenuRadioItem>
+                          ))}
+                        </MenuRadioGroup>
+                        {levels.length > 0 ? (
+                          <>
+                            <MenuSeparator />
+                            <MenuLabel>{`Effort: ${effortText}`}</MenuLabel>
+                            <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
+                              {levels.map((l) => (
+                                <MenuRadioItem key={l} value={l}>
+                                  {EFFORT_LABEL[l] ?? l}
+                                </MenuRadioItem>
+                              ))}
+                            </MenuRadioGroup>
+                          </>
+                        ) : null}
+                      </Menu>
+                      <Menu
+                        side="top"
+                        align="start"
+                        label={`Mode: ${modeText}`}
+                        trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu />}
+                      >
+                        <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
+                          {MODE_CHOICES.map((value) => (
+                            <MenuRadioItem key={value} value={value}>
+                              <span className="block">{MODES[value].label}</span>
+                              <span className="block text-xs text-text-muted">{MODES[value].detail}</span>
+                            </MenuRadioItem>
+                          ))}
+                        </MenuRadioGroup>
+                      </Menu>
+                    </>
+                  }
+                  trailing={
+                    <>
+                      {usage?.context && usage.context.percent >= 50 ? (
+                        <ComposerChip
+                          label={usage.context.percent >= 85 ? "Chat almost full" : `Chat ${usage.context.percent}% full`}
+                          popoverTarget="context-popover"
+                        />
+                      ) : null}
+                      {working && hasDraft ? (
+                        <ComposerChip
+                          className="shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0"
+                          icon={<Stop size={14} aria-hidden="true" />}
+                          label="Stop"
+                          hideLabelOnPhone
+                          aria-label="Stop Claude"
+                          title="Stop"
+                          onClick={() => void stop()}
+                        />
+                      ) : null}
+                      {working && !hasDraft ? (
+                        <Button variant="secondary" iconOnly aria-label="Stop Claude" title="Stop Claude" onClick={() => void stop()}>
+                          <Stop size={16} aria-hidden="true" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="primary"
+                          iconOnly
+                          aria-label="Send"
+                          title={busy ? "Send (queued until Claude is ready)" : "Send"}
+                          disabled={waiting !== null || sending || uploading || !hasDraft}
+                          onClick={() => void send()}
+                        >
+                          <ArrowUp size={18} aria-hidden="true" />
+                        </Button>
+                      )}
+                    </>
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
+  
+          {/* Native popover: Esc and an outside click close it, no modal. Placed above the chip when it opens. */}
+          <div
+            id="context-popover"
+            popover="auto"
+            aria-label="How full this chat is"
+            className="menu m-0 inset-auto h-fit w-80 max-w-[calc(100vw-1rem)] p-4"
+            onToggle={(e) => {
+              const pop = e.currentTarget;
+              const chip = document.querySelector<HTMLElement>('[popovertarget="context-popover"]');
+              if ((e.nativeEvent as ToggleEvent).newState !== "open" || !chip) return;
+              const r = chip.getBoundingClientRect();
+              pop.style.left = `${Math.max(8, Math.min(r.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8))}px`;
+              pop.style.top = `${Math.max(8, r.top - pop.offsetHeight - 8)}px`;
+            }}
+          >
+            <p className="text-base font-semibold text-text-primary">How full this chat is</p>
+            <p className="mt-1 text-sm leading-5 text-text-muted">
+              Long chats get summarised automatically. Start a fresh project chat for a new task.
+            </p>
+            {usage ? (
+              <div className="mt-3">
+                <UsagePanel usage={usage} />
+              </div>
+            ) : null}
+          </div>
         </div>
+  
+        <ConfirmDialog
+          open={rewindPlan !== null}
+          onOpenChange={(v) => {
+            if (!v) setRewindPlan(null);
+          }}
+          title="Undo these changes?"
+          description={
+            rewindPlan
+              ? `Claude changed ${rewindPlan.files.length} ${rewindPlan.files.length === 1 ? "file" : "files"} since that message. They go back to how they were before it.`
+              : ""
+          }
+          details={
+            rewindPlan ? (
+              <>
+                <ul className="mono flex flex-col gap-0.5 break-all">
+                  {rewindPlan.files.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+                <p className="mt-1">
+                  {rewindPlan.insertions} lines added, {rewindPlan.deletions} removed
+                </p>
+              </>
+            ) : null
+          }
+          confirmLabel="Undo"
+          tone="danger"
+          busy={rewindBusy}
+          onConfirm={() => void confirmRewind()}
+        />
+        <ConfirmDialog
+          open={confirmUndo}
+          onOpenChange={(v) => {
+            if (!v) setConfirmUndo(false);
+          }}
+          title="Undo the changes?"
+          description="Everything Claude changed since you last pressed Keep will be removed. This can't be reversed."
+          confirmLabel="Undo"
+          tone="danger"
+          busy={undoing}
+          onConfirm={() => void undo()}
+        />
       </div>
-
-      <ConfirmDialog
-        open={rewindPlan !== null}
-        onOpenChange={(v) => {
-          if (!v) setRewindPlan(null);
-        }}
-        title="Undo these changes?"
-        description={
-          rewindPlan
-            ? `Claude changed ${rewindPlan.files.length} ${rewindPlan.files.length === 1 ? "file" : "files"} since that message. They go back to how they were before it.`
-            : ""
-        }
-        details={
-          rewindPlan ? (
-            <>
-              <ul className="mono flex flex-col gap-0.5 break-all">
-                {rewindPlan.files.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-              <p className="mt-1">
-                {rewindPlan.insertions} lines added, {rewindPlan.deletions} removed
-              </p>
-            </>
-          ) : null
-        }
-        confirmLabel="Undo"
-        tone="danger"
-        busy={rewindBusy}
-        onConfirm={() => void confirmRewind()}
-      />
-      <ConfirmDialog
-        open={confirmUndo}
-        onOpenChange={(v) => {
-          if (!v) setConfirmUndo(false);
-        }}
-        title="Undo the changes?"
-        description="Everything Claude changed since you last pressed Keep will be removed. This can't be reversed."
-        confirmLabel="Undo"
-        tone="danger"
-        busy={undoing}
-        onConfirm={() => void undo()}
-      />
-    </div>
+    </WorkspaceCtx.Provider>
   );
 }

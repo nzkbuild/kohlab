@@ -95,6 +95,7 @@ try {
   run("cli surface", "node", ["scripts/check-cli.mjs"]);
   run("access bootstrap", "node", ["scripts/check-access.mjs"]);
   run("auth hardening (gate, throttle, rotation, socket key)", "node", ["scripts/check-auth-hardening.mjs"]);
+  run("chat pictures (own sandbox route, auth, size cap)", "node", ["scripts/check-picture.mjs"]);
   run("durability (schema, backup, rotation, daemon health)", "node", ["scripts/check-durability.mjs"]);
   run("push encryption (RFC 8291 vector)", "bun", ["scripts/check-push-crypto.ts"]);
   run("push delivery (fake push service)", "node", ["scripts/check-push-delivery.mjs"]);

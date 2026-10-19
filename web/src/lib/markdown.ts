@@ -3,7 +3,9 @@
  * turns these nodes into React elements, so a reply cannot inject markup.
  *
  * Deliberately small: fenced code, headings, rules, bullets, numbers, pipe tables,
- * paragraphs, **bold**, `code`, [text](url) and bare http(s) URLs. Anything else stays text.
+ * paragraphs, **bold**, `code`, [text](url), ![alt](picture.png) and bare http(s) URLs.
+ * A picture is only a picture when its path is inside the project (no scheme, no "..");
+ * anything else stays text, and an http(s) picture becomes a plain link. Anything else stays text.
  */
 
 export type Block =
@@ -18,7 +20,8 @@ export type Inline =
   | { kind: "text"; text: string }
   | { kind: "strong"; children: Inline[] }
   | { kind: "code"; text: string }
-  | { kind: "link"; href: string; text: string };
+  | { kind: "link"; href: string; text: string }
+  | { kind: "image"; src: string; alt: string };
 
 const OPEN_FENCE = /^\s{0,3}```\s*([^\s`]*)/;
 const CLOSE_FENCE = /^\s{0,3}```\s*$/;
@@ -113,7 +116,24 @@ export function parseBlocks(text: string): Block[] {
 }
 
 // One pass, left to right: code wins over everything, so a link inside backticks stays code.
-const TOKEN = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"`]+)/g;
+// The picture alternative sits before the link one, so "![a](b.png)" is not read as "!" plus a link.
+const TOKEN = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|!\[([^\]\n]*)\]\(([^)\s]+)\)|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"`]+)/g;
+
+const PICTURE = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+/** A picture path the app may load: inside the project, a picture file. Checked decoded too, so "%2e%2e" is no escape. */
+function safePicture(src: string): boolean {
+  let decoded = src;
+  try {
+    decoded = decodeURIComponent(src);
+  } catch {
+    return false;
+  }
+  for (const p of [src, decoded]) {
+    if (p.includes(":") || /^[\\/]/.test(p) || p.split(/[\\/]/).includes("..") || !PICTURE.test(p)) return false;
+  }
+  return true;
+}
 
 const count = (s: string, ch: string) => s.split(ch).length - 1;
 
@@ -152,12 +172,16 @@ export function inline(text: string): Inline[] {
   };
   for (const m of text.matchAll(TOKEN)) {
     const start = m.index ?? 0;
-    const [raw, code, bold, label, href, bare] = m;
+    const [raw, code, bold, alt, picture, label, href, bare] = m;
     pushText(text.slice(at, start));
     at = start + raw.length;
     if (code !== undefined) out.push({ kind: "code", text: code });
     else if (bold !== undefined) out.push({ kind: "strong", children: inline(bold) });
-    else if (label !== undefined) {
+    else if (alt !== undefined) {
+      if (safeHref(picture)) out.push({ kind: "link", href: picture, text: alt || picture });
+      else if (safePicture(picture)) out.push({ kind: "image", src: picture, alt });
+      else pushText(raw);
+    } else if (label !== undefined) {
       if (safeHref(href)) out.push({ kind: "link", href, text: label });
       else pushText(raw);
     } else if (bare !== undefined) {

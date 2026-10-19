@@ -83,6 +83,7 @@ import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, 
 import { resolvePreviewFile } from "./preview";
 import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, touchBrowser } from "./browser";
 import { stopAllDevServers } from "./devserver";
+import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { ChatError, answer as answerChat, chatControl, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
@@ -262,6 +263,41 @@ async function handlePreview(token: string, rest: string, req: Request): Promise
     return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
   }
   return new Response(req.method === "HEAD" ? null : Bun.file(file), { headers });
+}
+
+/** A picture's page: its own sandbox CSP, so the page runs as an opaque origin and not under the app's policy. */
+const PICTURE_HEADERS: Record<string, string> = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "content-security-policy":
+    "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'self'",
+};
+
+/** POST a picture's page. The caller has already passed the workspace checks; this only keeps the page and returns its URL. */
+async function handlePicturePost(req: Request): Promise<Response> {
+  // Counted as it arrives, so a body with no Content-Length cannot slip past the cap.
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = req.body?.getReader();
+  for (let r = await reader?.read(); r && !r.done; r = await reader?.read()) {
+    total += r.value.byteLength;
+    if (total > PICTURE_MAX_BYTES) {
+      await reader?.cancel();
+      return json({ error: "picture is too big" }, 413);
+    }
+    chunks.push(r.value);
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  let body: { html?: unknown };
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return json({ error: "body must be JSON" }, 400);
+  }
+  if (typeof body?.html !== "string") return json({ error: "html must be a string" }, 400);
+  return json({ url: `/pic/${mintPicture(body.html)}` });
 }
 
 async function handleRename(id: string, req: Request): Promise<Response> {
@@ -1194,6 +1230,14 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
       return handlePreview(previewM[1], previewM[2], req);
     }
+    // A picture drawn in chat: the random token is the credential, as with /p/. Before the auth gate.
+    const picM = path.match(/^\/pic\/([A-Za-z0-9_-]+)$/);
+    if (picM) {
+      if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+      const html = pictureHtml(picM[1]);
+      if (html === null) return new Response("<!doctype html><title>Not found</title><p>This picture is no longer here. Ask Claude to draw it again.</p>", { status: 404, headers: PICTURE_HEADERS });
+      return new Response(req.method === "HEAD" ? null : html, { headers: PICTURE_HEADERS });
+    }
     // Claude Code hook callbacks: before the auth gate, the hook token is the credential.
     const hookM = path.match(/^\/api\/hook\/([^/]+)$/);
     if (hookM) {
@@ -1292,6 +1336,15 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
       return handleChatPost(chatId, req, actor, sub);
+    }
+
+    // A picture for a chat frame (see picture.ts). Read access, like viewing the chat: no share links, no credentials, no entry.
+    const picsM = path.match(/^\/api\/workspaces\/([^/]+)\/picture$/);
+    if (picsM) {
+      if (denied) return json({ error: "unauthorized" }, 401);
+      if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, picsM[1]))) return json({ error: "forbidden, not your workspace" }, 403);
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      return handlePicturePost(req);
     }
 
     // The shared browser (browser.ts): read its page URL, or navigate it. Share links never reach it.
@@ -1884,11 +1937,12 @@ serve({
   // bound anywhere but loopback with no key and no users, the server generates
   // itself one (see resolveAccessKey in lib.ts).
   hostname: HOST,
-  // A preview page carries its own sandbox CSP. secured() would overwrite it with
+  // A preview page and a chat picture carry their own sandbox CSP. secured() would overwrite it with
   // the app's policy, which blocks the page's inline scripts.
   fetch: async (req, server) => {
     const res = await handle(req, server);
-    return new URL(req.url).pathname.startsWith("/p/") ? res : secured(res);
+    const own = new URL(req.url).pathname;
+    return own.startsWith("/p/") || own.startsWith("/pic/") ? res : secured(res);
   },
   websocket: socketHandlers,
 });

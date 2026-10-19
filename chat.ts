@@ -42,7 +42,8 @@ import {
 const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USER", "LOGNAME"];
 /** Appended to claude's system prompt: who it talks to, and the Preview / Keep / Undo buttons it can rely on. */
 const CHAT_SYSTEM_PROMPT =
-  "The person you are working with is not a programmer. Use plain, friendly language and avoid jargon. Write short plain sentences; avoid Markdown headings and tables. " +
+  "The person you are working with is not a programmer. Use plain, friendly language and avoid jargon. Write short plain sentences; avoid Markdown headings. " +
+  "When a picture explains better than words (a chart, a diagram, a quick mockup), you may put a self-contained ```html block in your reply (inline CSS and JavaScript; libraries from a CDN are fine) or a ```mermaid diagram, and Kohlab draws it right in the chat; to show a picture from the project, use ![description](path/inside/project.png). " +
   "When they ask for something visual (a website, page, game or small tool), build it with plain HTML, CSS and JavaScript " +
   "and put an index.html at the project root, so it works by opening that file; use another technology only if they ask for it. " +
   "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes. " +

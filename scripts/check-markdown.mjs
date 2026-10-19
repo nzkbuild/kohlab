@@ -127,6 +127,23 @@ check(
   [{ kind: "table", head: ["What", "Today"], rows: [["**Question cards**: options", "Raw text"]] }],
 );
 
+// pictures
+check("project picture is an image", inline("![a](pics/a.png)"), [{ kind: "image", src: "pics/a.png", alt: "a" }]);
+check("picture extension is case-insensitive", inline("![](uploads/B.JPEG)"), [{ kind: "image", src: "uploads/B.JPEG", alt: "" }]);
+check("picture with ../ is refused as text", inline("![a](../b.png)"), [{ kind: "text", text: "![a](../b.png)" }]);
+check("picture with an encoded ../ is refused", inline("![a](%2e%2e/b.png)"), [{ kind: "text", text: "![a](%2e%2e/b.png)" }]);
+check("picture with a leading slash is refused", inline("![a](/etc/b.png)"), [{ kind: "text", text: "![a](/etc/b.png)" }]);
+check("picture that is not an image file is refused", inline("![a](b.txt)"), [{ kind: "text", text: "![a](b.txt)" }]);
+check("http picture becomes a link", inline("![a](https://x.y/z.png)"), [{ kind: "link", href: "https://x.y/z.png", text: "a" }]);
+check("http picture without alt links its address", inline("![](https://x.y/z.png)"), [{ kind: "link", href: "https://x.y/z.png", text: "https://x.y/z.png" }]);
+check("picture inside backticks stays code", inline("`![a](p.png)`"), [{ kind: "code", text: "![a](p.png)" }]);
+check("picture and a link in one line", inline("see ![a](p.png) and [b](https://b.c)"), [
+  { kind: "text", text: "see " },
+  { kind: "image", src: "p.png", alt: "a" },
+  { kind: "text", text: " and " },
+  { kind: "link", href: "https://b.c", text: "b" },
+]);
+
 if (failures) {
   console.log(`\n${failures} failed`);
   process.exit(1);
