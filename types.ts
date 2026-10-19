@@ -51,6 +51,8 @@ export interface Workspace {
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
 /** Permission mode the person picked in the chat, passed to claude when it starts. Undefined = "default" for a chat, the project's own settings for a terminal. */
 permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk";
+  /** Model an ACP agent (hermes, omp) runs its chat on, as the agent names it (its model value). Undefined = the agent's own default. */
+  agentModel?: string;
 }
 
 export interface WorkspaceLimits {

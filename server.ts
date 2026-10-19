@@ -790,7 +790,7 @@ function claudeSignedIn(): Promise<boolean | null> {
 }
 
 async function handleAgentsStatus(): Promise<Response> {
-  const names = ["omp", "claude", "codex", "opencode", "pi", "gemini"];
+  const names = ["omp", "hermes", "claude", "codex", "opencode", "pi", "gemini"];
   const { execFile } = await import("child_process");
   const status: Record<string, boolean | null> = {};
   await Promise.all(

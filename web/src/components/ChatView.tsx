@@ -12,6 +12,7 @@ import { inline, parseBlocks, type Inline } from "../lib/markdown";
 import { cn } from "../lib/utils";
 import { isPhone } from "../lib/viewport";
 import { MODEL_LABEL, modelOf } from "../lib/projectActions";
+import { agentName } from "../lib/agentName";
 import ConfirmDialog from "./ConfirmDialog";
 import { Composer } from "./Composer";
 import { Button, ComposerChip, Dialog, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
@@ -448,6 +449,8 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 
 /** The workspace the reply's project pictures come from. Provided once, where the event list is drawn. */
 const WorkspaceCtx = createContext<string>("");
+/** The agent's name as a person sees it ("Claude"), for the parts of the chat that speak for it. */
+const AgentCtx = createContext<string>("Claude");
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -509,6 +512,7 @@ function diagramDoc(code: string, id: string, scheme: string): string {
 
 /** A finished html or mermaid block, drawn live in a sandboxed frame (no same-origin, no top navigation). Its toolbar shows the code, copies it, or opens it full screen. */
 function HtmlFrame({ kind, code }: { kind: "html" | "mermaid"; code: string }) {
+  const who = useContext(AgentCtx);
   const workspaceId = useContext(WorkspaceCtx);
   const id = useMemo(() => frameId(kind + code), [kind, code]);
   const [showCode, setShowCode] = useState(false);
@@ -574,7 +578,7 @@ function HtmlFrame({ kind, code }: { kind: "html" | "mermaid"; code: string }) {
     ) : (
       <iframe
         ref={ref}
-        title={kind === "html" ? "Picture from Claude" : "Diagram from Claude"}
+        title={kind === "html" ? `Picture from ${who}` : `Diagram from ${who}`}
         sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         src={src}
         referrerPolicy="no-referrer"
@@ -861,9 +865,10 @@ function ToolLine({ e, result }: { e: ToolEvent; result?: ToolResult }) {
 
 /** The question Claude asked, and the answer, once given: one muted line. A plan keeps its text behind "Show plan". */
 function AnsweredAsk({ e, allowed, reply }: { e: AskEvent; allowed: boolean; reply?: string }) {
+  const who = useContext(AgentCtx);
   const Icon = allowed ? Check : X;
   if (e.form === "question") {
-    const said = allowed ? (reply ? `You answered: ${reply}` : "You answered Claude's question") : "You skipped Claude's question";
+    const said = allowed ? (reply ? `You answered: ${reply}` : `You answered ${who}'s question`) : `You skipped ${who}'s question`;
     return (
       <div className="text-small text-text-muted">
         <p className="flex items-start gap-1.5">
@@ -891,12 +896,12 @@ function AnsweredAsk({ e, allowed, reply }: { e: AskEvent; allowed: boolean; rep
     );
   }
   // "Claude wants to create the file index.html" reads as "You allowed Claude to create index.html".
-  const what = e.text.replace(/^Claude wants to /, "").replace(/^(create|change) the file /, "$1 ");
+  const what = e.text.replace(/^\S+ wants to /, "").replace(/^(create|change) the file /, "$1 ");
   return (
     <div className="text-small text-text-muted">
       <p className="flex items-start gap-1.5">
         <Icon size={14} className="mt-[5px] shrink-0" aria-hidden="true" />
-        <span className="min-w-0">{allowed ? `You allowed Claude to ${what}` : `You didn't allow Claude to ${what}`}</span>
+        <span className="min-w-0">{allowed ? `You allowed ${who} to ${what}` : `You didn't allow ${who} to ${what}`}</span>
       </p>
       {e.detail || e.why ? (
         <div className="ml-5">
@@ -909,6 +914,7 @@ function AnsweredAsk({ e, allowed, reply }: { e: AskEvent; allowed: boolean; rep
 
 /** Claude's multiple-choice questions: each has options to pick (one, or several) and an "Other" answer, then Send answer or Skip. */
 function QuestionCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; busy: boolean; onAnswer: (allow: boolean, extra?: { answers?: Record<string, string> }) => void }) {
+  const who = useContext(AgentCtx);
   const questions = e.questions ?? [];
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [typed, setTyped] = useState<Record<number, string>>({});
@@ -928,7 +934,7 @@ function QuestionCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; b
     setPicked((p) => ({ ...p, [i]: [] }));
   };
   return (
-    <section aria-label="Claude is asking" className="rounded-card bg-surface-raised px-5 py-[18px]">
+    <section aria-label={`${who} is asking`} className="rounded-card bg-surface-raised px-5 py-[18px]">
       <p className="text-base font-semibold text-text-primary">{e.text}</p>
       {can ? (
         <>
@@ -989,11 +995,12 @@ function QuestionCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; b
 
 /** The plan Claude made in plan mode: read it, then build it, or ask for changes first. */
 function PlanCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; busy: boolean; onAnswer: (allow: boolean, extra?: { message?: string }) => void }) {
+  const who = useContext(AgentCtx);
   const [changing, setChanging] = useState(false);
   const [message, setMessage] = useState("");
   return (
-    <section aria-label="Claude is asking" className="rounded-card bg-surface-raised px-5 py-[18px]">
-      <p className="text-base font-semibold text-text-primary">Claude's plan</p>
+    <section aria-label={`${who} is asking`} className="rounded-card bg-surface-raised px-5 py-[18px]">
+      <p className="text-base font-semibold text-text-primary">{`${who}'s plan`}</p>
       <div className="mt-3 max-h-[50vh] overflow-y-auto">
         <Prose text={e.plan ?? ""} />
       </div>
@@ -1064,7 +1071,7 @@ function AnsweredGroup({ events, answers }: { events: ChatEvent[]; answers: Map<
             e.kind === "ask" ? (
               <li key={e.n}>
                 {answers.get(e.requestId) ? "Allowed: " : "Not allowed: "}
-                {e.text.replace(/^Claude wants to /, "")}
+                {e.text.replace(/^\S+ wants to /, "")}
                 {e.detail ? <span className="mono block break-all text-text-secondary">{e.detail}</span> : null}
               </li>
             ) : e.kind === "tool" ? (
@@ -1103,16 +1110,80 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
   return rows;
 }
 
+/** Models past this many get a search box at the top of the model menu. */
+const MODEL_SEARCH_AT = 12;
+
+/** A model's short name for the chip: the last part of its provider path ("openrouter/anthropic/claude-haiku-4.5" -> "claude-haiku-4.5"). */
+const shortModel = (value: string): string => value.slice(value.lastIndexOf("/") + 1);
+
+/** The model menu's choices. Past MODEL_SEARCH_AT models, a search box leads: it filters by name or value. ArrowDown or Tab moves into the list; Enter picks the first match. */
+function ModelChoices({ models, value, onPick }: { models: ModelInfo[]; value: string; onPick: (v: string) => void }) {
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const search = models.length > MODEL_SEARCH_AT;
+  const q = query.trim().toLowerCase();
+  const shown = search && q ? models.filter((m) => `${m.displayName} ${m.value}`.toLowerCase().includes(q)) : models;
+  // The menu takes focus when it opens; the search box takes it a frame later.
+  useEffect(() => {
+    if (!search) return;
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [search]);
+  // The first item of this menu, for the keys that move into the list.
+  const firstItem = (el: HTMLElement) => el.closest<HTMLElement>('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemradio"]');
+  return (
+    <>
+      {search ? (
+        <input
+          ref={searchRef}
+          type="search"
+          aria-label="Search models"
+          placeholder="Search models"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // The menu's own keys (typeahead, arrows, Tab) would take these: the search box keeps them.
+            e.stopPropagation();
+            if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+              e.preventDefault();
+              firstItem(e.currentTarget)?.focus();
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              firstItem(e.currentTarget)?.click();
+            }
+          }}
+          className="field-input mx-1 mb-1 block w-[calc(100%-0.5rem)] border-0 bg-surface-base"
+        />
+      ) : null}
+      <div className="max-h-80 overflow-y-auto">
+        <MenuRadioGroup value={value} onValueChange={onPick}>
+          {shown.map((m) => (
+            <MenuRadioItem key={m.value} value={m.value}>
+              <span className="block">{m.displayName}</span>
+              {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+      </div>
+      {search && shown.length === 0 ? <p className="px-2.5 py-1.5 text-small text-text-muted">No model matches "{query}".</p> : null}
+    </>
+  );
+}
+
 export default function ChatView({ workspaceId, onPreview, previewing = false, previewOpen = false, onTurnEnd, compact = false, terminalProject = false }: Props) {
   const refresh = useApp((s) => s.refresh);
   const workspaces = useApp((s) => s.workspaces);
   const can = useCan().mutate;
+  // The agent this chat talks to. Claude's own features (Undo, background tasks, usage, mode, effort) show only for Claude.
+  const agent = findWorkspace(workspaces, workspaceId)?.agent ?? "claude";
+  const who = agentName(agent);
+  const isClaude = agent === "claude";
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
   // When the current turn started (ms), whoever started it; background tasks still running; the model and mode the CLI reports.
   const [busySince, setBusySince] = useState<number | null>(null);
   const [tasks, setTasks] = useState<BgTask[]>([]);
-  const background = tasks.length;
+  const background = isClaude ? tasks.length : 0;
   const [tasksOpen, setTasksOpen] = useState(false);
   // Claude's checklist (its TodoWrite list), and the helper agents it has running, by label.
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -1599,9 +1670,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const stop = async () => {
     try {
       await api.chatControl(workspaceId, "interrupt", null);
-      announce("Claude stopped");
+      announce(`${who} stopped`);
     } catch {
-      announce("Claude could not stop");
+      announce(`${who} could not stop`);
     } finally {
       repoll();
     }
@@ -1734,7 +1805,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         const others = files.filter((name) => pictureType(name) === null);
         // Undo only for the newest message, and only once it has an id (a terminal's imported history has none).
         const uuid = e.uuid;
-        const undoable = uuid !== undefined && e.n === lastUserAllN && !busy && waiting === null && can;
+        const undoable = isClaude && uuid !== undefined && e.n === lastUserAllN && !busy && waiting === null && can;
         return (
           <div className="flex flex-col items-end gap-1" data-turn-start={e.n === lastUserN ? "" : undefined}>
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
@@ -1783,10 +1854,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           const repeatable = e.n === latestAskN && !events.some((x) => x.kind === "user" && x.n > e.n) && !busy && waiting === null && can;
           return (
             <div className="flex flex-col items-start gap-3">
-              <p className="text-small text-text-muted">Kohlab restarted before you answered, so Claude stopped here.</p>
+              <p className="text-small text-text-muted">{`Kohlab restarted before you answered, so ${who} stopped here.`}</p>
               {repeatable ? (
                 <Button variant="secondary" disabled={sending} onClick={() => void sendText("Please carry on with what you were doing.")}>
-                  Ask Claude again
+                  {`Ask ${who} again`}
                 </Button>
               ) : null}
             </div>
@@ -1795,7 +1866,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         if (e.form === "question") return <QuestionCard e={e} can={can} busy={answering !== null} onAnswer={(allow, extra) => void answer(e.requestId, allow, extra)} />;
         if (e.form === "plan") return <PlanCard e={e} can={can} busy={answering !== null} onAnswer={(allow, extra) => void answer(e.requestId, allow, extra)} />;
         return (
-          <section aria-label="Claude is asking" className="rounded-card bg-surface-raised px-5 py-[18px]">
+          <section aria-label={`${who} is asking`} className="rounded-card bg-surface-raised px-5 py-[18px]">
             <p className="text-base font-semibold text-text-primary">{e.text}</p>
             {e.why ? <p className="mt-1 text-small leading-5 text-text-muted">{e.why}</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1840,25 +1911,26 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The snapshot names the model in full (claude-haiku-5-5); the menu lists it by alias (haiku). Both match by the display name.
   // Until the snapshot arrives, the project's stored model shows and the mode reads "…".
   const modelInfo = model === null ? undefined : models.find((m) => m.value === model || m.displayName === modelName(model));
-  const levels = modelInfo?.supportedEffortLevels ?? [];
+  const levels = isClaude ? (modelInfo?.supportedEffortLevels ?? []) : [];
   const storedModel = modelOf(ws ?? undefined);
-  const modelText = modelInfo?.displayName ?? (model ? modelName(model) : storedModel === "default" ? "Default" : MODEL_LABEL[storedModel]);
+  const modelText = !isClaude ? (model ? shortModel(model) : "Default") : (modelInfo?.displayName ?? (model ? modelName(model) : storedModel === "default" ? "Default" : MODEL_LABEL[storedModel]));
   const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Default";
   const modeText = mode === null ? "Mode" : (MODES[mode]?.label ?? mode);
 
   const placeholder =
     waiting !== null
-      ? "Claude is waiting for your answer above"
+      ? `${who} is waiting for your answer above`
       : busy
-        ? "Claude is working…"
+        ? `${who} is working…`
         : isPhone()
-          ? "Message Claude"
-          : commandsEnabled ? "Message Claude — / for commands, @ for files" : "Message Claude — @ for files";
+          ? `Message ${who}`
+          : commandsEnabled ? `Message ${who} — / for commands, @ for files` : `Message ${who} — @ for files`;
   // Stop is the round button only while busy with nothing typed; with text, Send queues it and a quiet Stop sits beside it.
   const hasDraft = draft.trim() !== "" || attachments.length > 0;
 
   return (
     <WorkspaceCtx.Provider value={workspaceId}>
+    <AgentCtx.Provider value={who}>
       <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
@@ -1866,7 +1938,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               <div
                 role="log"
                 aria-live="polite"
-                aria-label="Conversation with Claude"
+                aria-label={`Conversation with ${who}`}
                 className={cn(
                   "flex w-full flex-col gap-6 px-4 pt-6 pb-8 max-md:gap-5 max-md:pt-4 max-md:pb-4",
                   compact ? "pt-4" : "mx-auto max-w-[720px] shell:px-6",
@@ -1874,8 +1946,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               >
                 {events.length === 0 && !busy ? (
                   <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
-                    <h2 className="text-xl font-semibold text-text-primary">What should Claude build?</h2>
-                    <p className="text-base text-text-muted">Describe it in your own words. Claude will ask before changing anything important.</p>
+                    <h2 className="text-xl font-semibold text-text-primary">{`What should ${who} build?`}</h2>
+                    <p className="text-base text-text-muted">{`Describe it in your own words. ${who} will ask before changing anything important.`}</p>
                   </div>
                 ) : null}
                 {turns.map((turn, ti) => {
@@ -2038,7 +2110,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 ) : null}
   
                 <Composer
-                  ariaLabel="Message Claude"
+                  ariaLabel={`Message ${who}`}
                   textareaRef={taRef}
                   value={draft}
                   onChange={(v) => {
@@ -2129,18 +2201,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                             label={modelText}
                             menu
                             disabled={models.length === 0}
-                            title={models.length === 0 ? "Models load when Claude starts" : undefined}
+                            title={models.length === 0 ? `Models load when ${who} starts` : !isClaude && model ? model : undefined}
                           />
                         }
                       >
-                        <MenuRadioGroup value={modelInfo?.value ?? ""} onValueChange={(v) => void pick("model", v, model, setModel)}>
-                          {models.map((m) => (
-                            <MenuRadioItem key={m.value} value={m.value}>
-                              <span className="block">{m.displayName}</span>
-                              {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
-                            </MenuRadioItem>
-                          ))}
-                        </MenuRadioGroup>
+                        <ModelChoices models={models} value={modelInfo?.value ?? ""} onPick={(v) => void pick("model", v, model, setModel)} />
                         {levels.length > 0 ? (
                           <>
                             <MenuSeparator />
@@ -2155,26 +2220,28 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                           </>
                         ) : null}
                       </Menu>
-                      <Menu
-                        side="top"
-                        align="start"
-                        label={`Mode: ${modeText}`}
-                        trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu />}
-                      >
-                        <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
-                          {MODE_CHOICES.map((value) => (
-                            <MenuRadioItem key={value} value={value}>
-                              <span className="block">{MODES[value].label}</span>
-                              <span className="block text-xs text-text-muted">{MODES[value].detail}</span>
-                            </MenuRadioItem>
-                          ))}
-                        </MenuRadioGroup>
-                      </Menu>
+                      {isClaude ? (
+                        <Menu
+                          side="top"
+                          align="start"
+                          label={`Mode: ${modeText}`}
+                          trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu />}
+                        >
+                          <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
+                            {MODE_CHOICES.map((value) => (
+                              <MenuRadioItem key={value} value={value}>
+                                <span className="block">{MODES[value].label}</span>
+                                <span className="block text-xs text-text-muted">{MODES[value].detail}</span>
+                              </MenuRadioItem>
+                            ))}
+                          </MenuRadioGroup>
+                        </Menu>
+                      ) : null}
                     </>
                   }
                   trailing={
                     <>
-                      {usage?.context && usage.context.percent >= 50 ? (
+                      {isClaude && usage?.context && usage.context.percent >= 50 ? (
                         <ComposerChip
                           label={usage.context.percent >= 85 ? "Chat almost full" : `Chat ${usage.context.percent}% full`}
                           popoverTarget="context-popover"
@@ -2186,13 +2253,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                           icon={<Stop size={14} aria-hidden="true" />}
                           label="Stop"
                           hideLabelOnPhone
-                          aria-label="Stop Claude"
+                          aria-label={`Stop ${who}`}
                           title="Stop"
                           onClick={() => void stop()}
                         />
                       ) : null}
                       {working && !hasDraft ? (
-                        <Button variant="secondary" iconOnly aria-label="Stop Claude" title="Stop Claude" onClick={() => void stop()}>
+                        <Button variant="secondary" iconOnly aria-label={`Stop ${who}`} title={`Stop ${who}`} onClick={() => void stop()}>
                           <Stop size={16} aria-hidden="true" />
                         </Button>
                       ) : (
@@ -2200,7 +2267,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                           variant="primary"
                           iconOnly
                           aria-label="Send"
-                          title={busy ? "Send (queued until Claude is ready)" : "Send"}
+                          title={busy ? `Send (queued until ${who} is ready)` : "Send"}
                           disabled={waiting !== null || sending || uploading || !hasDraft}
                           onClick={() => void send()}
                         >
@@ -2233,7 +2300,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
             <p className="mt-1 text-sm leading-5 text-text-muted">
               Long chats get summarised automatically. Start a fresh project chat for a new task.
             </p>
-            {usage ? (
+            {isClaude && usage ? (
               <div className="mt-3">
                 <UsagePanel usage={usage} />
               </div>
@@ -2249,7 +2316,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           title="Undo these changes?"
           description={
             rewindPlan
-              ? `Claude changed ${rewindPlan.files.length} ${rewindPlan.files.length === 1 ? "file" : "files"} since that message. They go back to how they were before it.`
+              ? `${who} changed ${rewindPlan.files.length} ${rewindPlan.files.length === 1 ? "file" : "files"} since that message. They go back to how they were before it.`
               : ""
           }
           details={
@@ -2277,13 +2344,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
             if (!v) setConfirmUndo(false);
           }}
           title="Undo the changes?"
-          description="Everything Claude changed since you last pressed Keep will be removed. This can't be reversed."
+          description={`Everything ${who} changed since you last pressed Keep will be removed. This can't be reversed.`}
           confirmLabel="Undo"
           tone="danger"
           busy={undoing}
           onConfirm={() => void undo()}
         />
       </div>
+    </AgentCtx.Provider>
     </WorkspaceCtx.Provider>
   );
 }

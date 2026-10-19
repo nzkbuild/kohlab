@@ -28,6 +28,8 @@ export interface Workspace {
   waiting?: boolean;
   /** Claude model for this project. Undefined = the account default. */
   model?: "opus" | "sonnet" | "haiku";
+  /** Model an ACP agent (hermes, omp) runs its chat on: the agent's own model value. */
+  agentModel?: string;
 }
 
 /** One multiple-choice question Claude asks (AskUserQuestion). */

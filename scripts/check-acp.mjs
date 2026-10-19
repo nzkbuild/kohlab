@@ -7,7 +7,7 @@
  *
  * Run:  bun scripts/check-acp.mjs
  */
-import { acpDetail, acpEffects, isAcpAgent, permissionText, pickOption, planTodos } from "../acp.ts";
+import { acpDetail, acpEffects, acpModels, isAcpAgent, permissionText, pickOption, planTodos } from "../acp.ts";
 
 let failures = 0;
 
@@ -78,6 +78,50 @@ check("allow with no options is cancelled", pickOption([], true), null);
 // the question text
 check("permission text names the agent and the action", permissionText("hermes", "terminal: echo hi"), "Hermes wants to do this: terminal: echo hi");
 check("permission text without a title", permissionText("omp", "  "), "Omp wants to do something");
+
+// the models: session/new replies, as hermes and omp sent them in the spike (trimmed)
+const hermesNew = {
+  sessionId: "554516c0-d20b-485b-9405-c9828519eca8",
+  models: {
+    availableModels: [
+      { description: "Provider: Anthropic", modelId: "anthropic:claude-fable-5.1", name: "Anthropic \u00b7 claude-fable-5.1" },
+      { description: "Provider: Anthropic", modelId: "anthropic:claude-opus-5", name: "Anthropic \u00b7 claude-opus-5" },
+    ],
+    currentModelId: "custom:jbt/openai/gpt-5.6-luna",
+  },
+};
+const hermesModels = [
+  { value: "anthropic:claude-fable-5.1", displayName: "Anthropic \u00b7 claude-fable-5.1", description: "Provider: Anthropic", supportedEffortLevels: [] },
+  { value: "anthropic:claude-opus-5", displayName: "Anthropic \u00b7 claude-opus-5", description: "Provider: Anthropic", supportedEffortLevels: [] },
+];
+check("hermes models come from availableModels", acpModels(hermesNew).models, hermesModels);
+check("hermes current model is currentModelId", acpModels(hermesNew).current, "custom:jbt/openai/gpt-5.6-luna");
+check("hermes changes its model with set_model", acpModels(hermesNew).how, "model");
+const ompNew = {
+  sessionId: "01a152dd-2cf0-77b2-a485-7e23f86af26b",
+  configOptions: [
+    { id: "mode", name: "Mode", category: "mode", type: "select", currentValue: "default", options: [{ value: "default", name: "Default", description: "Standard ACP headless mode" }, { value: "plan", name: "Plan", description: "Read-only planning mode" }] },
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: "openrouter/anthropic/claude-haiku-4.5",
+      options: [
+        { value: "commandcode/claude-fable-5", name: "Claude Fable 5", description: "commandcode/claude-fable-5" },
+        { value: "openrouter/anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", description: "openrouter/anthropic/claude-haiku-4.5" },
+      ],
+    },
+  ],
+};
+check("omp models come from the model config option", acpModels(ompNew).models, [
+  { value: "commandcode/claude-fable-5", displayName: "Claude Fable 5", description: "commandcode/claude-fable-5", supportedEffortLevels: [] },
+  { value: "openrouter/anthropic/claude-haiku-4.5", displayName: "Claude Haiku 4.5", description: "openrouter/anthropic/claude-haiku-4.5", supportedEffortLevels: [] },
+]);
+check("omp current model is the option's currentValue", acpModels(ompNew).current, "openrouter/anthropic/claude-haiku-4.5");
+check("omp changes its model with set_config_option on the model option", [acpModels(ompNew).how, acpModels(ompNew).configId], ["config", "model"]);
+check("a reply with no model list gives none", acpModels({ sessionId: "x", configOptions: [{ id: "mode", options: [] }] }), { models: [], current: null, how: null, configId: "" });
+check("a model entry without a value is skipped", acpModels({ models: { availableModels: [{ name: "no id" }, { modelId: "m1" }] } }).models.map((m) => m.value), ["m1"]);
 
 if (failures) {
   console.log(`\n${failures} failing`);

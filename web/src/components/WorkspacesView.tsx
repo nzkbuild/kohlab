@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUp, GithubLogo, X } from "@phosphor-icons/react";
+import { ArrowUp, GithubLogo, Robot, X } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { projectTitle } from "../lib/format";
+import { agentName } from "../lib/agentName";
 import { workspaceStatus } from "../lib/status";
-import { Button, Dialog, Field, Panel } from "./ui";
+import { Button, ComposerChip, Dialog, Field, Menu, MenuRadioGroup, MenuRadioItem, Panel } from "./ui";
 import { Composer } from "./Composer";
 import { projectNameFromIdea } from "./homeName";
 import { isPhone } from "../lib/viewport";
@@ -25,6 +26,39 @@ function plainError(e: unknown): string {
 
 /* ------------------------------------------------------------ create form -- */
 
+/** The ACP agents a new chat project can use, besides Claude. Each is offered only when the server reports it installed. */
+const ACP_CHOICES = ["hermes", "omp"];
+
+/** The AI a new chat project talks through: Claude, or an installed ACP agent. Default Claude. */
+function useNewAgent() {
+  const [agent, setAgent] = useState("claude");
+  const [installed, setInstalled] = useState<string[]>([]);
+  useEffect(() => {
+    api.agentsStatus().then((s) => setInstalled(ACP_CHOICES.filter((n) => s[n] === true)), () => {});
+  }, []);
+  return { agent, setAgent, options: ["claude", ...installed] };
+}
+
+/** The AI choice for a new project: a composer chip. On a phone it is the icon alone, so the composer does not crowd. */
+function AgentChip({ agent, options, onChange, disabled = false }: { agent: string; options: string[]; onChange: (agent: string) => void; disabled?: boolean }) {
+  return (
+    <Menu
+      side="top"
+      align="start"
+      label={`AI: ${agentName(agent)}`}
+      trigger={<ComposerChip className="max-w-48 shrink-0" icon={<Robot size={14} aria-hidden="true" />} label={agentName(agent)} hideLabelOnPhone menu disabled={disabled} />}
+    >
+      <MenuRadioGroup value={agent} onValueChange={onChange}>
+        {options.map((o) => (
+          <MenuRadioItem key={o} value={o}>
+            {agentName(o)}
+          </MenuRadioItem>
+        ))}
+      </MenuRadioGroup>
+    </Menu>
+  );
+}
+
 /**
  * The one way to make a project by hand. A chat project starts empty: the first
  * message is typed in the chat, not here. Copying from GitHub is the rarer path,
@@ -43,6 +77,7 @@ function NewProjectForm({ onCancel }: { onCancel: () => void }) {
   const [ghNote, setGhNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const newAgent = useNewAgent();
 
   // The GitHub list loads only when the person opens "More options".
   useEffect(() => {
@@ -72,8 +107,8 @@ function NewProjectForm({ onCancel }: { onCancel: () => void }) {
     setError(null);
     try {
       const created = cloning
-        ? await api.clone({ url: gitUrl.trim(), task: "", agent: "claude", chat: true })
-        : await api.create({ task: "", agent: "claude", newProject: name.trim(), chat: true });
+        ? await api.clone({ url: gitUrl.trim(), task: "", agent: newAgent.agent, chat: true })
+        : await api.create({ task: "", agent: newAgent.agent, newProject: name.trim(), chat: true });
       await refresh();
       announce("Project created");
       setNewOpen(false);
@@ -97,6 +132,13 @@ function NewProjectForm({ onCancel }: { onCancel: () => void }) {
           autoFocus
         />
       </Field>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="field-label">AI</span>
+        <div>
+          <AgentChip agent={newAgent.agent} options={newAgent.options} onChange={newAgent.setAgent} disabled={busy} />
+        </div>
+      </div>
 
       <details
         className="launch-limits"
@@ -220,6 +262,7 @@ export function HomeScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const newAgent = useNewAgent();
 
   // Claude missing or signed out: one calm notice above the message box. A failed check shows nothing.
   const [claudeNeedsSetup, setClaudeNeedsSetup] = useState(false);
@@ -256,7 +299,7 @@ export function HomeScreen() {
         try {
           created = await api.create({
             task: "",
-            agent: "claude",
+            agent: newAgent.agent,
             newProject: n === 1 ? base : `${base}-${n}`,
             chat: true,
           });
@@ -328,6 +371,7 @@ export function HomeScreen() {
                 value={idea}
                 onChange={(v) => setIdea(v)}
                 readOnly={busy}
+                leading={<AgentChip agent={newAgent.agent} options={newAgent.options} onChange={newAgent.setAgent} disabled={busy} />}
                 onKeyDown={onComposerKeyDown}
                 // The keyboard covers the lower half of a phone: bring the composer up into view.
                 onFocus={(e) => {

@@ -4,11 +4,11 @@
  * an interrupt here instead of to the claude process.
  *
  * ponytail: an ACP agent cannot take a second message mid-turn, so one waits for the person
- * to send it again. Settings (model, mode, effort), Undo and file mentions are not offered yet.
+ * to send it again. Mode, effort, Undo and file mentions are not offered yet.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { BgTask, Body, Todo } from "./chat";
+import type { BgTask, Body, Caps, Todo } from "./chat";
 import { resultText } from "./chat";
 import { chatBusy, chatWaiting } from "./lib";
 
@@ -24,6 +24,25 @@ export const ACP_AGENTS: Record<string, string[]> = {
 const ACP_NAMES: Record<string, string> = { hermes: "Hermes", omp: "Omp", gemini: "Gemini", opencode: "OpenCode" };
 
 export const isAcpAgent = (agent: string): boolean => Object.prototype.hasOwnProperty.call(ACP_AGENTS, agent);
+
+/** The models an ACP agent offers, from its session/new or session/load reply. hermes lists them under models (availableModels, currentModelId) and takes a change with session/set_model; omp lists the "model" config option and takes one with session/set_config_option. Pure. */
+export function acpModels(res: any): { models: Caps["models"]; current: string | null; how: "model" | "config" | null; configId: string } {
+  const none = { models: [], current: null, how: null, configId: "" };
+  if (Array.isArray(res?.models?.availableModels)) {
+    const models = res.models.availableModels
+      .filter((m: any) => typeof m?.modelId === "string")
+      .map((m: any) => ({ value: m.modelId, displayName: String(m.name ?? m.modelId), description: String(m.description ?? ""), supportedEffortLevels: [] }));
+    const current = typeof res.models.currentModelId === "string" ? res.models.currentModelId : null;
+    return { models, current, how: "model", configId: "" };
+  }
+  const opt = Array.isArray(res?.configOptions) ? res.configOptions.find((o: any) => o?.id === "model") : undefined;
+  if (!opt || !Array.isArray(opt.options)) return none;
+  const models = opt.options
+    .filter((o: any) => typeof o?.value === "string")
+    .map((o: any) => ({ value: o.value, displayName: String(o.name ?? o.value), description: String(o.description ?? ""), supportedEffortLevels: [] }));
+  const current = typeof opt.currentValue === "string" ? opt.currentValue : null;
+  return { models, current, how: "config", configId: String(opt.id) };
+}
 
 /** What one session/update line does to the chat: text for the streamed draft, a flush of that draft, an event, or the checklist. */
 export type AcpEffect = { kind: "text"; text: string } | { kind: "flush" } | { kind: "event"; body: Body } | { kind: "todos"; todos: Todo[] };
@@ -106,6 +125,8 @@ export interface AcpHost {
   persistSession(sid: string): void;
   finish(): void;
   pingNeedsYou(text: string): void;
+  /** the models the agent offers, and the one it is on: the chat's menu, saved for the next start */
+  models(list: Caps["models"], current: string | null): void;
   /** the client has stopped: the host drops it if it is still the chat's current one */
   exited(client: AcpClient): void;
 }
@@ -119,6 +140,8 @@ export interface AcpStart {
   env: Record<string, string>;
   /** a conversation to load, when the agent can load one */
   resumeSession?: string;
+  /** the model the person chose for this chat; applied when the agent is on another */
+  agentModel?: string;
 }
 
 interface Rpc {
@@ -147,8 +170,13 @@ export class AcpClient {
   effort?: string = undefined;
   closed = false;
   stopping = false;
+  /** the handshake and session are done: a model change can be sent */
+  started = false;
   stderr = "";
   sid?: string;
+  /** how this agent takes a model change, and the config option's id when it is one */
+  private modelHow: "model" | "config" | null = null;
+  private configId = "";
   private child!: ChildProcess;
   private seq = 0;
   private rpc = new Map<number, Rpc>();
@@ -174,10 +202,11 @@ export class AcpClient {
     this.child.on("exit", () => this.onExit());
     const init = await this.request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }, 60_000);
     const cwd = opts.cwd;
+    let opened: any;
     if (opts.resumeSession && init?.agentCapabilities?.loadSession === true) {
       this.replaying = true;
       try {
-        await this.request("session/load", { sessionId: opts.resumeSession, cwd, mcpServers: [] }, 60_000);
+        opened = await this.request("session/load", { sessionId: opts.resumeSession, cwd, mcpServers: [] }, 60_000);
         this.sid = opts.resumeSession;
       } catch (e) {
         // the old conversation is gone: a new one starts, quietly
@@ -187,10 +216,41 @@ export class AcpClient {
       }
     }
     if (!this.sid) {
-      const made = await this.request("session/new", { cwd, mcpServers: [] }, 60_000);
-      this.sid = String(made.sessionId);
+      opened = await this.request("session/new", { cwd, mcpServers: [] }, 60_000);
+      this.sid = String(opened.sessionId);
     }
     this.host.persistSession(this.sid);
+    this.readModels(opened);
+    await this.applyModel(opts.agentModel);
+    this.started = true;
+  }
+
+  /** Switches the model: session/set_model, or the model config option, whichever the agent offered. */
+  async setModel(value: string): Promise<void> {
+    if (this.modelHow === "model") await this.request("session/set_model", { sessionId: this.sid, modelId: value }, 60_000);
+    else if (this.modelHow === "config") await this.request("session/set_config_option", { sessionId: this.sid, configId: this.configId, value }, 60_000);
+    else throw new Error("the agent offers no model choice");
+    this.model = value;
+  }
+
+  /** Takes the models from a session reply, when it lists any. */
+  private readModels(res: unknown): void {
+    const got = acpModels(res);
+    if (got.models.length === 0) return;
+    this.modelHow = got.how;
+    this.configId = got.configId;
+    this.model = got.current;
+    this.host.models(got.models, got.current);
+  }
+
+  /** Applies the model the person chose, when the agent is on another. A refusal is logged and the chat goes on. */
+  async applyModel(want: string | undefined): Promise<void> {
+    if (!want || want === this.model || this.modelHow === null) return;
+    try {
+      await this.setModel(want);
+    } catch (e) {
+      console.warn("[acp] could not apply the chosen model:", (e as Error).message);
+    }
   }
 
   /** Sends one message as a prompt turn. The turn's end is handled here, when the agent answers. */

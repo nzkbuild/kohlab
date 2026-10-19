@@ -1749,7 +1749,7 @@ input[type="radio"] {
 
 /* --- menu + tooltip (Radix) --------------------------------------------- */
 .menu {
-  z-index: var(--z-overlay);
+  z-index: var(--z-dialog); /* above an open dialog: the New project dialog has a menu */
   min-width: 11rem;
   border-radius: var(--radius-card);
   background: var(--surface-overlay);

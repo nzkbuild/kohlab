@@ -791,6 +791,28 @@ function loadCaps(id: string): void {
   capsSaved.set(id, JSON.stringify(saved));
 }
 
+/** What is kept per ACP agent, across projects: the models it offered when last seen, and the one the person chose last. A caps file in the agent's name. */
+const agentInfos = new Map<string, { models: Caps["models"]; lastModel: string | null }>();
+const agentFile = (agent: string) => join(chatsDir(), `agent-${agent}.models.json`);
+function agentInfo(agent: string) {
+  let a = agentInfos.get(agent);
+  if (!a) {
+    const saved = readCapsFile(agentFile(agent));
+    agentInfos.set(agent, (a = { models: saved?.models ?? [], lastModel: saved?.model ?? null }));
+  }
+  return a;
+}
+function saveAgentInfo(agent: string): void {
+  const a = agentInfo(agent);
+  try {
+    writeCapsFile(agentFile(agent), { commands: [], models: a.models, model: a.lastModel, mode: null, savedAt: Date.now() });
+  } catch (e) {
+    console.warn(`[chat] agent models save: ${(e as Error).message}`);
+  }
+}
+/** The model an ACP project runs on: its own choice, else the one last chosen for that agent, else the agent's default (undefined). */
+const wantedModel = (ws: Workspace): string | undefined => ws.agentModel ?? (isAcp(ws) ? (agentInfo(ws.agent).lastModel ?? undefined) : undefined);
+
 /** Saves the menus and settings when they differ from the file. Never throws: a failed save must not stop the chat. */
 function persistCaps(id: string): void {
   const c = caps.get(id);
@@ -1099,6 +1121,11 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
   const live = procs.get(id);
   // the first read of usage comes with the first poll that finds none (a restart, or a chat not yet used)
   if (live && !usages.has(id)) void readUsage(id, live, false);
+  // an ACP project with no model list yet: its agent starts quietly, once, so the list is there before the first message
+  if (isAcp(ws) && !acps.has(id) && !caps.get(id)?.models.length && !agentInfo(ws.agent).models.length && !warmed.has(id)) {
+    warmed.add(id);
+    startAcp(ws, id).catch((e) => console.warn("[chat] warm-up:", (e as Error).message));
+  }
   const cur = live ?? acps.get(id); // an ACP agent's chat keeps the same fields
   return {
     events,
@@ -1112,13 +1139,13 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     retry: cur?.retry ?? null,
     usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
     // one rule: a live process, else the project's saved choice, else what was last seen
-    model: cur?.model ?? ws.model ?? lastSeen.get(id)?.model ?? null,
+    model: cur?.model ?? wantedModel(ws) ?? ws.model ?? lastSeen.get(id)?.model ?? null,
     mode: cur?.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined) ?? lastSeen.get(id)?.mode ?? null,
     effort: cur?.effort ?? ws.effort ?? null,
     // clean chats run with --disable-slash-commands: they get no "/" menu
     commandsEnabled: term,
     commands: term ? (caps.get(id)?.commands ?? []).slice(0, 200) : [],
-    models: caps.get(id)?.models ?? [],
+    models: caps.get(id)?.models.length ? caps.get(id)!.models : isAcp(ws) ? agentInfo(ws.agent).models : [],
     waiting: cur?.asks.keys().next().value ?? null,
     draft: cur?.draft ?? "",
     terminalOpen: term && (await isAlive(ws)),
@@ -1138,7 +1165,7 @@ function isAcp(ws: Workspace): boolean {
 }
 
 /** What an ACP agent reports back to the chat: the same events, state and saves as a Claude process. */
-function acpHost(id: string): AcpHost {
+function acpHost(id: string, agent: string): AcpHost {
   return {
     emit: (body) => {
       emit(id, body);
@@ -1148,6 +1175,12 @@ function acpHost(id: string): AcpHost {
       finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
     },
     pingNeedsYou: (text) => pingNeedsYou(id, text),
+    models: (list) => {
+      capsOf(id).models = list;
+      persistCaps(id);
+      agentInfo(agent).models = list;
+      saveAgentInfo(agent);
+    },
     exited: (acp) => {
       if (acps.get(id) === acp) acps.delete(id);
     },
@@ -1155,15 +1188,27 @@ function acpHost(id: string): AcpHost {
 }
 
 /** Starts the chat's ACP agent and opens its session (the chat's conversation, when the agent can load it). */
-async function startAcp(ws: Workspace, id: string): Promise<AcpClient> {
+const acpStarting = new Map<string, Promise<AcpClient>>();
+/** Projects whose agent was started for its model list: once each, so a failing agent is not respawned on every poll. ponytail: no idle stop, like Claude chats; the process lives until the project is reset or the server exits. */
+const warmed = new Set<string>();
+function startAcp(ws: Workspace, id: string): Promise<AcpClient> {
+  const pending = acpStarting.get(id);
+  if (pending) return pending;
+  const p = startAcpNow(ws, id).finally(() => acpStarting.delete(id));
+  acpStarting.set(id, p);
+  return p;
+}
+async function startAcpNow(ws: Workspace, id: string): Promise<AcpClient> {
   const [cmd, ...args] = ACP_AGENTS[ws.agent];
   const bin = Bun.which(cmd);
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
   const who = identityOf(ws);
-  const acp = new AcpClient(id, ws.agent, acpHost(id));
+  const acp = new AcpClient(id, ws.agent, acpHost(id, ws.agent));
   acps.set(id, acp);
   try {
-    await acp.start({ bin, args, cwd: worktreePath(ws), uid: who?.uid, gid: who?.gid, env: childEnv(who?.home || homedir()), resumeSession: ws.chatSession });
+    await acp.start({ bin, args, cwd: worktreePath(ws), uid: who?.uid, gid: who?.gid, env: childEnv(who?.home || homedir()), resumeSession: ws.chatSession, agentModel: wantedModel(ws) });
+    // a model chosen while the agent was starting
+    await acp.applyModel(wantedModel(await getWorkspace(id)));
   } catch (e) {
     acp.stop();
     if (acps.get(id) === acp) acps.delete(id);
@@ -1181,7 +1226,7 @@ async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
   try {
     await markStarted(id);
     const cur = acps.get(id);
-    const acp = cur && !cur.closed ? cur : await startAcp(ws, id);
+    const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
     acp.prompt(t);
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
@@ -1191,8 +1236,35 @@ async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
   }
 }
 
-/** Controls an ACP chat supports: only stopping the turn. The rest wait for ACP support. */
-function acpControl(id: string, action: unknown): { ok: true } {
+/** The model an ACP chat runs on. With a live agent it is switched there; either way it is saved on the project for the next start. */
+async function acpModel(id: string, value: unknown): Promise<void> {
+  loadCaps(id);
+  if (typeof value !== "string" || value.length === 0 || value.length > 200) throw new ChatError(400, "unknown model");
+  // The agent's list is known once it has started; before that, the choice is saved and the agent checks it at its start.
+  const ws = await getWorkspace(id);
+  const offered = capsOf(id).models.length ? capsOf(id).models : agentInfo(ws.agent).models;
+  if (offered.length > 0 && !offered.some((m) => m.value === value)) throw new ChatError(400, "unknown model");
+  const acp = acps.get(id);
+  if (acp && acp.started && !acp.closed) {
+    await acp.setModel(value).catch((e) => {
+      console.warn("[chat] could not switch the agent's model:", (e as Error).message);
+      throw new ChatError(409, "The agent could not switch to that model. Try again.");
+    });
+  }
+  await mutateState((s) => {
+    const w = s.workspaces.find((x) => x.id === id);
+    if (w) w.agentModel = value;
+  });
+  agentInfo(ws.agent).lastModel = value;
+  saveAgentInfo(ws.agent);
+}
+
+/** Controls an ACP chat supports: the model, and stopping the turn. The rest wait for ACP support. */
+async function acpControl(id: string, action: unknown, value: unknown): Promise<{ ok: true }> {
+  if (action === "model") {
+    await acpModel(id, value);
+    return { ok: true };
+  }
   if (action !== "interrupt") throw new ChatError(400, "Not available for this agent yet");
   const acp = acps.get(id);
   if (!acp || acp.closed) throw new ChatError(409, "The agent is not running");
@@ -1407,7 +1479,7 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
 /** The chat's menu actions: stop the turn, or change the model, permission mode or effort (saved even with no process running).
  *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo). */
 export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
-  if (isAcp(await getWorkspace(id))) return acpControl(id, action);
+  if (isAcp(await getWorkspace(id))) return acpControl(id, action, value);
   if (action === "files") return { ok: true, files: await fileMentions(id, value) };
   if (action === "stop_task") return stopTask(id, value);
   if (action === "rewind_preview" || action === "rewind") return rewindFiles(id, value, action === "rewind_preview");
