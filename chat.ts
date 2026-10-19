@@ -58,7 +58,10 @@ type Body =
   /** uuid: the id Claude keeps for this message, which Undo names. Not set on lines imported from a terminal's transcript. */
   | { kind: "user"; text: string; uuid?: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool"; text: string }
+  /** toolId: the tool's id, which its result refers to. detail: what it did (the command, the change), for the expandable line. */
+  | { kind: "tool"; text: string; toolId?: string; detail?: string }
+  /** result: what a tool gave back, trimmed by resultText. failed: the tool errored. */
+  | { kind: "result"; toolId: string; output: string; failed?: boolean }
   /** form: a question card ("question", with questions) or a plan card ("plan", with plan). Neither is set for a permission question. */
   | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string; form?: "question" | "plan"; questions?: AskQuestion[]; plan?: string }
   /** reply: what the person answered or asked for, when a question or plan card was answered with text. */
@@ -112,6 +115,55 @@ export function describeTool(name: string, input: Record<string, any>, cwd: stri
       if (name === "mcp__browser__agent_browser_open") return `Opened ${input.url ?? "a page"} in the browser`;
       return name.startsWith("mcp__browser__") ? "Used the browser" : `Used ${name}`;
   }
+}
+
+/** What a tool did, in full, for an expandable line: the command, the lines changed, the address or the search. Undefined when there is nothing to show. Pure. */
+export function toolDetail(name: string, input: Record<string, any>, cwd: string): string | undefined {
+  const cut = (s: string, cap: number) => (s.length > cap ? s.slice(0, cap - 2) + "\n…" : s);
+  const diff = (oldText: unknown, newText: unknown) => [
+    ...String(oldText ?? "").split("\n").map((l) => `- ${l}`),
+    ...String(newText ?? "").split("\n").map((l) => `+ ${l}`),
+  ];
+  switch (name) {
+    case "Bash":
+      return String(input.command ?? "").slice(0, 2000) || undefined;
+    case "Edit":
+      return cut(diff(input.old_string, input.new_string).join("\n"), 4000);
+    case "MultiEdit": {
+      const edits: any[] = Array.isArray(input.edits) ? input.edits : [];
+      return cut(edits.map((e) => diff(e?.old_string, e?.new_string).join("\n")).join("\n\n"), 4000) || undefined;
+    }
+    case "Write": {
+      const text = String(input.content ?? "");
+      return text ? cut(text.split("\n").slice(0, 40).map((l) => `+ ${l}`).join("\n"), 4000) : undefined;
+    }
+    case "WebFetch":
+      return String(input.url ?? "") || undefined;
+    case "WebSearch":
+      return String(input.query ?? "") || undefined;
+    case "Glob":
+    case "Grep": {
+      const pattern = String(input.pattern ?? "");
+      if (!pattern) return undefined;
+      return input.path ? `${pattern} in ${rel(input.path, cwd)}` : pattern;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** What a tool result says, for its expandable line: the text of its text blocks, ANSI colour codes removed, and only the last 60 lines and 4000 characters. Pure. */
+export function resultText(content: unknown): string {
+  let text = typeof content === "string" ? content : Array.isArray(content) ? content.flatMap((c: any) => (c?.type === "text" && typeof c.text === "string" ? [c.text] : [])).join("\n") : "";
+  text = text.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\n+$/, "");
+  const lines = text.split("\n");
+  let cut = lines.length > 60;
+  if (cut) text = lines.slice(-60).join("\n");
+  if (text.length > 4000) {
+    text = text.slice(-4000);
+    cut = true;
+  }
+  return cut ? `…\n${text}` : text;
 }
 
 /** The permission question for a browser tool, naming the site it acts on ("a website" when the page address is not known). */
@@ -262,11 +314,15 @@ interface Live {
   newTasks: Map<string, { subject: string; form?: string }>;
   /** helper agents still running, by tool_use id, with a label for each */
   helpers: Map<string, string>;
+  /** tool_use ids whose line was shown, so their result can follow (and is dropped once it has) */
+  shownTools: Set<string>;
   /** the CLI is retrying a failed request: which try, and how many tries in all */
   retry?: { attempt: number; max: number };
   /** the model and permission mode the CLI reports in its init line */
   model: string | null;
   mode: string | null;
+  /** the permission mode in force before plan mode, restored when an approved plan leaves plan mode */
+  beforePlan?: string;
   /** control requests waiting for the CLI's reply, by request id */
   pending: Map<string, Pending>;
   /** the init reply: the menus are known once it has come */
@@ -532,9 +588,13 @@ export function usageOf(context: any, plan: any): Usage {
   };
 }
 
+/** Bookkeeping tools whose calls are not shown as steps (the checklist already shows the tasks). */
+const HIDDEN_TOOLS = new Set(["TodoWrite", "ToolSearch", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskStop"]);
+
 /** Claude Code's transcript lines as chat events: what the person wrote and what Claude said and did. Pure. */
 export function transcriptEvents(lines: string[], cwd: string): Body[] {
   const out: Body[] = [];
+  const shown = new Set<string>(); // tool ids whose line this call emitted: their results follow in the same lines
   for (const line of lines) {
     let m: any;
     try {
@@ -547,6 +607,12 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
     if (m.type === "system" && m.subtype === "compact_boundary") out.push({ kind: "tool", text: noticeText(m) ?? "" });
     if (m.type === "user") {
       const content = m.message?.content;
+      for (const b of Array.isArray(content) ? content : []) {
+        if (b?.type !== "tool_result" || !shown.has(b.tool_use_id)) continue;
+        shown.delete(b.tool_use_id);
+        const output = resultText(b.content);
+        if (output !== "" || b.is_error) out.push({ kind: "result", toolId: b.tool_use_id, output, ...(b.is_error ? { failed: true } : {}) });
+      }
       let text = "";
       if (typeof content === "string") text = content;
       else if (Array.isArray(content)) text = content.map((b) => (b?.type === "text" && typeof b.text === "string" ? b.text : "")).join("\n");
@@ -563,8 +629,10 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
     } else if (m.type === "assistant") {
       for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
         if (b?.type === "text" && typeof b.text === "string" && b.text.trim()) out.push({ kind: "assistant", text: b.text.trim() });
-        else if (b?.type === "tool_use" && typeof b.name === "string" && b.name !== "TodoWrite") {
-          out.push({ kind: "tool", text: describeTool(b.name, b.input ?? {}, cwd) });
+        else if (b?.type === "tool_use" && typeof b.name === "string" && !HIDDEN_TOOLS.has(b.name)) {
+          const detail = toolDetail(b.name, b.input ?? {}, cwd);
+          shown.add(b.id);
+          out.push({ kind: "tool", text: describeTool(b.name, b.input ?? {}, cwd), toolId: b.id, ...(detail !== undefined ? { detail } : {}) });
         }
       }
     }
@@ -814,9 +882,11 @@ function onLine(id: string, live: Live, line: string) {
       else if (b?.type === "tool_use" && b.name === "TaskCreate") {
         if (typeof b.input?.subject === "string") live.newTasks.set(b.id, { subject: b.input.subject, form: b.input.activeForm });
       } else if (b?.type === "tool_use" && b.name === "TaskUpdate") live.todos = applyTaskEvent(live.todos, { update: b.input });
-      else if (b?.type === "tool_use") {
+      else if (b?.type === "tool_use" && !HIDDEN_TOOLS.has(b.name)) {
         if (b.name === "Task" || b.name === "Agent") live.helpers.set(b.id, helperLabel(b.input));
-        emit(id, { kind: "tool", text: describeTool(b.name, b.input ?? {}, live.cwd) });
+        const detail = toolDetail(b.name, b.input ?? {}, live.cwd);
+        live.shownTools.add(b.id);
+        emit(id, { kind: "tool", text: describeTool(b.name, b.input ?? {}, live.cwd), toolId: b.id, ...(detail !== undefined ? { detail } : {}) });
       }
     }
     return;
@@ -825,6 +895,11 @@ function onLine(id: string, live: Live, line: string) {
   if (m.type === "user" && !m.parent_tool_use_id) {
     for (const b of m.message?.content ?? []) {
       if (b?.type !== "tool_result") continue;
+      if (live.shownTools.has(b.tool_use_id)) {
+        live.shownTools.delete(b.tool_use_id);
+        const output = resultText(b.content);
+        if (output !== "" || b.is_error) emit(id, { kind: "result", toolId: b.tool_use_id, output, ...(b.is_error ? { failed: true } : {}) });
+      }
       live.helpers.delete(b.tool_use_id);
       const made = live.newTasks.get(b.tool_use_id);
       if (!made) continue;
@@ -968,6 +1043,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     todos: [],
     newTasks: new Map(),
     helpers: new Map(),
+    shownTools: new Set(),
     model: null,
     mode: null,
     pending: new Map(),
@@ -1214,7 +1290,9 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
     case "mode": {
       if (typeof value !== "string" || !MODES.includes(value)) throw new ChatError(400, "unknown mode");
       if (live) {
+        const before = live.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined);
         await ask(live, { subtype: "set_permission_mode", mode: value });
+        if (value === "plan" && before !== "plan") live.beforePlan = before;
         live.mode = value;
       }
       // saved on the project, so it survives a restart and applies when Claude next starts
@@ -1332,6 +1410,12 @@ export async function answer(id: string, requestId: string, allow: boolean, extr
   const { response, reply } = answerResponse(tool, input, allow, extra);
   writeAnswer(live, requestId, response);
   emit(id, { kind: "answer", requestId, allow, ...(reply ? { reply } : {}) });
+  // an approved plan leaves plan mode for the mode it was entered from (default if unknown), through the mode menu's own path, without holding up the reply
+  if (tool === "ExitPlanMode" && allow) {
+    const back = live.beforePlan && live.beforePlan !== "plan" ? live.beforePlan : "default";
+    live.beforePlan = undefined;
+    setting(id, "mode", back).catch((e) => console.warn(`[chat] leave plan mode: ${(e as Error).message}`));
+  }
 }
 
 /** After a server restart: a chat whose newest question has nothing answered after it is still waiting, so its "needs you" dot comes back. */

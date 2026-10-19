@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, helperLabel, noticeText, readCapsFile, todosOf, usageOf, writeCapsFile } from "../chat.ts";
+import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, helperLabel, noticeText, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -31,6 +31,27 @@ check("WebSearch names the query", describeTool("WebSearch", { query: "cats" }, 
 check("unknown tool falls back", describeTool("Frobnicate", {}, cwd), "Used Frobnicate");
 check("browser open", describeTool("mcp__browser__agent_browser_open", { url: "https://example.com" }, cwd), "Opened https://example.com in the browser");
 check("browser other tool", describeTool("mcp__browser__agent_browser_click", {}, cwd), "Used the browser");
+
+// what the agent did, in full (the expandable line)
+check("toolDetail: Bash is the command", toolDetail("Bash", { command: "ls -la" }, cwd), "ls -la");
+check("toolDetail: Bash command is cut at 2000", toolDetail("Bash", { command: "x".repeat(3000) }, cwd).length, 2000);
+check("toolDetail: Edit lists the old lines then the new", toolDetail("Edit", { old_string: "a\nb", new_string: "c" }, cwd), "- a\n- b\n+ c");
+check("toolDetail: MultiEdit separates edits with a blank line", toolDetail("MultiEdit", { edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }] }, cwd), "- a\n+ b\n\n- c\n+ d");
+const longEdit = toolDetail("Edit", { old_string: "x".repeat(5000), new_string: "y" }, cwd);
+check("toolDetail: a long Edit is cut at 4000 and ends with the cut mark", [longEdit.length, longEdit.endsWith("\n…")], [4000, true]);
+const bigWrite = Array.from({ length: 50 }, (_, i) => `l${i + 1}`).join("\n");
+check("toolDetail: Write shows the first 40 lines as additions", toolDetail("Write", { file_path: "/x", content: bigWrite }, cwd), Array.from({ length: 40 }, (_, i) => `+ l${i + 1}`).join("\n"));
+check("toolDetail: Glob with a path names the folder", toolDetail("Glob", { pattern: "*.ts", path: `${cwd}/src` }, cwd), "*.ts in src");
+check("toolDetail: an unknown tool has no detail", toolDetail("Frobnicate", {}, cwd), undefined);
+
+// what a tool gave back
+check("resultText: a string is itself", resultText("hi"), "hi");
+check("resultText: text blocks are joined with a newline", resultText([{ type: "text", text: "a" }, { type: "image" }, { type: "text", text: "b" }]), "a\nb");
+check("resultText: no content is empty", resultText(undefined), "");
+check("resultText: colour codes are removed", resultText("\x1b[31mred\x1b[0m"), "red");
+const lines100 = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n");
+check("resultText: only the last 60 lines are kept, with the cut mark", resultText(lines100), "…\n" + Array.from({ length: 60 }, (_, i) => `line ${i + 41}`).join("\n"));
+check("resultText: exactly 60 lines are kept whole", resultText(Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join("\n")).startsWith("…"), false);
 
 // what the agent asks before doing it
 check("Bash ask: text", describeAsk("Bash", { command: "rm -rf x", description: "Clean up" }, cwd).text, "Claude wants to run a command");

@@ -52,6 +52,11 @@ check(
   transcriptEvents([assistant([{ type: "tool_use", name: "TodoWrite", input: { todos: [] } }])], cwd),
   [],
 );
+check(
+  "bookkeeping tools (ToolSearch, TaskList) are hidden",
+  transcriptEvents([assistant([{ type: "tool_use", id: "h1", name: "ToolSearch", input: {} }, { type: "tool_use", id: "h2", name: "TaskList", input: {} }])], cwd),
+  [],
+);
 check("malformed line is skipped", transcriptEvents(["{not json", user("after the bad line")], cwd), [{ kind: "user", text: "after the bad line" }]);
 check(
   "attachment and system lines are skipped",

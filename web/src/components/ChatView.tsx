@@ -19,6 +19,7 @@ import { Button, ComposerChip, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, M
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
 type ChatEvent = StoredChatEvent & { why?: string };
 type ToolEvent = Extract<ChatEvent, { kind: "tool" }>;
+type ToolResult = { output: string; failed?: boolean };
 type AskEvent = Extract<ChatEvent, { kind: "ask" }>;
 
 const MAX_FILES = 10;
@@ -507,10 +508,11 @@ function Prose({ text }: { text: string }) {
 }
 
 /** A run of tool actions: one muted line; the caret opens the list of each action. Collapsed while live too: the working line shows the current step. */
-function ToolRun({ lines }: { lines: ChatEvent[] }) {
+function ToolRun({ lines, results }: { lines: ChatEvent[]; results: Map<string, ToolResult> }) {
   const [open, setOpen] = useState(false);
   const tools = lines.filter((e): e is ToolEvent => e.kind === "tool");
-  const summary = summarizeTools(tools.map((e) => e.text));
+  const failed = tools.filter((e) => e.toolId !== undefined && results.get(e.toolId)?.failed).length;
+  const summary = summarizeTools(tools.map((e) => e.text)) + (failed ? `, ${failed} failed` : "");
   return (
     <div>
       <button
@@ -525,11 +527,63 @@ function ToolRun({ lines }: { lines: ChatEvent[] }) {
       {open ? (
         <ul className="mt-1 flex flex-col gap-1 pl-6 text-sm text-text-muted">
           {tools.map((e) => (
-            <li key={e.n}>{e.text}</li>
+            <ToolLine key={e.n} e={e} result={e.toolId !== undefined ? results.get(e.toolId) : undefined} />
           ))}
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/** One action in an expanded run: its line, and on a click what it did (the command or the change) and what it gave back. A failed one says so. */
+function ToolLine({ e, result }: { e: ToolEvent; result?: ToolResult }) {
+  const [open, setOpen] = useState(false);
+  if (!e.detail && !result?.output)
+    return (
+      <li className="flex items-center gap-1.5">
+        <span className="min-w-0 flex-1">{e.text}</span>
+        {result?.failed ? <span className="shrink-0 text-xs font-medium text-status-danger">Failed</span> : null}
+      </li>
+    );
+  // an edit or a new file: its "+ " and "- " lines are coloured as in the diff
+  const isChange = e.text.startsWith("Edited ") || e.text.startsWith("Created ");
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex min-h-11 w-full items-center gap-1.5 rounded-lg px-1 text-left hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
+      >
+        <CaretRight size={14} aria-hidden="true" className={cn("shrink-0 motion-safe:transition-transform", open && "rotate-90")} />
+        <span className="min-w-0 flex-1">{e.text}</span>
+        {result?.failed ? <span className="shrink-0 text-xs font-medium text-status-danger">Failed</span> : null}
+      </button>
+      {open ? (
+        <div className="mb-1 mt-1 rounded-card bg-surface-sunken">
+          {e.detail ? (
+            <pre tabIndex={0} className="mono overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 text-xs text-text-secondary">
+              {isChange
+                ? e.detail.split("\n").map((line, i) => (
+                    <Fragment key={i}>
+                      {i > 0 ? "\n" : null}
+                      <span className={line.startsWith("+ ") ? "text-status-running" : line.startsWith("- ") ? "text-status-danger" : undefined}>{line}</span>
+                    </Fragment>
+                  ))
+                : e.detail}
+            </pre>
+          ) : null}
+          {result?.output ? (
+            <>
+              <p className="px-3 pt-2 text-xs text-text-muted">Output</p>
+              <pre tabIndex={0} className="mono overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 text-xs text-text-secondary">
+                {result.output}
+              </pre>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -631,7 +685,7 @@ function QuestionCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; b
                 </div>
                 <input
                   type="text"
-                  className="field-input"
+                  className="field-input border-0 bg-surface-base focus:outline-2 focus:outline-offset-2 focus:outline-focus"
                   aria-label={`Other answer to: ${q.question}`}
                   placeholder="Other…"
                   value={typed[i] ?? ""}
@@ -685,7 +739,7 @@ function PlanCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; busy:
             <div className="flex flex-col items-start gap-3">
               <label className="flex w-full flex-col gap-1.5 text-small text-text-muted">
                 What should change?
-                <textarea className="field-textarea" rows={3} value={message} disabled={busy} onChange={(ev) => setMessage(ev.target.value)} />
+                <textarea className="field-textarea border-0 bg-surface-base focus:outline-2 focus:outline-offset-2 focus:outline-focus" rows={3} value={message} disabled={busy} onChange={(ev) => setMessage(ev.target.value)} />
               </label>
               <Button variant="primary" disabled={busy || !message.trim()} onClick={() => onAnswer(false, { message: message.trim() })}>
                 Send changes
@@ -769,7 +823,7 @@ function Details({ detail, why, className }: { detail?: string; why?: string; cl
 function groupRows(events: ChatEvent[]): ChatEvent[][] {
   const rows: ChatEvent[][] = [];
   for (const e of events) {
-    if (e.kind === "done" || e.kind === "answer") continue;
+    if (e.kind === "done" || e.kind === "answer" || e.kind === "result") continue;
     const last = rows[rows.length - 1];
     if (e.kind === "tool" && last?.[0].kind === "tool") last.push(e);
     else rows.push([e]);
@@ -967,6 +1021,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const replies = useMemo(() => {
     const m = new Map<string, string>();
     for (const e of events) if (e.kind === "answer" && e.reply) m.set(e.requestId, e.reply);
+    return m;
+  }, [events]);
+
+  // What each tool line gave back, by tool id: its output, and whether it failed.
+  const results = useMemo(() => {
+    const m = new Map<string, { output: string; failed?: boolean }>();
+    for (const e of events) if (e.kind === "result") m.set(e.toolId, { output: e.output, failed: e.failed });
     return m;
   }, [events]);
 
@@ -1545,7 +1606,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     {turn.map((row) => (
                       <Fragment key={row[0].n}>
                         {row[0].kind === "tool" ? (
-                          <ToolRun lines={row} />
+                          <ToolRun lines={row} results={results} />
                         ) : row.length > 1 ? (
                           <AnsweredGroup events={row} answers={answers} />
                         ) : (
