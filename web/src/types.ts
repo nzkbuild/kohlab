@@ -48,7 +48,7 @@ export interface AskQuestion {
 
 /** One entry in a chat workspace's conversation. `n` is the sequence number used for polling. */
 export type ChatEvent = { n: number; at: number } & (
-  | { kind: "user"; text: string; uuid?: string }
+  | { kind: "user"; text: string; uuid?: string; tree?: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string; toolId?: string; detail?: string }
   | { kind: "result"; toolId: string; output: string; failed?: boolean }
@@ -162,3 +162,9 @@ export const AGENT_CATALOG: AgentInfo[] = [
     setupHint: "Run `gemini` and follow the Google sign-in flow.",
   },
 ];
+
+/** One file a message changed: "What this changed". */
+export interface TurnFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+}

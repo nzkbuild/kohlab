@@ -59,6 +59,10 @@ permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk";
   agentSeen?: Record<string, number>;
   /** After a switch of AI: the events after this number are what the new agent has not seen. Cleared by its first message. */
   handoffAfter?: number;
+  /** After "New chat from here": what the conversation it started from said, sent with the next message. Cleared by that message. */
+  branchContext?: string;
+  /** After "Go back to here": the message the files were put back before (shortened). Sent as a note with the next message, then cleared. */
+  restoredFrom?: string;
 }
 
 export interface WorkspaceLimits {

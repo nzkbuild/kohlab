@@ -1,4 +1,4 @@
-import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, ReleaseStatus, TreeNode, Version, Workspace } from "./types";
+import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, ReleaseStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -153,6 +153,23 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sid }),
+    }),
+  /** What one message changed, up to the next message (or the files as they are now). */
+  chatTurn: (id: string, n: number) =>
+    json<{ files: TurnFile[]; diff: string }>(`/api/workspaces/${encodeURIComponent(id)}/chat/turn?n=${n}`),
+  /** Put the files back to how they were before message n. */
+  chatGoBack: (id: string, n: number) =>
+    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/goback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ n }),
+    }),
+  /** A new conversation that starts from what was said up to message n. */
+  chatBranch: (id: string, n: number) =>
+    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/branch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ n }),
     }),
   chatSend: (id: string, text: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat`, {

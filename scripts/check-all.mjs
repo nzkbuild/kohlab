@@ -76,6 +76,7 @@ try {
 
   banner("static checks");
   run("chat lines (describeTool, describeAsk)", "bun", ["scripts/check-chat.mjs"]);
+  run("turn checkpoints (snapshot, what a message changed, go back)", "bun", ["scripts/check-checkpoints.mjs"]);
   run("agent client protocol (update mapping, permission choices)", "bun", ["scripts/check-acp.mjs"]);
   run("terminal transcript lines (what the chat view shows)", "bun", ["scripts/check-transcript.mjs"]);
   run("project names (rename rules, notification titles)", "bun", ["scripts/check-rename.mjs"]);

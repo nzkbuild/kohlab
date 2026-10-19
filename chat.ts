@@ -17,6 +17,7 @@ import type { Workspace } from "./types";
 import { notifyNeedsYou } from "./push";
 import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
 import { devServerOrigin } from "./devserver";
+import { goBackTo, snapshotTree, turnChanges, type TurnFile } from "./checkpoints";
 import { ACP_AGENTS, AcpClient, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
 import {
   WORKS_DIR,
@@ -65,7 +66,8 @@ export type AskQuestion = { question: string; header?: string; multiSelect?: boo
 
 export type Body =
   /** uuid: the id Claude keeps for this message, which Undo names. Not set on lines imported from a terminal's transcript. */
-  | { kind: "user"; text: string; uuid?: string }
+  /** tree: the project's files as they were just before this message (checkpoints.ts). Not set when the snapshot could not be taken. */
+  | { kind: "user"; text: string; uuid?: string; tree?: string }
   | { kind: "assistant"; text: string }
   /** toolId: the tool's id, which its result refers to. detail: what it did (the command, the change), for the expandable line. */
   | { kind: "tool"; text: string; toolId?: string; detail?: string }
@@ -1266,21 +1268,49 @@ async function startAcpNow(ws: Workspace, id: string): Promise<AcpClient> {
   return acp;
 }
 
-/** The text an agent is sent for the person's message. After a switch of AI, its first message carries the conversation it has not seen; the chat still shows only the person's own words. */
+/** The text an agent is sent for the person's message. After a switch of AI, its first message carries the conversation it has not seen; after "New chat from here", the conversation it starts from; after "Go back to here", a note. The chat still shows only the person's own words. */
 function handoffMessage(id: string, ws: Workspace, text: string): string {
-  if (ws.handoffAfter === undefined) return text;
-  const after = ws.handoffAfter;
-  const summary = handoffText(load(id).events.filter((e) => e.n > after), ws.agent);
-  if (!summary) return text;
-  return `Context: this conversation started with another assistant. What happened so far:\n${summary}\n\nThe person's new message:\n${text}`;
+  const parts: string[] = [];
+  if (ws.handoffAfter !== undefined) {
+    const summary = handoffText(load(id).events.filter((e) => e.n > ws.handoffAfter!), ws.agent);
+    if (summary) parts.push(`Context: this conversation started with another assistant. What happened so far:\n${summary}`);
+  }
+  if (ws.branchContext) parts.push(`Context: this conversation was started from an earlier one. What happened there:\n${ws.branchContext}`);
+  if (ws.restoredFrom !== undefined) parts.push(`Note: the person restored the project files to how they were before their message “${ws.restoredFrom}”. Files changed after that point were undone.`);
+  if (parts.length === 0) return text;
+  return `${parts.join("\n\n")}\n\nThe person's new message:\n${text}`;
 }
 
-/** The catch-up a switch of AI left is spent: the message that carried it has been sent. */
+/** Whether the next message still has a catch-up, a branch context or a restore note to carry. */
+const hasPendingContext = (ws: Workspace) => ws.handoffAfter !== undefined || ws.branchContext !== undefined || ws.restoredFrom !== undefined;
+
+/** The catch-up, context and note a message carried are spent: that message has been sent. */
 function clearHandoff(id: string) {
   return mutateState((st) => {
     const w = st.workspaces.find((x) => x.id === id);
-    if (w) delete w.handoffAfter;
+    if (w) {
+      delete w.handoffAfter;
+      delete w.branchContext;
+      delete w.restoredFrom;
+    }
   });
+}
+
+/** Projects whose files are being put back: a message sent meanwhile would start on files mid-restore. */
+const restoring = new Set<string>();
+
+/** A message's text, shortened for a line or a note. */
+const excerpt = (text: string) => {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 60 ? `${t.slice(0, 60)}…` : t;
+};
+
+/** The user message with this event number. */
+function userEventAt(id: string, n: unknown): Extract<ChatEvent, { kind: "user" }> {
+  if (typeof n !== "number" || !Number.isInteger(n)) throw new ChatError(400, "message number is required");
+  const ev = load(id).events.find((e) => e.n === n);
+  if (!ev || ev.kind !== "user") throw new ChatError(404, "that message was not found");
+  return ev;
 }
 
 /** A message to an ACP agent: one prompt turn. A message sent while a turn runs is refused: the agent cannot take it mid-turn. */
@@ -1289,13 +1319,14 @@ async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
   chatBusy.add(id);
   chatWaiting.delete(id); // a new message clears a stale "needs you" from before
   const sent = handoffMessage(id, ws, t);
-  emit(id, { kind: "user", text: t });
+  const tree = await snapshotTree(worktreePath(ws)); // before the agent starts on this message
+  emit(id, { kind: "user", text: t, tree: tree ?? undefined });
   try {
     await markStarted(id);
     const cur = acps.get(id);
     const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
     acp.prompt(sent);
-    if (ws.handoffAfter !== undefined) await clearHandoff(id).catch(() => {}); // only once the agent has the message
+    if (hasPendingContext(ws)) await clearHandoff(id).catch(() => {}); // only once the agent has the message
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
     emit(id, { kind: "error", text: acpStartFailure(ws.agent, e) });
@@ -1345,6 +1376,7 @@ export async function send(id: string, text: string): Promise<void> {
   const t = text.trim();
   if (!t) throw new ChatError(400, "message is empty");
   if (t.length > MAX_TEXT) throw new ChatError(400, `message is over ${MAX_TEXT} characters`);
+  if (restoring.has(id)) throw new ChatError(409, "The project's files are being put back. Try again in a moment.");
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
   if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
@@ -1372,7 +1404,9 @@ export async function send(id: string, text: string): Promise<void> {
   // The id is ours, so the message can be named for Undo at once. The CLI keeps the id it is sent with.
   const uuid = randomUUID();
   const sent = handoffMessage(id, ws, t);
-  emit(id, { kind: "user", text: t, uuid });
+  // A message queued behind a running turn gets no snapshot: the files are mid-turn, so it would mislead.
+  const tree = queued ? null : await snapshotTree(worktreePath(ws));
+  emit(id, { kind: "user", text: t, uuid, tree: tree ?? undefined });
   try {
     if (!queued) await markStarted(id);
     const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
@@ -1381,7 +1415,7 @@ export async function send(id: string, text: string): Promise<void> {
       live.busySince = Date.now();
     }
     live.child.stdin!.write(JSON.stringify({ type: "user", uuid, message: { role: "user", content: sent }, parent_tool_use_id: null }) + "\n");
-    if (ws.handoffAfter !== undefined) await clearHandoff(id).catch(() => {}); // only once Claude has the message
+    if (hasPendingContext(ws)) await clearHandoff(id).catch(() => {}); // only once Claude has the message
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
     emit(id, { kind: "error", text: friendlyError((e as Error).message) });
@@ -1812,4 +1846,54 @@ export async function switchSession(id: string, sid: unknown): Promise<void> {
     if (!w.chat) w.resumeInTerminal = sid !== null;
   });
   if (typeof sid === "string") await syncFromTerminal(await getWorkspace(id));
+}
+
+/** "What this changed": the files one message changed, up to the next message, or up to the files as they are now for the newest. */
+export async function chatTurn(id: string, n: unknown): Promise<{ files: TurnFile[]; diff: string }> {
+  const ev = userEventAt(id, n);
+  if (!ev.tree) throw new ChatError(404, "There is no saved copy of the files from before that message.");
+  const next = load(id).events.find((e): e is Extract<ChatEvent, { kind: "user" }> => e.kind === "user" && e.n > ev.n);
+  const ws = await getWorkspace(id);
+  const to = next ? next.tree : await snapshotTree(worktreePath(ws));
+  if (!to) throw new ChatError(next ? 404 : 503, next ? "There is no saved copy of the files from the message after that one." : "Could not read the project's files just now. Try again.");
+  return turnChanges(worktreePath(ws), ev.tree, to);
+}
+
+/** "Go back to here": the files return to how they were before this message. Refused while the AI works. The files as they are now are saved as a version first, so going back can itself be undone from Earlier versions. */
+export async function chatGoBack(id: string, n: unknown): Promise<{ ok: true }> {
+  const ev = userEventAt(id, n);
+  if (!ev.tree) throw new ChatError(409, "There is no saved copy of the files from before that message.");
+  if (chatBusy.has(id)) throw new ChatError(409, "Wait until the AI has finished, then try again.");
+  if (restoring.has(id)) throw new ChatError(409, "The project's files are already being put back.");
+  restoring.add(id);
+  try {
+    const ws = await getWorkspace(id);
+    const note = excerpt(ev.text);
+    await goBackTo(worktreePath(ws), ev.tree, `Went back to before: “${note}”`);
+    await mutateState((st) => {
+      const w = st.workspaces.find((x) => x.id === id);
+      if (!w) throw new Error(`no workspace '${id}'`);
+      w.lastCommitAt = Date.now();
+      w.restoredFrom = note; // the next message is told the files were put back
+    });
+    emit(id, { kind: "tool", text: `Went back to before: “${note}”` });
+  } finally {
+    restoring.delete(id);
+  }
+  return { ok: true };
+}
+
+/** "New chat from here": a new conversation whose first message carries what was said up to this one. The files are not touched. */
+export async function chatBranch(id: string, n: unknown): Promise<void> {
+  const ev = userEventAt(id, n);
+  if (restoring.has(id)) throw new ChatError(409, "The project's files are being put back. Try again in a moment.");
+  const ws = await getWorkspace(id);
+  const summary = handoffText(load(id).events.filter((e) => e.n <= ev.n), ws.agent);
+  await switchSession(id, null);
+  if (summary) {
+    await mutateState((st) => {
+      const w = st.workspaces.find((x) => x.id === id);
+      if (w) w.branchContext = summary;
+    });
+  }
 }

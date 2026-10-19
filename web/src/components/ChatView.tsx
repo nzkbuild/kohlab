@@ -2,7 +2,7 @@ import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMem
 import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
-import type { ChatEvent as StoredChatEvent } from "../types";
+import type { ChatEvent as StoredChatEvent, TurnFile } from "../types";
 import { announce } from "../lib/announce";
 import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
 import { copyText } from "../lib/clipboard";
@@ -1171,6 +1171,98 @@ function ModelChoices({ models, value, onPick }: { models: ModelInfo[]; value: s
   );
 }
 
+/** The row under a message: what it changed, going back to before it, and a new chat from it. Quiet: shown on hover or focus, always on touch. */
+function MessageActions({ onChanges, onBack, onBranch }: { onChanges: () => void; onBack: () => void; onBranch: () => void }) {
+  const quiet = cn(
+    "text-text-faint hover:text-text-primary [@media(pointer:coarse)]:opacity-100",
+    "motion-safe:transition-opacity opacity-0 group-focus-within/msg:opacity-100 group-hover/msg:opacity-100",
+  );
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      <Button variant="quiet" size="sm" className={quiet} onClick={onChanges}>
+        What this changed
+      </Button>
+      <Button variant="quiet" size="sm" className={quiet} onClick={onBack}>
+        Go back to here
+      </Button>
+      <Button variant="quiet" size="sm" className={quiet} onClick={onBranch}>
+        New chat from here
+      </Button>
+    </div>
+  );
+}
+
+const CHANGE_WORD: Record<TurnFile["status"], string> = { added: "New", deleted: "Removed", modified: "Changed" };
+
+/** One line of a patch, coloured the way the Changes tab colours its counts. */
+function patchLineClass(line: string): string {
+  if (/^(\+\+\+|---|@@|diff |index )/.test(line)) return "text-text-muted";
+  if (line.startsWith("+")) return "text-status-running";
+  if (line.startsWith("-")) return "text-status-danger";
+  return "text-text-secondary";
+}
+
+/** What one message changed: the files, then the patch. Read from the server when it opens. */
+function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; n: number; onOpenChange: (open: boolean) => void }) {
+  const [turn, setTurn] = useState<{ files: TurnFile[]; diff: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.chatTurn(workspaceId, n).then(
+      (t) => {
+        if (alive) setTurn(t);
+      },
+      (e: Error) => {
+        if (alive) setError(e.message);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [workspaceId, n]);
+  const count = turn?.files.length ?? 0;
+  return (
+    <Dialog.Root open onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content aria-describedby={undefined} className="dialog-content flex max-h-[85vh] w-[90vw] max-w-[720px] flex-col gap-3 p-4">
+          <Dialog.Title className="text-base font-semibold text-text-primary">What this changed</Dialog.Title>
+          {error ? (
+            <p role="alert" className="text-small text-status-danger">{`Could not read the changes: ${error}`}</p>
+          ) : turn === null ? (
+            <p className="text-small text-text-muted">Reading the changes…</p>
+          ) : count === 0 ? (
+            <p className="text-small text-text-muted">No project files changed after this message.</p>
+          ) : (
+            <>
+              <p className="text-small text-text-muted">{`${count} ${count === 1 ? "file" : "files"} changed`}</p>
+              <ul className="mono flex max-h-40 flex-col gap-0.5 overflow-y-auto text-xs break-all text-text-secondary">
+                {turn.files.map((f) => (
+                  <li key={f.path}>
+                    <span className="text-text-muted">{CHANGE_WORD[f.status]}</span> {f.path}
+                  </li>
+                ))}
+              </ul>
+              <pre className="mono min-h-0 flex-1 overflow-auto rounded-lg bg-surface-base p-3 text-xs leading-5 whitespace-pre">
+                {turn.diff.split("\n").map((line, i) => (
+                  <span key={i} className={cn("block", patchLineClass(line))}>
+                    {line || " "}
+                  </span>
+                ))}
+              </pre>
+            </>
+          )}
+          <div className="flex justify-end">
+            <Dialog.Close asChild>
+              <Button variant="secondary">Close</Button>
+            </Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export default function ChatView({ workspaceId, onPreview, previewing = false, previewOpen = false, onTurnEnd, compact = false, terminalProject = false }: Props) {
   const refresh = useApp((s) => s.refresh);
   const workspaces = useApp((s) => s.workspaces);
@@ -1811,6 +1903,39 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  /** The message whose changes are shown, and the message the person is asked to go back to. */
+  const [changesOf, setChangesOf] = useState<{ n: number } | null>(null);
+  const [backTo, setBackTo] = useState<{ n: number; text: string } | null>(null);
+  const [goingBack, setGoingBack] = useState(false);
+
+  /** Go back to before a message: its files return as they were, and the next message is told so. */
+  const confirmGoBack = async () => {
+    if (!backTo) return;
+    setGoingBack(true);
+    try {
+      await api.chatGoBack(workspaceId, backTo.n);
+      toast.success("Went back. Your files are as they were before that message.");
+      await refresh();
+    } catch (e) {
+      toast.error(`Could not go back, ${(e as Error).message}`);
+    } finally {
+      setGoingBack(false);
+      setBackTo(null);
+      repoll();
+    }
+  };
+
+  /** A new conversation that starts from what was said up to a message. The files stay as they are. */
+  const branchFrom = async (n: number) => {
+    try {
+      await api.chatBranch(workspaceId, n);
+      toast.success("Started a new chat from here");
+      await refresh();
+    } catch (e) {
+      toast.error(`Could not start a new chat, ${(e as Error).message}`);
+    }
+  };
+
   const renderEvent = (e: ChatEvent) => {
     switch (e.kind) {
       case "user": {
@@ -1822,7 +1947,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         const uuid = e.uuid;
         const undoable = isClaude && uuid !== undefined && e.n === lastUserAllN && !busy && waiting === null && can;
         return (
-          <div className="flex flex-col items-end gap-1" data-turn-start={e.n === lastUserN ? "" : undefined}>
+          <div className="group/msg flex flex-col items-end gap-1" data-turn-start={e.n === lastUserN ? "" : undefined}>
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
               {body}
               {pictures.map((name, i) => (
@@ -1854,6 +1979,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 <ArrowCounterClockwise size={14} aria-hidden="true" />
                 {"Undo this message's changes"}
               </Button>
+            ) : null}
+            {e.tree !== undefined && can && !busy ? (
+              <MessageActions onChanges={() => setChangesOf({ n: e.n })} onBack={() => setBackTo({ n: e.n, text: e.text })} onBranch={() => void branchFrom(e.n)} />
             ) : null}
           </div>
         );
@@ -2332,6 +2460,27 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           </div>
         </div>
   
+        {changesOf !== null ? (
+          <ChangesDialog
+            workspaceId={workspaceId}
+            n={changesOf.n}
+            onOpenChange={(v) => {
+              if (!v) setChangesOf(null);
+            }}
+          />
+        ) : null}
+        <ConfirmDialog
+          open={backTo !== null}
+          onOpenChange={(v) => {
+            if (!v) setBackTo(null);
+          }}
+          title="Go back to before this message?"
+          description="Your files return to how they were before you sent it. You can undo this from Earlier versions."
+          confirmLabel="Go back"
+          tone="commit"
+          busy={goingBack}
+          onConfirm={() => void confirmGoBack()}
+        />
         <ConfirmDialog
           open={rewindPlan !== null}
           onOpenChange={(v) => {

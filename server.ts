@@ -85,7 +85,7 @@ import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, to
 import { stopAllDevServers } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
-import { ChatError, answer as answerChat, chatControl, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession } from "./chat";
+import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -348,6 +348,15 @@ async function handleChatSessions(id: string): Promise<Response> {
   }
 }
 
+/** One message's changes, for "What this changed". */
+async function handleChatTurn(id: string, req: Request): Promise<Response> {
+  try {
+    return json(await chatTurn(id, Number(new URL(req.url).searchParams.get("n"))));
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof ChatError ? e.status : 400);
+  }
+}
+
 /** Chat workspaces: the task is the first chat message, sent once the workspace exists. */
 async function handleChatGet(id: string, req: Request, see: { usage: boolean; owner: boolean }): Promise<Response> {
   try {
@@ -360,7 +369,7 @@ async function handleChatGet(id: string, req: Request, see: { usage: boolean; ow
 
 async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined): Promise<Response> {
   try {
-    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown; answers?: unknown; message?: unknown };
+    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown; answers?: unknown; message?: unknown; n?: unknown };
     // a control action may answer with data (the files, the undo list): it is sent back as it is
     let reply: Record<string, unknown> = { ok: true };
     if (sub === "/answer") {
@@ -377,6 +386,12 @@ async function handleChatPost(id: string, req: Request, actor: string, sub: stri
     } else if (sub === "/session") {
       containFailure(audit(actor, "chat.session", id), "audit");
       await switchSession(id, body.sid);
+    } else if (sub === "/goback") {
+      containFailure(audit(actor, "chat.goback", id), "audit");
+      await chatGoBack(id, body.n);
+    } else if (sub === "/branch") {
+      containFailure(audit(actor, "chat.branch", id), "audit");
+      await chatBranch(id, body.n);
     } else {
       containFailure(audit(actor, "chat", id), "audit");
       await sendChat(id, typeof body.text === "string" ? body.text : "");
@@ -1332,7 +1347,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (server.upgrade(req, upgradeOpts)) return undefined;
     }
 
-    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control|\/sessions|\/session)?$/);
+    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control|\/sessions|\/session|\/turn|\/goback|\/branch)?$/);
     if (chatM) {
       const [, chatId, sub] = chatM;
       if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, chatId))) return json({ error: "forbidden, not your workspace" }, 403);
@@ -1341,7 +1356,11 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         return handleChatGet(chatId, req, { usage: canMutate, owner: isOwner });
       }
       if (req.method === "GET" && sub === "/sessions") return handleChatSessions(chatId);
-      if (req.method !== "POST" || sub === "/sessions") return json({ error: "method not allowed" }, 405);
+      if (req.method === "GET" && sub === "/turn") {
+        if (denied) return json({ error: "unauthorized" }, 401);
+        return handleChatTurn(chatId, req);
+      }
+      if (req.method !== "POST" || sub === "/sessions" || sub === "/turn") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
       return handleChatPost(chatId, req, actor, sub);
