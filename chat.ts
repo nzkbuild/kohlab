@@ -256,6 +256,12 @@ interface Live {
   busySince?: number;
   /** background tasks still running (Bash or helper runs), from the CLI's own list */
   tasks: BgTask[];
+  /** the checklist Claude's last TodoWrite sent (the full list) */
+  todos: Todo[];
+  /** TaskCreate calls waiting for their result (which carries the id), by tool_use id */
+  newTasks: Map<string, { subject: string; form?: string }>;
+  /** helper agents still running, by tool_use id, with a label for each */
+  helpers: Map<string, string>;
   /** the CLI is retrying a failed request: which try, and how many tries in all */
   retry?: { attempt: number; max: number };
   /** the model and permission mode the CLI reports in its init line */
@@ -450,6 +456,65 @@ function bgTasks(x: unknown): BgTask[] {
   return x
     .filter((t) => typeof t?.task_id === "string")
     .map((t) => ({ id: t.task_id, type: String(t.task_type ?? ""), description: String(t.description ?? "").slice(0, 200) }));
+}
+
+/** One item of Claude's checklist: its text and where it stands. */
+export type Todo = { text: string; status: "pending" | "active" | "done"; id?: string; subject?: string; form?: string };
+
+/** Show the active form while a task is active, the subject otherwise. */
+const shown = (t: Todo): Todo => ({ ...t, text: (t.status === "active" && t.form ? t.form : t.subject ?? t.text).slice(0, 200) });
+
+/** A TaskCreate result: the new task's id, from the structured result or the text ("Task #1 created ..."). Pure. */
+export function newTaskId(structured: unknown, text: unknown): string | null {
+  const id = (structured as { task?: { id?: unknown } } | null)?.task?.id;
+  if (typeof id === "string" || typeof id === "number") return String(id);
+  const m = typeof text === "string" ? /Task #(\w+) created/.exec(text) : null;
+  return m ? m[1] : null;
+}
+
+/** The checklist after a TaskCreate finished (id known) or a TaskUpdate was called. Pure. */
+export function applyTaskEvent(list: Todo[], ev: { create: { id: string; subject: string; form?: string } } | { update: unknown }): Todo[] {
+  if ("create" in ev) {
+    const { id, subject, form } = ev.create;
+    if (list.some((t) => t.id === id)) return list;
+    return [...list, shown({ id, subject, form, text: subject, status: "pending" })].slice(0, 50);
+  }
+  const u = (ev.update ?? {}) as { taskId?: unknown; status?: unknown; subject?: unknown; activeForm?: unknown };
+  const id = String(u.taskId ?? "");
+  if (u.status === "deleted") return list.filter((t) => t.id !== id);
+  return list.map((t) => {
+    if (t.id !== id) return t;
+    const status = u.status === "in_progress" ? "active" : u.status === "completed" ? "done" : u.status === "pending" ? "pending" : t.status;
+    return shown({
+      ...t,
+      status,
+      subject: typeof u.subject === "string" && u.subject ? u.subject : t.subject,
+      form: typeof u.activeForm === "string" && u.activeForm ? u.activeForm : t.form,
+    });
+  });
+}
+
+/** The checklist a TodoWrite call sends (the full list). Pure. */
+export function todosOf(input: unknown): Todo[] {
+  const list = (input as { todos?: unknown } | null)?.todos;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((t) => typeof t?.content === "string")
+    .slice(0, 50)
+    .map((t) => {
+      const status = t.status === "in_progress" ? "active" : t.status === "completed" ? "done" : "pending";
+      const text = status === "active" && typeof t.activeForm === "string" && t.activeForm ? t.activeForm : t.content;
+      return { text: text.slice(0, 200), status } as Todo;
+    });
+}
+
+/** The label of a helper agent (a Task or Agent tool call): its description, else the start of its prompt. Pure. */
+export function helperLabel(input: unknown): string {
+  const i = (input ?? {}) as { description?: unknown; prompt?: unknown };
+  const flat = (x: unknown) => (typeof x === "string" ? x.replace(/\s+/g, " ").trim() : "");
+  const d = flat(i.description);
+  const p = flat(i.prompt).slice(0, 60).trim();
+  return (d || p || "a helper").slice(0, 80).trim();
 }
 
 /** The usage the footer shows, from the two replies: get_context_usage and get_usage. Pure. */
@@ -745,9 +810,28 @@ function onLine(id: string, live: Live, line: string) {
     live.draft = ""; // the full message replaces the streamed draft
     for (const b of m.message?.content ?? []) {
       if (b?.type === "text" && b.text) emit(id, { kind: "assistant", text: b.text });
-      else if (b?.type === "tool_use" && b.name !== "TodoWrite") {
+      else if (b?.type === "tool_use" && b.name === "TodoWrite") live.todos = todosOf(b.input);
+      else if (b?.type === "tool_use" && b.name === "TaskCreate") {
+        if (typeof b.input?.subject === "string") live.newTasks.set(b.id, { subject: b.input.subject, form: b.input.activeForm });
+      } else if (b?.type === "tool_use" && b.name === "TaskUpdate") live.todos = applyTaskEvent(live.todos, { update: b.input });
+      else if (b?.type === "tool_use") {
+        if (b.name === "Task" || b.name === "Agent") live.helpers.set(b.id, helperLabel(b.input));
         emit(id, { kind: "tool", text: describeTool(b.name, b.input ?? {}, live.cwd) });
       }
+    }
+    return;
+  }
+  // A tool that finished: a helper agent that returned is no longer working.
+  if (m.type === "user" && !m.parent_tool_use_id) {
+    for (const b of m.message?.content ?? []) {
+      if (b?.type !== "tool_result") continue;
+      live.helpers.delete(b.tool_use_id);
+      const made = live.newTasks.get(b.tool_use_id);
+      if (!made) continue;
+      live.newTasks.delete(b.tool_use_id);
+      const text = Array.isArray(b.content) ? b.content.map((c: any) => c?.text ?? "").join("") : b.content;
+      const tid = newTaskId(m.tool_use_result, text);
+      if (tid) live.todos = applyTaskEvent(live.todos, { create: { id: tid, ...made } });
     }
     return;
   }
@@ -778,6 +862,8 @@ function onLine(id: string, live: Live, line: string) {
     emit(id, { kind: "done" });
     chatBusy.delete(id);
     live.busySince = undefined;
+    live.helpers.clear();
+    if (live.todos.every((t) => t.status === "done")) live.todos = [];
     finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
     void readUsage(id, live, true);
   }
@@ -862,6 +948,8 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   // A copy of each file before Claude edits it, so Undo can put it back.
   // ponytail: the copies live under this home's .claude/file-history and grow with every edit; nothing prunes them yet.
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = "1";
+  // Gives -p mode the task tools (TaskCreate, TaskUpdate), which feed the progress checklist.
+  env.CLAUDE_CODE_ENABLE_TODO_TOOLS = "1";
   if (!term) env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "1";
   const cwd = worktreePath(ws);
   const child = spawn(bin, args, { cwd, uid: who?.uid, gid: who?.gid, env, stdio: ["pipe", "pipe", "pipe"] });
@@ -877,6 +965,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     sid: ws.chatSession,
     transcriptHome: term ? home : undefined,
     tasks: [],
+    todos: [],
+    newTasks: new Map(),
+    helpers: new Map(),
     model: null,
     mode: null,
     pending: new Map(),
@@ -924,6 +1015,8 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     now: Date.now(),
     background: live?.tasks.length ?? 0,
     tasks: live?.tasks ?? [],
+    todos: live?.todos ?? [],
+    helpers: [...(live?.helpers.values() ?? [])],
     retry: live?.retry ?? null,
     usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
     // one rule: a live process, else the project's saved choice, else what was last seen

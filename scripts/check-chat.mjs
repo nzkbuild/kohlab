@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answerResponse, askForm, describeAsk, describeTool, friendlyError, noticeText, readCapsFile, usageOf, writeCapsFile } from "../chat.ts";
+import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, helperLabel, noticeText, readCapsFile, todosOf, usageOf, writeCapsFile } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -54,6 +54,49 @@ check("browser type ask: form, detail is the text", describeAsk("mcp__browser__a
 check("browser type ask: text", describeAsk("mcp__browser__agent_browser_type", { text: "hi" }, cwd, "https://example.com/").text, "Claude wants to type into a form on example.com");
 check("browser type ask: detail cut at 80", describeAsk("mcp__browser__agent_browser_type", { text: "z".repeat(200) }, cwd, "https://example.com/").detail.length, 80);
 check("browser eval ask: a script", describeAsk("mcp__browser__agent_browser_eval", { script: "1" }, cwd, "https://example.com/").text, "Claude wants to run a script on example.com");
+
+// Claude's checklist (TodoWrite) and its helpers (Task or Agent)
+check("todos: statuses map, and an in-progress item shows its activeForm", todosOf({ todos: [
+  { content: "Plan", status: "completed" },
+  { content: "Build", activeForm: "Building", status: "in_progress" },
+  { content: "Test", status: "pending" },
+  { content: "Ship", status: "weird" },
+] }), [
+  { text: "Plan", status: "done" },
+  { text: "Building", status: "active" },
+  { text: "Test", status: "pending" },
+  { text: "Ship", status: "pending" },
+]);
+check("todos: an in-progress item without activeForm keeps its content", todosOf({ todos: [{ content: "Build", status: "in_progress" }] }), [{ text: "Build", status: "active" }]);
+check("todos: items without string content are skipped", todosOf({ todos: [{ status: "pending" }, { content: 5 }, null, { content: "Ok", status: "pending" }] }), [{ text: "Ok", status: "pending" }]);
+check("todos: no todos list is empty", todosOf({}), []);
+check("todos: capped at 50 items", todosOf({ todos: Array.from({ length: 60 }, (_, i) => ({ content: `T${i}`, status: "pending" })) }).length, 50);
+check("todos: each text cut at 200", todosOf({ todos: [{ content: "x".repeat(300), status: "pending" }] })[0].text.length, 200);
+check("helper: its description", helperLabel({ description: "Find the bug", prompt: "long prompt" }), "Find the bug");
+check("helper: no description, the start of the prompt", helperLabel({ prompt: "p".repeat(100) }), "p".repeat(60));
+check("helper: nothing, a helper", helperLabel({}), "a helper");
+check("helper: a long description cut at 80", helperLabel({ description: "d".repeat(120) }).length, 80);
+
+// task tools (TaskCreate / TaskUpdate), shapes seen from claude 2.1.301
+check("task id: structured result", newTaskId({ task: { id: "1", subject: "Create a.txt" } }, ""), "1");
+check("task id: from the text", newTaskId(null, "Task #2 created successfully: Create b.txt"), "2");
+check("task id: none", newTaskId(null, "oops"), null);
+{
+  let l = applyTaskEvent([], { create: { id: "1", subject: "Create a.txt", form: "Creating a.txt" } });
+  l = applyTaskEvent(l, { create: { id: "2", subject: "Create b.txt" } });
+  const view = () => l.map((t) => `${t.status}:${t.text}`).join("|");
+  check("tasks: created pending", view(), "pending:Create a.txt|pending:Create b.txt");
+  l = applyTaskEvent(l, { update: { taskId: "1", status: "in_progress" } });
+  check("tasks: active shows activeForm", view(), "active:Creating a.txt|pending:Create b.txt");
+  l = applyTaskEvent(l, { update: { taskId: "1", status: "completed" } });
+  check("tasks: done shows subject", view(), "done:Create a.txt|pending:Create b.txt");
+  check("tasks: duplicate create ignored", applyTaskEvent(l, { create: { id: "2", subject: "x" } }).length, 2);
+  check("tasks: unknown id ignored", applyTaskEvent(l, { update: { taskId: "9", status: "completed" } }).length, 2);
+  l = applyTaskEvent(l, { update: { taskId: "2", subject: "Make b.txt" } });
+  check("tasks: subject updated", view(), "done:Create a.txt|pending:Make b.txt");
+  l = applyTaskEvent(l, { update: { taskId: "2", status: "deleted" } });
+  check("tasks: deleted removed", view(), "done:Create a.txt");
+}
 
 // what the user reads when Claude fails
 check("usage limit: plain sentence", friendlyError("Claude AI usage limit reached|123"), "Claude has reached its usage limit for now. Try again in a little while.");

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, Copy, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
 import type { ChatEvent as StoredChatEvent } from "../types";
@@ -133,8 +133,80 @@ interface ModelInfo {
   supportedEffortLevels: string[];
 }
 
-/** The working line: a pulsing dot, the current action, how long the turn has run, and background tasks (a button that opens their list). The timer ticks only while this line is shown. */
-function WorkingLine({ action, since, background, tasksOpen, onTasks }: { action: string; since: number | null; background: number; tasksOpen: boolean; onTasks: () => void }) {
+/** Claude's checklist (its TodoWrite list): one row with the count and the active item, the full list when opened. */
+type Todo = { text: string; status: "pending" | "active" | "done" };
+function Checklist({ todos }: { todos: Todo[] }) {
+  const [open, setOpen] = useState(false);
+  const done = todos.filter((t) => t.status === "done").length;
+  const active = todos.find((t) => t.status === "active");
+  return (
+    <div className="rounded-card bg-surface-raised px-4 py-2.5 text-sm">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="flex w-full min-w-0 items-center gap-2 text-left text-text-secondary">
+        <span className="shrink-0 tabular-nums">{done} of {todos.length} done</span>
+        {active ? <span className="min-w-0 flex-1 truncate text-text-primary">{active.text}</span> : <span className="flex-1" />}
+        <CaretRight size={14} aria-hidden="true" className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+      </button>
+      {open ? (
+        <ul aria-label="Checklist" className="mt-2 flex flex-col gap-1.5">
+          {todos.map((t, i) => (
+            <li
+              key={i}
+              className={cn(
+                "flex min-w-0 items-center gap-2",
+                t.status === "done" ? "text-text-muted line-through" : t.status === "active" ? "font-medium text-text-primary" : "text-text-muted",
+              )}
+            >
+              {t.status === "done" ? (
+                <CheckCircle size={16} className="shrink-0" aria-hidden="true" />
+              ) : t.status === "active" ? (
+                <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+                  <span className="size-2 rounded-full bg-text-primary motion-safe:animate-pulse" />
+                </span>
+              ) : (
+                <Circle size={16} className="shrink-0" aria-hidden="true" />
+              )}
+              <span className="min-w-0 truncate">{t.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** The helpers Claude has running (its sub-agents), by label. Opened from the "helpers working" text. */
+function HelperList({ helpers }: { helpers: string[] }) {
+  return (
+    <ul aria-label="Helpers" className="flex flex-col gap-1 pl-5 text-sm text-text-muted">
+      {helpers.map((h, i) => (
+        <li key={i} className="min-w-0 truncate">
+          Helper: {h}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The working line: a pulsing dot, the current action, how long the turn has run, helpers working and background tasks (buttons that open their lists). The timer ticks only while this line is shown. */
+function WorkingLine({
+  action,
+  since,
+  background,
+  tasksOpen,
+  onTasks,
+  helpers,
+  helpersOpen,
+  onHelpers,
+}: {
+  action: string;
+  since: number | null;
+  background: number;
+  tasksOpen: boolean;
+  onTasks: () => void;
+  helpers: string[];
+  helpersOpen: boolean;
+  onHelpers: () => void;
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 1000);
@@ -146,6 +218,11 @@ function WorkingLine({ action, since, background, tasksOpen, onTasks }: { action
       <span className="shimmer-text min-w-0">{action}</span>
       {/* aria-hidden: the timer changes every second and must not be read out */}
       {since !== null ? <span aria-hidden="true" className="tabular-nums text-text-faint">{formatElapsed(now - since)}</span> : null}
+      {helpers.length > 0 ? (
+        <button type="button" aria-expanded={helpersOpen} onClick={onHelpers} className="rounded px-1 hover:bg-surface-hover hover:text-text-primary">
+          · {helpers.length} {helpers.length === 1 ? "helper" : "helpers"} working
+        </button>
+      ) : null}
       {background > 0 ? (
         <button type="button" aria-expanded={tasksOpen} onClick={onTasks} className="rounded px-1 hover:bg-surface-hover hover:text-text-primary">
           · {background} in background
@@ -711,6 +788,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const [tasks, setTasks] = useState<BgTask[]>([]);
   const background = tasks.length;
   const [tasksOpen, setTasksOpen] = useState(false);
+  // Claude's checklist (its TodoWrite list), and the helper agents it has running, by label.
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [helpers, setHelpers] = useState<string[]>([]);
+  const [helpersOpen, setHelpersOpen] = useState(false);
   const [stopping, setStopping] = useState<string | null>(null);
   // The CLI is retrying a request: which try, of how many. And the chat's usage, read when the last turn ended.
   const [retry, setRetry] = useState<{ attempt: number; max: number } | null>(null);
@@ -797,6 +878,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         const start = res.busySince === null ? null : Date.now() - (res.now - res.busySince);
         setBusySince((prev) => (prev !== null && start !== null && Math.abs(prev - start) < 2000 ? prev : start));
         setTasks(res.tasks);
+        // an older server sends no checklist or helpers
+        setTodos(res.todos ?? []);
+        setHelpers(res.helpers ?? []);
         setRetry(res.retry);
         setUsage(res.usage);
         setModel(res.model);
@@ -835,6 +919,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   useEffect(() => {
     if (tasks.length === 0) setTasksOpen(false);
   }, [tasks.length]);
+  // The helper list closes itself when the last helper is gone.
+  useEffect(() => {
+    if (helpers.length === 0) setHelpersOpen(false);
+  }, [helpers.length]);
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -1508,9 +1596,24 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               </div>
             </div>
               ) : null}
-              {working ? (
-                <WorkingLine action={currentAction} since={busySince} background={background} tasksOpen={tasksOpen} onTasks={() => setTasksOpen((o) => !o)} />
+              {todos.length > 0 ? (
+                <div className="mb-2">
+                  <Checklist todos={todos} />
+                </div>
               ) : null}
+              {working ? (
+                <WorkingLine
+                  action={currentAction}
+                  since={busySince}
+                  background={background}
+                  tasksOpen={tasksOpen}
+                  onTasks={() => setTasksOpen((o) => !o)}
+                  helpers={helpers}
+                  helpersOpen={helpersOpen}
+                  onHelpers={() => setHelpersOpen((o) => !o)}
+                />
+              ) : null}
+              {working && helpersOpen && helpers.length > 0 ? <HelperList helpers={helpers} /> : null}
               {!busy && background > 0 ? (
                 <button
                   type="button"

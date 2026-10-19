@@ -120,6 +120,10 @@ export const api = {
       background: number;
       /** the same tasks, by id, for the Stop list */
       tasks: { id: string; type: string; description: string }[];
+      /** Claude's checklist, from its last TodoWrite */
+      todos: { text: string; status: "pending" | "active" | "done" }[];
+      /** labels of the helper agents still working */
+      helpers: string[];
       /** the CLI is retrying a failed request: which try, of how many */
       retry: { attempt: number; max: number } | null;
       /** context in use and plan limits, read when the last turn ended */
