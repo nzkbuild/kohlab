@@ -177,6 +177,7 @@ try {
   const PRIVILEGED_READS = [
     ["GET", "/api/users"],
     ["GET", "/api/audit"],
+    ["GET", "/api/usage"],
   ];
 
   const viewerId = `smoke-viewer-${Date.now()}`;
@@ -245,6 +246,8 @@ try {
     // start an update of the checkout this suite is running from.
     const anonRead = await fetch(`${BASE}/api/release`);
     check("GET /api/release without a key -> 401", anonRead.status === 401, `got ${anonRead.status}`);
+    const anonUsage = await fetch(`${BASE}/api/usage`);
+    check("GET /api/usage without a key -> 401", anonUsage.status === 401, `got ${anonUsage.status}`);
     const anonUpdate = await fetch(`${BASE}/api/release/update`, { method: "POST" });
     check("POST /api/release/update without a key -> 401", anonUpdate.status === 401, `got ${anonUpdate.status}`);
     const wrongMethod = await req("/api/release/update");

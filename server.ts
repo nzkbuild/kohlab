@@ -85,7 +85,7 @@ import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, to
 import { stopAllDevServers } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
-import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession } from "./chat";
+import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -1040,6 +1040,16 @@ function sniffImageMime(bytes: Uint8Array): string | undefined {
   return undefined;
 }
 
+/** The owner's plan usage (the Usage dialog). A failed read is a 503 with a plain sentence. */
+async function handleUsage(): Promise<Response> {
+  try {
+    return json(await ownerPlanUsage());
+  } catch (e) {
+    console.warn("[usage]", (e as Error).message);
+    return json({ error: "Couldn't read your plan usage right now." }, 503);
+  }
+}
+
 /** List GitHub repos via `gh` (if authenticated) for the repo browser. */
 async function handleGhRepos(): Promise<Response> {
   const { execFile } = await import("child_process");
@@ -1658,6 +1668,12 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (path === "/api/agents-status") {
       if (denied) return json({ error: "unauthorized" }, 401);
       return handleAgentsStatus();
+    }
+    // Plan usage is the owner's account data: no credentials is 401, a member or viewer is 403.
+    if (path === "/api/usage" && req.method === "GET") {
+      const refused = gate(isOwner, "forbidden, only an owner can see plan usage");
+      if (refused) return refused;
+      return handleUsage();
     }
     if (path === "/api/gh/repos") {
       if (denied) return json({ error: "unauthorized" }, 401);

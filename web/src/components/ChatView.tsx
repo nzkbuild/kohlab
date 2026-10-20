@@ -1,7 +1,7 @@
 import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, FastForward, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import { api, type ChatUsage, type ChatUsageWindow } from "../api";
+import { api, type ChatUsage } from "../api";
 import type { ChatEvent as StoredChatEvent, TurnFile } from "../types";
 import { announce } from "../lib/announce";
 import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
@@ -18,7 +18,7 @@ import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import { agentName } from "../lib/agentName";
 import ConfirmDialog from "./ConfirmDialog";
 import { Composer, SaveLaterChip, SavedChip } from "./Composer";
-import { AgentChip, useNewAgent } from "./WorkspacesView";
+import { AgentChip, useAgentReasons, useNewAgent } from "./WorkspacesView";
 import { Button, ComposerChip, Dialog, Menu, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
@@ -284,37 +284,6 @@ function TaskList({ tasks, stopping, onStop }: { tasks: BgTask[]; stopping: stri
             Stop
           </Button>
         </li>
-      ))}
-    </ul>
-  );
-}
-
-/** "Fri, 7:00 AM": when a plan limit resets, in this device's time. Empty when the time is not known. */
-function resetText(iso: string | null): string {
-  const d = iso ? new Date(iso) : null;
-  return d && !Number.isNaN(d.getTime()) ? d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
-}
-
-/** The chat's usage details: the context window in use, and the plan's limits when the CLI reports them. */
-function UsagePanel({ usage }: { usage: ChatUsage }) {
-  const rows: string[] = [];
-  if (usage.context) {
-    rows.push(`Context: ${usage.context.used.toLocaleString()} of ${usage.context.limit.toLocaleString()} tokens used (${usage.context.percent}%)`);
-  }
-  const planRow = (label: string, w: ChatUsageWindow | null) => {
-    if (!w) return;
-    const reset = resetText(w.resetsAt);
-    rows.push(`${label} ${w.percent}%${reset ? ` · resets ${reset}` : ""}`);
-  };
-  if (usage.plan) {
-    planRow("5-hour limit", usage.plan.fiveHour);
-    planRow("Week", usage.plan.week);
-  }
-  if (rows.length === 0) return null;
-  return (
-    <ul className="flex flex-col gap-1 text-sm text-text-secondary">
-      {rows.map((r) => (
-        <li key={r}>{r}</li>
       ))}
     </ul>
   );
@@ -1415,10 +1384,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const isClaude = agent === "claude";
   // The AIs this chat can switch to: Claude, and the ACP agents the server reports installed.
   const agentOptions = useNewAgent().options;
+  const agentReasons = useAgentReasons();
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
   // When the current turn started (ms), whoever started it; background tasks still running; the model and mode the CLI reports.
   const [busySince, setBusySince] = useState<number | null>(null);
+  // The same start on the server's clock (events carry server times): a user message after it is queued behind this turn.
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   const [tasks, setTasks] = useState<BgTask[]>([]);
   const background = isClaude ? tasks.length : 0;
   const [tasksOpen, setTasksOpen] = useState(false);
@@ -1430,6 +1402,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The CLI is retrying a request: which try, of how many. And the chat's usage, read when the last turn ended.
   const [retry, setRetry] = useState<{ attempt: number; max: number } | null>(null);
   const [usage, setUsage] = useState<ChatUsage | null>(null);
+  const setUsageOpen = useApp((s) => s.setUsageOpen);
+  const setChatContext = useApp((s) => s.setChatContext);
+  // The Usage dialog shows this chat's context while the chat is open.
+  const chatCtx = isClaude && usage?.context ? usage.context : null;
+  useEffect(() => {
+    setChatContext(chatCtx);
+  }, [chatCtx, setChatContext]);
+  useEffect(() => () => setChatContext(null), [setChatContext]);
   const [model, setModel] = useState<string | null>(null);
   const [mode, setMode] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<string | null>(null);
@@ -1525,6 +1505,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         // elapsed on the server's clock, moved onto this device's; kept steady across polls
         const start = res.busySince === null ? null : Date.now() - (res.now - res.busySince);
         setBusySince((prev) => (prev !== null && start !== null && Math.abs(prev - start) < 2000 ? prev : start));
+        setTurnStartedAt(res.busySince);
         setTasks(res.tasks);
         // an older server sends no checklist or helpers
         setTodos(res.todos ?? []);
@@ -2176,6 +2157,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         // Edit and resend: the newest message, once the AI is idle. Going back and a new chat need a checkpoint (a turn that changed nothing has none).
         const newest = e.n === lastUserAllN && !busy && waiting === null && can;
         const checkpoint = e.tree !== undefined && can && !busy;
+        // Sent after the running turn began: the CLI runs it once that turn ends.
+        const queuedBehind = busy && turnStartedAt !== null && e.at > turnStartedAt;
         return (
           <div className="group/msg flex flex-col items-end">
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
@@ -2196,6 +2179,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </ul>
               ) : null}
             </div>
+            {queuedBehind ? <p className="-mt-0.5 text-xs text-text-muted">Waiting to send</p> : null}
             <MessageMenu
               onCopy={() => void copyMessage(body)}
               onEdit={newest ? () => startEdit(e.n, body, e.tree !== undefined) : undefined}
@@ -2280,6 +2264,25 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Default";
   // Never a bare "Mode": an unknown or not-yet-known mode shows the default mode's label.
   const modeText = (mode !== null ? MODES[mode] : undefined)?.label ?? MODES.default.label;
+  // The model menu's body, shared by the desktop model chip and the phone's combined chip.
+  const modelMenu = (
+    <>
+      <ModelChoices models={models} value={modelInfo?.value ?? ""} onPick={(v) => void pick("model", v, model, setModel)} />
+      {levels.length > 0 ? (
+        <>
+          <MenuSeparator />
+          <MenuLabel>{`Effort: ${effortText}`}</MenuLabel>
+          <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
+            {levels.map((l) => (
+              <MenuRadioItem key={l} value={l}>
+                {EFFORT_LABEL[l] ?? l}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </>
+      ) : null}
+    </>
+  );
 
   const placeholder =
     waiting !== null
@@ -2289,7 +2292,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         : isPhone()
           ? `Message ${who}`
           : commandsEnabled ? `Message ${who} — / for commands, @ for files` : `Message ${who} — @ for files`;
-  // Stop is the round button only while busy with nothing typed; with text, Send queues it and a quiet Stop sits beside it.
+  // While the AI works, the round button is always Stop. Enter with text queues the message (see the card above the box).
   const hasDraft = draft.trim() !== "" || attachments.length > 0;
 
   return (
@@ -2527,6 +2530,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     "aria-activedescendant": slashOn ? `slash-menu-opt-${slashActive}` : mentionOn ? `mention-menu-opt-${mentionActive}` : undefined,
                   }}
                   onKeyDown={onKeyDown}
+                  phoneOneRow
                   onSubmit={() => void send()}
                   onSaveLater={saveForLater}
                   onPaste={(e) => {
@@ -2602,10 +2606,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                           label="Commands"
                           trigger={
                             <ComposerChip
-                              label="Commands"
-                              menu
+                              iconOnly
+                              aria-label="Commands"
                               className="max-md:hidden"
-                              title={commands.length === 0 ? `Commands load when ${who} starts` : undefined}
+                              title={commands.length === 0 ? `Commands load when ${who} starts` : "Commands (type /)"}
+                              icon={<span aria-hidden="true" className="text-base leading-none">/</span>}
                               disabled={commands.length === 0}
                             />
                           }
@@ -2615,6 +2620,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       ) : null}
                       {!terminalProject && ws?.chat ? (
                         <AgentChip
+                          className="max-md:hidden"
                           agent={agent}
                           options={agentOptions}
                           onChange={(v) => void switchAgent(v)}
@@ -2628,7 +2634,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                         label={`Model: ${modelText}`}
                         trigger={
                           <ComposerChip
-                            className="max-w-48 shrink-0"
+                            className="max-w-48 shrink-0 max-md:hidden"
                             label={modelText}
                             menu
                             disabled={models.length === 0}
@@ -2636,20 +2642,39 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                           />
                         }
                       >
-                        <ModelChoices models={models} value={modelInfo?.value ?? ""} onPick={(v) => void pick("model", v, model, setModel)} />
-                        {levels.length > 0 ? (
+                        {modelMenu}
+                      </Menu>
+                      {/* Phones: one chip for the AI and the model, its menu holding both groups. */}
+                      <Menu
+                        side="top"
+                        align="start"
+                        label={`AI and model: ${who}, ${modelText}`}
+                        trigger={
+                          <ComposerChip
+                            className="md:hidden min-w-0 max-w-[55%] shrink"
+                            label={`${who} · ${modelText}`}
+                            menu
+                            disabled={models.length === 0 && (terminalProject || !ws?.chat)}
+                            title={busy ? "Wait until the reply finishes to switch AI" : undefined}
+                          />
+                        }
+                      >
+                        {!terminalProject && ws?.chat ? (
                           <>
-                            <MenuSeparator />
-                            <MenuLabel>{`Effort: ${effortText}`}</MenuLabel>
-                            <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
-                              {levels.map((l) => (
-                                <MenuRadioItem key={l} value={l}>
-                                  {EFFORT_LABEL[l] ?? l}
+                            <MenuLabel>AI</MenuLabel>
+                            <MenuRadioGroup value={agent} onValueChange={(next) => !agentReasons[next] && void switchAgent(next)}>
+                              {agentOptions.map((o) => (
+                                <MenuRadioItem key={o} value={o} disabled={busy || !!agentReasons[o]}>
+                                  {agentName(o)}
+                                  {agentReasons[o] ? <span className="block text-xs text-text-muted">{agentReasons[o]}</span> : null}
                                 </MenuRadioItem>
                               ))}
                             </MenuRadioGroup>
+                            <MenuSeparator />
                           </>
                         ) : null}
+                        <MenuLabel>Model</MenuLabel>
+                        {modelMenu}
                       </Menu>
                       {isClaude ? (
                         <Menu
@@ -2674,43 +2699,22 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     <>
                       {isClaude && usage?.context && usage.context.percent >= 50 ? (
                         <ComposerChip
+                          className="min-w-0 shrink"
                           label={usage.context.percent >= 85 ? "Chat almost full" : `Chat ${usage.context.percent}% full`}
-                          popoverTarget="context-popover"
+                          onClick={() => setUsageOpen(true)}
                         />
                       ) : null}
-                      {working && hasDraft ? (
-                        <ComposerChip
-                          className={cn("shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0", draft.trim() !== "" && "max-md:hidden")}
-                          icon={<Stop size={14} aria-hidden="true" />}
-                          label="Stop"
-                          hideLabelOnPhone
-                          aria-label={`Stop ${who}`}
-                          title="Stop"
-                          onClick={() => void stop()}
-                        />
-                      ) : null}
-                      {working && draft.trim() !== "" ? (
-                        <ComposerChip
-                          className="shrink-0 max-md:w-[var(--control-h-sm)] max-md:justify-center max-md:px-0"
-                          icon={<FastForward size={14} aria-hidden="true" />}
-                          label="Send now"
-                          hideLabelOnPhone
-                          aria-label="Send now"
-                          title="Stop and send now"
-                          disabled={sending || uploading}
-                          onClick={() => void sendNow()}
-                        />
-                      ) : null}
-                      {working && !hasDraft ? (
-                        <Button variant="secondary" iconOnly aria-label={`Stop ${who}`} title={`Stop ${who}`} onClick={() => void stop()}>
+                      {busy ? (
+                        <Button variant="secondary" iconOnly className="shrink-0" aria-label="Stop" title="Stop" onClick={() => void stop()}>
                           <Stop size={16} aria-hidden="true" />
                         </Button>
                       ) : (
                         <Button
                           variant="primary"
                           iconOnly
+                          className="shrink-0"
                           aria-label="Send"
-                          title={busy ? `Send (queued until ${who} is ready)` : "Send"}
+                          title="Send"
                           disabled={waiting !== null || sending || uploading || !hasDraft}
                           onClick={() => void send()}
                         >
@@ -2727,31 +2731,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
             </div>
           ) : null}
   
-          {/* Native popover: Esc and an outside click close it, no modal. Placed above the chip when it opens. */}
-          <div
-            id="context-popover"
-            popover="auto"
-            aria-label="How full this chat is"
-            className="menu m-0 inset-auto h-fit w-80 max-w-[calc(100vw-1rem)] p-4"
-            onToggle={(e) => {
-              const pop = e.currentTarget;
-              const chip = document.querySelector<HTMLElement>('[popovertarget="context-popover"]');
-              if ((e.nativeEvent as ToggleEvent).newState !== "open" || !chip) return;
-              const r = chip.getBoundingClientRect();
-              pop.style.left = `${Math.max(8, Math.min(r.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8))}px`;
-              pop.style.top = `${Math.max(8, r.top - pop.offsetHeight - 8)}px`;
-            }}
-          >
-            <p className="text-base font-semibold text-text-primary">How full this chat is</p>
-            <p className="mt-1 text-sm leading-5 text-text-muted">
-              Long chats get summarised automatically. Start a fresh project chat for a new task.
-            </p>
-            {isClaude && usage ? (
-              <div className="mt-3">
-                <UsagePanel usage={usage} />
-              </div>
-            ) : null}
-          </div>
         </div>
   
         {changesOf !== null ? (

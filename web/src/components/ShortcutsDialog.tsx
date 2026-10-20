@@ -11,6 +11,7 @@ const GROUPS: { title: string; rows: { label: string; keys: string[] }[] }[] = [
     title: "Anywhere",
     rows: [
       { label: "Open the command palette", keys: [`${MOD} K`, `${MOD} Shift P`] },
+      { label: "Show plan usage", keys: [`${MOD} U`] },
       { label: "Show or hide the terminal", keys: ["Ctrl `"] },
       { label: "Show this list", keys: ["?"] },
       { label: "Close a menu or dialog", keys: ["Esc"] },

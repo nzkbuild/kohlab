@@ -8,9 +8,9 @@
  * flight at restart is lost. Upgrade path: host it in the PTY daemon.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import type { Workspace } from "./types";
@@ -1471,6 +1471,95 @@ async function readUsage(id: string, live: Live, force: boolean): Promise<void> 
   } finally {
     usageReading.delete(id);
   }
+}
+
+/** The plan usage a get_usage reply holds, as the Usage dialog shows it. Pure. */
+export function planUsageOf(reply: any): Usage["plan"] {
+  return usageOf(null, reply).plan;
+}
+
+/** The reply to one control request in a line of the CLI's stream: ok, and its body. Undefined for any other line. Pure. */
+export function controlReplyOf(line: string, requestId: string): { ok: boolean; response: any } | undefined {
+  let m: any;
+  try {
+    m = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const r = m?.type === "control_response" ? m.response : undefined;
+  if (!r || r.request_id !== requestId) return undefined;
+  return { ok: r.subtype === "success", response: r.response };
+}
+
+/** The freshest plan usage read by any workspace's live chat, with when it was read. */
+function freshestPlan(): { plan: NonNullable<Usage["plan"]>; at: number } | null {
+  let best: { plan: NonNullable<Usage["plan"]>; at: number } | null = null;
+  for (const [id, u] of usages) {
+    const at = usageAt.get(id) ?? 0;
+    if (u.plan && (!best || at > best.at)) best = { plan: u.plan, at };
+  }
+  return best;
+}
+
+/** Plan usage with no chat running: a claude that is only asked get_usage. No user message, so no model call. Killed after its reply, or at 10 s. */
+async function headlessPlanUsage(): Promise<Usage["plan"]> {
+  const s = await loadState();
+  const cmd = (s.agents?.claude || "claude").split(/\s+/)[0];
+  const bin = Bun.which(cmd);
+  if (!bin) throw new Error(`${cmd} is not installed on this server`);
+  const dir = mkdtempSync(join(tmpdir(), "kohlab-usage-"));
+  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config"];
+  const child = spawn(bin, args, { cwd: dir, env: childEnv(homedir()), stdio: ["pipe", "pipe", "pipe"] });
+  child.stdin!.on("error", () => {}); // a dead process: the exit below reports it
+  child.stderr!.on("data", () => {});
+  try {
+    return await new Promise<Usage["plan"]>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Claude did not answer in time")), 10_000);
+      createInterface({ input: child.stdout! }).on("line", (l) => {
+        const init = controlReplyOf(l, "usage-init");
+        if (init && !init.ok) reject(new Error("Claude did not start"));
+        const got = controlReplyOf(l, "usage-get");
+        if (!got) return;
+        clearTimeout(timer);
+        if (got.ok) resolve(planUsageOf(got.response));
+        else reject(new Error("Claude could not say its usage"));
+      });
+      child.on("error", (e) => reject(e));
+      child.on("exit", () => reject(new Error("Claude stopped")));
+      child.stdin!.write(JSON.stringify({ type: "control_request", request_id: "usage-init", request: { subtype: "initialize" } }) + "\n");
+      child.stdin!.write(JSON.stringify({ type: "control_request", request_id: "usage-get", request: { subtype: "get_usage" } }) + "\n");
+    });
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The owner's plan usage for the Usage dialog. A reading under 2 minutes old is used as is; else a live chat reads it now; else a headless claude does, cached 60 s. Throws when none can read it. */
+// ponytail: one headless claude per 60 s at most, no shared process. Upgrade path: keep one warm if the dialog is opened often.
+let headlessCache: { plan: Usage["plan"]; at: number } | null = null;
+export function ownerPlanUsage(): Promise<{ plan: Usage["plan"]; at: number }> {
+  // Concurrent requests share one read.
+  inflightUsage ??= readOwnerPlanUsage().finally(() => {
+    inflightUsage = null;
+  });
+  return inflightUsage;
+}
+let inflightUsage: Promise<{ plan: Usage["plan"]; at: number }> | null = null;
+async function readOwnerPlanUsage(): Promise<{ plan: Usage["plan"]; at: number }> {
+  const now = Date.now();
+  const fresh = freshestPlan();
+  if (fresh && now - fresh.at < 120_000) return fresh;
+  if (headlessCache && now - headlessCache.at < 60_000) return headlessCache;
+  for (const [id, live] of procs) {
+    if (live.closed || live.stopping) continue;
+    await readUsage(id, live, true);
+    const got = freshestPlan();
+    if (got && got.at >= now) return got;
+    break;
+  }
+  headlessCache = { plan: await headlessPlanUsage(), at: Date.now() };
+  return headlessCache;
 }
 
 const MENTION_CAP = 50;

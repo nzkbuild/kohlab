@@ -5,6 +5,7 @@ import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
 import { projectTitle } from "../lib/format";
 import { agentName } from "../lib/agentName";
+import { cn } from "../lib/utils";
 import { workspaceStatus } from "../lib/status";
 import { Button, ComposerChip, Dialog, Field, Menu, MenuRadioGroup, MenuRadioItem, Panel } from "./ui";
 import { Composer, SaveLaterChip, SavedChip } from "./Composer";
@@ -47,7 +48,7 @@ export function useNewAgent() {
 const SIGN_IN_FIRST = "Sign in first in Settings";
 
 /** Why an AI cannot be used yet, from the server's own check, keyed by agent. Empty when ready or not yet answered. */
-function useAgentReasons(): Record<string, string> {
+export function useAgentReasons(): Record<string, string> {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   useEffect(() => {
     api.agentsStatus().then((s) => {
@@ -61,14 +62,14 @@ function useAgentReasons(): Record<string, string> {
 }
 
 /** The AI choice for a new project: a text chip with a caret. An AI that is not ready is listed but disabled, with the reason. */
-export function AgentChip({ agent, options, onChange, disabled = false, title }: { agent: string; options: string[]; onChange: (agent: string) => void; disabled?: boolean; title?: string }) {
+export function AgentChip({ agent, options, onChange, disabled = false, title, className }: { agent: string; options: string[]; onChange: (agent: string) => void; disabled?: boolean; title?: string; className?: string }) {
   const reasons = useAgentReasons();
   return (
     <Menu
       side="top"
       align="start"
       label={`AI: ${agentName(agent)}`}
-      trigger={<ComposerChip className="max-w-48 shrink-0" label={agentName(agent)} menu disabled={disabled} title={title} />}
+      trigger={<ComposerChip className={cn("max-w-48 shrink-0", className)} label={agentName(agent)} menu disabled={disabled} title={title} />}
     >
       <MenuRadioGroup value={agent} onValueChange={(next) => !reasons[next] && onChange(next)}>
         {options.map((o) => (

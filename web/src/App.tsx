@@ -14,6 +14,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import CommandPalette from "./components/CommandPalette";
 import ShortcutsDialog from "./components/ShortcutsDialog";
+import UsageDialog from "./components/UsageDialog";
 import WorkspacesView, { LaunchSheet } from "./components/WorkspacesView";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
@@ -91,6 +92,7 @@ export default function App() {
     <TooltipProvider delayDuration={300}>
       <CommandPalette />
       <ShortcutsDialog />
+      <UsageDialog />
       <LaunchSheet open={newOpen && can.mutate} onClose={() => setNewOpen(false)} />
       <Announcer />
       <Toaster

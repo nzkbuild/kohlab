@@ -251,7 +251,7 @@ export function Menu({
       </RadixMenu.Trigger>
       <RadixMenu.Portal>
         <RadixMenu.Content
-          className="menu"
+          className="menu max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto"
           align={align}
           side={side}
           sideOffset={4}
@@ -270,7 +270,15 @@ export const MenuRoot = RadixMenu.Root;
 export const MenuTrigger = RadixMenu.Trigger;
 export const MenuPortal = RadixMenu.Portal;
 export function MenuContent(props: RadixMenu.DropdownMenuContentProps) {
-  return <RadixMenu.Content className="menu" align="end" sideOffset={4} collisionPadding={8} {...props} />;
+  return (
+    <RadixMenu.Content
+      className="menu max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto"
+      align="end"
+      sideOffset={4}
+      collisionPadding={8}
+      {...props}
+    />
+  );
 }
 
 export function MenuSub({ label, icon, children }: { label: string; icon?: ReactNode; children: ReactNode }) {

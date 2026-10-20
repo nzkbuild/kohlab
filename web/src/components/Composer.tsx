@@ -32,12 +32,14 @@ interface ComposerProps {
   /** Bottom row, left and right of a flexible gap. */
   leading?: ReactNode;
   trailing?: ReactNode;
+  /** On phones the bottom row stays on one line (its chips shrink); the row still wraps elsewhere. */
+  phoneOneRow?: boolean;
   className?: string;
 }
 
 /**
  * The one message box for chat and Home. Two rows: the text on top, a bottom
- * row of controls. No border: the raised fill is the edge.
+ * row of controls, its left edge on the text's. No border: the raised fill is the edge.
  */
 export function Composer({
   id,
@@ -58,6 +60,7 @@ export function Composer({
   attachments,
   leading,
   trailing,
+  phoneOneRow = false,
   className,
 }: ComposerProps) {
   // Grow with the text, up to about eight lines (five on a phone).
@@ -90,7 +93,7 @@ export function Composer({
 
   return (
     <div
-      className={cn("flex flex-col gap-1 rounded-composer bg-surface-raised px-4 pt-2.5 pb-2", className)}
+      className={cn("flex flex-col gap-1 rounded-composer bg-surface-raised px-4 pt-2 pb-2", className)}
       onDragOver={(e: DragEvent<HTMLDivElement>) => {
         if (onDropFiles && e.dataTransfer.types.includes("Files")) e.preventDefault();
       }}
@@ -117,7 +120,8 @@ export function Composer({
         onFocus={onFocus}
         className="block min-h-9 w-full min-w-0 resize-none bg-transparent py-1.5 text-base leading-6 text-text-primary outline-none! placeholder:text-text-muted disabled:cursor-not-allowed"
       />
-      <div className="flex min-w-0 items-center gap-1">
+      {/* The chips' 10px inner padding is pulled into the margin, so a chip's glyph or label lines up with the text above. */}
+      <div className={cn("-ml-2.5 flex min-w-0 items-center gap-1 flex-wrap", phoneOneRow && "max-md:flex-nowrap")}>
         {leading}
         <div className="min-w-2 flex-1" />
         {trailing}

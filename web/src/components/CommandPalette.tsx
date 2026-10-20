@@ -9,6 +9,7 @@ import {
   Eye,
   File,
   FolderSimple,
+  Gauge,
   GearSix,
   House,
   Keyboard,
@@ -90,6 +91,7 @@ export default function CommandPalette() {
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
   const setShortcutsOpen = useApp((s) => s.setShortcutsOpen);
+  const setUsageOpen = useApp((s) => s.setUsageOpen);
   const can = useCan();
   const refresh = useApp((s) => s.refresh);
 
@@ -197,6 +199,14 @@ export default function CommandPalette() {
     ...(isTouchOnly()
       ? []
       : [
+          {
+            id: "action-usage",
+            label: "Usage",
+            group: "Actions" as const,
+            icon: <Gauge size={16} />,
+            keywords: ["plan", "limit", "limits", "quota", "claude"],
+            onAction: () => setUsageOpen(true),
+          },
           {
             id: "action-shortcuts",
             label: "Keyboard shortcuts",

@@ -7,6 +7,7 @@ import {
   CaretDoubleRight,
   DotsThree,
   DownloadSimple,
+  Gauge,
   GearSix,
   Keyboard,
   MagnifyingGlass,
@@ -553,6 +554,10 @@ export default function Sidebar({ open, onClose }: Props) {
               <MenuItem onSelect={() => navigate({ kind: "settings" })}>
                 <GearSix size={16} aria-hidden="true" />
                 Settings
+              </MenuItem>
+              <MenuItem onSelect={() => useApp.getState().setUsageOpen(true)}>
+                <Gauge size={16} aria-hidden="true" />
+                Usage
               </MenuItem>
               {isTouchOnly() ? null : (
                 <MenuItem onSelect={() => useApp.getState().setShortcutsOpen(true)}>

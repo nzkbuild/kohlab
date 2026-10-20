@@ -44,6 +44,12 @@ export interface AppState {
   /** The keyboard shortcuts list (?, or from the palette and the account menu). */
   shortcutsOpen: boolean;
   setShortcutsOpen: (value: boolean) => void;
+  /** The Usage dialog (Ctrl/Cmd+U, the account menu, the palette, the context chip). */
+  usageOpen: boolean;
+  setUsageOpen: (value: boolean) => void;
+  /** The open chat's context window, set by the chat while it is open; the Usage dialog shows it as "This chat". */
+  chatContext: { used: number; limit: number; percent: number } | null;
+  setChatContext: (value: { used: number; limit: number; percent: number } | null) => void;
 
   setNavOpen: (value: boolean) => void;
   setNewOpen: (value: boolean) => void;
@@ -124,6 +130,10 @@ export const useApp = create<AppState>((set, get) => ({
   setPaletteOpen: (value) => set({ paletteOpen: value }),
   shortcutsOpen: false,
   setShortcutsOpen: (value) => set({ shortcutsOpen: value }),
+  usageOpen: false,
+  setUsageOpen: (value) => set({ usageOpen: value }),
+  chatContext: null,
+  setChatContext: (value) => set({ chatContext: value }),
 
   setNavOpen: (value) => set({ navOpen: value }),
   setNewOpen: (value) => set({ newOpen: value }),

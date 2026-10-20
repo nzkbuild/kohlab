@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, handoffText, helperLabel, noticeText, rankFiles, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile } from "../chat.ts";
+import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, handoffText, helperLabel, noticeText, rankFiles, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile, planUsageOf, controlReplyOf } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -142,6 +142,18 @@ check("plan: a window the CLI leaves out is null", used.plan.week, null);
 check("plan: subscription name", used.plan.subscription, "pro");
 check("no plan limits: plan is null", usageOf({ totalTokens: 1, maxTokens: 10 }, { rate_limits_available: false }).plan, null);
 check("no context size: context is null", usageOf({}, {}).context, null);
+
+// the owner's plan usage for the Usage dialog: a get_usage reply, and the one control reply in a stream line
+check(
+  "plan usage: both windows, rounded, with the plan name",
+  planUsageOf({ rate_limits_available: true, subscription_type: "max", rate_limits: { five_hour: { utilization: 34.4, resets_at: "2026-10-20T12:20:00Z" }, seven_day: { utilization: 61, resets_at: null } } }),
+  { subscription: "max", fiveHour: { percent: 34, resetsAt: "2026-10-20T12:20:00Z" }, week: { percent: 61, resetsAt: null } },
+);
+check("plan usage: no limits reported is null", planUsageOf({ rate_limits_available: false }), null);
+check("control reply: the matching request's body", controlReplyOf(JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: "usage-get", response: { a: 1 } } }), "usage-get"), { ok: true, response: { a: 1 } });
+check("control reply: another request is ignored", controlReplyOf(JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: "usage-init", response: {} } }), "usage-get"), undefined);
+check("control reply: a torn line is ignored", controlReplyOf('{"type":"control_resp', "usage-get"), undefined);
+check("control reply: an error reply is not ok", controlReplyOf(JSON.stringify({ type: "control_response", response: { subtype: "error", request_id: "usage-get", error: "x" } }), "usage-get").ok, false);
 
 // the menus and settings kept across a restart (chats/<id>.caps.json)
 const dir = mkdtempSync(join(tmpdir(), "caps-check-"));

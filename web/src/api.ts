@@ -327,6 +327,8 @@ export const api = {
   installAgent: (name: string, cmd: string) =>
     json<{ ok: boolean; output?: string }>("/api/agents/install", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, cmd }) }),
   ghRepos: () => json<{ ok: boolean; repos: string[]; authed: boolean }>("/api/gh/repos"),
+  /** The owner's plan usage. 403 for a member or viewer, 503 when it cannot be read. */
+  usage: () => json<{ plan: NonNullable<ChatUsage["plan"]> | null; at: number }>("/api/usage"),
   release: (force = false) => json<ReleaseStatus>(`/api/release${force ? "?force=1" : ""}`),
   applyUpdate: () => json<{ started?: boolean; log?: string }>("/api/release/update", { method: "POST" }),
   uploadImage: async (workspaceId: string, image: Blob): Promise<{ path: string; mimeType: string; bytes: number }> => {
