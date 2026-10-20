@@ -17,23 +17,51 @@ import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import "monaco-editor/esm/vs/basic-languages/monaco.contribution";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { loader, type Monaco } from "@monaco-editor/react";
+import { useEffect, useState } from "react";
 import { monoFont, tokenColor } from "./tokenColor";
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 loader.config({ monaco });
 
-export const MONACO_THEME = "kohlab";
+export const MONACO_DARK = "kohlab-dark";
+export const MONACO_LIGHT = "kohlab-light";
+const LIGHT_QUERY = "(prefers-color-scheme: light)";
 
-/** Colours from the same tokens as the terminal, so the panes read as one surface. */
+/** The editor follows the OS setting, like the rest of the page. */
+export function monacoTheme(): string {
+  return typeof matchMedia === "function" && matchMedia(LIGHT_QUERY).matches ? MONACO_LIGHT : MONACO_DARK;
+}
+
+/** The theme name for the current OS setting, switching live when it changes. */
+export function useMonacoTheme(): string {
+  const [name, setName] = useState(monacoTheme);
+  useEffect(() => {
+    const query = matchMedia(LIGHT_QUERY);
+    const onChange = () => {
+      // Colours are read from the page's tokens at define time, so they are read again before the switch.
+      defineKohlabTheme(monaco);
+      setName(monacoTheme());
+    };
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return name;
+}
+
+/** Both themes. The dark one reads the pinned .dark-pane tokens; the light one reads the page's, which are light whenever it is selected. */
 export function defineKohlabTheme(m: Monaco) {
-  // The editor is dark in both modes: read the pinned .dark-pane tokens, not the
-  // page's (which flip with the OS setting). The probe is attached only to be read.
+  defineOne(m, MONACO_DARK, "vs-dark", "dark-pane");
+  defineOne(m, MONACO_LIGHT, "vs", "");
+}
+
+function defineOne(m: Monaco, name: string, base: "vs" | "vs-dark", paneClass: string) {
+  // The probe is attached only to be read, with the pane class that pins the tokens.
   const el = document.createElement("div");
-  el.className = "dark-pane";
+  el.className = paneClass;
   document.body.appendChild(el);
   const c = (token: string, alpha?: number) => tokenColor(el, token, alpha) ?? "#000000";
-  m.editor.defineTheme(MONACO_THEME, {
-    base: "vs-dark",
+  m.editor.defineTheme(name, {
+    base,
     inherit: true,
     rules: [],
     colors: {

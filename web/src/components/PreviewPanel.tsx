@@ -221,7 +221,7 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
       onBlur={() => setDraft(null)}
       onKeyDown={onAddressKey}
       className={cn(
-        "min-w-0 flex-1 truncate rounded-full border-0 px-4 text-[15px] text-text-primary placeholder:text-text-muted",
+        "min-w-0 flex-1 truncate rounded-full border-0 px-4 text-base text-text-primary placeholder:text-text-muted",
         fieldHeight,
         fieldFill,
       )}

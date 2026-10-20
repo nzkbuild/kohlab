@@ -13,6 +13,7 @@ import JoinView from "./components/JoinView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import CommandPalette from "./components/CommandPalette";
+import ShortcutsDialog from "./components/ShortcutsDialog";
 import WorkspacesView, { LaunchSheet } from "./components/WorkspacesView";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
@@ -31,6 +32,7 @@ export default function App() {
   const loading = useApp((s) => s.loading);
   const error = useApp((s) => s.error);
   const connection = useApp((s) => s.connection);
+  const unreachable = useApp((s) => s.refreshFailures >= 2);
   const loadMe = useApp((s) => s.loadMe);
   const newOpen = useApp((s) => s.newOpen);
   const setNewOpen = useApp((s) => s.setNewOpen);
@@ -88,6 +90,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={300}>
       <CommandPalette />
+      <ShortcutsDialog />
       <LaunchSheet open={newOpen && can.mutate} onClose={() => setNewOpen(false)} />
       <Announcer />
       <Toaster
@@ -150,6 +153,12 @@ export default function App() {
 
             {/* Silent while connected; the page only speaks up when it cannot
                 reach the server, and says the agents are unaffected. */}
+            {/* Two background refreshes in a row failed: a slim line, gone on the next success. The socket's banner below takes precedence. */}
+            {unreachable && connection !== "reconnecting" && connection !== "offline" ? (
+              <div role="status" className="flex items-center gap-2 bg-surface-raised px-4 py-1.5 text-sm text-text-secondary">
+                Can&apos;t reach Kohlab. Trying again…
+              </div>
+            ) : null}
             {connection === "reconnecting" || connection === "offline" ? (
               <div role="status" className="conn-banner" data-state={connection}>
                 <span className="chip-dot" aria-hidden="true" />

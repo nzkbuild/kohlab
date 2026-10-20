@@ -65,6 +65,8 @@ export type ChatEvent = { n: number; at: number } & (
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
   | { kind: "done" }
   | { kind: "error"; text: string }
+  /** A quiet line in the chat: "Switched to X", "Went back to before: …", compaction or model-fallback notices, "Background task finished: …". */
+  | { kind: "note"; text: string }
 );
 
 export interface TreeNode {

@@ -41,7 +41,7 @@ function Branch({ nodes, prefix, depth, ...rest }: Omit<Props, "nodes"> & { node
                 aria-expanded={open}
                 onClick={() => onToggle(path)}
                 style={indent}
-                className="flex min-h-8 w-full items-center gap-1.5 rounded-lg pe-2 text-start text-[14px] text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:min-h-11"
+                className="flex min-h-8 w-full items-center gap-1.5 rounded-lg pe-2 text-start text-small text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:min-h-11"
               >
                 <CaretRight size={12} className={cn("shrink-0 text-text-muted transition-transform", open && "rotate-90")} aria-hidden="true" />
                 <span className="min-w-0 truncate">{node.name}</span>
@@ -69,7 +69,7 @@ function Branch({ nodes, prefix, depth, ...rest }: Omit<Props, "nodes"> & { node
               )}
             >
               <FileText size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
-              <span className="mono min-w-0 flex-1 truncate text-[13px]">{node.name}</span>
+              <span className="mono min-w-0 flex-1 truncate text-sm">{node.name}</span>
               {change ? <span className="shrink-0 text-xs text-text-muted">{change}</span> : null}
             </button>
           </li>

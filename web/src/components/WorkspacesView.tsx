@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUp, GithubLogo, Robot, X } from "@phosphor-icons/react";
+import { ArrowUp, GithubLogo, X } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
@@ -44,19 +44,37 @@ export function useNewAgent() {
   return { agent, setAgent, options: ["claude", ...installed], codexNeedsSignIn: !codexSignedIn };
 }
 
-/** The AI choice for a new project: a composer chip. On a phone it is the icon alone, so the composer does not crowd. */
+const SIGN_IN_FIRST = "Sign in first in Settings";
+
+/** Why an AI cannot be used yet, from the server's own check, keyed by agent. Empty when ready or not yet answered. */
+function useAgentReasons(): Record<string, string> {
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.agentsStatus().then((s) => {
+      const next: Record<string, string> = {};
+      if (s.claude === true && s.claudeSignedIn === false) next.claude = SIGN_IN_FIRST;
+      if (s.codex === true && s.codexSignedIn === false) next.codex = SIGN_IN_FIRST;
+      setReasons(next);
+    }, () => {});
+  }, []);
+  return reasons;
+}
+
+/** The AI choice for a new project: a text chip with a caret. An AI that is not ready is listed but disabled, with the reason. */
 export function AgentChip({ agent, options, onChange, disabled = false, title }: { agent: string; options: string[]; onChange: (agent: string) => void; disabled?: boolean; title?: string }) {
+  const reasons = useAgentReasons();
   return (
     <Menu
       side="top"
       align="start"
       label={`AI: ${agentName(agent)}`}
-      trigger={<ComposerChip className="max-w-48 shrink-0" icon={<Robot size={14} aria-hidden="true" />} label={agentName(agent)} hideLabelOnPhone menu disabled={disabled} title={title} />}
+      trigger={<ComposerChip className="max-w-48 shrink-0" label={agentName(agent)} menu disabled={disabled} title={title} />}
     >
-      <MenuRadioGroup value={agent} onValueChange={onChange}>
+      <MenuRadioGroup value={agent} onValueChange={(next) => !reasons[next] && onChange(next)}>
         {options.map((o) => (
-          <MenuRadioItem key={o} value={o}>
+          <MenuRadioItem key={o} value={o} disabled={!!reasons[o]}>
             {agentName(o)}
+            {reasons[o] ? <span className="block text-xs text-text-muted">{reasons[o]}</span> : null}
           </MenuRadioItem>
         ))}
       </MenuRadioGroup>
@@ -228,7 +246,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
     <Dialog.Root open={open} onOpenChange={(o) => (o ? null : onClose())}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="fixed top-1/2 left-1/2 z-[var(--z-dialog)] max-h-[90vh] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-card bg-surface-raised p-6 text-text-primary shadow-[0_1.5rem_4rem_oklch(0.08_0.002_286/0.55)] max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:max-h-[90dvh] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-t-[18px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:px-4 max-md:pt-0 max-md:pb-[max(1rem,var(--safe-bottom))] max-md:before:mx-auto max-md:before:mt-2.5 max-md:before:mb-4 max-md:before:block max-md:before:h-1 max-md:before:w-9 max-md:before:rounded-full max-md:before:bg-line-strong max-md:before:content-[''] max-md:motion-safe:animate-[kohlab-sheet-up_240ms_ease-out]">
+        <Dialog.Content className="dialog-content p-6 max-md:px-4 max-md:pt-0">
           <header className="flex items-center justify-between gap-4">
             <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">New project</Dialog.Title>
             <Dialog.Close asChild>
@@ -248,7 +266,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
 
 /** Starter ideas: each one fills the composer. "Something else" just puts the cursor there. */
 const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator"];
-const CHIP = "inline-flex h-9 items-center rounded-full bg-surface-raised px-3.5 text-[14px] text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+const CHIP = "inline-flex h-9 items-center rounded-full bg-surface-raised px-3.5 text-small text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 
 /**
  * Home, and the same screen for a first run with no projects: one question, one
@@ -379,7 +397,7 @@ export function HomeScreen() {
     <div className="surface">
       <div className="surface-inner">
         <div className="mx-auto flex w-full max-w-[720px] flex-col items-center px-4 pt-[12vh] pb-16">
-          <h1 className="text-center text-[28px] leading-[34px] font-medium tracking-tight text-text-primary max-md:text-[24px] max-md:leading-[30px]">
+          <h1 className="text-center text-2xl font-medium tracking-tight text-text-primary">
             What should we build?
           </h1>
 

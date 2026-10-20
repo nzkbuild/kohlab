@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { toast } from "sonner";
-import { MONACO_THEME, baseOptions, defineKohlabTheme } from "../lib/monaco";
+import { baseOptions, defineKohlabTheme, useMonacoTheme } from "../lib/monaco";
 import {
   ArrowCounterClockwise,
   ArrowUUpLeft,
@@ -23,6 +23,8 @@ import { languageForFile, splitUnifiedDiff } from "../lib/diff";
 import { workspaceStatus } from "../lib/status";
 import { cn } from "../lib/utils";
 import type { DiffFile, Version } from "../types";
+import { agentName } from "../lib/agentName";
+import { changeWord } from "./files/tree";
 import { Button, EmptyState, Kbd, Skeleton, SkeletonRows } from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -67,6 +69,7 @@ const PANE_CLASS = "flex min-h-72 min-w-0 flex-1 flex-col shell:min-h-0";
 
 /** One file's diff: Monaco side by side, or the plain text when the file is Not a text file. */
 function FileDiff({ name, diff }: { name: string; diff: string }) {
+  const theme = useMonacoTheme();
   const stats = diffStats(diff);
   // The API returns a unified diff (a patch), not two documents. Splitting it is
   // what lets the editor show the actual change instead of patch syntax.
@@ -89,7 +92,7 @@ function FileDiff({ name, diff }: { name: string; diff: string }) {
       original={split.original}
       modified={split.modified}
       beforeMount={defineKohlabTheme}
-      theme={MONACO_THEME}
+      theme={theme}
       onMount={(editor) => editor.getOriginalEditor().updateOptions({ ariaLabel: `original version of ${name}` })}
       options={{
         ...baseOptions(),
@@ -128,6 +131,7 @@ function Totals({ added, removed }: { added: number; removed: number }) {
 export default function DiffView({ workspaceId, simple = false }: Props) {
   const task = useApp((s) => s.workspaces.find((w) => w.id === workspaceId)?.task ?? "");
   const workspace = useApp((s) => s.workspaces.find((w) => w.id === workspaceId) ?? null);
+  const who = agentName(workspace?.agent ?? "claude");
   const refresh = useApp((s) => s.refresh);
   const can = useCan();
 
@@ -368,7 +372,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
           ? "Could not load the changes"
           : count === 0
             ? "Nothing new since you last kept"
-            : "What Claude changed";
+            : `What ${who} changed`;
     // Same guard as the developer view's discard: the server refuses a reset under a live agent.
     const simpleBusy = keeping || undoing || restoring || !!workspace?.running;
 
@@ -435,7 +439,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
               </Button>
             </div>
             {count > 0 ? (
-              <p className="mt-1 text-[14px] text-text-muted">
+              <p className="mt-1 text-small text-text-muted">
                 {count} {count === 1 ? "file" : "files"} since you last pressed Keep.
               </p>
             ) : null}
@@ -456,11 +460,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 <ul className="mt-3 flex flex-col">
                   {files.map((file) => {
                     const isCurrent = current?.name === file.name;
-                    const word = /^new file mode/m.test(file.diff)
-                      ? "New"
-                      : /^deleted file mode/m.test(file.diff)
-                        ? "Removed"
-                        : "Changed";
+                    const word = changeWord(file.diff);
                     return (
                       <li key={file.name}>
                         <button
@@ -473,7 +473,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                           )}
                         >
                           <FileText size={16} className="shrink-0 text-text-muted" aria-hidden="true" />
-                          <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary" title={file.name}>
+                          <span className="min-w-0 flex-1 truncate text-base text-text-primary" title={file.name}>
                             {file.name}
                           </span>
                           <span className="shrink-0 text-sm text-text-muted">{word}</span>
@@ -496,7 +496,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 ) : null}
                 {/* The code is mounted only once opened: the editor is the heavy part. */}
                 <details className="group mt-4" onToggle={(e) => setShowCode(e.currentTarget.open)}>
-                  <summary className="flex min-h-11 w-fit cursor-pointer list-none select-none items-center gap-1.5 rounded-lg px-3 text-[14px] text-text-muted hover:bg-surface-hover hover:text-text-primary [&::-webkit-details-marker]:hidden">
+                  <summary className="flex min-h-11 w-fit cursor-pointer list-none select-none items-center gap-1.5 rounded-lg px-3 text-small text-text-muted hover:bg-surface-hover hover:text-text-primary [&::-webkit-details-marker]:hidden">
                     <CaretRight size={14} aria-hidden="true" className="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
                     Show the code
                   </summary>
@@ -518,7 +518,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                   {versions.map((v, i) => (
                     <li key={v.id} className="flex min-h-11 items-center gap-3 rounded-lg px-3 max-md:min-h-13">
                       <span className="tnum shrink-0 text-sm text-text-muted">{sidebarWhen(v.at)}</span>
-                      <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary" title={v.label}>
+                      <span className="min-w-0 flex-1 truncate text-base text-text-primary" title={v.label}>
                         {v.label}
                       </span>
                       {i === 0 ? (
@@ -542,7 +542,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
             if (!v) setConfirmUndo(false);
           }}
           title="Undo the changes?"
-          description="Everything Claude changed since you last pressed Keep will be removed. This can't be reversed."
+          description={`Everything ${who} changed since you last pressed Keep will be removed. This can't be reversed.`}
           confirmLabel="Undo"
           busy={undoing}
           onConfirm={() => void undoSimple()}

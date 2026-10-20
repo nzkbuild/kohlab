@@ -41,12 +41,20 @@ export function hasKey() {
  * still accepted by the server, for existing bookmarks and curl, but a key in a
  * query string leaks into browser history, proxy logs and Referer.
  */
+/** What a person sees when the request never reached Kohlab (offline, server down, a dropped connection). */
+export const UNREACHABLE_MESSAGE = "Can't reach Kohlab. Check your connection and try again.";
+
 async function req(path: string, opts: RequestInit = {}): Promise<Response> {
-  const res = await fetch(path, {
-    ...opts,
-    headers: key ? { ...(opts.headers || {}), authorization: `Bearer ${key}` } : { ...(opts.headers || {}) },
-  });
-  return res;
+  try {
+    return await fetch(path, {
+      ...opts,
+      headers: key ? { ...(opts.headers || {}), authorization: `Bearer ${key}` } : { ...(opts.headers || {}) },
+    });
+  } catch (e) {
+    // fetch rejects with a TypeError ("Failed to fetch", "NetworkError…", "Load failed") when no answer comes back.
+    if (e instanceof TypeError) throw new Error(UNREACHABLE_MESSAGE);
+    throw e;
+  }
 }
 
 /** The subprotocol a socket offers to carry the key. Mirrors the server's KEY_PROTOCOL. */

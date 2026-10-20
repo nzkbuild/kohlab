@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { api } from "../api";
 import { useApp } from "../store";
 import type { Workspace } from "../types";
+import { agentName } from "./agentName";
 
 export type ModelChoice = "opus" | "sonnet" | "haiku" | "default";
 
@@ -20,7 +21,7 @@ export function modelOf(w: Workspace | undefined): ModelChoice {
 
 /** Continue needs a conversation to resume: a chat with no messages has no session yet. */
 export function canContinue(w: Workspace | undefined): boolean {
-  return !!w?.chat && !!w.chatSession;
+  return !!w?.chat && w.agent === "claude" && !!w.chatSession;
 }
 
 /** Saves the model, then refreshes the list. Errors are shown, never thrown. */
@@ -29,8 +30,15 @@ export async function changeModel(w: Workspace, model: ModelChoice): Promise<voi
     await api.setModel(w.id, model);
     await useApp.getState().refresh();
     const name = model === "default" ? "the account default" : MODEL_LABEL[model];
-    toast.success(w.chat ? `Claude will use ${name} from the next message` : `Claude will use ${name} after Restart Claude`);
+    const who = agentName(w.agent);
+    toast.success(w.chat ? `${who} will use ${name} from the next message` : `${who} will use ${name} after Restart ${who}`);
   } catch (e) {
     toast.error(`Could not change the model, ${(e as Error).message}`);
   }
+}
+
+/** Starts a new conversation (null) or switches the project to an earlier one. */
+export async function switchConversation(workspaceId: string, sid: string | null): Promise<void> {
+  await api.chatSwitch(workspaceId, sid);
+  await useApp.getState().refresh();
 }

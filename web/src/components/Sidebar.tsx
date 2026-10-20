@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -9,6 +8,7 @@ import {
   DotsThree,
   DownloadSimple,
   GearSix,
+  Keyboard,
   MagnifyingGlass,
   PencilSimple,
   Trash,
@@ -24,9 +24,10 @@ import { announce } from "../lib/announce";
 import { restoreFocusAfterClose } from "../lib/inputModality";
 import { cn } from "../lib/utils";
 import { isPhone } from "../lib/viewport";
+import { isTouchOnly } from "../lib/platform";
 import ConfirmDialog from "./ConfirmDialog";
 import { disposeWorkspaceTerminals } from "./terminalCache";
-import { Button, Dialog, MenuItem, Tooltip } from "./ui";
+import { Button, Dialog, MenuContent, MenuItem, MenuPortal, MenuRoot, MenuTrigger, Tooltip } from "./ui";
 
 const COLLAPSE_KEY = "kohlab_sidebar_collapsed";
 
@@ -153,11 +154,11 @@ export function RenameDialog({
             <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end">
               <Dialog.Close asChild>
                 <Button variant="secondary" size="sm" className="max-md:w-full">
-                  cancel
+                  Cancel
                 </Button>
               </Dialog.Close>
               <Button type="submit" variant="primary" size="sm" disabled={busy} aria-busy={busy} className="max-md:w-full">
-                {busy ? "saving…" : "save"}
+                {busy ? "Saving…" : "Save"}
               </Button>
             </div>
           </form>
@@ -337,7 +338,7 @@ export default function Sidebar({ open, onClose }: Props) {
           variant="quiet"
           iconOnly
           size="sm"
-          className={cn("sidebar-search", collapsed && "shell:hidden")}
+          className="sidebar-search"
           aria-label="Search projects"
           onClick={() => useApp.getState().setPaletteOpen(true)}
         >
@@ -392,7 +393,7 @@ export default function Sidebar({ open, onClose }: Props) {
         <p className="sidebar-section-title px-2.5 pb-1.5 pt-5 text-sm text-text-faint">Projects</p>
         {workspaces.length === 0 ? (
           <p className="sidebar-label px-2 pt-2 text-sm leading-relaxed text-text-muted">
-            Nothing yet. Start a new project and Claude gets to work.
+            Nothing yet. Start a new project and the AI gets to work.
           </p>
         ) : (
           <div className="flex flex-col gap-0.5">
@@ -409,7 +410,7 @@ export default function Sidebar({ open, onClose }: Props) {
               // Viewers get no menu, so right-click keeps the browser's own.
               const canMenu = can.mutate;
               return (
-                <DropdownMenu.Root
+                <MenuRoot
                   key={workspace.id}
                   open={canMenu && menuFor === workspace.id}
                   onOpenChange={(next) => setMenuFor(next ? workspace.id : null)}
@@ -476,7 +477,7 @@ export default function Sidebar({ open, onClose }: Props) {
                       </span>
                     ) : null}
                     {canMenu && !editing ? (
-                      <DropdownMenu.Trigger asChild>
+                      <MenuTrigger asChild>
                         <button
                           type="button"
                           ref={(el) => {
@@ -489,16 +490,12 @@ export default function Sidebar({ open, onClose }: Props) {
                         >
                           <DotsThree size={16} aria-hidden="true" />
                         </button>
-                      </DropdownMenu.Trigger>
+                      </MenuTrigger>
                     ) : null}
                   </div>
                   {canMenu ? (
-                    <DropdownMenu.Portal>
-                      <DropdownMenu.Content
-                        className="menu"
-                        align="end"
-                        sideOffset={4}
-                        collisionPadding={8}
+                    <MenuPortal>
+                      <MenuContent
                         onCloseAutoFocus={(e) => {
                           if (renameNext.current === null) {
                             restoreFocusAfterClose(e, moreButtons.current.get(workspace.id));
@@ -522,10 +519,10 @@ export default function Sidebar({ open, onClose }: Props) {
                           <Trash size={16} aria-hidden="true" />
                           Delete project…
                         </MenuItem>
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Portal>
+                      </MenuContent>
+                    </MenuPortal>
                   ) : null}
-                </DropdownMenu.Root>
+                </MenuRoot>
               );
             })}
           </div>
@@ -533,9 +530,9 @@ export default function Sidebar({ open, onClose }: Props) {
       </nav>
 
       <div className="p-2.5">
-        <DropdownMenu.Root>
+        <MenuRoot>
           <Tooltip content={accountName} disabled={!collapsed}>
-            <DropdownMenu.Trigger asChild>
+            <MenuTrigger asChild>
               <button ref={accountTrigger} type="button" className="sidebar-row" aria-label={`Account, ${accountName}`}>
                 <span
                   className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-active text-xs font-semibold text-text-primary"
@@ -545,30 +542,33 @@ export default function Sidebar({ open, onClose }: Props) {
                 </span>
                 <span className="sidebar-label min-w-0 flex-1 truncate text-base text-text-primary">{accountName}</span>
               </button>
-            </DropdownMenu.Trigger>
+            </MenuTrigger>
           </Tooltip>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              className="menu"
+          <MenuPortal>
+            <MenuContent
               align="start"
               side="top"
-              sideOffset={4}
-              collisionPadding={8}
               onCloseAutoFocus={(e) => restoreFocusAfterClose(e, accountTrigger.current)}
             >
               <MenuItem onSelect={() => navigate({ kind: "settings" })}>
                 <GearSix size={16} aria-hidden="true" />
                 Settings
               </MenuItem>
+              {isTouchOnly() ? null : (
+                <MenuItem onSelect={() => useApp.getState().setShortcutsOpen(true)}>
+                  <Keyboard size={16} aria-hidden="true" />
+                  Keyboard shortcuts
+                </MenuItem>
+              )}
               {installEvent && !standalone ? (
                 <MenuItem onSelect={() => void install()}>
                   <DownloadSimple size={16} aria-hidden="true" />
                   Install app
                 </MenuItem>
               ) : null}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+            </MenuContent>
+          </MenuPortal>
+        </MenuRoot>
       </div>
 
       <RenameDialog

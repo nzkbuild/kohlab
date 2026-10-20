@@ -22,11 +22,17 @@ export function filePaths(nodes: TreeNode[], prefix = ""): string[] {
   });
 }
 
-/** "New" when the diff adds the file from nothing, otherwise "Changed". */
-export type Change = "New" | "Changed";
+/** The same words in Changes and Files: a file the diff adds is New, one it deletes is Removed, anything else Changed. */
+export type Change = "New" | "Removed" | "Changed";
+
+export function changeWord(diff: string): Change {
+  if (/^new file mode/m.test(diff) || diff.startsWith("--- /dev/null")) return "New";
+  if (/^deleted file mode/m.test(diff)) return "Removed";
+  return "Changed";
+}
 
 export function changeMap(files: DiffFile[]): Map<string, Change> {
-  return new Map(files.map((f) => [f.name, f.diff.startsWith("--- /dev/null") ? "New" : "Changed"]));
+  return new Map(files.map((f) => [f.name, changeWord(f.diff)]));
 }
 
 /** The image MIME type for a file the Files view shows as a picture, or null for everything else. */

@@ -65,6 +65,8 @@ function keyFields(e: KeyboardEvent) {
 export default function BrowserView({ workspaceId, onUrl }: Props) {
   const can = useCan();
   const [phase, setPhase] = useState<Phase>("starting");
+  // Until the first picture is drawn the canvas is blank, so the page says it is starting.
+  const [framed, setFramed] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
@@ -141,6 +143,7 @@ export default function BrowserView({ workspaceId, onUrl }: Props) {
           }
           canvas.getContext("2d")?.drawImage(bmp, 0, 0);
           deviceRef.current = { width: bmp.width, height: bmp.height };
+          setFramed(true);
         }
         bmp?.close();
         ack(f.seq);
@@ -367,16 +370,17 @@ export default function BrowserView({ workspaceId, onUrl }: Props) {
       {ripples.map((r) => (
         <span key={r.id} aria-hidden="true" className="browser-ripple" style={{ left: r.x, top: r.y }} />
       ))}
-      {phase === "starting" ? (
+      {phase === "starting" || (phase === "live" && !framed) ? (
         <div className="absolute inset-0 flex items-center justify-center bg-surface-sunken p-6 text-center">
-          <p role="status" className="text-[15px] text-text-muted">
-            Starting the browser…
+          <p role="status" className="flex items-center gap-2 text-base text-text-muted">
+            <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
+            Starting the preview…
           </p>
         </div>
       ) : null}
       {phase === "error" ? (
         <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-sunken p-6 text-center">
-          <p className="max-w-sm text-[15px] text-text-secondary">{errorText}</p>
+          <p className="max-w-sm text-base text-text-secondary">{errorText}</p>
           <Button
             variant="secondary"
             onClick={() => {

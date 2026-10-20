@@ -3,7 +3,7 @@
  * of the home bundle: this module pulls in lib/monaco (the whole editor).
  */
 import Editor from "@monaco-editor/react";
-import { MONACO_THEME, baseOptions, defineKohlabTheme } from "../../lib/monaco";
+import { baseOptions, defineKohlabTheme, useMonacoTheme } from "../../lib/monaco";
 import { languageForFile } from "../../lib/diff";
 
 interface Props {
@@ -14,6 +14,7 @@ interface Props {
 }
 
 export default function CodeEditor({ path, value, readOnly, onChange }: Props) {
+  const theme = useMonacoTheme();
   return (
     <Editor
       height="100%"
@@ -21,7 +22,7 @@ export default function CodeEditor({ path, value, readOnly, onChange }: Props) {
       language={languageForFile(path)}
       value={value}
       beforeMount={defineKohlabTheme}
-      theme={MONACO_THEME}
+      theme={theme}
       onChange={(next) => onChange(next ?? "")}
       options={{
         ...baseOptions(),

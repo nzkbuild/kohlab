@@ -5,6 +5,7 @@ import { useApp, useCan } from "../store";
 import { api, clearKey } from "../api";
 import type { AgentStatus } from "../types";
 import { announce, setAnnouncementsPaused } from "../lib/announce";
+import { agentName } from "../lib/agentName";
 import { cn } from "../lib/utils";
 import PushToggle from "./PushToggle";
 import UpdatePanel from "./UpdatePanel";
@@ -33,7 +34,7 @@ const PERMISSION_CHIP: Record<Permission, string> = {
 const SECTIONS: { id: SettingsSection; label: string; hint: string; icon: typeof Bell }[] = [
   { id: "account", label: "Account", hint: "Who is signed in on this computer.", icon: UserCircle },
   { id: "appearance", label: "Appearance", hint: "How the project page looks.", icon: SlidersHorizontal },
-  { id: "agents", label: "Agents", hint: "The AI helpers on this computer.", icon: Sparkle },
+  { id: "agents", label: "AI", hint: "The AI helpers on this computer.", icon: Sparkle },
   { id: "notifications", label: "Notifications", hint: "What reaches you when Kohlab is in the background.", icon: Bell },
   { id: "updates", label: "Updates", hint: "New versions of Kohlab.", icon: ArrowsClockwise },
 ];
@@ -89,15 +90,10 @@ function AppearancePane() {
   );
 }
 
-/** Agents on this computer, Claude first. The names are what people see; the keys are what the server reports. */
-const AGENT_NAMES: [key: string, name: string][] = [
-  ["claude", "Claude Code"],
-  ["codex", "Codex"],
-  ["gemini", "Gemini CLI"],
-  ["opencode", "OpenCode"],
-  ["pi", "Pi"],
-  ["omp", "Oh My Pi"],
-];
+/** The AIs on this computer, Claude first. Names come from agentName; keys are what the server reports. */
+const AGENT_KEYS = ["claude", "hermes", "omp", "codex", "gemini", "opencode", "pi"];
+/** Always listed; the others appear only once installed. */
+const ALWAYS_LISTED = new Set(["claude", "hermes", "omp", "codex"]);
 
 /** Codex sign-in for the owner: shows the code and link from `codex login --device-auth`, then polls until the browser approval lands. */
 function CodexSignIn({ onConnected }: { onConnected: () => void }) {
@@ -214,7 +210,9 @@ function AgentsPane({ owner }: { owner: boolean }) {
   const codexNeedsSignIn = status?.codex === true && status.codexSignedIn !== true;
 
   // Claude stays first; of the rest, installed ones come before the ones not set up.
-  const rows = AGENT_NAMES.map(([key, name]) => ({ key, name, installed: status?.[key] === true }));
+  const rows = AGENT_KEYS.map((key) => ({ key, name: agentName(key), installed: status?.[key] === true })).filter(
+    (r) => ALWAYS_LISTED.has(r.key) || r.installed,
+  );
   const ordered = [rows[0], ...rows.slice(1).filter((r) => r.installed), ...rows.slice(1).filter((r) => !r.installed)];
 
   const chipFor = (row: { key: string; installed: boolean }) => {
@@ -222,18 +220,12 @@ function AgentsPane({ owner }: { owner: boolean }) {
     if (row.key === "claude") {
       if (!row.installed) {
         return (
-          <span className={cn("chip", "chip-danger")}>
-            <span className="chip-dot" aria-hidden="true" />
-            Not set up
-          </span>
+          <Chip>Not set up</Chip>
         );
       }
       if (notSignedIn) {
         return (
-          <span className={cn("chip", "chip-danger")}>
-            <span className="chip-dot" aria-hidden="true" />
-            Not signed in
-          </span>
+          <Chip>Not signed in</Chip>
         );
       }
       return (
@@ -247,10 +239,7 @@ function AgentsPane({ owner }: { owner: boolean }) {
       if (status?.codexSignedIn === true) return <Chip>Signed in</Chip>;
       if (status?.codexSignedIn === false) {
         return (
-          <span className={cn("chip", "chip-danger")}>
-            <span className="chip-dot" aria-hidden="true" />
-            Not signed in
-          </span>
+          <Chip>Not signed in</Chip>
         );
       }
     }
@@ -284,11 +273,11 @@ function AgentsPane({ owner }: { owner: boolean }) {
             "Claude is not set up on this computer yet. Ask whoever installed Kohlab to set it up, then check again."
           ) : notSignedIn ? (
             <>
-              Claude is installed but not signed in. On the server, run <code className="mono rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">claude</code> once
+              Claude is installed but not signed in. On the server, run <code className="mono rounded bg-surface-sunken px-1 py-0.5">claude</code> once
               and sign in with your Claude account, then check again.
             </>
           ) : (
-            "New projects start with Claude Code. Other agents can run in a project's terminal; chat support for them comes later."
+            "Pick which AI to use when you start a project."
           )}
         </p>
         {codexNeedsSignIn ? (
@@ -315,10 +304,9 @@ export default function Settings() {
 
   // Read, never request: `Notification.permission` is free, and browsers only
   // honour a request from a user gesture.
-  const [permission, setPermission] = useState<Permission>(() =>
+  const [permission] = useState<Permission>(() =>
     typeof Notification === "undefined" ? "unsupported" : Notification.permission,
   );
-  const [asking, setAsking] = useState(false);
   const [paused, setPaused] = useState(() => localStorage.getItem(PAUSE_KEY) === "1");
 
   // The pause control (SC 2.2.2): persist it, and push it into the
@@ -328,27 +316,16 @@ export default function Settings() {
     localStorage.setItem(PAUSE_KEY, paused ? "1" : "0");
   }, [paused]);
 
-  const askPermission = async () => {
-    if (typeof Notification === "undefined") return;
-    setAsking(true);
-    try {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      announce(result === "granted" ? "notifications turned on" : "notifications are off");
-    } catch (e) {
-      setPermission(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
-      announce(`Could not turn on notifications: ${(e as Error).message}`);
-    } finally {
-      setAsking(false);
-    }
-  };
-
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
   // Updates are owner-only: nobody else is shown a page the server would refuse.
   const sections = SECTIONS.filter((x) => x.id !== "updates" || can.own);
   const wanted = route.kind === "settings" ? route.section : undefined;
   const active = sections.find((x) => x.id === wanted) ?? sections[0];
+  // A link to a section that is not here (or not for this person) shows the first one, and the address says so too.
+  useEffect(() => {
+    if (route.kind === "settings" && route.section !== undefined && route.section !== active.id) navigate({ kind: "settings", section: active.id }, { replace: true });
+  }, [route, active.id, navigate]);
 
   const notifications = (
     <Panel>
@@ -366,7 +343,7 @@ export default function Settings() {
               </span>
             </p>
             <p className="mt-1 text-xs leading-relaxed text-text-muted">
-              A ping when Claude needs you or a project is ready to check, while this tab is in the background. Nothing
+              A ping when the AI needs you or a project is ready to check, while this tab is in the background. Nothing
               is sent while you are looking at Kohlab.
             </p>
             {permission === "denied" ? (
@@ -374,13 +351,6 @@ export default function Settings() {
                 <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
                 Your browser will not ask again. Allow notifications for this site in the browser settings, then reload.
               </p>
-            ) : null}
-            {permission === "default" ? (
-              <div className="mt-2">
-                <Button variant="secondary" size="sm" disabled={asking} onClick={() => void askPermission()}>
-                  {asking ? "Asking…" : "Turn on notifications"}
-                </Button>
-              </div>
             ) : null}
           </div>
         </div>

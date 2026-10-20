@@ -89,7 +89,7 @@ export default function QuickOpen({ open, onOpenChange, paths, onPick }: Props) 
                 className="palette-item cursor-pointer"
               >
                 <FileText size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
-                <span className="mono min-w-0 flex-1 truncate text-[13px]">{path}</span>
+                <span className="mono min-w-0 flex-1 truncate text-sm">{path}</span>
               </li>
             ))}
           </ul>

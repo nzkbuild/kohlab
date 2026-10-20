@@ -144,6 +144,52 @@ check("picture and a link in one line", inline("see ![a](p.png) and [b](https://
   { kind: "link", href: "https://b.c", text: "b" },
 ]);
 
+// italic, strikethrough
+check("*italic* is em", inline("a *b* c"), [
+  { kind: "text", text: "a " },
+  { kind: "em", children: [{ kind: "text", text: "b" }] },
+  { kind: "text", text: " c" },
+]);
+check("_italic_ is em", inline("_b_"), [{ kind: "em", children: [{ kind: "text", text: "b" }] }]);
+check("snake_case_name stays text", inline("use snake_case_name here"), [{ kind: "text", text: "use snake_case_name here" }]);
+check("a lone * with spaces stays text", inline("2 * 3 * 4"), [{ kind: "text", text: "2 * 3 * 4" }]);
+check("~~strike~~ is del", inline("~~old~~ new"), [
+  { kind: "del", children: [{ kind: "text", text: "old" }] },
+  { kind: "text", text: " new" },
+]);
+check("bold is still bold, not italic", inline("**b**"), [{ kind: "strong", children: [{ kind: "text", text: "b" }] }]);
+check("italic inside a link label stays a link", links(inline("[*x*](https://a.b)")), ["https://a.b"]);
+check("italic inside backticks stays code", inline("`*x*`"), [{ kind: "code", text: "*x*" }]);
+
+// blockquote
+check(
+  "consecutive > lines are one quote",
+  parseBlocks("> one\n> two\n\nafter"),
+  [
+    { kind: "quote", lines: ["one", "two"] },
+    { kind: "p", lines: ["after"] },
+  ],
+);
+check("a quote after a blank line is a new quote", parseBlocks("> a\n\n> b"), [
+  { kind: "quote", lines: ["a"] },
+  { kind: "quote", lines: ["b"] },
+]);
+
+// headings 4 to 6, and 7 hashes is prose
+check("#### is a small heading", parseBlocks("#### Sub"), [{ kind: "subh", text: "Sub" }]);
+check("###### is a small heading", parseBlocks("###### Sub"), [{ kind: "subh", text: "Sub" }]);
+check("####### (seven) is prose", parseBlocks("####### x"), [{ kind: "p", lines: ["####### x"] }]);
+
+// nested lists
+check(
+  "indented items are one level deeper",
+  parseBlocks("- a\n  - b\n    - c\n- d"),
+  [{ kind: "ul", items: ["a", "b", "c", "d"], levels: [0, 1, 2, 0] }],
+);
+check("a tab of indent is one level deeper", parseBlocks("- a\n\t- b"), [{ kind: "ul", items: ["a", "b"], levels: [0, 1] }]);
+check("a list cannot start two levels in", parseBlocks("- a\n    - b"), [{ kind: "ul", items: ["a", "b"], levels: [0, 1] }]);
+check("a flat list has no levels key", parseBlocks("- a\n- b"), [{ kind: "ul", items: ["a", "b"] }]);
+
 if (failures) {
   console.log(`\n${failures} failed`);
   process.exit(1);

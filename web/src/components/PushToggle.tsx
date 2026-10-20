@@ -88,7 +88,7 @@ export default function PushToggle() {
         ? "On iPhone, notifications only work from the Home Screen: tap Share, then Add to Home Screen, open Kohlab from that icon, and come back here."
         : "This browser cannot show notifications.";
   } else {
-    note = "Get a notification on this device when Claude finishes or needs you, even when the browser is closed.";
+    note = "Get a notification on this device when the AI finishes or needs you, even when the browser is closed.";
   }
 
   return (

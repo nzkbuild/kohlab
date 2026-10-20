@@ -25,7 +25,9 @@ import { useApp, useCan } from "../store";
 import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
 import { projectTitle, relativeTime } from "../lib/format";
-import { canContinue } from "../lib/projectActions";
+import { canContinue, switchConversation } from "../lib/projectActions";
+import { agentName, isAiAgent } from "../lib/agentName";
+import { isTouchOnly } from "../lib/platform";
 import { cn } from "../lib/utils";
 import { useDragSize } from "../lib/useDragSize";
 import ConfirmDialog from "./ConfirmDialog";
@@ -105,7 +107,6 @@ const TEXT_ENTRY_TAGS: Record<string, true> = { INPUT: true, TEXTAREA: true, SEL
 
 /** The Conversations submenu: a new conversation, or an earlier one of this project. Loads when it opens. */
 function ConversationItems({ workspaceId, onSwitched }: { workspaceId: string; onSwitched: () => void }) {
-  const refresh = useApp((s) => s.refresh);
   const [list, setList] = useState<{ current: string | null; sessions: { id: string; title: string; at: number }[] } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
@@ -125,8 +126,7 @@ function ConversationItems({ workspaceId, onSwitched }: { workspaceId: string; o
 
   const pick = async (sid: string | null) => {
     try {
-      await api.chatSwitch(workspaceId, sid);
-      await refresh();
+      await switchConversation(workspaceId, sid);
       onSwitched();
     } catch (e) {
       toast.error((e as Error).message);
@@ -212,6 +212,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const chat = w?.chat === true;
   // A terminal project whose agent is Claude also has a chat view of its conversation.
   const claudeTerminal = !chat && w?.agent === "claude";
+  // Names the AI in menus and copy; a plain terminal project says "the terminal" and "Restart" instead.
+  const who = isAiAgent(w?.agent) ? agentName(w!.agent) : null;
   const claudeView = claudeViewState.id === workspaceId ? claudeViewState.view : readClaudeView(workspaceId);
 
   // Lifecycle toggles are bounded single-object mutations, so they may show
@@ -274,7 +276,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     const inPanel = !!document.activeElement?.closest('[aria-label="Terminal panel"]');
     setPanelOpen(false);
     if (inPanel) {
-      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Claude"]')?.focus());
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[data-composer]')?.focus());
     }
   };
   // The window listener is bound once per project, so it reads the latest toggle through a ref.
@@ -512,7 +514,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       trigger={
         <button
           type="button"
-          className="inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-row px-2.5 text-[15px] font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-row px-2.5 text-base font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           <span className="min-w-0 truncate">{title}</span>
           <CaretDown size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
@@ -526,6 +528,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       <MenuSeparator />
       {(chat || claudeTerminal) && can.mutate ? (
         <>
+          <MenuItem
+            onSelect={() =>
+              void switchConversation(workspaceId, null)
+                .then(() => goTo("chat"))
+                .catch((e: Error) => toast.error(e.message))
+            }
+          >
+            <Plus size={16} aria-hidden="true" />
+            New chat
+          </MenuItem>
           <MenuSub label="Conversations" icon={<ChatCircle size={16} aria-hidden="true" />}>
             <ConversationItems workspaceId={workspaceId} onSwitched={() => goTo("chat")} />
           </MenuSub>
@@ -535,9 +547,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       <MenuItem onSelect={() => openPanel()}>
         <Terminal size={14} aria-hidden="true" />
         <span className="flex-1">Open terminal</span>
-        <span className="text-xs text-text-faint">Ctrl `</span>
+        {isTouchOnly() ? null : <span className="whitespace-nowrap text-xs text-text-faint">Ctrl `</span>}
       </MenuItem>
-      {chat ? (
+      {chat && w?.agent === "claude" ? (
         <MenuItem
           disabled={!canContinue(w)}
           title={canContinue(w) ? undefined : "Send Claude a message first, then you can continue it here."}
@@ -556,12 +568,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <>
           <MenuItem onSelect={() => run("restart")}>
             <ArrowsClockwise size={14} aria-hidden="true" />
-            Restart Claude
+            {who ? `Restart ${who}` : "Restart"}
           </MenuItem>
           {running ? (
             <MenuItem onSelect={() => run("stop")}>
               <Stop size={14} aria-hidden="true" />
-              Stop Claude
+              {who ? `Stop ${who}` : "Stop"}
             </MenuItem>
           ) : null}
         </>
@@ -666,7 +678,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               <List size={20} aria-hidden="true" />
             </Button>
           )}
-          <h1 className="m-0 flex min-w-0 text-[15px] font-medium text-text-primary">
+          <h1 className="m-0 flex min-w-0 text-base font-medium text-text-primary">
             {can.mutate ? projectMenu : <span className="min-w-0 truncate px-2.5">{title}</span>}
           </h1>
         </div>
@@ -725,11 +737,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                     {running ? null : (
                       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-3 text-sm text-text-muted">
                         <span className="min-w-0 flex-1">
-                          {can.mutate ? "Claude has stopped. This is the last thing it showed." : "Not running, showing the last screen."}
+                          {can.mutate ? `${who ?? "The terminal"} has stopped. This is the last thing it showed.` : "Not running, showing the last screen."}
                         </span>
                         {can.mutate ? (
                           <Button variant="secondary" size="sm" className="rounded-full" onClick={() => run("start")}>
-                            Restart Claude
+                            {who ? `Restart ${who}` : "Restart"}
                           </Button>
                         ) : null}
                       </div>

@@ -1,5 +1,5 @@
 import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, FastForward, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, FastForward, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
 import type { ChatEvent as StoredChatEvent, TurnFile } from "../types";
@@ -19,7 +19,7 @@ import { agentName } from "../lib/agentName";
 import ConfirmDialog from "./ConfirmDialog";
 import { Composer, SaveLaterChip, SavedChip } from "./Composer";
 import { AgentChip, useNewAgent } from "./WorkspacesView";
-import { Button, ComposerChip, Dialog, Menu, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
+import { Button, ComposerChip, Dialog, Menu, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
 type ChatEvent = StoredChatEvent & { why?: string };
@@ -51,6 +51,27 @@ interface Props {
   /** A terminal project's Claude, shown as its chat: no Keep / Undo, since those would change the real project. */
   terminalProject?: boolean;
 }
+
+/** The text of a note: a "note" event, or an old saved tool line that says the same (from before notes existed). Null for every other event. */
+function noteOf(e: ChatEvent): string | null {
+  if (e.kind === "note") return e.text;
+  if (e.kind === "tool" && (e.text.startsWith("Switched to ") || e.text.startsWith("Went back to before:"))) return e.text;
+  return null;
+}
+
+/** A tool line that belongs to a run of tool lines (notes never do). */
+const isToolLine = (e: ChatEvent): e is ToolEvent => e.kind === "tool" && noteOf(e) === null;
+
+/** A failed request as a sentence a person can act on. */
+function friendly(err: unknown): string {
+  const m = (err instanceof Error ? err.message : String(err)).trim();
+  if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return "Can't reach Kohlab. Check your connection and try again.";
+  if (m === "") return "Something went wrong.";
+  return /[.!?]$/.test(m) ? m : `${m}.`;
+}
+
+/** A toast or inline error: "Couldn't undo. No file checkpoint found." */
+const failed = (what: string, err: unknown) => `Couldn't ${what}. ${friendly(err)}`;
 
 /** The tool lines of one run, as one plain sentence: "looked at 3 files, wrote 2 and ran 1 command". Prefixes come from describeTool in chat.ts. */
 function summarizeTools(lines: string[]): string {
@@ -355,6 +376,10 @@ function renderInline(nodes: Inline[]): ReactNode[] {
         return node.text;
       case "strong":
         return <strong key={i}>{renderInline(node.children)}</strong>;
+      case "em":
+        return <em key={i}>{renderInline(node.children)}</em>;
+      case "del":
+        return <del key={i}>{renderInline(node.children)}</del>;
       case "code":
         return (
           <code key={i} className="mono rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">
@@ -487,13 +512,13 @@ function pictureUrl(workspaceId: string, doc: string): Promise<string> {
   return url;
 }
 
-/** Posts the page's height to the chat as it changes. */
+/** Posts the page's height to the chat as it changes: the body's height plus its margins, so a small page can shrink below the frame. */
 const reportHeight = (id: string) =>
-  `<script>new ResizeObserver(()=>parent.postMessage({kohlabFrame:"${id}",h:document.documentElement.scrollHeight},"*")).observe(document.documentElement)</script>`;
+  `<script>new ResizeObserver(()=>{var b=document.body,s=getComputedStyle(b);parent.postMessage({kohlabFrame:"${id}",h:b.scrollHeight+parseFloat(s.marginTop)+parseFloat(s.marginBottom)},"*")}).observe(document.body)</script>`;
 
-/** A picture's page: the reply's own HTML, with the theme and the height reporter around it. */
-function pictureDoc(code: string, id: string, scheme: string): string {
-  const head = `<meta name="color-scheme" content="light dark"><base target="_blank"><style>html{color-scheme:${scheme}}body{margin:0;font-family:system-ui,sans-serif}</style>`;
+/** A picture's page: the reply's own HTML, with the height reporter around it. No colour scheme: the page's own styles decide. */
+function pictureDoc(code: string, id: string): string {
+  const head = `<base target="_blank"><style>body{margin:0;font-family:system-ui,sans-serif}</style>`;
   // A doctype has to stay first, or the browser renders the page in quirks mode.
   const at = /^\s*<!doctype[^>]*>/i.exec(code)?.[0].length ?? 0;
   return code.slice(0, at) + head + code.slice(at) + reportHeight(id);
@@ -528,7 +553,7 @@ function HtmlFrame({ kind, code }: { kind: "html" | "mermaid"; code: string }) {
   const label = kind === "html" ? "Picture" : "Diagram";
   const doc = useMemo(() => {
     const scheme = systemScheme();
-    return kind === "html" ? pictureDoc(code, id, scheme) : diagramDoc(code, id, scheme);
+    return kind === "html" ? pictureDoc(code, id) : diagramDoc(code, id, scheme);
   }, [kind, code, id]);
   // The page is kept on the server and framed from its own URL: the app's CSP would block its scripts as srcDoc.
   const [src, setSrc] = useState<string | null>(null);
@@ -720,6 +745,9 @@ function ProjectImage({ path, alt, thumbClass = "max-h-48" }: { path: string; al
   );
 }
 
+/** The indent of a nested list item, by its level (0 = top). */
+const NEST = ["", "ml-5", "ml-10", "ml-15"];
+
 /** What Claude said, in a measure a person can read without losing their place. A finished html or mermaid block is drawn, unless the reply is still streaming. */
 function Prose({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
@@ -727,6 +755,16 @@ function Prose({ text, streaming = false }: { text: string; streaming?: boolean 
       {parseBlocks(text).map((block, i) => {
         if (block.kind === "p") return <p key={i} className="whitespace-pre-line">{rich(block.lines.join("\n"))}</p>;
         if (block.kind === "h") return <p key={i} className="text-lg font-semibold text-text-primary">{rich(block.text)}</p>;
+        if (block.kind === "subh") return <p key={i} className="text-base font-semibold text-text-primary">{rich(block.text)}</p>;
+        if (block.kind === "quote") {
+          // A fill bar, not a border: the quote is muted text beside a tonal bar.
+          return (
+            <div key={i} className="flex min-w-0 gap-3">
+              <span aria-hidden="true" className="w-[3px] shrink-0 rounded-full bg-surface-active" />
+              <p className="min-w-0 text-text-muted whitespace-pre-line">{rich(block.lines.join("\n"))}</p>
+            </div>
+          );
+        }
         if (block.kind === "hr") return <hr key={i} className="border-line-subtle" />;
         if (block.kind === "code") {
           const lang = block.lang.toLowerCase();
@@ -761,13 +799,17 @@ function Prose({ text, streaming = false }: { text: string; streaming?: boolean 
             </div>
           );
         }
+        // Each nested level indents the item by one step (two levels and up share the last step).
         if (block.kind === "ul") {
           return (
             <ul key={i} className="space-y-1.5">
               {block.items.map((item, j) => (
                 <li
                   key={j}
-                  className="relative pl-[18px] before:absolute before:top-[10px] before:left-[4px] before:size-[5px] before:rounded-full before:bg-text-muted before:content-['']"
+                  className={cn(
+                    "relative pl-[18px] before:absolute before:top-[10px] before:left-[4px] before:size-[5px] before:rounded-full before:bg-text-muted before:content-['']",
+                    NEST[Math.min(block.levels?.[j] ?? 0, NEST.length - 1)],
+                  )}
                 >
                   {rich(item)}
                 </li>
@@ -778,7 +820,9 @@ function Prose({ text, streaming = false }: { text: string; streaming?: boolean 
         return (
           <ol key={i} className="list-decimal space-y-1.5 pl-[18px] marker:text-text-muted">
             {block.items.map((item, j) => (
-              <li key={j}>{rich(item)}</li>
+              <li key={j} className={NEST[Math.min(block.levels?.[j] ?? 0, NEST.length - 1)]}>
+                {rich(item)}
+              </li>
             ))}
           </ol>
         );
@@ -790,7 +834,7 @@ function Prose({ text, streaming = false }: { text: string; streaming?: boolean 
 /** A run of tool actions: one muted line; the caret opens the list of each action. Collapsed while live too: the working line shows the current step. */
 function ToolRun({ lines, results }: { lines: ChatEvent[]; results: Map<string, ToolResult> }) {
   const [open, setOpen] = useState(false);
-  const tools = lines.filter((e): e is ToolEvent => e.kind === "tool");
+  const tools = lines.filter(isToolLine);
   const failed = tools.filter((e) => e.toolId !== undefined && results.get(e.toolId)?.failed).length;
   const summary = summarizeTools(tools.map((e) => e.text)) + (failed ? `, ${failed} failed` : "");
   return (
@@ -1047,11 +1091,12 @@ function AnsweredGroup({ events, answers }: { events: ChatEvent[]; answers: Map<
   let commands = 0;
   let others = 0;
   for (const a of allowed) {
-    const f = /^Claude wants to (?:create|change) the file (.+)$/.exec(a.text);
+    // The agent's name leads the ask's text ("Codex wants to ..."), so the match does not depend on which agent it is.
+    const f = /^\S+ wants to (?:create|change) the file (.+)$/.exec(a.text);
     if (f) {
       changes++;
       files.add(f[1]);
-    } else if (a.text === "Claude wants to run a command") commands++;
+    } else if (/^\S+ wants to run a command$/.test(a.text)) commands++;
     else others++;
   }
   const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -1107,8 +1152,9 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
   const rows: ChatEvent[][] = [];
   for (const e of events) {
     if (e.kind === "done" || e.kind === "answer" || e.kind === "result") continue;
+    // A note is always a row of its own: it never joins a run of tool lines.
     const last = rows[rows.length - 1];
-    if (e.kind === "tool" && last?.[0].kind === "tool") last.push(e);
+    if (isToolLine(e) && last && isToolLine(last[0])) last.push(e);
     else rows.push([e]);
   }
   return rows;
@@ -1116,6 +1162,12 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
 
 /** Models past this many get a search box at the top of the model menu. */
 const MODEL_SEARCH_AT = 12;
+
+/** Commands past this many get a search box at the top of the Commands menu. */
+const COMMAND_SEARCH_AT = 12;
+
+/** Marks the composer's textarea for the workspace page's focus (WorkspaceDetail finds it by this attribute, not by its label). */
+const COMPOSER_MARK = { "data-composer": "" };
 
 /** A model's short name for the chip: the last part of its provider path ("openrouter/anthropic/claude-haiku-4.5" -> "claude-haiku-4.5"). */
 const shortModel = (value: string): string => value.slice(value.lastIndexOf("/") + 1);
@@ -1174,23 +1226,103 @@ function ModelChoices({ models, value, onPick }: { models: ModelInfo[]; value: s
   );
 }
 
-/** The row under a message: what it changed, going back to before it, and a new chat from it. Quiet: shown on hover or focus, always on touch. */
-function MessageActions({ onChanges, onBack, onBranch }: { onChanges: () => void; onBack: () => void; onBranch: () => void }) {
-  const quiet = cn(
-    "text-text-faint hover:text-text-primary [@media(pointer:coarse)]:opacity-100",
-    "motion-safe:transition-opacity opacity-0 group-focus-within/msg:opacity-100 group-hover/msg:opacity-100",
-  );
+/** The Commands menu's choices: each command's name and its one-line description. Past COMMAND_SEARCH_AT commands, a search box leads, as in the model menu. */
+function CommandChoices({ commands, onPick }: { commands: CommandInfo[]; onPick: (c: CommandInfo) => void }) {
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const search = commands.length > COMMAND_SEARCH_AT;
+  const q = query.trim().toLowerCase();
+  const shown = search && q ? commands.filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(q)) : commands;
+  // The menu takes focus when it opens; the search box takes it a frame later.
+  useEffect(() => {
+    if (!search) return;
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [search]);
+  // The first item of this menu, for the keys that move into the list.
+  const firstItem = (el: HTMLElement) => el.closest<HTMLElement>('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitem"]');
   return (
-    <div className="flex flex-wrap justify-end gap-1">
-      <Button variant="quiet" size="sm" className={quiet} onClick={onChanges}>
-        What this changed
-      </Button>
-      <Button variant="quiet" size="sm" className={quiet} onClick={onBack}>
-        Go back to here
-      </Button>
-      <Button variant="quiet" size="sm" className={quiet} onClick={onBranch}>
-        New chat from here
-      </Button>
+    <>
+      {search ? (
+        <input
+          ref={searchRef}
+          type="search"
+          aria-label="Search commands"
+          placeholder="Search commands"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // The menu's own keys (typeahead, arrows, Tab) would take these: the search box keeps them.
+            e.stopPropagation();
+            if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+              e.preventDefault();
+              firstItem(e.currentTarget)?.focus();
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              firstItem(e.currentTarget)?.click();
+            }
+          }}
+          className="field-input mx-1 mb-1 block w-[calc(100%-0.5rem)] border-0 bg-surface-base"
+        />
+      ) : null}
+      <div className="max-h-80 overflow-y-auto">
+        {shown.map((c) => (
+          <MenuItem key={c.name} onSelect={() => onPick(c)} className="min-w-0">
+            <span className="block min-w-0 truncate">{`/${c.name}`}</span>
+            {c.description ? <span className="block min-w-0 truncate text-xs text-text-muted">{c.description}</span> : null}
+          </MenuItem>
+        ))}
+      </div>
+      {search && shown.length === 0 ? <p className="px-2.5 py-1.5 text-small text-text-muted">No command matches "{query}".</p> : null}
+    </>
+  );
+}
+
+/** A quiet line in the chat, such as "Switched to Hermes": centred, muted, with room above and below. It is not a message. */
+function NoteLine({ text }: { text: string }) {
+  return <p className="px-4 text-center text-xs text-text-muted">{text}</p>;
+}
+
+/** The ⋯ under a message: copy it, and the actions that need a checkpoint or the newest message (each passed only when it applies). Quiet: shown on hover or focus, always on touch. */
+function MessageMenu({
+  onCopy,
+  onEdit,
+  onChanges,
+  onBack,
+  onBranch,
+}: {
+  onCopy: () => void;
+  onEdit?: () => void;
+  onChanges?: () => void;
+  onBack?: () => void;
+  onBranch?: () => void;
+}) {
+  return (
+    <div className="-mt-1 flex h-6 items-center justify-end">
+      <Menu
+        align="end"
+        label="Message actions"
+        trigger={
+          <Button
+            variant="quiet"
+            size="sm"
+            iconOnly
+            aria-label="Message actions"
+            className={cn(
+              "text-text-faint hover:text-text-primary data-[state=open]:opacity-100 [@media(pointer:coarse)]:opacity-100",
+              "motion-safe:transition-opacity opacity-0 group-focus-within/msg:opacity-100 group-hover/msg:opacity-100",
+            )}
+          >
+            <DotsThree size={16} aria-hidden="true" />
+          </Button>
+        }
+      >
+        <MenuItem onSelect={onCopy}>Copy message</MenuItem>
+        {onEdit ? <MenuItem onSelect={onEdit}>Edit and resend</MenuItem> : null}
+        {onChanges ? <MenuItem onSelect={onChanges}>What this changed</MenuItem> : null}
+        {onBack ? <MenuItem onSelect={onBack}>Go back to here</MenuItem> : null}
+        {onBranch ? <MenuItem onSelect={onBranch}>New chat from here</MenuItem> : null}
+      </Menu>
     </div>
   );
 }
@@ -1215,8 +1347,8 @@ function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; 
       (t) => {
         if (alive) setTurn(t);
       },
-      (e: Error) => {
-        if (alive) setError(e.message);
+      (e: unknown) => {
+        if (alive) setError(friendly(e));
       },
     );
     return () => {
@@ -1232,7 +1364,7 @@ function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; 
         <Dialog.Content aria-describedby={undefined} className="dialog-content flex max-h-[85vh] w-[90vw] max-w-[720px] flex-col gap-3 p-4">
           <Dialog.Title className="text-base font-semibold text-text-primary">What this changed</Dialog.Title>
           {error ? (
-            <p role="alert" className="text-small text-status-danger">{`Could not read the changes: ${error}`}</p>
+            <p role="alert" className="text-small text-status-danger">{`Couldn't read the changes. ${error}`}</p>
           ) : turn === null ? (
             <p className="text-small text-text-muted">Reading the changes…</p>
           ) : count === 0 ? (
@@ -1298,9 +1430,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The CLI is retrying a request: which try, of how many. And the chat's usage, read when the last turn ended.
   const [retry, setRetry] = useState<{ attempt: number; max: number } | null>(null);
   const [usage, setUsage] = useState<ChatUsage | null>(null);
-  // Undo: the newest message's id while its files are being checked, and the list the person is asked to confirm.
-  const [rewindBusy, setRewindBusy] = useState(false);
-  const [rewindPlan, setRewindPlan] = useState<{ uuid: string; files: string[]; insertions: number; deletions: number } | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [mode, setMode] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<string | null>(null);
@@ -1314,7 +1443,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const [slashShut, setSlashShut] = useState(false);
   // The "@" menu: Esc closes it for this text.
   const [mentionShut, setMentionShut] = useState(false);
-  // Scrolled up from the newest message: the "Scroll to latest" button shows.
+  // Edit and resend: the newest message being edited, and whether it has a checkpoint to go back to.
+  const [editing, setEditing] = useState<{ n: number; tree: boolean } | null>(null);
+  // Scrolled well up from the newest message: the "Scroll to latest" button shows.
   const [farFromEnd, setFarFromEnd] = useState(false);
   // Whether the project's terminal Claude is open: sending from here closes it.
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -1357,7 +1488,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const openedRef = useRef(false);
   const announcedRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const nearBottomRef = useRef(true);
+  const columnRef = useRef<HTMLDivElement>(null);
+  // Stuck to the bottom: the chat follows new content until the person scrolls up themselves.
+  const stickRef = useRef(true);
+  const lastTopRef = useRef(0);
+  const touchY = useRef(0);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // Poll: 0.5 s while the AI is working, 1 s while it waits for an answer or background tasks run, 4 s otherwise. Paused while the
@@ -1445,7 +1580,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       const hidden = Math.round(window.innerHeight - vv.height - vv.offsetTop);
       const lift = phone && document.activeElement === taRef.current && hidden > 80 ? hidden : 0;
       setKeyboard(lift);
-      if (lift && nearBottomRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      if (lift && stickRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     };
     vv.addEventListener("resize", onResize);
     return () => vv.removeEventListener("resize", onResize);
@@ -1503,7 +1638,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const pendingN = pendingAsk?.n ?? Infinity;
   const lastUserN = Math.max(0, ...events.filter((e) => e.kind === "user" && e.n < pendingN).map((e) => e.n));
   const visibleRows = useMemo(
-    () => (pendingAsk ? rows.filter((row) => !(row[0].kind === "tool" && row[0].n > lastUserN && row[0].n < pendingN)) : rows),
+    () => (pendingAsk ? rows.filter((row) => !(isToolLine(row[0]) && row[0].n > lastUserN && row[0].n < pendingN)) : rows),
     [rows, lastUserN, pendingN, pendingAsk],
   );
 
@@ -1525,7 +1660,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           continue;
         }
         let end = i;
-        for (let j = i + 1; j < turn.length && (isAnswered(turn[j]) || turn[j][0].kind === "tool"); j++) if (isAnswered(turn[j])) end = j;
+        for (let j = i + 1; j < turn.length && (isAnswered(turn[j]) || isToolLine(turn[j][0])); j++) if (isAnswered(turn[j])) end = j;
         merged.push(turn.slice(i, end + 1).flat());
         i = end;
       }
@@ -1533,34 +1668,53 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     });
   }, [visibleRows, answers]);
 
-  // Keep the newest message in view, but only while the reader is already at the bottom.
-  // On open, start at the latest user message rather than mid-reply.
+  // Open at the very bottom, and keep new content in view while the reader is stuck there.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (!openedRef.current) {
       if (events.length === 0) return;
       openedRef.current = true;
-      const start = el.querySelector<HTMLElement>("[data-turn-start]");
-      if (start) el.scrollTop += start.getBoundingClientRect().top - el.getBoundingClientRect().top - 24;
-      else el.scrollTop = el.scrollHeight;
-      nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      stickRef.current = true;
+      el.scrollTop = el.scrollHeight;
       return;
     }
-    if (nearBottomRef.current) el.scrollTop = el.scrollHeight;
+    if (stickRef.current) el.scrollTop = el.scrollHeight;
   }, [events, busy, waiting, streamed]);
+
+  // Pictures, frames and images load after the text: as the column grows, a stuck reader stays at the bottom.
+  useEffect(() => {
+    const col = columnRef.current;
+    const el = scrollRef.current;
+    if (!col || !el) return;
+    const ro = new ResizeObserver(() => {
+      if (stickRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(col);
+    return () => ro.disconnect();
+  }, []);
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    setFarFromEnd(!nearBottomRef.current);
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Moving up well above the end stops the following. Back at the end (or moved there by the app) it resumes.
+    const up = el.scrollTop < lastTopRef.current - 1;
+    lastTopRef.current = el.scrollTop;
+    if (gap < 8) stickRef.current = true;
+    else if (up && gap >= 80) stickRef.current = false;
+    setFarFromEnd(gap >= 80 && !stickRef.current);
+  };
+
+  // A wheel, a swipe down or an arrow/page key up is the reader scrolling up: stop following at once.
+  const scrollUp = () => {
+    stickRef.current = false;
   };
 
   const scrollToLatest = () => {
     const el = scrollRef.current;
     if (!el) return;
-    nearBottomRef.current = true;
+    stickRef.current = true;
     setFarFromEnd(false);
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
@@ -1572,12 +1726,12 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     try {
       await api.chatSend(workspaceId, text);
       setBusy(true);
-      nearBottomRef.current = true;
+      stickRef.current = true;
       setFarFromEnd(false);
       return true;
     } catch (e) {
       // 409 "still working": Claude is busy, so the composer locks until it is not.
-      setSendError((e as Error).message);
+      setSendError(friendly(e));
       setBusy(true);
       return false;
     } finally {
@@ -1657,7 +1811,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       try {
         paths = await uploadAll();
       } catch (e) {
-        setSendError((e as Error).message);
+        setSendError(friendly(e));
         return;
       } finally {
         setUploading(false);
@@ -1665,10 +1819,47 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       const line = `Attached: ${paths.join(", ")}`;
       message = text ? `${text}\n\n${line}` : line;
     }
+    // Edit and resend: the message's files go back first (when it has a checkpoint), then the new text is sent as a normal message.
+    if (editing?.tree) {
+      try {
+        await api.chatGoBack(workspaceId, editing.n);
+      } catch (e) {
+        setSendError(failed("go back", e));
+        return;
+      }
+    }
     if (await sendText(message)) {
       setDraft("");
       clearAttachments();
+      setEditing(null);
     }
+  };
+
+  /** Copies a message's own text (its Attached line is not part of what the person wrote). */
+  const copyMessage = async (text: string) => {
+    try {
+      await copyText(text);
+      announce("Copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
+
+  /** Edit and resend: the newest message goes into the box, and the line above the box says so until it is sent or cancelled. */
+  const startEdit = (n: number, body: string, tree: boolean) => {
+    setEditing({ n, tree });
+    setDraft(body);
+    focusEnd();
+  };
+
+  /** Puts the caret at the end of the box. Waits a frame, so a menu that just closed does not take focus back. */
+  const focusEnd = () => {
+    window.requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
   };
 
   // The "/" menu: while the text is a command name with no space yet, the commands that start with it.
@@ -1724,11 +1915,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     taRef.current?.focus();
   };
 
-  /** The "/" chip: an empty draft becomes "/", which opens the command list. */
-  const openCommands = () => {
-    if (draft === "") setDraft("/");
+  /** The Commands chip's pick: "/name " goes at the start of the draft, and what was typed stays after it. */
+  const insertCommand = (c: CommandInfo) => {
+    setDraft(`/${c.name} ${draft.trimStart()}`);
     setSlashShut(false);
-    taRef.current?.focus();
+    focusEnd();
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1788,7 +1979,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await api.chatAnswer(workspaceId, requestId, allow, extra);
       repoll();
     } catch (e) {
-      toast.error(`Could not answer, ${(e as Error).message}`);
+      toast.error(failed("answer", e));
     } finally {
       setAnswering(null);
     }
@@ -1843,7 +2034,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await api.chatControl(workspaceId, action, value);
     } catch (e) {
       set(current);
-      toast.error(`Could not change that, ${(e as Error).message}`);
+      toast.error(failed("change that", e));
     } finally {
       repoll();
     }
@@ -1855,7 +2046,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await api.chatControl(workspaceId, "agent", value);
       await refresh();
     } catch (e) {
-      toast.error(`Could not switch, ${(e as Error).message}`);
+      toast.error(failed("switch", e));
     } finally {
       repoll();
     }
@@ -1864,9 +2055,15 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const working = busy && waiting === null;
   // The line under the last message: the newest tool line of this turn if the code has one, else "Working".
   const lastUserAllN = Math.max(0, ...events.filter((e) => e.kind === "user").map((e) => e.n));
-  const latestTool = [...events].reverse().find((e): e is ToolEvent => e.kind === "tool" && e.n > lastUserAllN);
-  // While the CLI retries a failed request, the working line says which try it is on.
-  const currentAction = retry ? `Retrying (attempt ${retry.attempt}${retry.max ? ` of ${retry.max}` : ""})…` : latestTool ? workingLine(latestTool.text) : "Working";
+  const latestTool = [...events].reverse().find((e): e is ToolEvent => isToolLine(e) && e.n > lastUserAllN);
+  // While the CLI retries a failed request, the working line says which try it is on. While the reply is being written, it says so, not the last step.
+  const currentAction = retry
+    ? `Retrying (attempt ${retry.attempt}${retry.max ? ` of ${retry.max}` : ""})…`
+    : streamed.trim() !== ""
+      ? "Writing a reply"
+      : latestTool
+        ? workingLine(latestTool.text)
+        : "Working";
 
   // Keep / Undo only while the AI's changes are waiting to be kept or undone.
   const ws = findWorkspace(workspaces, workspaceId);
@@ -1900,7 +2097,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await refresh();
       toast.success("Saved");
     } catch (e) {
-      toast.error(`Could not save, ${(e as Error).message}`);
+      toast.error(failed("save", e));
     } finally {
       setKeeping(false);
     }
@@ -1913,7 +2110,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await refresh();
       toast.success("Changes undone");
     } catch (e) {
-      toast.error(`Could not undo, ${(e as Error).message}`);
+      toast.error(failed("undo", e));
     } finally {
       setUndoing(false);
       setConfirmUndo(false);
@@ -1927,42 +2124,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await api.chatControl(workspaceId, "stop_task", taskId);
       announce("Task stopped");
     } catch (e) {
-      toast.error(`Could not stop that, ${(e as Error).message}`);
+      toast.error(failed("stop that", e));
     } finally {
       setStopping(null);
       repoll();
-    }
-  };
-
-  /** Undo, step 1: which files Claude changed since this message. None: say so. Otherwise the list to confirm. */
-  const previewUndo = async (uuid: string) => {
-    setRewindBusy(true);
-    try {
-      const r = await api.chatControl(workspaceId, "rewind_preview", uuid);
-      const files = r.files ?? [];
-      if (files.length === 0) toast("No files changed since that message");
-      else setRewindPlan({ uuid, files, insertions: r.insertions ?? 0, deletions: r.deletions ?? 0 });
-    } catch (e) {
-      toast.error(`Could not undo, ${(e as Error).message}`);
-    } finally {
-      setRewindBusy(false);
-    }
-  };
-
-  /** Undo, step 2: put the files back as they were before the message. */
-  const confirmRewind = async () => {
-    if (!rewindPlan) return;
-    setRewindBusy(true);
-    try {
-      await api.chatControl(workspaceId, "rewind", rewindPlan.uuid);
-      const n = rewindPlan.files.length;
-      toast.success(`Undid changes to ${n} ${n === 1 ? "file" : "files"}`);
-      await refresh();
-    } catch (e) {
-      toast.error(`Could not undo, ${(e as Error).message}`);
-    } finally {
-      setRewindBusy(false);
-      setRewindPlan(null);
     }
   };
 
@@ -1980,7 +2145,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       toast.success("Went back. Your files are as they were before that message.");
       await refresh();
     } catch (e) {
-      toast.error(`Could not go back, ${(e as Error).message}`);
+      toast.error(failed("go back", e));
     } finally {
       setGoingBack(false);
       setBackTo(null);
@@ -1995,22 +2160,24 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       toast.success("Started a new chat from here");
       await refresh();
     } catch (e) {
-      toast.error(`Could not start a new chat, ${(e as Error).message}`);
+      toast.error(failed("start a new chat", e));
     }
   };
 
   const renderEvent = (e: ChatEvent) => {
+    const note = noteOf(e);
+    if (note !== null) return <NoteLine text={note} />;
     switch (e.kind) {
       case "user": {
         const { body, files } = splitAttached(e.text);
         // Pictures show as thumbnails; the other files stay as chips. Attachments are always saved in uploads/.
         const pictures = files.filter((name) => pictureType(name) !== null);
         const others = files.filter((name) => pictureType(name) === null);
-        // Undo only for the newest message, and only once it has an id (a terminal's imported history has none).
-        const uuid = e.uuid;
-        const undoable = isClaude && uuid !== undefined && e.n === lastUserAllN && !busy && waiting === null && can;
+        // Edit and resend: the newest message, once the AI is idle. Going back and a new chat need a checkpoint (a turn that changed nothing has none).
+        const newest = e.n === lastUserAllN && !busy && waiting === null && can;
+        const checkpoint = e.tree !== undefined && can && !busy;
         return (
-          <div className="group/msg flex flex-col items-end gap-1" data-turn-start={e.n === lastUserN ? "" : undefined}>
+          <div className="group/msg flex flex-col items-end">
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
               {body}
               {pictures.map((name, i) => (
@@ -2029,23 +2196,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </ul>
               ) : null}
             </div>
-            {undoable ? (
-              <Button
-                variant="quiet"
-                size="sm"
-                className="text-sm text-text-secondary"
-                disabled={rewindBusy}
-                onClick={() => {
-                  if (uuid) void previewUndo(uuid);
-                }}
-              >
-                <ArrowCounterClockwise size={14} aria-hidden="true" />
-                {"Undo this message's changes"}
-              </Button>
-            ) : null}
-            {e.tree !== undefined && can && !busy ? (
-              <MessageActions onChanges={() => setChangesOf({ n: e.n })} onBack={() => setBackTo({ n: e.n, text: e.text })} onBranch={() => void branchFrom(e.n)} />
-            ) : null}
+            <MessageMenu
+              onCopy={() => void copyMessage(body)}
+              onEdit={newest ? () => startEdit(e.n, body, e.tree !== undefined) : undefined}
+              onChanges={checkpoint ? () => setChangesOf({ n: e.n }) : undefined}
+              onBack={checkpoint ? () => setBackTo({ n: e.n, text: e.text }) : undefined}
+              onBranch={checkpoint ? () => void branchFrom(e.n) : undefined}
+            />
           </div>
         );
       }
@@ -2121,7 +2278,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const storedModel = modelOf(ws ?? undefined);
   const modelText = !isClaude ? (model ? shortModel(model) : "Default") : (modelInfo?.displayName ?? (model ? modelName(model) : storedModel === "default" ? "Default" : MODEL_LABEL[storedModel]));
   const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Default";
-  const modeText = mode === null ? "Mode" : (MODES[mode]?.label ?? mode);
+  // Never a bare "Mode": an unknown or not-yet-known mode shows the default mode's label.
+  const modeText = (mode !== null ? MODES[mode] : undefined)?.label ?? MODES.default.label;
 
   const placeholder =
     waiting !== null
@@ -2140,8 +2298,27 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
-            <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overscroll-contain">
+            <div
+              ref={scrollRef}
+              onScroll={onScroll}
+              onWheel={(e) => {
+                if (e.deltaY < 0) scrollUp();
+              }}
+              onTouchStart={(e) => {
+                touchY.current = e.touches[0]?.clientY ?? 0;
+              }}
+              onTouchMove={(e) => {
+                const y = e.touches[0]?.clientY ?? 0;
+                if (y > touchY.current + 4) scrollUp();
+                touchY.current = y;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") scrollUp();
+              }}
+              className="absolute inset-0 overflow-y-auto overscroll-contain"
+            >
               <div
+                ref={columnRef}
                 role="log"
                 aria-live="polite"
                 aria-label={`Conversation with ${who}`}
@@ -2150,7 +2327,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   compact ? "pt-4" : "mx-auto max-w-[720px] shell:px-6",
                 )}
               >
-                {events.length === 0 && !busy ? (
+                {events.every((e) => noteOf(e) !== null) && !busy ? (
                   <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
                     <h2 className="text-xl font-semibold text-text-primary">{`What should ${who} build?`}</h2>
                     <p className="text-base text-text-muted">{`Describe it in your own words. ${who} will ask before changing anything important.`}</p>
@@ -2164,7 +2341,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
                       {turn.map((row) => (
                         <Fragment key={row[0].n}>
-                          {row[0].kind === "tool" ? (
+                          {isToolLine(row[0]) ? (
                             <ToolRun lines={row} results={results} />
                           ) : row.length > 1 ? (
                             <AnsweredGroup events={row} answers={answers} />
@@ -2216,11 +2393,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </div>
               </div>
                 ) : null}
-                {todos.length > 0 ? (
-                  <div className="mb-2">
-                    <Checklist todos={todos} />
-                  </div>
-                ) : null}
+                {todos.length > 0 ? <Checklist todos={todos} /> : null}
                 {working ? (
                   <WorkingLine
                     action={currentAction}
@@ -2270,6 +2443,25 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     {sendError}
                   </p>
                 ) : null}
+
+                {editing ? (
+                  <p className="mb-2 flex flex-wrap items-center gap-x-1.5 text-sm text-text-muted">
+                    <span>{editing.tree ? "Editing your last message" : "Editing your last message (files stay as they are)"}</span>
+                    <span aria-hidden="true">·</span>
+                    <Button
+                      variant="quiet"
+                      size="sm"
+                      className="text-xs text-text-secondary"
+                      onClick={() => {
+                        // The text stays in the box as an ordinary draft; only the edit ends.
+                        setEditing(null);
+                        taRef.current?.focus();
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </p>
+                ) : null}
   
                 {attachNote ? (
                   <p role="alert" className="mb-2 text-sm text-status-danger">
@@ -2279,7 +2471,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   
                 {terminalProject && terminalOpen && !busy && waiting === null ? (
                   <p className="mb-2 text-xs text-text-muted">
-                    Sending from here closes Claude's terminal screen. The conversation carries on here, and in Terminal when you switch back.
+                    {`Sending from here closes ${who}'s terminal screen. The conversation carries on here, and in Terminal when you switch back.`}
                   </p>
                 ) : null}
                 {slashOn ? (
@@ -2316,7 +2508,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 ) : null}
   
                 <Composer
-                  ariaLabel={`Message ${who}`}
+                  ariaLabel="Message"
                   textareaRef={taRef}
                   value={draft}
                   onChange={(v) => {
@@ -2328,6 +2520,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   placeholder={placeholder}
                   disabled={waiting !== null}
                   textareaAria={{
+                    ...COMPOSER_MARK,
                     "aria-autocomplete": "list",
                     "aria-expanded": slashOn || mentionOn,
                     "aria-controls": slashOn ? "slash-menu" : mentionOn ? "mention-menu" : undefined,
@@ -2403,14 +2596,22 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                         taRef.current?.focus();
                       }} />
                       {commandsEnabled ? (
-                      <ComposerChip
-                        label="Commands"
-                        className="max-md:hidden"
-                        aria-label="Commands"
-                        title={commands.length === 0 ? "Commands load when Claude starts" : undefined}
-                        disabled={commands.length === 0}
-                        onClick={openCommands}
-                      />
+                        <Menu
+                          side="top"
+                          align="start"
+                          label="Commands"
+                          trigger={
+                            <ComposerChip
+                              label="Commands"
+                              menu
+                              className="max-md:hidden"
+                              title={commands.length === 0 ? `Commands load when ${who} starts` : undefined}
+                              disabled={commands.length === 0}
+                            />
+                          }
+                        >
+                          <CommandChoices commands={commands} onPick={insertCommand} />
+                        </Menu>
                       ) : null}
                       {!terminalProject && ws?.chat ? (
                         <AgentChip
@@ -2573,36 +2774,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           tone="commit"
           busy={goingBack}
           onConfirm={() => void confirmGoBack()}
-        />
-        <ConfirmDialog
-          open={rewindPlan !== null}
-          onOpenChange={(v) => {
-            if (!v) setRewindPlan(null);
-          }}
-          title="Undo these changes?"
-          description={
-            rewindPlan
-              ? `${who} changed ${rewindPlan.files.length} ${rewindPlan.files.length === 1 ? "file" : "files"} since that message. They go back to how they were before it.`
-              : ""
-          }
-          details={
-            rewindPlan ? (
-              <>
-                <ul className="mono flex flex-col gap-0.5 break-all">
-                  {rewindPlan.files.map((f) => (
-                    <li key={f}>{f}</li>
-                  ))}
-                </ul>
-                <p className="mt-1">
-                  {rewindPlan.insertions} lines added, {rewindPlan.deletions} removed
-                </p>
-              </>
-            ) : null
-          }
-          confirmLabel="Undo"
-          tone="danger"
-          busy={rewindBusy}
-          onConfirm={() => void confirmRewind()}
         />
         <ConfirmDialog
           open={confirmUndo}

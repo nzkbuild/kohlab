@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, handoffText, helperLabel, noticeText, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile } from "../chat.ts";
+import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, handoffText, helperLabel, noticeText, rankFiles, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -234,6 +234,22 @@ check("handoffText: the line after the first says how many were left out", /^\(�
 check("handoffText: the latest message is kept", bigLines.at(-1), "Person: latest question");
 check("handoffText: the summary stays within the budget", bigOut.length <= 1000, true);
 check("handoffText: a short conversation has no omission line", handoffText(bigEvents.slice(0, 3), "omp").includes("left out"), false);
+
+// a note is a divider, not an AI step: handoffText leaves it out
+check("handoffText: a note is skipped", handoffText([hev(1, { kind: "user", text: "hi" }), hev(2, { kind: "note", text: "Switched to omp" }), hev(3, { kind: "assistant", text: "hello" })], "claude"), "Person: hi\nAssistant: hello");
+check("handoffText: a note alone is empty", handoffText([hev(1, { kind: "note", text: "Went back to before: “x”" })], "claude"), "");
+check("handoffText: an old saved go-back tool line is skipped too", handoffText([hev(1, { kind: "user", text: "hi" }), hev(2, { kind: "tool", text: "Went back to before: “x”" })], "claude"), "Person: hi");
+check("handoffText: an old saved background line is skipped too", handoffText([hev(1, { kind: "user", text: "hi" }), hev(2, { kind: "tool", text: "Background task finished: npm test" })], "claude"), "Person: hi");
+check("handoffText: a real AI step is still kept", handoffText([hev(1, { kind: "tool", text: "Created index.html" })], "claude"), "Did: Created index.html");
+
+// @ mentions: a case-insensitive substring of the path; basename prefix matches first; at most 50
+const files = ["docs/readme.md", "src/App.tsx", "src/apple/index.ts", "pineapple.txt", "lib/app.css"];
+check("rankFiles: case-insensitive substring of the path", rankFiles(files, "APP"), ["src/App.tsx", "lib/app.css", "src/apple/index.ts", "pineapple.txt"]);
+check("rankFiles: basename prefix ranks before a mid-name match", rankFiles(["x/pineapple.txt", "app.md"], "app"), ["app.md", "x/pineapple.txt"]);
+check("rankFiles: a directory part matches", rankFiles(files, "src/"), ["src/App.tsx", "src/apple/index.ts"]);
+check("rankFiles: no match is empty", rankFiles(files, "zzz"), []);
+check("rankFiles: an empty query lists the files in order", rankFiles(files, ""), files);
+check("rankFiles: capped at 50", rankFiles(Array.from({ length: 80 }, (_, i) => `f${i}.ts`), "f").length, 50);
 
 if (failures) {
   console.log(`\n${failures} failed`);

@@ -8,8 +8,10 @@ import {
   DownloadSimple,
   Eye,
   File,
+  FolderSimple,
   GearSix,
   House,
+  Keyboard,
   Link,
   MagnifyingGlass,
   Plus,
@@ -23,7 +25,7 @@ import { announce } from "../lib/announce";
 import { copyText } from "../lib/clipboard";
 import { readDraft } from "../lib/drafts";
 import { PROMPT_MAX } from "../lib/route";
-import { isApple } from "../lib/platform";
+import { isApple, isTouchOnly, isTypingTarget } from "../lib/platform";
 import { canContinue } from "../lib/projectActions";
 import type { PanelAction, PanelRequest } from "../store";
 import type { Workspace } from "../types";
@@ -46,18 +48,6 @@ type PaletteItem = {
   status?: WorkspaceStatus;
   onAction: () => void | Promise<unknown>;
 };
-
-/**
- * Focus is "busy typing" inside a form control or a live terminal; the Ctrl/⌘ K
- * accelerator belongs to the field there, not to the palette.
- */
-function isTypingTarget(target: EventTarget | null): boolean {
-  // A key event can target the document itself; nothing is "typing" then.
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return true;
-  return target.closest(".terminal-wrap, .xterm") !== null;
-}
 
 /** The open project's own actions. Changing things is for people who can change the project. */
 function projectActionItems(
@@ -99,6 +89,7 @@ export default function CommandPalette() {
   const requestPanel = useApp((s) => s.requestPanel);
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
+  const setShortcutsOpen = useApp((s) => s.setShortcutsOpen);
   const can = useCan();
   const refresh = useApp((s) => s.refresh);
 
@@ -176,14 +167,15 @@ export default function CommandPalette() {
       onAction: () => navigate({ kind: "settings" }),
     },
     // One entry per project, in sidebar order, with the sidebar's dot for the two statuses that need the user.
-    ...sidebarOrder(workspaces).map((w) => {
+    // The open project has its own group above, so it is not listed twice.
+    ...sidebarOrder(workspaces).filter((w) => w.id !== openId).map((w) => {
       const status = workspaceStatus(w);
       const title = projectTitle(w);
       return {
         id: `project-${w.id}`,
         label: title,
         group: "Projects" as const,
-        icon: <span className="inline-block size-4" />,
+        icon: <FolderSimple size={16} />,
         status,
         keywords: [w.id],
         onAction: () => navigate({ kind: "workspace", id: w.id }),
@@ -202,6 +194,18 @@ export default function CommandPalette() {
           },
         ]
       : []),
+    ...(isTouchOnly()
+      ? []
+      : [
+          {
+            id: "action-shortcuts",
+            label: "Keyboard shortcuts",
+            group: "Actions" as const,
+            icon: <Keyboard size={16} />,
+            keywords: ["keys", "hotkeys", "shortcuts", "help"],
+            onAction: () => setShortcutsOpen(true),
+          },
+        ]),
     ...(draftText.trim() !== ""
       ? [
           {
@@ -303,7 +307,7 @@ export default function CommandPalette() {
               placeholder="Search projects, or run a command…"
               className="min-w-0 flex-1 bg-transparent py-3 text-sm text-text-primary outline-none! placeholder:text-text-faint"
             />
-            <Kbd>{isApple ? "⌘K" : "Ctrl K"}</Kbd>
+            {isTouchOnly() ? null : <Kbd>{isApple ? "⌘K" : "Ctrl K"}</Kbd>}
             <Dialog.Close asChild>
               <Button variant="quiet" iconOnly size="sm" aria-label="Close">
                 <X size={13} />
@@ -340,7 +344,7 @@ export default function CommandPalette() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate">{entry.label}</span>
                       </span>
-                      {entry.hint ? <span className="shrink-0 text-xs text-text-faint">{entry.hint}</span> : null}
+                      {entry.hint && !isTouchOnly() ? <span className="shrink-0 whitespace-nowrap text-xs text-text-faint">{entry.hint}</span> : null}
                       {entry.status === "needs-you" || entry.status === "needs-review" ? (
                         <>
                           <span className="sidebar-dot" aria-hidden="true" />

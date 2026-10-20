@@ -23,6 +23,8 @@ export interface AppState {
   error: string | null;
   lastUpdated: number | null;
   connection: Connection;
+  /** Background refreshes that failed in a row. Two or more shows the "Can't reach Kohlab" line; a success clears it. */
+  refreshFailures: number;
   /** null until /api/account answers. Treated as permissive meanwhile: hiding
    *  controls for a beat on every load would flicker for the common case. */
   me: Me | null;
@@ -39,6 +41,9 @@ export interface AppState {
   /** The command palette (⌘K or the sidebar search button). */
   paletteOpen: boolean;
   setPaletteOpen: (value: boolean) => void;
+  /** The keyboard shortcuts list (?, or from the palette and the account menu). */
+  shortcutsOpen: boolean;
+  setShortcutsOpen: (value: boolean) => void;
 
   setNavOpen: (value: boolean) => void;
   setNewOpen: (value: boolean) => void;
@@ -101,6 +106,7 @@ export const useApp = create<AppState>((set, get) => ({
   error: null,
   lastUpdated: null,
   connection: "connecting",
+  refreshFailures: 0,
   me: null,
   powerTools: readPowerTools(),
   setPowerTools: (value) => {
@@ -116,6 +122,8 @@ export const useApp = create<AppState>((set, get) => ({
   navOpen: false,
   paletteOpen: false,
   setPaletteOpen: (value) => set({ paletteOpen: value }),
+  shortcutsOpen: false,
+  setShortcutsOpen: (value) => set({ shortcutsOpen: value }),
 
   setNavOpen: (value) => set({ navOpen: value }),
   setNewOpen: (value) => set({ newOpen: value }),
@@ -125,9 +133,9 @@ export const useApp = create<AppState>((set, get) => ({
   refresh: async () => {
     try {
       const workspaces = await api.workspaces();
-      set({ workspaces, loading: false, error: null, lastUpdated: Date.now() });
+      set({ workspaces, loading: false, error: null, lastUpdated: Date.now(), refreshFailures: 0 });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message, loading: false, refreshFailures: get().refreshFailures + 1 });
     }
   },
 

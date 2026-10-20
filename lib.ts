@@ -7,7 +7,7 @@ import { restoreTree, type Version } from "./versions";
 import { chmodSync, chownSync, rmSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
-import { randomBytes, timingSafeEqual } from "crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { cwd } from "process";
@@ -1587,7 +1587,8 @@ async function migrateState(s: State, file: string): Promise<State> {
  * contents are still unwritten.
  */
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
-  const tmp = `${file}.tmp`;
+  // A temp name of its own per write: concurrent writes (a fresh install's first reads) must not share one file.
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(tmp, "w");
   try {
     await handle.writeFile(JSON.stringify(value, null, 2));
@@ -1595,7 +1596,12 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   } finally {
     await handle.close();
   }
-  await rename(tmp, file);
+  try {
+    await rename(tmp, file);
+  } catch (error) {
+    await rm(tmp, { force: true });
+    throw error;
+  }
 }
 
 async function saveState(s: State) {
@@ -2013,7 +2019,7 @@ export async function newProject(name: string, parent?: string): Promise<string>
   if (existsSync(dir)) throw new Error(`a project named '${slug}' already exists, pick another name or start from it`);
   await mkdir(dir, { recursive: true });
   await run(dir, "git", ["init", "--quiet", "-b", "main"]);
-  await run(dir, "git", ["-c", "user.name=kohlab", "-c", "user.email=kohlab@local", "commit", "--quiet", "--allow-empty", "-m", "start"]);
+  await run(dir, "git", ["-c", "user.name=kohlab", "-c", "user.email=kohlab@local", "commit", "--quiet", "--allow-empty", "-m", "First version"]);
   return dir;
 }
 
@@ -2361,7 +2367,9 @@ export async function listVersions(id: string): Promise<Version[]> {
     .filter(Boolean)
     .map((line) => {
       const [sha, ct, ...subject] = line.split("\t");
-      return { id: sha, at: Number(ct) * 1000, label: subject.join("\t") };
+      const label = subject.join("\t");
+      // projects made before the label changed keep "start" in their history
+      return { id: sha, at: Number(ct) * 1000, label: label === "start" ? "First version" : label };
     });
 }
 

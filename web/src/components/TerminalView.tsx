@@ -533,7 +533,7 @@ export default function TerminalView({ workspaceId, terminalId, onExit, autoFocu
       </div>
       <p id={descId} className="sr-only">
         Interactive terminal. Keystrokes are sent to the agent&apos;s process; output is not
-        announced here. The Log tab has the same output as readable text.
+        announced here.
       </p>
     </div>
   );

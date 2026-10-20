@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Dialog } from "./ui";
-import { CheckCircle, Warning } from "@phosphor-icons/react";
-import { cn } from "../lib/utils";
+import { Warning } from "@phosphor-icons/react";
 import { Button } from "./ui";
 
 interface Props {
@@ -36,7 +35,7 @@ export default function ConfirmDialog({
   title,
   description,
   details,
-  confirmLabel = "delete",
+  confirmLabel = "Delete",
   busy = false,
   tone = "danger",
   onConfirm,
@@ -50,15 +49,12 @@ export default function ConfirmDialog({
             default, so this override is what actually lands on the element. */}
         <Dialog.Content role="alertdialog" className="dialog-content p-4">
           <div className="flex items-start gap-3">
-            <span
-              className={cn(
-                "grid size-8 shrink-0 place-items-center rounded-lg bg-surface-hover",
-                tone === "danger" ? "text-status-danger" : "text-accent",
-              )}
-              aria-hidden="true"
-            >
-              {tone === "danger" ? <Warning size={16} /> : <CheckCircle size={16} />}
-            </span>
+            {/* Only a danger confirm carries an icon; a commit reads as plain text. */}
+            {tone === "danger" ? (
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-surface-hover text-status-danger" aria-hidden="true">
+                <Warning size={16} />
+              </span>
+            ) : null}
             <div className="min-w-0 flex-1">
               <Dialog.Title className="text-base font-semibold text-text-primary">{title}</Dialog.Title>
               <Dialog.Description className="mt-1 text-xs leading-5 text-text-muted">
@@ -71,7 +67,7 @@ export default function ConfirmDialog({
           <div className="mt-4 flex flex-col-reverse gap-2 md:flex-row md:justify-end">
             <Dialog.Close asChild>
               <Button variant="secondary" size="sm" className="max-md:w-full">
-                cancel
+                Cancel
               </Button>
             </Dialog.Close>
             <Button
@@ -82,7 +78,7 @@ export default function ConfirmDialog({
               aria-busy={busy}
               onClick={onConfirm}
             >
-              {busy ? "working…" : confirmLabel}
+              {busy ? "Working…" : confirmLabel}
             </Button>
           </div>
         </Dialog.Content>

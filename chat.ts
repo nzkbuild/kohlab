@@ -71,6 +71,8 @@ export type Body =
   | { kind: "assistant"; text: string }
   /** toolId: the tool's id, which its result refers to. detail: what it did (the command, the change), for the expandable line. */
   | { kind: "tool"; text: string; toolId?: string; detail?: string }
+  /** A quiet divider line for something that happened to the conversation (a switch of AI, going back, a compaction, a background task), not an AI step. */
+  | { kind: "note"; text: string }
   /** result: what a tool gave back, trimmed by resultText. failed: the tool errored. */
   | { kind: "result"; toolId: string; output: string; failed?: boolean }
   /** form: a question card ("question", with questions) or a plan card ("plan", with plan). Neither is set for a permission question. */
@@ -297,7 +299,9 @@ export function friendlyError(raw: string): string {
 }
 
 /** The names the "Switched to" line shows: the same as web/src/lib/agentName.ts. */
-const AGENT_NAMES: Record<string, string> = { claude: "Claude", hermes: "Hermes", omp: "omp", codex: "Codex", gemini: "Gemini", opencode: "OpenCode" };
+const AGENT_NAMES: Record<string, string> = { claude: "Claude", hermes: "Hermes", omp: "omp", codex: "Codex", gemini: "Gemini", opencode: "OpenCode", pi: "Pi", sh: "Terminal" };
+/** Lines that were notes before they had their own kind: saved conversations still hold them as tool lines. */
+const OLD_NOTE_LINE = /^(Switched to |Went back to before: |Background task finished|A background task finished|Conversation compacted)/;
 
 /** The conversation as one line per message or action, oldest first, for an AI that joins it: the first message the person sent is always kept, then the latest lines as far as the budget goes, and a line says how many were left out. "" when there is nothing. Pure.
  *  ponytail: the summary is cut by characters, not by tokens. _fromName is not used: the lines say "Assistant", so the new AI is not told which AI it replaces. */
@@ -311,7 +315,7 @@ export function handoffText(events: ChatEvent[], _fromName: string, budget = 120
   for (const e of events) {
     if (e.kind === "user") lines.push(oneLine(`Person: ${e.text}`));
     else if (e.kind === "assistant") lines.push(oneLine(`Assistant: ${e.text}`));
-    else if (e.kind === "tool" && e.text.trim() && !e.text.startsWith("Switched to ")) lines.push(oneLine(`Did: ${e.text}`));
+    else if (e.kind === "tool" && e.text.trim() && !OLD_NOTE_LINE.test(e.text)) lines.push(oneLine(`Did: ${e.text}`));
     else if (e.kind === "ask" && answered.has(e.requestId)) lines.push(oneLine(`Assistant asked: ${e.questions?.map((q) => q.question).join(" ") || e.plan || e.text}`));
   }
   if (lines.length === 0) return "";
@@ -662,7 +666,7 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
     }
     if (!m || typeof m !== "object" || m.isSidechain || m.isMeta) continue; // a helper agent's work, or a note for Claude itself
     // a compaction note: one quiet line. Model switches are live-only, so they are not read from the transcript.
-    if (m.type === "system" && m.subtype === "compact_boundary") out.push({ kind: "tool", text: noticeText(m) ?? "" });
+    if (m.type === "system" && m.subtype === "compact_boundary") out.push({ kind: "note", text: noticeText(m) ?? "" });
     if (m.type === "user") {
       const content = m.message?.content;
       for (const b of Array.isArray(content) ? content : []) {
@@ -679,7 +683,7 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
       if (!text || ["<command-name>", "<local-command", "<command-message>"].some((p) => text.startsWith(p))) continue;
       // a background task's note to Claude: one quiet line; a helper's message to Claude: not the person's
       if (text.startsWith("<task-notification>")) {
-        out.push({ kind: "tool", text: taskFinishedLine(text) });
+        out.push({ kind: "note", text: taskFinishedLine(text) });
         continue;
       }
       if (text.startsWith("<agent-message")) continue;
@@ -898,7 +902,7 @@ function onLine(id: string, live: Live, line: string) {
   }
   // A finished background task, live. A terminal project's importer reads the same line from the transcript, so it stays quiet there.
   if (m.type === "system" && m.subtype === "task_notification") {
-    if (!live.transcriptHome) emit(id, { kind: "tool", text: taskFinishedLine(`<summary>${String(m.summary ?? "")}</summary>`) });
+    if (!live.transcriptHome) emit(id, { kind: "note", text: taskFinishedLine(`<summary>${String(m.summary ?? "")}</summary>`) });
     return;
   }
   if (m.type === "system" && m.subtype === "background_tasks_changed") {
@@ -914,7 +918,7 @@ function onLine(id: string, live: Live, line: string) {
   // A model switch always shows. A compaction shows once: a terminal project's importer reads it from the transcript.
   if (m.type === "system" && (m.subtype === "model_fallback" || m.subtype === "compact_boundary")) {
     const text = noticeText(m);
-    if (text && (m.subtype === "model_fallback" || !live.transcriptHome)) emit(id, { kind: "tool", text });
+    if (text && (m.subtype === "model_fallback" || !live.transcriptHome)) emit(id, { kind: "note", text });
     return;
   }
   if (m.type === "system" && m.subtype === "commands_changed") {
@@ -1165,7 +1169,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
 export async function snapshot(id: string, after: number, see: { usage: boolean; owner: boolean } = { usage: false, owner: false }) {
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
-  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
   loadCaps(id);
   if (term) await syncFromTerminal(ws);
   const events = load(id).events.filter((e) => e.n > after);
@@ -1176,6 +1180,11 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
   if (isAcp(ws) && !acps.has(id) && !caps.get(id)?.models.length && !agentInfo(ws.agent).models.length && !warmed.has(id)) {
     warmed.add(id);
     startAcp(ws, id).catch((e) => console.warn("[chat] warm-up:", (e as Error).message));
+  }
+  // a Claude project with no model list yet: its process starts quietly, once, for the list. start() sends only the initialize request, no message.
+  if (ws.chat && ws.agent === "claude" && !live && !caps.get(id)?.models.length && !agentInfo("claude").models.length && !warmed.has(id)) {
+    warmed.add(id);
+    start(ws, id).catch((e) => console.warn("[chat] warm-up:", (e as Error).message));
   }
   const cur = live ?? acps.get(id); // an ACP agent's chat keeps the same fields
   return {
@@ -1191,7 +1200,7 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
     // one rule: a live process, else the project's saved choice, else what was last seen
     model: cur?.model ?? wantedModel(ws) ?? ws.model ?? lastSeen.get(id)?.model ?? null,
-    mode: cur?.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined) ?? lastSeen.get(id)?.mode ?? null,
+    mode: cur?.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined) ?? lastSeen.get(id)?.mode ?? (ws.chat ? "default" : null),
     effort: cur?.effort ?? ws.effort ?? null,
     // clean chats run with --disable-slash-commands: they get no "/" menu
     commandsEnabled: term,
@@ -1307,15 +1316,15 @@ const excerpt = (text: string) => {
 
 /** The user message with this event number. */
 function userEventAt(id: string, n: unknown): Extract<ChatEvent, { kind: "user" }> {
-  if (typeof n !== "number" || !Number.isInteger(n)) throw new ChatError(400, "message number is required");
+  if (typeof n !== "number" || !Number.isInteger(n)) throw new ChatError(400, "The message number is required.");
   const ev = load(id).events.find((e) => e.n === n);
-  if (!ev || ev.kind !== "user") throw new ChatError(404, "that message was not found");
+  if (!ev || ev.kind !== "user") throw new ChatError(404, "That message was not found.");
   return ev;
 }
 
 /** A message to an ACP agent: one prompt turn. A message sent while a turn runs is refused: the agent cannot take it mid-turn. */
 async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
-  if (chatBusy.has(id)) throw new ChatError(409, "still working");
+  if (chatBusy.has(id)) throw new ChatError(409, "The AI is still working. Wait until it finishes, then try again.");
   chatBusy.add(id);
   chatWaiting.delete(id); // a new message clears a stale "needs you" from before
   const sent = handoffMessage(id, ws, t);
@@ -1338,11 +1347,11 @@ async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
 /** The model an ACP chat runs on. With a live agent it is switched there; either way it is saved on the project for the next start. */
 async function acpModel(id: string, value: unknown): Promise<void> {
   loadCaps(id);
-  if (typeof value !== "string" || value.length === 0 || value.length > 200) throw new ChatError(400, "unknown model");
+  if (typeof value !== "string" || value.length === 0 || value.length > 200) throw new ChatError(400, "That model is not available.");
   // The agent's list is known once it has started; before that, the choice is saved and the agent checks it at its start.
   const ws = await getWorkspace(id);
   const offered = capsOf(id).models.length ? capsOf(id).models : agentInfo(ws.agent).models;
-  if (offered.length > 0 && !offered.some((m) => m.value === value)) throw new ChatError(400, "unknown model");
+  if (offered.length > 0 && !offered.some((m) => m.value === value)) throw new ChatError(400, "That model is not available.");
   const acp = acps.get(id);
   if (acp && acp.started && !acp.closed) {
     await acp.setModel(value).catch((e) => {
@@ -1364,9 +1373,9 @@ async function acpControl(id: string, action: unknown, value: unknown): Promise<
     await acpModel(id, value);
     return { ok: true };
   }
-  if (action !== "interrupt") throw new ChatError(400, "Not available for this agent yet");
+  if (action !== "interrupt") throw new ChatError(400, "This action is not available for this agent yet.");
   const acp = acps.get(id);
-  if (!acp || acp.closed) throw new ChatError(409, "The agent is not running");
+  if (!acp || acp.closed) throw new ChatError(409, "The agent is not running.");
   acp.cancel();
   return { ok: true };
 }
@@ -1374,12 +1383,12 @@ async function acpControl(id: string, action: unknown, value: unknown): Promise<
 /** Send a user message. Starts the claude process if none is alive. */
 export async function send(id: string, text: string): Promise<void> {
   const t = text.trim();
-  if (!t) throw new ChatError(400, "message is empty");
-  if (t.length > MAX_TEXT) throw new ChatError(400, `message is over ${MAX_TEXT} characters`);
+  if (!t) throw new ChatError(400, "The message is empty.");
+  if (t.length > MAX_TEXT) throw new ChatError(400, `The message is over ${MAX_TEXT} characters.`);
   if (restoring.has(id)) throw new ChatError(409, "The project's files are being put back. Try again in a moment.");
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
-  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
   if (isAcp(ws)) return sendAcp(ws, id, t);
   if (term) await syncFromTerminal(ws);
   if (!term && (await resumeOpen(id))) throw new ChatError(409, "Claude is open in the terminal. Close it there, then send your message again.");
@@ -1398,7 +1407,7 @@ export async function send(id: string, text: string): Promise<void> {
   // check and claim in one synchronous step, so two posts cannot both start a turn.
   // While a turn runs, a live process takes the message as a queued one: the CLI runs it after the turn.
   const queued = chatBusy.has(id);
-  if (queued && !procs.has(id)) throw new ChatError(409, "still working");
+  if (queued && !procs.has(id)) throw new ChatError(409, "The AI is still working. Wait until it finishes, then try again.");
   if (!queued) chatBusy.add(id);
   if (!queued) chatWaiting.delete(id); // a new message clears a stale "needs you" from before
   // The id is ours, so the message can be named for Undo at once. The CLI keeps the id it is sent with.
@@ -1430,7 +1439,7 @@ export async function send(id: string, text: string): Promise<void> {
 async function liveFor(id: string): Promise<Live> {
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
-  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
   let live = procs.get(id);
   if (!live) {
     // a terminal's Claude runs in its own screen: the chat can only control a process it started
@@ -1464,38 +1473,102 @@ async function readUsage(id: string, live: Live, force: boolean): Promise<void> 
   }
 }
 
-/** The files an @ mention can pick, from the CLI's own index. Empty when no process runs: a mention never starts one. */
+const MENTION_CAP = 50;
+const FILE_LIST_TTL_MS = 10_000;
+const FILE_LIST_MS = 5_000;
+const FILE_LIST_BYTES = 5 * 1024 * 1024;
+/** Each workspace's file list for @ mentions, kept for FILE_LIST_TTL_MS. */
+const fileLists = new Map<string, { at: number; paths: string[] }>();
+
+/** The files of a worktree git knows about: tracked, or not ignored. Read as the server, as checkpoints.ts reads git. Empty on a timeout, an error, or no repo. */
+function listFiles(cwd: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    const p = spawn("git", ["-c", "safe.directory=*", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let capped = false;
+    let settled = false;
+    const settle = (paths: string[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(paths);
+    };
+    const timer = setTimeout(() => {
+      p.kill();
+      settle([]);
+    }, FILE_LIST_MS);
+    p.stdout.on("data", (d: Buffer) => {
+      if (capped) return;
+      const room = FILE_LIST_BYTES - size;
+      if (d.length > room) {
+        chunks.push(d.subarray(0, room));
+        size = FILE_LIST_BYTES;
+        capped = true;
+        p.kill();
+      } else {
+        chunks.push(d);
+        size += d.length;
+      }
+    });
+    p.stderr.resume();
+    p.on("error", () => settle([]));
+    p.on("close", (code) => {
+      if (!capped && code !== 0) return settle([]);
+      let out = Buffer.concat(chunks);
+      if (capped) out = out.subarray(0, out.lastIndexOf(0) + 1); // a path cut in half is dropped
+      settle(out.toString("utf8").split("\0").filter(Boolean));
+    });
+  });
+}
+
+/** The paths an @ mention matches: a case-insensitive substring of the path, with basename prefix matches first, at most MENTION_CAP. Pure. */
+export function rankFiles(paths: string[], query: string): string[] {
+  const q = query.trim().toLowerCase();
+  const hits = paths.filter((p) => p.toLowerCase().includes(q));
+  const prefix = (p: string) => basename(p).toLowerCase().startsWith(q);
+  return [...hits.filter(prefix), ...hits.filter((p) => !prefix(p))].slice(0, MENTION_CAP);
+}
+
+/** The files an @ mention can pick: the project's own list, for every agent, with or without a running process. */
 async function fileMentions(id: string, query: unknown): Promise<string[]> {
-  const live = procs.get(id);
-  if (!live || typeof query !== "string" || query.length > 200) return [];
-  try {
-    const reply = await ask(live, { subtype: "file_suggestions", query });
-    const paths: unknown[] = Array.isArray(reply?.suggestions) ? reply.suggestions.map((s: any) => s?.path) : [];
-    return paths.filter((p): p is string => typeof p === "string" && p !== "" && !isAbsolute(p) && !p.split("/").some((d) => d === ".." || d === ".git")).slice(0, 20);
-  } catch {
-    return []; // the menu just shows nothing
+  if (typeof query !== "string" || query.length > 200) return [];
+  const hit = fileLists.get(id);
+  let paths: string[];
+  if (hit && Date.now() - hit.at < FILE_LIST_TTL_MS) paths = hit.paths;
+  else {
+    paths = await listFiles(worktreePath(await getWorkspace(id)));
+    fileLists.set(id, { at: Date.now(), paths });
   }
+  return rankFiles(paths, query);
 }
 
 /** Stop one background task the CLI listed. The id must be in the current list. */
 async function stopTask(id: string, value: unknown): Promise<{ ok: true }> {
   const live = procs.get(id);
   const task = live?.tasks.find((t) => t.id === value);
-  if (!live || !task) throw new ChatError(400, "that task is not running");
+  if (!live || !task) throw new ChatError(400, "That task is not running.");
   await ask(live, { subtype: "stop_task", task_id: task.id });
   return { ok: true };
 }
 
+/** A server message as a plain sentence: a capital first letter and a full stop. */
+const sentence = (s: string) => {
+  const t = s.trim();
+  const up = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(up) ? up : `${up}.`;
+};
+
 /** Undo: the files Claude changed since a message. A dry run lists them; the real run puts them back. Only the last message can be undone. */
 async function rewindFiles(id: string, value: unknown, dryRun: boolean): Promise<{ ok: true } & Record<string, unknown>> {
-  if (typeof value !== "string") throw new ChatError(400, "message id is required");
+  if (typeof value !== "string") throw new ChatError(400, "The message is required.");
   if (chatBusy.has(id)) throw new ChatError(409, "Claude is still working. Wait until it finishes, then undo.");
   let last: string | undefined; // the newest message's id; a message from before this feature, or a terminal's, has none
   for (const e of load(id).events) if (e.kind === "user") last = e.uuid;
-  if (last === undefined || last !== value) throw new ChatError(400, "only the last message can be undone");
+  if (last === undefined || last !== value) throw new ChatError(400, "Only the last message can be undone.");
   const live = await liveFor(id);
   const r = await ask(live, { subtype: "rewind_files", user_message_id: value, ...(dryRun ? { dry_run: true } : {}) });
-  if (r?.canRewind === false || r?.error) throw new ChatError(409, String(r.error ?? "Those changes can't be undone."));
+  if (r?.canRewind === false || r?.error) throw new ChatError(409, r.error ? sentence(String(r.error)) : "Those changes can't be undone.");
   const raw: unknown[] = Array.isArray(r?.filesChanged) ? r.filesChanged : [];
   const inside = (p: unknown) => typeof p === "string" && (!isAbsolute(p) ? !p.split("/").includes("..") : p.startsWith(live.cwd + "/"));
   if (!raw.every(inside)) throw new ChatError(409, "Some of those changes are outside this project, so they can't be undone here.");
@@ -1507,7 +1580,7 @@ async function rewindFiles(id: string, value: unknown, dryRun: boolean): Promise
 async function setting(id: string, action: "model" | "mode" | "effort", value: unknown): Promise<void> {
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
-  if (!ws.chat && !term) throw new ChatError(400, "not a chat workspace");
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
   loadCaps(id);
   const live = procs.get(id);
   if (live) await live.ready;
@@ -1517,7 +1590,7 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
       const picked = parseModel(value);
       if (live) {
         const known = value === "default" || models.some((m) => m.value === value);
-        if (!known) throw new ChatError(400, "unknown model");
+        if (!known) throw new ChatError(400, "That model is not available.");
         await ask(live, { subtype: "set_model", model: value });
         // "default" shows as chosen until the next init reports the real model
         live.model = String(value);
@@ -1537,7 +1610,7 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
       } else {
         // no process: only an alias is saved, and a listed model when the list is known
         const known = picked !== null && (picked === "default" || models.length === 0 || models.some((m) => m.value === value));
-        if (!known) throw new ChatError(400, "unknown model");
+        if (!known) throw new ChatError(400, "That model is not available.");
         const levels = models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
         await mutateState((s) => {
           const w = s.workspaces.find((x) => x.id === id);
@@ -1549,7 +1622,7 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
       break;
     }
     case "mode": {
-      if (typeof value !== "string" || !MODES.includes(value)) throw new ChatError(400, "unknown mode");
+      if (typeof value !== "string" || !MODES.includes(value)) throw new ChatError(400, "That mode is not available.");
       if (live) {
         const before = live.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined);
         await ask(live, { subtype: "set_permission_mode", mode: value });
@@ -1565,7 +1638,7 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
       break;
     }
     case "effort": {
-      if (typeof value !== "string" || !EFFORTS.includes(value)) throw new ChatError(400, "unknown effort level");
+      if (typeof value !== "string" || !EFFORTS.includes(value)) throw new ChatError(400, "That effort level is not available.");
       if (live) {
         await ask(live, { subtype: "apply_flag_settings", settings: { effortLevel: value } });
         live.effort = value;
@@ -1583,12 +1656,12 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
 /** Switches a chat project's AI. The conversation stays; the agent it switches to gets what it has not seen, with the person's next message. */
 async function switchAgent(id: string, value: unknown): Promise<{ ok: true }> {
   const ws = await getWorkspace(id);
-  if (!ws.chat) throw new ChatError(400, "not a chat workspace");
-  if (typeof value !== "string" || (value !== "claude" && !isAcpAgent(value))) throw new ChatError(400, "unknown agent");
+  if (!ws.chat) throw new ChatError(400, "This is not a chat project.");
+  if (typeof value !== "string" || (value !== "claude" && !isAcpAgent(value))) throw new ChatError(400, "That agent is not available.");
   const agent = value;
   if (agent === ws.agent) return { ok: true };
   const bin = agent === "claude" ? ((await loadState()).agents?.claude || "claude").split(/\s+/)[0] : ACP_AGENTS[agent][0];
-  if (!Bun.which(bin)) throw new ChatError(400, `${AGENT_NAMES[agent] ?? agent} is not installed on this server`);
+  if (!Bun.which(bin)) throw new ChatError(400, `${AGENT_NAMES[agent] ?? agent} is not installed on this server.`);
   if (chatBusy.has(id)) throw new ChatError(409, "Wait until the current reply finishes");
   // nothing awaits between this check and the stop, so no turn can start in between
   const lastN = load(id).events.at(-1)?.n ?? 0;
@@ -1616,7 +1689,7 @@ async function switchAgent(id: string, value: unknown): Promise<{ ok: true }> {
   lastSeen.delete(id);
   warmed.delete(id);
   persistCaps(id);
-  emit(id, { kind: "tool", text: `Switched to ${AGENT_NAMES[agent] ?? agent}` });
+  emit(id, { kind: "note", text: `Switched to ${AGENT_NAMES[agent] ?? agent}` });
   return { ok: true };
 }
 
@@ -1624,15 +1697,15 @@ async function switchAgent(id: string, value: unknown): Promise<{ ok: true }> {
  *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo), and "agent" (switch the AI). */
 export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
   if (action === "agent") return switchAgent(id, value);
-  if (isAcp(await getWorkspace(id))) return acpControl(id, action, value);
   if (action === "files") return { ok: true, files: await fileMentions(id, value) };
+  if (isAcp(await getWorkspace(id))) return acpControl(id, action, value);
   if (action === "stop_task") return stopTask(id, value);
   if (action === "rewind_preview" || action === "rewind") return rewindFiles(id, value, action === "rewind_preview");
   if (action === "model" || action === "mode" || action === "effort") {
     await setting(id, action, value);
     return { ok: true };
   }
-  if (action === "interrupt" && !procs.has(id)) throw new ChatError(409, "Claude is not running");
+  if (action === "interrupt" && !procs.has(id)) throw new ChatError(409, "Claude is not running.");
   const live = await liveFor(id);
   switch (action) {
     case "interrupt": {
@@ -1655,7 +1728,7 @@ export async function chatControl(id: string, action: unknown, value: unknown): 
       break;
     }
     default:
-      throw new ChatError(400, "unknown action");
+      throw new ChatError(400, "That action is not available.");
   }
   return { ok: true };
 }
@@ -1707,12 +1780,12 @@ function ownPagesOf(ws: Workspace | null): OwnPages {
 export async function answer(id: string, requestId: string, allow: boolean, extra: { answers?: Record<string, string>; message?: string } = {}): Promise<void> {
   const acp = acps.get(id);
   if (acp) {
-    if (!acp.asks.has(requestId)) throw new ChatError(404, "no such pending question");
+    if (!acp.asks.has(requestId)) throw new ChatError(404, "That question is no longer waiting.");
     acp.answer(requestId, allow);
     return;
   }
   const live = procs.get(id);
-  if (!live || !live.asks.has(requestId)) throw new ChatError(404, "no such pending question");
+  if (!live || !live.asks.has(requestId)) throw new ChatError(404, "That question is no longer waiting.");
   const { tool, input } = live.asks.get(requestId)!;
   live.asks.delete(requestId);
   if (live.asks.size === 0) chatWaiting.delete(id);
@@ -1816,16 +1889,16 @@ function sessionDir(ws: Workspace): string {
 /** A Claude project's earlier conversations, and which one is current (null for a new one). */
 export async function sessions(id: string): Promise<{ current: string | null; sessions: { id: string; title: string; at: number }[] }> {
   const ws = await getWorkspace(id);
-  if (!ws.chat && !(await viaTerminal(ws))) throw new ChatError(400, "not a Claude project");
+  if (!ws.chat && !(await viaTerminal(ws))) throw new ChatError(400, "This is not a Claude project.");
   return { current: ws.chatSession ?? null, sessions: listSessions(sessionDir(ws), worktreePath(ws)) };
 }
 
 /** Start a new conversation (sid null), or switch to an earlier one. The chat's file is kept as one backup, and an earlier conversation's last messages are imported. */
 export async function switchSession(id: string, sid: unknown): Promise<void> {
-  if (sid !== null && typeof sid !== "string") throw new ChatError(400, "sid must be a conversation id or null");
+  if (sid !== null && typeof sid !== "string") throw new ChatError(400, "That conversation is not valid.");
   const ws = await getWorkspace(id);
   const term = await viaTerminal(ws);
-  if (!ws.chat && !term) throw new ChatError(400, "not a Claude project");
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a Claude project.");
   if (chatBusy.has(id)) throw new ChatError(409, "Claude is working. Stop it or wait, then try again.");
   if (term ? await isAlive(ws) : await resumeOpen(id)) throw new ChatError(409, "Claude is open in the terminal. Stop it there first.");
   if (typeof sid === "string" && !listSessions(sessionDir(ws), worktreePath(ws)).some((s) => s.id === sid)) {
@@ -1876,7 +1949,7 @@ export async function chatGoBack(id: string, n: unknown): Promise<{ ok: true }> 
       w.lastCommitAt = Date.now();
       w.restoredFrom = note; // the next message is told the files were put back
     });
-    emit(id, { kind: "tool", text: `Went back to before: “${note}”` });
+    emit(id, { kind: "note", text: `Went back to before: “${note}”` });
   } finally {
     restoring.delete(id);
   }

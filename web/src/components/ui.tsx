@@ -265,6 +265,14 @@ export function Menu({
   );
 }
 
+/* Parts for a surface that owns its menu's open state (the sidebar's project rows). */
+export const MenuRoot = RadixMenu.Root;
+export const MenuTrigger = RadixMenu.Trigger;
+export const MenuPortal = RadixMenu.Portal;
+export function MenuContent(props: RadixMenu.DropdownMenuContentProps) {
+  return <RadixMenu.Content className="menu" align="end" sideOffset={4} collisionPadding={8} {...props} />;
+}
+
 export function MenuSub({ label, icon, children }: { label: string; icon?: ReactNode; children: ReactNode }) {
   return (
     <RadixMenu.Sub>

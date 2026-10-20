@@ -337,13 +337,13 @@ function Files({ workspaceId }: Props) {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
           {treeError ? (
-            <p role="alert" className="px-2 text-[14px] text-status-danger">
+            <p role="alert" className="px-2 text-small text-status-danger">
               {treeError}
             </p>
           ) : tree === null ? (
             <SkeletonRows rows={6} />
           ) : tree.length === 0 ? (
-            <p className="px-2 text-[14px] text-text-muted">No files yet.</p>
+            <p className="px-2 text-small text-text-muted">No files yet.</p>
           ) : (
             <TreeList
               nodes={tree}
@@ -386,7 +386,7 @@ function Files({ workspaceId }: Props) {
                       title={tab.path}
                       onClick={() => setActive(tab.path)}
                       className={cn(
-                        "mono flex min-w-0 items-center gap-1.5 py-1.5 ps-2.5 text-[13px]",
+                        "mono flex min-w-0 items-center gap-1.5 py-1.5 ps-2.5 text-sm",
                         isActive ? "text-text-primary" : "text-text-muted hover:text-text-primary",
                       )}
                     >
@@ -410,10 +410,10 @@ function Files({ workspaceId }: Props) {
                 );
               })}
             </ul>
-            {status ? <span className="shrink-0 text-[13px] text-text-muted">{status}</span> : null}
+            {status ? <span className="shrink-0 text-sm text-text-muted">{status}</span> : null}
             {wide && room && chat && claudeHidden ? (
               <Button variant="quiet" size="sm" onClick={() => setClaudeDocked(false)}>
-                Show Claude
+                Show chat
               </Button>
             ) : null}
           </div>
@@ -421,7 +421,7 @@ function Files({ workspaceId }: Props) {
           <div className="relative min-h-0 flex-1">
             <div className="absolute inset-0 flex flex-col">
               {activeTab?.kind === "text" ? (
-                <Suspense fallback={<p className="p-4 text-[14px] text-text-muted">Opening the editor…</p>}>
+                <Suspense fallback={<p className="p-4 text-small text-text-muted">Opening the editor…</p>}>
                   <div className="min-h-0 flex-1">
                     <CodeEditor
                       key={`${activeTab.path}#${activeTab.rev}`}
@@ -438,14 +438,14 @@ function Files({ workspaceId }: Props) {
                 </div>
               ) : activeTab?.kind === "blocked" ? (
                 <div className="flex flex-col items-start gap-3 p-6">
-                  <p className="text-[15px] text-text-secondary">This file can't be shown here.</p>
+                  <p className="text-base text-text-secondary">This file can't be shown here.</p>
                   <Button variant="secondary" className="rounded-full" onClick={() => api.download(workspaceId, activeTab.path).catch((e: Error) => toast.error(e.message))}>
                     <DownloadSimple size={14} aria-hidden="true" />
                     Download
                   </Button>
                 </div>
               ) : (
-                <p className="p-6 text-[15px] text-text-muted">
+                <p className="p-6 text-base text-text-muted">
                   {opening ? "Opening the file…" : "Open a file from the list, or press Ctrl P (⌘ P on a Mac) to find one."}
                 </p>
               )}
@@ -456,10 +456,10 @@ function Files({ workspaceId }: Props) {
 
       {/* Right: Claude, docked. Desktop only; on a phone Claude is its own tab. */}
       {showDock ? (
-        <aside aria-label="Claude" className="flex min-h-0 w-[360px] shrink-0 flex-col pe-3">
+        <aside aria-label="Chat" className="flex min-h-0 w-[400px] shrink-0 flex-col pe-3">
           <div className="flex h-11 shrink-0 items-center justify-end px-2">
             <Button variant="quiet" size="sm" onClick={() => setClaudeDocked(true)}>
-              Hide Claude
+              Hide chat
             </Button>
           </div>
           <div className="relative min-h-0 flex-1">
