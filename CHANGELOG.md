@@ -9,6 +9,40 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.1.0] - 2026-10-20
+
+A polish release: every basic control does what it says, and the whole app looks and reads the same everywhere.
+
+### Added
+- **Usage**: see how much of your Claude plan you have used in the next few hours and this week, with reset times, and how full the current chat is. Open it from the account menu, the command palette, or Ctrl+U. Only the owner sees plan usage.
+- Each of your messages has a ⋯ menu: Copy message, What this changed, Go back to here, New chat from here, and for your latest message, Edit and resend.
+- Unsent messages are kept per project, even after a reload. "Save for later" keeps a draft aside, and a very long paste becomes an attached text file.
+- Prompt links: open Kohlab with a message ready to send (it never sends by itself).
+- Keyboard shortcuts list: press ? anywhere outside a text box.
+- "New chat" is right in the project menu.
+- A calm "Can't reach Kohlab. Trying again…" line when the connection drops, and plain-English errors instead of "Failed to fetch".
+- Replies can use italics, strikethrough, quotes, smaller headings and nested lists.
+- "Starting the preview…" while the preview browser starts.
+
+### Changed
+- While the AI works, the round button is always Stop. Press Enter to send another message and it shows "Waiting to send" until the AI gets to it. Ctrl+Enter stops and sends at once.
+- Commands is a small "/" button that opens the list of commands, even when you have already typed something.
+- @ lists your project's files for every AI, straight away.
+- "Switched to omp" and "Went back to…" show as quiet lines of their own instead of hiding in "Did 1 other thing".
+- Projects using Hermes, omp or Codex say so everywhere, not "Claude". The AI menu greys out an AI that still needs signing in and says why.
+- On phones the AI and model share one button, so the message box fits on one row, and menus never run off the screen.
+- Pictures from the AI keep their own colours in dark mode and shrink to fit.
+- Chats open scrolled to the newest message.
+- Settings: the section is called "AI", it lists the same AIs as the chat, and nothing harmless is shown in red.
+- The code editor follows light and dark mode.
+
+### Removed
+- "Undo this message's changes", which often failed. "Go back to here" does the same job for every AI.
+
+### Fixed
+- The very first page load on a fresh install could fail.
+- The Send button could be cut off next to the files view and on small phones.
+
 ## [2.0.0] - 2026-10-19
 
 Kohlab now works with more than one AI, and the chat can show far more than text.
