@@ -9,6 +9,35 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.2.0] - 2026-10-21
+
+Built from a Laws of UX review and a study of Lovable, Bolt, v0, Replit, Claude, ChatGPT and T3 Code.
+
+### Added
+- When the AI finishes, a "Ready to check" card: Preview comes first until you have looked, then Keep this version. "Check it works" asks the AI to test the page while you watch.
+- Keeping or undoing now shows in the conversation ("Kept this version"), with "Show someone: Copy link".
+- "Worked for 1m 12s" under each longer reply, and for the owner how much of the plan it used.
+- Notes for the AI per project (project menu → Notes): things it should always remember, like your business name or colours.
+- Phone, Tablet and Desktop sizes in Preview, and the address reads "Your page".
+- Download project gives a .zip of the last kept version.
+- Home shows which project has a question or is ready to check, more starter ideas, "Attach a screenshot of a site you like" and "Ask me a few questions first".
+
+### Changed
+- New project starts by describing what you want, like Home.
+- The model menu shows four plain choices; older models are one click away.
+- Allow and Don't allow are the same size; a question asked before a restart stays visible.
+- An empty chat opens with the message box in the middle.
+- Projects open faster, the sidebar lists "needs you" then "ready to check", and messages use the project's name.
+- Notices appear at the top and never cover buttons.
+- Project names made from your first message no longer stop mid-phrase.
+- Chat projects only show Preview and Changes once there is something to see; terminal items stay in the menu only with power tools on.
+
+### Fixed
+- Opening the Terminal tab while Claude was still finishing work in the background ended that work. The terminal now waits and opens when the work is done.
+- Coming back to a Claude project with work ready to check opened Changes instead of the chat.
+- After a stop, part of a reply could appear twice.
+- Read-only share links no longer include the project's private notes.
+
 ## [2.1.0] - 2026-10-20
 
 A polish release: every basic control does what it says, and the whole app looks and reads the same everywhere.
