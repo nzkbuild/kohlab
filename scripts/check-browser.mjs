@@ -152,7 +152,8 @@ try {
       check(`${at}: no horizontal scroll`, m.overflow <= 0 && m.surfaceOverflow <= 0, `page ${m.overflow}px, surface ${m.surfaceOverflow}px`);
       check(`${at}: controls at least 24px`, m.small.length === 0, m.small.slice(0, 4).join(", "));
       if (name === "home") check(`${at}: home asks what to build`, m.composer);
-      if (name === "new") check(`${at}: /new opens the form`, m.form);
+      // /new is New project: it lands on Home's describe box, not the name dialog.
+      if (name === "new") check(`${at}: /new lands on the describe box`, m.composer && !m.form);
       if (name === "workspace") {
         check(`${at}: needs-review opens on Review`, m.tab === "tab-review", `${m.tab}`);
         check(`${at}: the tab is in the URL`, m.path === "/w/ws-review/review", m.path);

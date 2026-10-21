@@ -34,8 +34,9 @@ const reviewed = { ...base, id: "review-old", stopped: 3 };
 const input = [newestPlain, reviewed, running, oldNeeds, newNeeds];
 const before = ids(input);
 
-check("needs-you first, even when older", ids(sidebarOrder(input)), ["needs-new", "needs-old", "plain-new", "running", "review-old"]);
-check("rest by most recent change, no status grouping", ids(sidebarOrder([reviewed, running, newestPlain])), ["plain-new", "running", "review-old"]);
+check("needs-you first, even when older", ids(sidebarOrder(input)), ["needs-new", "needs-old", "plain-new", "review-old", "running"]);
+// Both stopped projects are ready to check, newest first; the running one ranks below them despite its newer activity.
+check("ready to check before the rest, newest first", ids(sidebarOrder([reviewed, running, newestPlain])), ["plain-new", "review-old", "running"]);
 check("sort does not mutate the store's array", ids(input), before);
 check("empty list", sidebarOrder([]), []);
 

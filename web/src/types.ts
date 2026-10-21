@@ -36,6 +36,8 @@ export interface Workspace {
   agentSeen?: Record<string, number>;
   /** After a switch of AI: the events after this number are what the new agent has not seen. */
   handoffAfter?: number;
+  /** Standing notes for the AI on this project (business name, colours, tone). At most 4000 characters. */
+  notes?: string;
 }
 
 /** One multiple-choice question Claude asks (AskUserQuestion). */
@@ -63,7 +65,7 @@ export type ChatEvent = { n: number; at: number } & (
       plan?: string;
     }
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
-  | { kind: "done" }
+  | { kind: "done"; worked?: number; planDelta?: number }
   | { kind: "error"; text: string }
   /** A quiet line in the chat: "Switched to X", "Went back to before: …", compaction or model-fallback notices, "Background task finished: …". */
   | { kind: "note"; text: string }

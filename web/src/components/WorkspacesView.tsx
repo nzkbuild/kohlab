@@ -249,7 +249,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content p-6 max-md:px-4 max-md:pt-0">
           <header className="flex items-center justify-between gap-4">
-            <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">New project</Dialog.Title>
+            <Dialog.Title className="m-0 text-xl font-semibold tracking-tight">Start from a folder or link</Dialog.Title>
             <Dialog.Close asChild>
               <Button variant="quiet" iconOnly aria-label="Close">
                 <X size={16} />
@@ -266,8 +266,12 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
 /* ------------------------------------------------------------------ home -- */
 
 /** Starter ideas: each one fills the composer. "Something else" just puts the cursor there. */
-const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator"];
-const CHIP = "inline-flex h-9 items-center rounded-full bg-surface-raised px-3.5 text-small text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator", "A booking page", "A menu for my café", "A portfolio"];
+const CHIP = "inline-flex min-h-9 items-center rounded-full bg-surface-raised px-3.5 text-small text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none pointer-coarse:min-h-11";
+/** A project in the Home list: a full-width tonal row, 44px and up. */
+const ROW = "flex min-h-11 w-full items-center rounded-card bg-surface-raised px-4 text-left text-base text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+/** The text the "Ask me a few questions first" link puts in the box. It is not sent. */
+const QUESTIONS_FIRST = "Before you build anything, ask me a few short questions about what I want.";
 
 /**
  * Home, and the same screen for a first run with no projects: one question, one
@@ -279,7 +283,6 @@ export function HomeScreen() {
   const navigate = useApp((s) => s.navigate);
   const refresh = useApp((s) => s.refresh);
   const route = useApp((s) => s.route);
-  const setNewOpen = useApp((s) => s.setNewOpen);
   const can = useCan();
 
   // The unsent idea: restored on load, saved 300 ms after the last key.
@@ -296,6 +299,9 @@ export function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const newAgent = useNewAgent();
+  // A screenshot of a site the person likes: picked here, uploaded into the new project when they start.
+  const [shot, setShot] = useState<File | null>(null);
+  const shotInput = useRef<HTMLInputElement>(null);
 
   // Claude missing or signed out: one calm notice above the message box. A failed check shows nothing.
   const [claudeNeedsSetup, setClaudeNeedsSetup] = useState(false);
@@ -303,13 +309,13 @@ export function HomeScreen() {
     api.agentsStatus().then((s) => setClaudeNeedsSetup(!s.claude || s.claudeSignedIn === false), () => {});
   }, []);
 
-  // `/new` (an old bookmark) opens the dialog over this page, then drops the flag.
+  // `/new` (an old bookmark) is New project: the box is focused on Home, then the flag is dropped.
   const wantsCreate = route.kind === "workspaces" && !!route.create;
   useEffect(() => {
     if (!wantsCreate) return;
-    setNewOpen(true);
     navigate({ kind: "workspaces" }, { replace: true });
-  }, [wantsCreate, setNewOpen, navigate]);
+    composer.current?.focus();
+  }, [wantsCreate, navigate]);
 
   // /new?prompt=… fills the box and takes the prompt out of the address bar (any other parameter, such as an access key, stays). It never sends.
   const promptText = route.kind === "workspaces" ? route.prompt : undefined;
@@ -329,6 +335,14 @@ export function HomeScreen() {
       workspaces
         .filter((w) => workspaceStatus(w) === "needs-you")
         .sort((a, b) => (a.stopped ?? a.created) - (b.stopped ?? b.created)),
+    [workspaces],
+  );
+  // Newest finished work first: the one the person most likely wants to check.
+  const readyToCheck = useMemo(
+    () =>
+      workspaces
+        .filter((w) => workspaceStatus(w) === "needs-review")
+        .sort((a, b) => (b.stopped ?? b.created) - (a.stopped ?? a.created)),
     [workspaces],
   );
 
@@ -354,13 +368,24 @@ export function HomeScreen() {
         }
       }
       if (!created) throw new Error("no free name");
+      // The screenshot goes into the new project first, so the first message can name its path (as the chat does).
+      let message = text;
+      if (shot) {
+        try {
+          const up = await api.uploadImage(created.id, shot);
+          message = `${text}\n\nAttached: ${up.path}`;
+        } catch (e) {
+          announce(`The screenshot did not upload: ${(e as Error).message}`);
+        }
+      }
       // The project exists from here on, so the chat opens even if the send fails.
       try {
-        await api.chatSend(created.id, text);
+        await api.chatSend(created.id, message);
       } catch (e) {
         announce(`The first message did not send: ${(e as Error).message}`);
       }
       setIdea("");
+      setShot(null);
       await refresh();
       navigate({ kind: "workspace", id: created.id });
     } catch (e) {
@@ -495,10 +520,52 @@ export function HomeScreen() {
                 </li>
               </ul>
 
-              {needsYou[0] ? (
-                <Button variant="quiet" size="sm" className="mt-6 text-text-muted" onClick={() => open(needsYou[0].id)}>
-                  {`${projectTitle(needsYou[0])} needs you`}
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+                <Button variant="quiet" size="sm" onClick={() => shotInput.current?.click()}>
+                  Attach a screenshot of a site you like
                 </Button>
+                <Button variant="quiet" size="sm" onClick={() => fill(QUESTIONS_FIRST)}>
+                  Ask me a few questions first
+                </Button>
+              </div>
+              {shot ? (
+                <p className="mt-1 flex max-w-full items-center gap-2 text-sm text-text-muted">
+                  <span className="min-w-0 truncate">Screenshot: {shot.name}</span>
+                  <Button variant="quiet" size="sm" onClick={() => setShot(null)}>
+                    Remove
+                  </Button>
+                </p>
+              ) : null}
+              <input
+                ref={shotInput}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                tabIndex={-1}
+                aria-label="Screenshot of a site you like"
+                onChange={(e) => {
+                  setShot(e.target.files?.[0] ?? null);
+                  e.target.value = "";
+                }}
+              />
+
+              {needsYou[0] || readyToCheck[0] ? (
+                <ul className="mt-8 flex w-full flex-col gap-2">
+                  {needsYou[0] ? (
+                    <li>
+                      <button type="button" className={ROW} onClick={() => open(needsYou[0].id)}>
+                        {`${projectTitle(needsYou[0])} has a question`}
+                      </button>
+                    </li>
+                  ) : null}
+                  {readyToCheck[0] ? (
+                    <li>
+                      <button type="button" className={ROW} onClick={() => open(readyToCheck[0].id)}>
+                        {`${projectTitle(readyToCheck[0])} is ready to check`}
+                      </button>
+                    </li>
+                  ) : null}
+                </ul>
               ) : null}
             </>
           ) : (

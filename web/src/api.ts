@@ -26,10 +26,12 @@ if (urlKey) {
 
 export function setKey(k: string) {
   key = k;
+  prefetched.clear(); // a read made under another key is never shown under this one
   localStorage.setItem("kohlab_key", k);
 }
 export function clearKey() {
   key = "";
+  prefetched.clear();
   localStorage.removeItem("kohlab_key");
 }
 export function hasKey() {
@@ -44,7 +46,17 @@ export function hasKey() {
 /** What a person sees when the request never reached Kohlab (offline, server down, a dropped connection). */
 export const UNREACHABLE_MESSAGE = "Can't reach Kohlab. Check your connection and try again.";
 
+/**
+ * Reads started ahead of time, by hovering or focusing a sidebar row. Only the
+ * chat snapshot (after 0) and the diff are ever stored here, so a screen that
+ * opens next paints at once. An entry serves reads for 10 s, and any write
+ * drops them all, so a Keep or an Undo is never shown from before it.
+ */
+const PREFETCH_MS = 10_000;
+const prefetched = new Map<string, { at: number; value: Promise<unknown> }>();
+
 async function req(path: string, opts: RequestInit = {}): Promise<Response> {
+  if (opts.method && opts.method !== "GET") prefetched.clear();
   try {
     return await fetch(path, {
       ...opts,
@@ -63,10 +75,36 @@ export function socketProtocol(k = key): string[] {
 }
 
 async function json<T>(path: string, opts?: RequestInit): Promise<T> {
+  const hit = prefetched.get(path);
+  if (hit && (opts?.method ?? "GET") === "GET") {
+    prefetched.delete(path); // used once: a later read is always fresh
+    if (Date.now() - hit.at < PREFETCH_MS) return hit.value as Promise<T>;
+  }
   const res = await req(path, opts);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
   return body as T;
+}
+
+/** Starts a read now and keeps it for the next 10 s. A failed read is not kept. */
+function prefetch(path: string): void {
+  const hit = prefetched.get(path);
+  if (hit && Date.now() - hit.at < PREFETCH_MS) return;
+  const value = json<unknown>(path);
+  value.catch(() => {
+    if (prefetched.get(path)?.value === value) prefetched.delete(path);
+  });
+  prefetched.set(path, { at: Date.now(), value });
+}
+
+/** Saves a blob the browser already holds, under a name. */
+function saveAs(blob: Blob, name: string): void {
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(href), 30_000);
 }
 
 export const api = {
@@ -109,6 +147,28 @@ export const api = {
     a.click();
     setTimeout(() => URL.revokeObjectURL(href), 30_000);
   },
+  /** The whole project as a zip of its last kept version, saved as `<name>.zip`. */
+  downloadProject: async (id: string, name: string): Promise<void> => {
+    const res = await req(`/api/workspaces/${encodeURIComponent(id)}/download`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || res.statusText);
+    }
+    const safe = name.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "project";
+    saveAs(await res.blob(), `${safe}.zip`);
+  },
+  /** Warms the reads a project's first paint needs. Called when its sidebar row is hovered or focused. */
+  prefetchProject: (id: string, chat: boolean): void => {
+    if (chat) prefetch(`/api/workspaces/${encodeURIComponent(id)}/chat?after=0`);
+    prefetch(`/api/workspaces/${id}/diff`);
+  },
+  /** The notes the AI should always keep in mind for this project. At most 4000 characters. */
+  setNotes: (id: string, notes: string) =>
+    json<{ ok: true }>(`/api/workspaces/${encodeURIComponent(id)}/notes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ notes }),
+    }),
   branches: (source: string) => json<{ branches: string[] }>(`/api/branches?source=${encodeURIComponent(source)}`),
   clone: (body: { url: string; task: string; agent: string; branch?: string; payload?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),

@@ -184,6 +184,8 @@ export class AcpClient {
   stopping = false;
   /** the handshake and session are done: a model change can be sent */
   started = false;
+  /** the session was opened new (not loaded), and no message has been sent in it yet: its first message carries the project's notes */
+  freshSession = false;
   stderr = "";
   sid?: string;
   /** how this agent takes a model change, and the config option's id when it is one */
@@ -230,6 +232,7 @@ export class AcpClient {
     if (!this.sid) {
       opened = await this.request("session/new", { cwd, mcpServers: [] }, 60_000);
       this.sid = String(opened.sessionId);
+      this.freshSession = true;
     }
     this.host.persistSession(this.sid);
     this.readModels(opened);
@@ -317,7 +320,7 @@ export class AcpClient {
       console.warn("[acp] prompt failed:", err.slice(0, 200));
       this.host.emit({ kind: "error", text: "The agent ran into a problem. Try again." });
     }
-    this.host.emit({ kind: "done" });
+    this.host.emit({ kind: "done", worked: Date.now() - since });
     this.wrapUp();
   }
 

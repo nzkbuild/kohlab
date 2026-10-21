@@ -55,6 +55,12 @@ export interface AppState {
   setNewOpen: (value: boolean) => void;
   setAuthed: (value: boolean) => void;
   setConnection: (value: Connection) => void;
+  /** The project whose "Notes for the AI" dialog is open (its id), or null. Opened from the project menu and the palette. */
+  notesFor: string | null;
+  /** Chat projects that have changed a file (so Preview has something to show), by id. Set by the open project. */
+  hasWork: Record<string, boolean>;
+  setHasWork: (id: string, value: boolean) => void;
+  setNotesFor: (value: string | null) => void;
   refresh: () => Promise<void>;
   loadMe: () => Promise<void>;
   /** Push a new route onto history, or replace the current entry. */
@@ -139,6 +145,10 @@ export const useApp = create<AppState>((set, get) => ({
   setNewOpen: (value) => set({ newOpen: value }),
   setAuthed: (value) => set({ authed: value }),
   setConnection: (value) => set({ connection: value }),
+  notesFor: null,
+  hasWork: {},
+  setHasWork: (id, value) => set((s) => (s.hasWork[id] === value ? s : { hasWork: { ...s.hasWork, [id]: value } })),
+  setNotesFor: (value) => set({ notesFor: value }),
 
   refresh: async () => {
     try {

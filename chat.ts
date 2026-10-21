@@ -56,10 +56,27 @@ const CHAT_SYSTEM_PROMPT =
   "When they ask for something visual (a website, page, game or small tool), build it with plain HTML, CSS and JavaScript " +
   "and put an index.html at the project root, so it works by opening that file; use another technology only if they ask for it. " +
   "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes. " +
+  "Never tell the person to open a file in their browser; tell them to press Preview. " +
+  "When you finish, end with one short sentence saying what to look at in Preview. " +
   "Files the person attaches are saved in the uploads folder of the project; open them with your Read tool, and use pictures from there directly in the page when they ask for that. " +
   "When you run a command, always give it a short plain-English description of what it does and why. " +
   "You have a real browser that the person watches live: after you change a page, open it there and check it, using the http://127.0.0.1 address of a dev server you started, or else the project's Preview.";
 const MAX_TEXT = 20000;
+
+/** The standing notes a chat gets: trimmed, "" when none. Only chat projects get them; a terminal's Claude keeps its own settings. Pure. */
+export function notesOf(ws: Pick<Workspace, "chat" | "notes">): string {
+  return ws.chat ? (ws.notes ?? "").trim() : "";
+}
+
+/** Claude's system prompt for a chat: the chat's rules, then the person's standing notes. Pure. */
+export function systemPromptFor(notes: string): string {
+  return notes ? `${CHAT_SYSTEM_PROMPT} The person's standing notes for this project (always follow them): ${notes}` : CHAT_SYSTEM_PROMPT;
+}
+
+/** The text put before the person's first message in a new ACP session: the notes, or "" when none. Pure. */
+export function notesMessagePrefix(notes: string): string {
+  return notes ? `Project notes from the person (always follow them):\n${notes}\n\n` : "";
+}
 
 /** One multiple-choice question from AskUserQuestion, cleaned by askForm. */
 export type AskQuestion = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] };
@@ -79,7 +96,8 @@ export type Body =
   | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string; form?: "question" | "plan"; questions?: AskQuestion[]; plan?: string }
   /** reply: what the person answered or asked for, when a question or plan card was answered with text. */
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
-  | { kind: "done" }
+  /** worked: how long the turn ran (ms). planDelta: the plan's five-hour window percent the turn used, for the owner only (snapshot strips it for others). */
+  | { kind: "done"; worked?: number; planDelta?: number }
   | { kind: "error"; text: string };
 
 export type ChatEvent = { n: number; at: number } & Body;
@@ -366,6 +384,10 @@ interface Live {
   transcriptHome?: string;
   /** when the current turn started (ms), by a send or by Claude itself; cleared at its result */
   busySince?: number;
+  /** the plan's five-hour percent when the current turn started (from the last reading); the done line's planDelta is taken from it */
+  planStart?: number;
+  /** the project's notes (trimmed) this process was started with; changed notes restart it at the next send */
+  notes: string;
   /** background tasks still running (Bash or helper runs), from the CLI's own list */
   tasks: BgTask[];
   /** the checklist Claude's last TodoWrite sent (the full list) */
@@ -780,6 +802,42 @@ function emit(id: string, body: Body): ChatEvent {
   return ev;
 }
 
+/** The chat's text as a note line: a quiet divider, from Kohlab itself (Keep, Undo all). */
+export function noteChat(id: string, text: string): void {
+  emit(id, { kind: "note", text });
+}
+
+/** The plan's five-hour percent as last read for a project, or undefined. */
+const planPercent = (id: string): number | undefined => usages.get(id)?.plan?.fiveHour?.percent;
+
+/** A Claude turn begins (a send, a retry, or Claude starting one itself): its clock starts, and the plan reading it starts from is kept. */
+function turnBegan(id: string, live: Live) {
+  live.busySince = Date.now();
+  live.planStart = planPercent(id);
+}
+
+/** A Claude turn ends: the done line is written once the plan usage is read (at most 3 s), so it can say what share of the plan the turn used.
+ *  ponytail: if a usage read is already running, the reading taken here may be a little stale. Accepted. */
+function turnDone(id: string, live: Live) {
+  const since = live.busySince;
+  const planStart = live.planStart;
+  const worked = since !== undefined ? Date.now() - since : undefined;
+  void Promise.race([readUsage(id, live, true), new Promise((r) => setTimeout(r, 3000))]).then(() => {
+    const end = planPercent(id);
+    const planDelta = planStart !== undefined && end !== undefined && end >= planStart ? end - planStart : undefined;
+    emit(id, { kind: "done", ...(worked !== undefined ? { worked } : {}), ...(planDelta !== undefined ? { planDelta } : {}) });
+  });
+}
+
+/** Ends a Claude process that was started before the project's notes changed, so the next start has the new notes. The conversation resumes with --resume. Only when no turn runs. */
+function retireStale(id: string, ws: Workspace) {
+  const live = procs.get(id);
+  if (!live || live.closed || live.notes === notesOf(ws)) return;
+  procs.delete(id);
+  live.stopping = true;
+  live.child.kill("SIGTERM");
+}
+
 /** Kill the claude process (stop or delete). The transcript cache is dropped and reloaded from file later. */
 function stop(id: string) {
   const live = procs.get(id);
@@ -898,7 +956,7 @@ function onLine(id: string, live: Live, line: string) {
   // Claude can start a turn by itself (a background task finished): show it as working, as a send does.
   if (isTurnStart(m) && !chatBusy.has(id)) {
     chatBusy.add(id);
-    live.busySince = Date.now();
+    turnBegan(id, live);
   }
   // A finished background task, live. A terminal project's importer reads the same line from the transcript, so it stays quiet there.
   if (m.type === "system" && m.subtype === "task_notification") {
@@ -1025,13 +1083,12 @@ function onLine(id: string, live: Live, line: string) {
       console.warn("[chat] claude result error:", raw.slice(0, 200));
       emit(id, { kind: "error", text: friendlyError(raw) });
     }
-    emit(id, { kind: "done" });
+    turnDone(id, live); // reads the start of the turn's clock first; the done line follows its plan reading
     chatBusy.delete(id);
     live.busySince = undefined;
     live.helpers.clear();
     if (live.todos.every((t) => t.status === "done")) live.todos = [];
     finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
-    void readUsage(id, live, true);
   }
 }
 
@@ -1082,7 +1139,7 @@ async function retryFresh(id: string, msg: string) {
   });
   const live = await start(await getWorkspace(id), id);
   live.msg = msg;
-  live.busySince = Date.now();
+  turnBegan(id, live);
   live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: msg }, parent_tool_use_id: null }) + "\n");
 }
 
@@ -1108,7 +1165,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   // strict: only our browser tools load, never the user's MCP servers
   const mcpFile = writeBrowserMcp(ws, who);
   if (mcpFile) args.push("--mcp-config", mcpFile);
-  if (!term) args.push("--append-system-prompt", CHAT_SYSTEM_PROMPT);
+  if (!term) args.push("--append-system-prompt", systemPromptFor(notesOf(ws)));
   if (ws.chatSession) args.push("--resume", ws.chatSession);
   if (ws.model) args.push("--model", ws.model);
   const env = childEnv(home);
@@ -1140,6 +1197,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     mode: null,
     pending: new Map(),
     interrupted: false,
+    notes: notesOf(ws),
   };
   procs.set(id, live);
   child.stdin!.on("error", () => {}); // a dead process: its exit event reports it
@@ -1172,7 +1230,10 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
   if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
   loadCaps(id);
   if (term) await syncFromTerminal(ws);
-  const events = load(id).events.filter((e) => e.n > after);
+  // the plan's share of a turn is the server owner's account data: other people see the turn's time only
+  const events = load(id).events
+    .filter((e) => e.n > after)
+    .map((e): ChatEvent => (e.kind === "done" && !see.owner && e.planDelta !== undefined ? { n: e.n, at: e.at, kind: "done", ...(e.worked !== undefined ? { worked: e.worked } : {}) } : e));
   const live = procs.get(id);
   // the first read of usage comes with the first poll that finds none (a restart, or a chat not yet used)
   if (live && !usages.has(id)) void readUsage(id, live, false);
@@ -1334,7 +1395,10 @@ async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
     await markStarted(id);
     const cur = acps.get(id);
     const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
-    acp.prompt(sent);
+    // the first message of a new agent session carries the project's notes; the mark is cleared only once it is sent
+    const notes = notesOf(ws);
+    acp.prompt(acp.freshSession && notes ? notesMessagePrefix(notes) + sent : sent);
+    acp.freshSession = false;
     if (hasPendingContext(ws)) await clearHandoff(id).catch(() => {}); // only once the agent has the message
   } catch (e) {
     console.error("[chat] could not start:", (e as Error).message);
@@ -1407,6 +1471,7 @@ export async function send(id: string, text: string): Promise<void> {
   // check and claim in one synchronous step, so two posts cannot both start a turn.
   // While a turn runs, a live process takes the message as a queued one: the CLI runs it after the turn.
   const queued = chatBusy.has(id);
+  if (!queued) retireStale(id, ws); // notes changed since this process started: the next one is started with them
   if (queued && !procs.has(id)) throw new ChatError(409, "The AI is still working. Wait until it finishes, then try again.");
   if (!queued) chatBusy.add(id);
   if (!queued) chatWaiting.delete(id); // a new message clears a stale "needs you" from before
@@ -1421,7 +1486,7 @@ export async function send(id: string, text: string): Promise<void> {
     const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
     if (!queued) {
       live.msg = sent;
-      live.busySince = Date.now();
+      turnBegan(id, live);
     }
     live.child.stdin!.write(JSON.stringify({ type: "user", uuid, message: { role: "user", content: sent }, parent_tool_use_id: null }) + "\n");
     if (hasPendingContext(ws)) await clearHandoff(id).catch(() => {}); // only once Claude has the message
@@ -1687,24 +1752,24 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
         const levels = models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
         const dropEffort = !!live.effort && !levels.includes(live.effort);
         if (dropEffort) live.effort = undefined;
-        // the three aliases are kept, so a restarted process uses the same model
-        if (picked) {
+        // the choice is kept, so a restarted process uses the same model
+        if (typeof value === "string") {
           await mutateState((s) => {
             const w = s.workspaces.find((x) => x.id === id);
             if (!w) return;
-            w.model = picked === "default" ? undefined : picked;
+            w.model = value === "default" ? undefined : (value as Workspace["model"]); // an alias, or a listed model's own name
             if (dropEffort) w.effort = undefined;
           });
         }
       } else {
         // no process: only an alias is saved, and a listed model when the list is known
-        const known = picked !== null && (picked === "default" || models.length === 0 || models.some((m) => m.value === value));
+        const known = (picked !== null && (picked === "default" || models.length === 0)) || models.some((m) => m.value === value);
         if (!known) throw new ChatError(400, "That model is not available.");
         const levels = models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
         await mutateState((s) => {
           const w = s.workspaces.find((x) => x.id === id);
           if (!w) return;
-          w.model = picked === "default" ? undefined : picked;
+          w.model = value === "default" ? undefined : (value as Workspace["model"]); // an alias, or a listed model's own name
           if (w.effort && !levels.includes(w.effort)) w.effort = undefined;
         });
       }
@@ -1810,7 +1875,7 @@ export async function chatControl(id: string, action: unknown, value: unknown): 
           markSeen(id, live);
           chatBusy.delete(id);
           live.busySince = undefined;
-          emit(id, { kind: "done" });
+          emit(id, { kind: "done", ...(since !== undefined ? { worked: Date.now() - since } : {}) });
           finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
         }, 5000);
       }

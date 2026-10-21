@@ -15,6 +15,7 @@ import {
   Keyboard,
   Link,
   MagnifyingGlass,
+  NotePencil,
   Plus,
   Terminal,
   TerminalWindow,
@@ -28,6 +29,8 @@ import { readDraft } from "../lib/drafts";
 import { PROMPT_MAX } from "../lib/route";
 import { isApple, isTouchOnly, isTypingTarget } from "../lib/platform";
 import { canContinue } from "../lib/projectActions";
+import { agentName, isAiAgent } from "../lib/agentName";
+import { startNewProject } from "../lib/newProject";
 import type { PanelAction, PanelRequest } from "../store";
 import type { Workspace } from "../types";
 import { projectTitle } from "../lib/format";
@@ -55,21 +58,29 @@ function projectActionItems(
   w: Workspace,
   group: string,
   mutate: boolean,
+  powerTools: boolean,
   requestPanel: (request: PanelRequest) => void,
+  setNotesFor: (id: string | null) => void,
+  hasWork: boolean,
 ): PaletteItem[] {
   const panel = (action: PanelAction) => () => requestPanel({ workspaceId: w.id, action });
+  // A chat project's terminal is a power tool: it is listed only once power tools are on.
+  const terminals = mutate && (!w.chat || powerTools);
   return [
-    ...(mutate
+    ...(terminals
       ? [{ id: "project-terminal", label: "Open terminal", group, icon: <Terminal size={16} />, hint: "Ctrl `", keywords: ["shell", "console", "command line"], onAction: panel("terminal") }]
       : []),
-    ...(mutate && canContinue(w)
+    ...(terminals && canContinue(w)
       ? [{ id: "project-continue", label: "Continue in Claude's terminal", group, icon: <TerminalWindow size={16} />, keywords: ["resume", "chat", "claude"], onAction: panel("continue") }]
+      : []),
+    ...(mutate && w.chat
+      ? [{ id: "project-notes", label: `Notes for ${isAiAgent(w.agent) ? agentName(w.agent) : "the AI"}…`, group, icon: <NotePencil size={16} />, keywords: ["remember", "business", "colours", "tone", "brand", "instructions"], onAction: () => setNotesFor(w.id) }]
       : []),
     { id: "project-file", label: "Open file…", group, icon: <File size={16} />, keywords: ["files", "code", "browse"], onAction: panel("files") },
     { id: "project-versions", label: "Earlier versions", group, icon: <ClockCounterClockwise size={16} />, keywords: ["changes", "history", "undo", "versions"], onAction: panel("changes") },
-    { id: "project-download", label: "Download project", group, icon: <DownloadSimple size={16} />, keywords: ["zip", "save", "export", "archive"], onAction: () => api.download(w.id, "") },
+    { id: "project-download", label: "Download project", group, icon: <DownloadSimple size={16} />, keywords: ["zip", "save", "export", "archive"], onAction: () => api.downloadProject(w.id, projectTitle(w)) },
     { id: "project-preview", label: "Preview", group, icon: <Eye size={16} />, keywords: ["site", "browser", "view", "page"], onAction: panel("preview") },
-  ];
+  ].filter((i) => i.id !== "project-preview" || !w.chat || hasWork || w.lastCommitAt !== undefined);
 }
 
 /**
@@ -90,6 +101,8 @@ export default function CommandPalette() {
   const requestPanel = useApp((s) => s.requestPanel);
   const navigate = useApp((s) => s.navigate);
   const setNewOpen = useApp((s) => s.setNewOpen);
+  const setNotesFor = useApp((s) => s.setNotesFor);
+  const powerTools = useApp((s) => s.powerTools);
   const setShortcutsOpen = useApp((s) => s.setShortcutsOpen);
   const setUsageOpen = useApp((s) => s.setUsageOpen);
   const can = useCan();
@@ -143,10 +156,11 @@ export default function CommandPalette() {
   const openId = route.kind === "workspace" ? route.id : null;
   const openProject = openId ? workspaces.find((w) => w.id === openId) : undefined;
   const projectGroup = openProject ? projectTitle(openProject) : null;
+  const hasWork = useApp((s) => (openProject ? s.hasWork[openProject.id] === true : false));
   const groupOrder: readonly PaletteGroup[] = projectGroup
     ? ["Views", "Projects", projectGroup, "Actions"]
     : ["Views", "Projects", "Actions"];
-  const projectItems: PaletteItem[] = openProject ? projectActionItems(openProject, projectGroup ?? "", can.mutate, requestPanel) : [];
+  const projectItems: PaletteItem[] = openProject ? projectActionItems(openProject, projectGroup ?? "", can.mutate, powerTools, requestPanel, setNotesFor, hasWork) : [];
   // The draft of the screen behind the palette (its chat, or Home). The prompt link is offered only while it has text.
   const draftScope = route.kind === "workspace" ? route.id : route.kind === "workspaces" ? "home" : null;
   const draftText = draftScope ? readDraft(draftScope) : "";
@@ -191,7 +205,15 @@ export default function CommandPalette() {
             label: "New project",
             group: "Actions" as const,
             icon: <Plus size={16} />,
-            keywords: ["create", "start", "clone", "github"],
+            keywords: ["create", "start", "describe", "build"],
+            onAction: startNewProject,
+          },
+          {
+            id: "action-new-from-link",
+            label: "Start from a folder or link",
+            group: "Actions" as const,
+            icon: <Link size={16} />,
+            keywords: ["clone", "github", "copy", "import", "folder", "repo"],
             onAction: () => setNewOpen(true),
           },
         ]

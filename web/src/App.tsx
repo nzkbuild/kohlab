@@ -14,6 +14,8 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import CommandPalette from "./components/CommandPalette";
 import ShortcutsDialog from "./components/ShortcutsDialog";
+import NotesDialog from "./components/NotesDialog";
+import { startNewProject } from "./lib/newProject";
 import UsageDialog from "./components/UsageDialog";
 import WorkspacesView, { LaunchSheet } from "./components/WorkspacesView";
 import Settings from "./components/Settings";
@@ -73,7 +75,7 @@ export default function App() {
   // notification, so it carries the review count rather than a transient flash.
   useEffect(() => {
     const review = workspaces.filter((w) => workspaceStatus(w) === "needs-review").length;
-    document.title = review > 0 ? `kohlab, ${review} ready for review` : "kohlab";
+    document.title = review > 0 ? `kohlab, ${review} ready to check` : "kohlab";
   }, [workspaces]);
 
   // The drawer is a mobile affordance; leaving it open across a route change
@@ -95,18 +97,14 @@ export default function App() {
       <UsageDialog />
       <LaunchSheet open={newOpen && can.mutate} onClose={() => setNewOpen(false)} />
       <Announcer />
+      <NotesDialog />
+      {/* Above the composer, centred: a toast never covers Send. Fill and shadow, no border (see .kohlab-toast). */}
       <Toaster
         theme="system"
-        position="bottom-right"
-        mobileOffset={{ bottom: "4.75rem" }}
-        toastOptions={{
-          style: {
-            background: "var(--surface-overlay)",
-            border: "1px solid var(--line-strong)",
-            color: "var(--text-primary)",
-            fontSize: "0.8125rem",
-          },
-        }}
+        position="bottom-center"
+        offset={{ bottom: "11rem" }}
+        mobileOffset={{ bottom: "9.5rem" }}
+        toastOptions={{ className: "kohlab-toast" }}
       />
 
       <div className="flex h-full min-h-0 flex-col">
@@ -147,7 +145,7 @@ export default function App() {
               <div className="flex-1" />
 
               {can.mutate ? (
-                <Button variant="quiet" iconOnly aria-label="New project" onClick={() => setNewOpen(true)}>
+                <Button variant="quiet" iconOnly aria-label="New project" onClick={startNewProject}>
                   <PencilSimple size={18} />
                 </Button>
               ) : null}

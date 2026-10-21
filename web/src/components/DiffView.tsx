@@ -380,11 +380,11 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
       setKeeping(true);
       try {
         await api.commit(workspaceId, `Kept ${count} changed file${count === 1 ? "" : "s"}`);
+        // No toast: the chat gets a "Kept this version" note, which is the feedback.
         await load();
         await refresh();
-        toast.success("Saved");
       } catch (e) {
-        toast.error(`Could not save, ${(e as Error).message}`);
+        toast.error(`Could not keep this version, ${(e as Error).message}`);
       } finally {
         setKeeping(false);
       }
@@ -394,9 +394,9 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
       setUndoing(true);
       try {
         await api.action(workspaceId, "discard");
+        // No toast: the chat gets an "Undid the changes" note, which is the feedback.
         await load();
         await refresh();
-        toast.success("Changes undone");
       } catch (e) {
         toast.error(`Could not undo, ${(e as Error).message}`);
       } finally {

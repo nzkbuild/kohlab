@@ -1876,7 +1876,14 @@ export async function createWorkspace(opts: {
   if (!opts.url && !repo) throw new Error(`not a git repo: ${opts.repo}`);
 
   const rootName = opts.url ? repoNameFromUrl(opts.url) : basename(repo!);
-  const id = `${slugify(rootName)}-${slugify(opts.task)}`;
+  // The id is the project's slug, with the task's slug only when it says something else: a new
+  // chat project's task is its name, which would double the slug ("tree-tree"). A taken id gets -2, -3 ….
+  const stem = slugify(rootName);
+  const taskSlug = opts.task.trim() ? slugify(opts.task) : "";
+  const base = taskSlug && taskSlug !== stem ? `${stem}-${taskSlug}` : stem;
+  const taken = new Set((await loadState()).workspaces.map((w) => w.id));
+  let id = base;
+  for (let n = 2; taken.has(id) && n < 1000; n++) id = `${base}-${n}`;
   const dir = isolated ? join(ownerUser!.home!, "works", id) : join(WORKS_DIR, id);
   const tree = join(dir, "tree");
   const admin = join(dir, "admin");

@@ -8,6 +8,8 @@ interface Props {
   workspaceId: string;
   /** Told the page's address on first load and after every navigation. */
   onUrl?: (url: string) => void;
+  /** A device size to lay the page out at. Null (the default) lays it out at the size of this view. */
+  viewport?: Size | null;
 }
 
 type Phase = "starting" | "live" | "reconnecting" | "error";
@@ -62,7 +64,9 @@ function keyFields(e: KeyboardEvent) {
  * A live view of the project's shared browser. The frames are drawn on a canvas and
  * clicks, typing and scrolling are sent back, so the user and Claude share one browser.
  */
-export default function BrowserView({ workspaceId, onUrl }: Props) {
+export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
+  const viewW = viewport?.width;
+  const viewH = viewport?.height;
   const can = useCan();
   const [phase, setPhase] = useState<Phase>("starting");
   // Until the first picture is drawn the canvas is blank, so the page says it is starting.
@@ -222,6 +226,11 @@ export default function BrowserView({ workspaceId, onUrl }: Props) {
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el || phase !== "live" || !canInputRef.current) return;
+    // A chosen device size is sent as it is, and the pane's own size is not measured.
+    if (viewW && viewH) {
+      api.browserAct(workspaceId, "viewport", undefined, { width: viewW, height: viewH }).catch(() => {});
+      return;
+    }
     let timer = 0;
     const sendSize = () => {
       const r = el.getBoundingClientRect();
@@ -240,7 +249,7 @@ export default function BrowserView({ workspaceId, onUrl }: Props) {
       window.clearTimeout(timer);
       ro.disconnect();
     };
-  }, [phase, workspaceId]);
+  }, [phase, workspaceId, viewW, viewH]);
 
   // Wheel and touch need passive: false so preventDefault stops the panel scrolling, which React's listeners cannot do.
   useEffect(() => {

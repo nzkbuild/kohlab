@@ -594,10 +594,30 @@ input[type="radio"] {
     text-overflow: ellipsis;
   }
   .chip-trigger-icon {
-    width: var(--control-h-sm);
+    width: var(--control-h);
+    min-height: var(--control-h);
     padding: 0;
     justify-content: center;
     flex-shrink: 0;
+  }
+  @media (pointer: coarse) {
+    .chip-trigger-icon {
+      width: 2.75rem;
+      min-height: 2.75rem;
+    }
+  }
+
+  /* Toasts: a fill and a soft shadow, no border (DESIGN: fills, not borders). Sonner's own
+     defaults carry a border and a shadow, so this selector is deliberately more specific. */
+  [data-sonner-toaster] {
+    --normal-bg: var(--surface-overlay);
+    --normal-text: var(--text-primary);
+    --normal-border: transparent;
+  }
+  [data-sonner-toaster] [data-sonner-toast][data-styled="true"].kohlab-toast {
+    border: 0;
+    font-size: var(--text-sm);
+    box-shadow: 0 0.75rem 2rem oklch(0.08 0.002 286 / 0.5);
   }
   @media (hover: hover) {
     .chip-trigger:hover:not(:disabled) {

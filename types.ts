@@ -47,6 +47,8 @@ export interface Workspace {
   limits?: WorkspaceLimits;
   /** Claude model for this project. Undefined = the account default. */
   model?: "opus" | "sonnet" | "haiku";
+  /** Standing notes the person wrote for the AI about this project (<= 4000 chars). Always followed by a chat; a running Claude picks them up at its next message. */
+  notes?: string;
   /** Claude effort level chosen in the chat; re-applied when its process restarts. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
 /** Permission mode the person picked in the chat, passed to claude when it starts. Undefined = "default" for a chat, the project's own settings for a terminal. */

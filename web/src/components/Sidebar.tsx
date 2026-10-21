@@ -23,6 +23,7 @@ import { projectTitle } from "../lib/format";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
 import { restoreFocusAfterClose } from "../lib/inputModality";
+import { startNewProject } from "../lib/newProject";
 import { cn } from "../lib/utils";
 import { isPhone } from "../lib/viewport";
 import { isTouchOnly } from "../lib/platform";
@@ -179,7 +180,6 @@ export default function Sidebar({ open, onClose }: Props) {
   const route = useApp((s) => s.route);
   const workspaces = useApp((s) => s.workspaces);
   const navigate = useApp((s) => s.navigate);
-  const setNewOpen = useApp((s) => s.setNewOpen);
   const navIndex = useApp((s) => s.navIndex);
   const navMax = useApp((s) => s.navMax);
   // Back needs an earlier entry in this app's history; Forward needs one we already left.
@@ -379,7 +379,7 @@ export default function Sidebar({ open, onClose }: Props) {
               className="sidebar-row"
               aria-label="New project"
               onClick={() => {
-                setNewOpen(true);
+                startNewProject();
                 onClose();
               }}
             >
@@ -449,6 +449,9 @@ export default function Sidebar({ open, onClose }: Props) {
                           className="sidebar-row sidebar-link"
                           data-selected={selected}
                           aria-current={selected ? "page" : undefined}
+                          // Opening a project reads its chat and diff: start those on hover or focus, so the screen paints at once.
+                          onPointerEnter={() => api.prefetchProject(workspace.id, !!workspace.chat)}
+                          onFocus={() => api.prefetchProject(workspace.id, !!workspace.chat)}
                           onClick={() => {
                             // A long press has just opened the More menu: that press is not a visit.
                             if (holdFired.current) {

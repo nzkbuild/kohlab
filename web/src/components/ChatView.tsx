@@ -120,10 +120,52 @@ function workingLine(t: string): string {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** "12s" under a minute, then "1m 05s". */
-function formatElapsed(ms: number): string {
+export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
+
+/** The quiet line under a reply: "Worked for 1m 12s", with the plan share when the server has it. Null for a turn of 5 s or less. Pure. */
+export function workedLine(d: { worked?: number; planDelta?: number }): string | null {
+  if (d.worked === undefined || d.worked <= 5000) return null;
+  return `Worked for ${formatElapsed(d.worked)}${d.planDelta !== undefined ? ` · ${d.planDelta}% of your plan` : ""}`;
+}
+
+/** The message "Check it works" sends: a fixed request, so the person needs no words of their own. */
+const CHECK_TEXT = "Please open the page in the shared browser and check that it works: click through it like a visitor would, look for errors, and fix anything broken. Then tell me what you checked in plain words.";
+
+/** Allow and Don't allow: the same width, and tall enough to tap on a touch screen. */
+const ASK_BUTTON = "min-w-[8rem] justify-center [@media(pointer:coarse)]:min-h-11";
+
+/** The note the server writes when the person Keeps a version (chat.ts's noteChat, via server.ts). */
+const KEPT_NOTE = "Kept this version";
+
+/** Set once the first "Ready to check" card has shown: after that, its hint line is not shown again. */
+const READY_HINT_KEY = "kohlab:ready-hint-seen";
+
+/** The Claude model menu's choices: the newest of each family, with a plain line about it. */
+const FAMILY_BLURB: Record<string, string> = { opus: "Best for complex work", sonnet: "Best for everyday work", haiku: "Fastest for quick answers" };
+
+/** Which Claude family a model belongs to, from its value or name ("claude-opus-5-5", "Opus 5.5"); undefined for any other. */
+function familyOf(m: ModelInfo): string | undefined {
+  return /\b(opus|sonnet|haiku)\b/i.exec(`${m.value} ${m.displayName}`)?.[1].toLowerCase();
+}
+
+/** A model's version as numbers, from its value or name ("claude-sonnet-4-5" -> [4, 5]); [0] when it has none. */
+function versionOf(m: ModelInfo): number[] {
+  // A date suffix (claude-opus-4-20250514) is not a minor version: the minor is one or two digits.
+  const v = /(\d+)(?:[.-](\d{1,2})(?!\d))?/.exec(m.value) ?? /(\d+)(?:[.-](\d{1,2})(?!\d))?/.exec(m.displayName);
+  return v ? [Number(v[1]), Number(v[2] ?? 0)] : [0];
+}
+
+/** Whether version a is newer than version b. */
+const newerThan = (a: number[], b: number[]) => {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d > 0;
+  }
+  return false;
+};
 
 /** "claude-opus-5-5" -> "Opus 5.5"; a name it does not know is shown as it is. */
 function modelName(id: string): string {
@@ -1195,6 +1237,58 @@ function ModelChoices({ models, value, onPick }: { models: ModelInfo[]; value: s
   );
 }
 
+/** Claude's model menu: Default, then the newest Opus, Sonnet and Haiku. The other models sit behind "Show older models". */
+function ClaudeModelChoices({ models, value, onPick }: { models: ModelInfo[]; value: string; onPick: (v: string) => void }) {
+  const [olderOpen, setOlderOpen] = useState(false);
+  const newest = new Map<string, ModelInfo>();
+  for (const m of models) {
+    const fam = familyOf(m);
+    if (!fam) continue;
+    const have = newest.get(fam);
+    if (!have || newerThan(versionOf(m), versionOf(have))) newest.set(fam, m);
+  }
+  const choices: { value: string; label: string }[] = [{ value: "default", label: "Default (recommended)" }];
+  for (const fam of ["opus", "sonnet", "haiku"]) {
+    const m = newest.get(fam);
+    if (!m) continue;
+    const [major, minor] = versionOf(m);
+    const name = major > 0 ? `${cap(fam)} ${major}${minor ? `.${minor}` : ""}` : cap(fam);
+    choices.push({ value: m.value, label: `${name} — ${FAMILY_BLURB[fam]}` });
+  }
+  const chosen = new Set(choices.map((c) => c.value));
+  const older = models.filter((m) => !chosen.has(m.value));
+  const inMain = choices.some((c) => c.value === value);
+  return (
+    <>
+      <MenuRadioGroup value={inMain ? value : ""} onValueChange={onPick}>
+        {choices.map((c) => (
+          <MenuRadioItem key={c.value} value={c.value}>
+            <span className="block">{c.label}</span>
+          </MenuRadioItem>
+        ))}
+      </MenuRadioGroup>
+      {older.length > 0 ? (
+        <>
+          {/* Stays open: the older models list opens inside this menu. */}
+          <MenuItem aria-expanded={olderOpen} onSelect={(e) => { e.preventDefault(); setOlderOpen((o) => !o); }} className="text-text-secondary">
+            {olderOpen ? "Hide older models" : "Show older models"}
+          </MenuItem>
+          {olderOpen ? (
+            <MenuRadioGroup value={inMain ? "" : value} onValueChange={onPick}>
+              {older.map((m) => (
+                <MenuRadioItem key={m.value} value={m.value}>
+                  <span className="block">{m.displayName}</span>
+                  {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          ) : null}
+        </>
+      ) : null}
+    </>
+  );
+}
+
 /** The Commands menu's choices: each command's name and its one-line description. Past COMMAND_SEARCH_AT commands, a search box leads, as in the model menu. */
 function CommandChoices({ commands, onPick }: { commands: CommandInfo[]; onPick: (c: CommandInfo) => void }) {
   const [query, setQuery] = useState("");
@@ -1578,6 +1672,28 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     wasBusy.current = busy;
   }, [busy, refresh]);
 
+  // The Preview counts as looked at once it has been opened since the last reply finished. The header's Preview says so with an event.
+  const [previewSeen, setPreviewSeen] = useState(false);
+  useEffect(() => {
+    if (!busy) setPreviewSeen(false);
+  }, [busy]);
+  useEffect(() => {
+    const opened = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+      if (!id || id === workspaceId) setPreviewSeen(true);
+    };
+    window.addEventListener("kohlab:preview-opened", opened);
+    return () => window.removeEventListener("kohlab:preview-opened", opened);
+  }, [workspaceId]);
+  // The first "Ready to check" card of the first visit carries a hint; it is never shown again after that.
+  const [readyHint] = useState(() => {
+    try {
+      return localStorage.getItem(READY_HINT_KEY) === null;
+    } catch {
+      return false;
+    }
+  });
+
   // Announce new assistant text. Bursts are coalesced by announce() itself.
   useEffect(() => {
     for (const e of events) {
@@ -1633,7 +1749,23 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     // Answered asks (and the tool runs between them) in one turn read as ONE row.
     // A question or plan card is never merged: it reads on its own.
     const isAnswered = (row: ChatEvent[]) => row.length === 1 && row[0].kind === "ask" && !row[0].form && answers.has(row[0].requestId);
-    return out.map((turn) => {
+    // The tool ran after its permission was answered, so its line comes after the ask in time. The answered ask moves up before the
+    // run of tool lines just above it, so "You allowed ..." reads before the step it unlocked.
+    const liftAnswered = (turn: ChatEvent[][]) => {
+      const lifted: ChatEvent[][] = [];
+      for (const row of turn) {
+        if (!isAnswered(row)) {
+          lifted.push(row);
+          continue;
+        }
+        let k = lifted.length;
+        while (k > 0 && isToolLine(lifted[k - 1][0])) k--;
+        lifted.splice(k, 0, row);
+      }
+      return lifted;
+    };
+    return out.map((rawTurn) => {
+      const turn = liftAnswered(rawTurn);
       const merged: ChatEvent[][] = [];
       for (let i = 0; i < turn.length; i++) {
         if (!isAnswered(turn[i])) {
@@ -1648,6 +1780,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       return merged;
     });
   }, [visibleRows, answers]);
+
+  // Each turn's done line, by the message that starts the turn (0 for replies before any message).
+  const doneByTurn = useMemo(() => {
+    const m = new Map<number, Extract<ChatEvent, { kind: "done" }>>();
+    let key = 0;
+    for (const e of events) {
+      if (e.kind === "user") key = e.n;
+      else if (e.kind === "done") m.set(key, e);
+    }
+    return m;
+  }, [events]);
 
   // Open at the very bottom, and keep new content in view while the reader is stuck there.
   useLayoutEffect(() => {
@@ -2071,12 +2214,22 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     };
   }, [hasChanges, busy, workspaceId]);
 
+  // Once a ready card has shown, the first-visit hint is remembered.
+  useEffect(() => {
+    if (!readyHint || busy || !hasChanges || !can || compact) return;
+    try {
+      localStorage.setItem(READY_HINT_KEY, "1");
+    } catch {
+      /* no storage: the hint may show again next time */
+    }
+  }, [readyHint, busy, hasChanges, can, compact]);
+
+  // Keep and Undo confirm in the conversation itself (the server writes a note), so no toast here: only failures show.
   const keep = async () => {
     setKeeping(true);
     try {
       await api.commit(workspaceId, keepMessage);
       await refresh();
-      toast.success("Saved");
     } catch (e) {
       toast.error(failed("save", e));
     } finally {
@@ -2084,12 +2237,28 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  /** Copies the link to this project's Preview, as the Preview panel does. */
+  const copyPreviewLink = async () => {
+    try {
+      const { url } = await api.preview(workspaceId);
+      await copyText(location.origin + url);
+      toast.success("Link copied. Anyone who can reach this Kohlab can open it.");
+    } catch (e) {
+      toast.error(`Could not copy the link, ${friendly(e)}`);
+    }
+  };
+
+  /** Opens the Preview from the ready card: that counts as having looked at it. */
+  const openPreview = () => {
+    setPreviewSeen(true);
+    onPreview?.();
+  };
+
   const undo = async () => {
     setUndoing(true);
     try {
       await api.action(workspaceId, "discard");
       await refresh();
-      toast.success("Changes undone");
     } catch (e) {
       toast.error(failed("undo", e));
     } finally {
@@ -2147,7 +2316,24 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
 
   const renderEvent = (e: ChatEvent) => {
     const note = noteOf(e);
-    if (note !== null) return <NoteLine text={note} />;
+    if (note !== null) {
+      // Under the newest "Kept this version": a quiet line to show someone the Preview link.
+      const latestKeptN = Math.max(0, ...events.filter((x) => x.kind === "note" && x.text === KEPT_NOTE).map((x) => x.n));
+      if (note === KEPT_NOTE && e.n === latestKeptN && can) {
+        return (
+          <>
+            <NoteLine text={note} />
+            <div className="flex items-center justify-center gap-1.5 text-xs text-text-muted">
+              <span>Show someone:</span>
+              <Button variant="quiet" size="sm" className="text-xs text-text-secondary" onClick={() => void copyPreviewLink()}>
+                Copy link
+              </Button>
+            </div>
+          </>
+        );
+      }
+      return <NoteLine text={note} />;
+    }
     switch (e.kind) {
       case "user": {
         const { body, files } = splitAttached(e.text);
@@ -2195,51 +2381,51 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       case "ask": {
         const answered = answers.get(e.requestId);
         if (answered !== undefined) return <AnsweredAsk e={e} allowed={answered} reply={replies.get(e.requestId)} />;
-        if (pendingAsk?.requestId !== e.requestId) {
-          // The newest question, with nothing said after it, can be asked again: the server restart lost the process that was waiting.
-          const latestAskN = Math.max(0, ...events.filter((x) => x.kind === "ask").map((x) => x.n));
-          const repeatable = e.n === latestAskN && !events.some((x) => x.kind === "user" && x.n > e.n) && !busy && waiting === null && can;
-          return (
-            <div className="flex flex-col items-start gap-3">
-              <p className="text-small text-text-muted">{`Kohlab restarted before you answered, so ${who} stopped here.`}</p>
-              {repeatable ? (
-                <Button variant="secondary" disabled={sending} onClick={() => void sendText("Please carry on with what you were doing.")}>
-                  {`Ask ${who} again`}
-                </Button>
-              ) : null}
-            </div>
+        // Nothing is waiting on this question any more (the server restarted before it was answered): it stays on screen, dimmed,
+        // with its buttons off, and the newest one can be asked again.
+        const dead = pendingAsk?.requestId !== e.requestId;
+        const askBusy = dead || answering !== null;
+        const latestAskN = Math.max(0, ...events.filter((x) => x.kind === "ask").map((x) => x.n));
+        const repeatable = dead && e.n === latestAskN && !events.some((x) => x.kind === "user" && x.n > e.n) && !busy && waiting === null && can;
+        const card =
+          e.form === "question" ? (
+            <QuestionCard e={e} can={can} busy={askBusy} onAnswer={(allow, extra) => void answer(e.requestId, allow, extra)} />
+          ) : e.form === "plan" ? (
+            <PlanCard e={e} can={can} busy={askBusy} onAnswer={(allow, extra) => void answer(e.requestId, allow, extra)} />
+          ) : (
+            <section aria-label={`${who} is asking`} className="rounded-card bg-surface-raised px-5 py-[18px]">
+              <p className="text-base font-semibold text-text-primary">{e.text}</p>
+              {e.why ? <p className="mt-1 text-small leading-5 text-text-muted">{e.why}</p> : null}
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                {can ? (
+                  <>
+                    <Button variant="primary" className={ASK_BUTTON} disabled={askBusy} onClick={() => void answer(e.requestId, true)}>
+                      Allow
+                    </Button>
+                    <Button variant="secondary" className={ASK_BUTTON} disabled={askBusy} onClick={() => void answer(e.requestId, false)}>
+                      {"Don't allow"}
+                    </Button>
+                  </>
+                ) : dead ? null : (
+                  <p className="text-small text-text-muted">Waiting for an answer.</p>
+                )}
+                {e.detail ? <Details className="ml-auto" detail={e.detail} /> : null}
+              </div>
+            </section>
           );
-        }
-        if (e.form === "question") return <QuestionCard e={e} can={can} busy={answering !== null} onAnswer={(allow, extra) => void answer(e.requestId, allow, extra)} />;
-        if (e.form === "plan") return <PlanCard e={e} can={can} busy={answering !== null} onAnswer={(allow, extra) => void answer(e.requestId, allow, extra)} />;
+        if (!dead) return card;
         return (
-          <section aria-label={`${who} is asking`} className="rounded-card bg-surface-raised px-5 py-[18px]">
-            <p className="text-base font-semibold text-text-primary">{e.text}</p>
-            {e.why ? <p className="mt-1 text-small leading-5 text-text-muted">{e.why}</p> : null}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              {can ? (
-                <>
-                  <Button
-                    variant="primary"
-                    disabled={answering !== null}
-                    onClick={() => void answer(e.requestId, true)}
-                  >
-                    Allow
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={answering !== null}
-                    onClick={() => void answer(e.requestId, false)}
-                  >
-                    {"Don't allow"}
-                  </Button>
-                </>
-              ) : (
-                <p className="text-small text-text-muted">Waiting for an answer.</p>
-              )}
-              {e.detail ? <Details className="ml-auto" detail={e.detail} /> : null}
+          <div className="flex flex-col items-start gap-3">
+            <div className="w-full opacity-50" aria-disabled="true">
+              {card}
             </div>
-          </section>
+            <p className="text-small text-text-muted">{`Kohlab restarted before you answered, so ${who} stopped here.`}</p>
+            {repeatable ? (
+              <Button variant="secondary" disabled={sending} onClick={() => void sendText("Please carry on with what you were doing.")}>
+                {`Ask ${who} again`}
+              </Button>
+            ) : null}
+          </div>
         );
       }
       case "error":
@@ -2267,7 +2453,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The model menu's body, shared by the desktop model chip and the phone's combined chip.
   const modelMenu = (
     <>
-      <ModelChoices models={models} value={modelInfo?.value ?? ""} onPick={(v) => void pick("model", v, model, setModel)} />
+      {isClaude ? (
+        <ClaudeModelChoices models={models} value={modelInfo?.value ?? ""} onPick={(v) => void pick("model", v, model, setModel)} />
+      ) : (
+        <ModelChoices models={models} value={modelInfo?.value ?? ""} onPick={(v) => void pick("model", v, model, setModel)} />
+      )}
       {levels.length > 0 ? (
         <>
           <MenuSeparator />
@@ -2282,6 +2472,24 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         </>
       ) : null}
     </>
+  );
+
+  // No message or reply yet (notes alone): the empty-chat layout, with the heading above the composer.
+  const empty = events.every((e) => noteOf(e) !== null) && !busy;
+
+  // The ready card's two buttons: Preview is the primary one until the person has looked at it, Keep is after that.
+  const previewPrimary = !previewOpen && !previewSeen;
+  const previewButton = previewOpen ? null : (
+    <Button variant={previewPrimary ? "primary" : "secondary"} className="max-md:px-3" disabled={previewing} onClick={openPreview}>
+      <Browser size={16} className="max-md:hidden" aria-hidden="true" />
+      Preview
+    </Button>
+  );
+  const keepButton = (
+    <Button variant={previewPrimary ? "secondary" : "primary"} className="max-md:px-3" disabled={keeping} onClick={() => void keep()}>
+      <Check size={16} className="max-md:hidden" aria-hidden="true" />
+      Keep this version
+    </Button>
   );
 
   const placeholder =
@@ -2299,8 +2507,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     <WorkspaceCtx.Provider value={workspaceId}>
     <AgentCtx.Provider value={who}>
       <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          <div className="relative min-h-0 flex-1">
+        <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col", empty && "justify-center")}>
+          {/* An empty chat centres its heading and composer together; the first message docks the composer at the bottom. */}
+          <div className={cn("relative min-h-0", empty ? "flex-none" : "flex-1")}>
             <div
               ref={scrollRef}
               onScroll={onScroll}
@@ -2318,7 +2527,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               onKeyDown={(e) => {
                 if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") scrollUp();
               }}
-              className="absolute inset-0 overflow-y-auto overscroll-contain"
+              className={cn(empty ? "relative" : "absolute inset-0", "overflow-y-auto overscroll-contain")}
             >
               <div
                 ref={columnRef}
@@ -2330,8 +2539,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   compact ? "pt-4" : "mx-auto max-w-[720px] shell:px-6",
                 )}
               >
-                {events.every((e) => noteOf(e) !== null) && !busy ? (
-                  <div className="flex flex-col items-center gap-2 px-2 pt-[18vh] text-center">
+                {empty ? (
+                  <div className="flex flex-col items-center gap-2 px-2 text-center">
                     <h2 className="text-xl font-semibold text-text-primary">{`What should ${who} build?`}</h2>
                     <p className="text-base text-text-muted">{`Describe it in your own words. ${who} will ask before changing anything important.`}</p>
                   </div>
@@ -2340,9 +2549,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   // Everything Claude wrote in this turn, as its markdown source, for Copy.
                   // Only Claude text that is actually shown earns a Copy: a blank reply under a question has nothing to copy.
                   const replies = turn.flat().flatMap((e) => (e.kind === "assistant" && e.text.trim() !== "" ? [e.text] : []));
-                  return (
-                    <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
-                      {turn.map((row) => (
+                  const turnKey = turn[0][0].kind === "user" ? turn[0][0].n : 0;
+                  // Not under the turn still running: a done line that arrives late can belong to the turn before it.
+                  const worked = busy && ti === turns.length - 1 ? null : workedLine(doneByTurn.get(turnKey) ?? {});
+                  const renderRow = (row: ChatEvent[]) => (
                         <Fragment key={row[0].n}>
                           {isToolLine(row[0]) ? (
                             <ToolRun lines={row} results={results} />
@@ -2359,11 +2569,18 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                             </div>
                           ) : null}
                         </Fragment>
-                      ))}
+                  );
+                  let tail = turn.length;
+                  while (tail > 1 && turn[tail - 1][0].kind === "note") tail--;
+                  return (
+                    <div key={turn[0][0].n} className="group flex min-w-0 flex-col gap-3">
+                      {turn.slice(0, tail).map(renderRow)}
+                      {worked ? <p className="text-xs text-text-muted">{worked}</p> : null}
                       {/* Copy only under a finished reply that ends in text: not mid-turn, not under a tool run. */}
-                      {replies.length > 0 && !(busy && ti === turns.length - 1) && turn[turn.length - 1][0].kind === "assistant" ? (
+                      {replies.length > 0 && !(busy && ti === turns.length - 1) && turn[tail - 1][0].kind === "assistant" ? (
                         <CopyReply text={replies.join("\n\n")} latest={ti === turns.length - 1} />
                       ) : null}
+                      {turn.slice(tail).map(renderRow)}
                     </div>
                   );
                 })}
@@ -2374,19 +2591,20 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   </div>
                 ) : null}
                 {!compact && !busy && hasChanges && can ? (
-              <div role="region" aria-label="Changes to check" className="flex flex-col gap-3">
-                <p className="text-small text-text-muted">
-                  {changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}
-                </p>
+              <section aria-label="Ready to check" className="flex flex-col gap-3 rounded-card bg-surface-raised px-5 py-[18px]">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <p className="text-base font-semibold text-text-primary">Ready to check</p>
+                  <p className="text-small text-text-muted">{changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}</p>
+                </div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Button variant="primary" className="max-md:px-3" disabled={keeping} onClick={() => void keep()}>
-                    <Check size={16} className="max-md:hidden" aria-hidden="true" />
-                    Keep this version
-                  </Button>
+                  {previewPrimary ? previewButton : null}
+                  {keepButton}
+                  {previewPrimary ? null : previewButton}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
                   {previewOpen ? null : (
-                    <Button variant="secondary" className="max-md:px-3" disabled={previewing} onClick={onPreview}>
-                      <Browser size={16} className="max-md:hidden" aria-hidden="true" />
-                      Preview
+                    <Button variant="quiet" className="text-text-secondary max-md:px-2.5" disabled={sending} onClick={() => void sendText(CHECK_TEXT)}>
+                      Check it works
                     </Button>
                   )}
                   <Button variant="quiet" className="text-text-secondary max-md:px-2.5" disabled={undoing} onClick={() => setConfirmUndo(true)}>
@@ -2394,7 +2612,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     Undo all since last keep
                   </Button>
                 </div>
-              </div>
+                {readyHint ? <p className="text-xs text-text-muted">Look at it in Preview, then keep it or undo it.</p> : null}
+              </section>
                 ) : null}
                 {todos.length > 0 ? <Checklist todos={todos} /> : null}
                 {working ? (

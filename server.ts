@@ -78,6 +78,8 @@ import {
   setHookBase,
   getPrefs,
   setPrefs,
+  mutateState,
+  slugify,
 } from "./lib";
 import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 import { resolvePreviewFile } from "./preview";
@@ -85,7 +87,7 @@ import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, to
 import { stopAllDevServers } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
-import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage } from "./chat";
+import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, noteChat, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -528,7 +530,41 @@ async function handleCommit(id: string, req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { message?: string };
     const res = await commitWorkspace(id, body.message ?? "");
+    if ((await getWorkspace(id)).chat) noteChat(id, "Kept this version");
     return json(res);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** "Download project": the last kept version as a zip. git archive reads HEAD, so uncommitted changes are left out. */
+async function handleDownload(id: string): Promise<Response> {
+  try {
+    const ws = await getWorkspace(id);
+    const proc = Bun.spawn(["git", "-c", "safe.directory=*", "archive", "--format=zip", "HEAD"], { cwd: worktreePath(ws), stdout: "pipe", stderr: "ignore" });
+    const zip = await new Response(proc.stdout).arrayBuffer();
+    if ((await proc.exited) !== 0) throw new Error("no kept version");
+    return new Response(zip, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${slugify(ws.task)}.zip"` } });
+  } catch {
+    return json({ error: "There is no kept version to download yet. Keep this version first." }, 409);
+  }
+}
+
+/** The project's standing notes for the AI. Trimmed; empty clears them. A running chat picks them up at its next message. */
+async function handleNotes(id: string, req: Request): Promise<Response> {
+  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+  try {
+    const body = (await req.json().catch(() => ({}))) as { notes?: unknown };
+    if (typeof body.notes !== "string") return json({ error: "notes must be text" }, 400);
+    const notes = body.notes.trim();
+    if (notes.length > 4000) return json({ error: "notes are over 4000 characters" }, 400);
+    await mutateState((s) => {
+      const w = s.workspaces.find((x) => x.id === id);
+      if (!w) throw new Error(`no workspace '${id}'`);
+      if (notes) w.notes = notes;
+      else delete w.notes;
+    });
+    return json({ ok: true });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -560,6 +596,7 @@ async function handleMerge(id: string, req: Request, actor: string): Promise<Res
 async function handleDiscard(id: string): Promise<Response> {
   try {
     const res = await discardWorkspace(id);
+    if ((await getWorkspace(id)).chat) noteChat(id, "Undid the changes since the last keep");
     return json(res);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -1278,7 +1315,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       return handleHookPost(hookM[1], req);
     }
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|fs|image|share|preview|rename|log|versions|restore|model|terminal)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|download|notes|fs|image|share|preview|rename|log|versions|restore|model|terminal)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -1418,7 +1455,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
 
     if (m) {
       const [, id, action] = m;
-      const shareReadOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "log";
+      const shareReadOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "download" || action === "log";
       // share-token access to this workspace is read-only
       if (shareIdRes === id && shareReadOnly) {
         switch (action) {
@@ -1426,13 +1463,14 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
           case "files": return handleFiles(id);
           case "file": return handleFile(id, req);
           case "raw": return handleRaw(id, req);
+          case "download": return handleDownload(id);
           case "log": return handleLog(id);
         }
       }
       // v1.8 ownership: a named member/viewer may only touch their own
       // workspaces (share-token reads already returned above). Owners and
       // the legacy/anonymous single-user flows pass through.
-      const readOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "log" || action === "versions";
+      const readOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "download" || action === "log" || action === "versions";
       if (!(await mayAccessWorkspace(auth, id))) {
         return json({ error: "forbidden, not your workspace" }, 403);
       }
@@ -1464,6 +1502,8 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         case "files": return handleFiles(id);
         case "file": return handleFile(id, req);
         case "raw": return handleRaw(id, req);
+        case "download": return handleDownload(id);
+        case "notes": containFailure(audit(actor, "notes", id), "audit"); return handleNotes(id, req);
         case "fs": containFailure(audit(actor, "fs", id, new URL(req.url).searchParams.get("op") ?? undefined), "audit"); return handleFs(id, req);
         case "log": return handleLog(id);
         case "image":
@@ -1725,7 +1765,10 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         const list = await listWorkspaces();
         const w = list.find((x) => x.id === shareIdRes);
         if (w && !(await mayAccessWorkspace(auth, w.id))) return json({ error: "forbidden, not your workspace" }, 403);
-        return json(w ? [w] : []);
+        // a share link shows the project, not the owner's private notes, hook secret, or conversation bookkeeping
+        if (!w) return json([]);
+        const { notes: _n, hookToken: _h, payload: _p, agentSessions: _a, agentSeen: _s, handoffAfter: _o, branchContext: _b, restoredFrom: _r, ...pub } = w;
+        return json([pub]);
       }
       if (denied) return json({ error: "unauthorized" }, 401);
       // a named member only ever sees their own workspaces

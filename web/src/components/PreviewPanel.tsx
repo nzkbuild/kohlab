@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { ArrowClockwise, ArrowLeft, ArrowRight, ArrowSquareOut, CaretLeft, DotsThree, Globe, LinkSimple, X } from "@phosphor-icons/react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { ArrowClockwise, ArrowLeft, ArrowRight, ArrowSquareOut, CaretLeft, Desktop, DeviceMobile, DeviceTablet, DotsThree, Globe, LinkSimple, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { copyText } from "../lib/clipboard";
@@ -28,6 +28,31 @@ const SWIPE_CLOSE_PX = 80;
 
 const ACTION_WORDS = { back: "go back", forward: "go forward", reload: "reload the page", open: "open that address", home: "open the project page" } as const;
 
+/** The pane's device sizes. Desktop follows the pane's own width. Sizes are CSS pixels; the frame is scaled to fit. */
+type DeviceId = "phone" | "tablet" | "desktop";
+const DEVICES: Record<DeviceId, { label: string; Icon: typeof Desktop; size: { width: number; height: number } | null }> = {
+  phone: { label: "Phone", Icon: DeviceMobile, size: { width: 390, height: 844 } },
+  tablet: { label: "Tablet", Icon: DeviceTablet, size: { width: 820, height: 1180 } },
+  desktop: { label: "Desktop", Icon: Desktop, size: null },
+};
+const deviceKey = (id: string) => `kohlab.previewDevice.${id}`;
+// localStorage can throw (private mode): the choice is then just not remembered.
+function readDevice(id: string | null): DeviceId {
+  try {
+    const v = id ? localStorage.getItem(deviceKey(id)) : null;
+    return v === "phone" || v === "tablet" ? v : "desktop";
+  } catch {
+    return "desktop";
+  }
+}
+function writeDevice(id: string, device: DeviceId) {
+  try {
+    localStorage.setItem(deviceKey(id), device);
+  } catch {
+    /* not remembered */
+  }
+}
+
 /**
  * The shared browser for this project, live, with an address bar. The menu keeps
  * the project's own static page: its link, a new link, and a way back to it.
@@ -51,8 +76,51 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
   const [entered, setEntered] = useState(false);
   const [dragY, setDragY] = useState(0);
   const drag = useRef<{ y: number; dy: number; id: number; captured: boolean } | null>(null);
+  // The device the pane shows the page at. Remembered per project; the pane is keyed by project, so it is read once.
+  const [device, setDevice] = useState<DeviceId>(() => readDevice(workspaceId));
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stage, setStage] = useState({ w: 0, h: 0 });
 
   useEffect(() => setShownUrl(url), [url]);
+
+  // The page's own static address, as a path: "/p/<token>/". The browser on that path is "Your page".
+  const ownPath = useMemo(() => {
+    try {
+      return new URL(shownUrl, location.origin).pathname;
+    } catch {
+      return "";
+    }
+  }, [shownUrl]);
+  const isOwnPage = (address: string) => {
+    if (!address) return false;
+    try {
+      const u = new URL(address);
+      // an address on this machine (the project's own dev server) is the person's page too
+      if (u.hostname === "127.0.0.1" || u.hostname === "localhost") return true;
+      return !!ownPath && u.pathname.startsWith(ownPath);
+    } catch {
+      return false;
+    }
+  };
+
+  // The framed device is measured so it can be scaled to fit the pane.
+  const framed = sheet ? null : DEVICES[device].size;
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => setStage({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const fit = framed && stage.w > 0 ? Math.min(1, (stage.w - 32) / framed.width, (stage.h - 32) / framed.height) : 1;
+  const scale = Math.max(0.1, fit);
+
+  const chooseDevice = (next: DeviceId) => {
+    setDevice(next);
+    if (workspaceId) writeDevice(workspaceId, next);
+  };
 
   // Escape backs out of the phone sheet, as a dialog would. Not while the confirm asks: that Escape is the dialog's.
   useEffect(() => {
@@ -205,7 +273,8 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
       inputMode="url"
       aria-label="Address"
       placeholder="Type an address"
-      value={draft ?? browserUrl}
+      // The project's own page reads "Your page"; editing it shows the real address.
+      value={draft ?? (isOwnPage(browserUrl) ? "Your page" : browserUrl)}
       readOnly={navDisabled}
       spellCheck={false}
       autoCapitalize="none"
@@ -257,7 +326,32 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
     </Menu>
   ) : null;
 
-  const view = workspaceId ? <BrowserView workspaceId={workspaceId} onUrl={setBrowserUrl} /> : null;
+  const view = workspaceId ? <BrowserView workspaceId={workspaceId} onUrl={setBrowserUrl} viewport={framed} /> : null;
+
+  // The device switch: the shared browser's viewport follows it (Desktop follows the pane). Pane only, not the phone sheet.
+  const deviceSwitch = sheet ? null : (
+    <div role="group" aria-label="Preview size" className="@container flex shrink-0 justify-center px-2 pb-2">
+      <div className="inline-flex gap-0.5 rounded-full bg-surface-sunken p-0.5">
+        {(Object.keys(DEVICES) as DeviceId[]).map((id) => {
+          const { label, Icon } = DEVICES[id];
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-label={label}
+              aria-pressed={device === id}
+              title={label}
+              onClick={() => chooseDevice(id)}
+              className="inline-flex min-h-(--control-h-sm) items-center gap-1.5 rounded-full px-3 text-sm text-text-secondary hover:text-text-primary aria-pressed:bg-surface-active aria-pressed:text-text-primary pointer-coarse:min-h-11"
+            >
+              <Icon size={16} aria-hidden="true" />
+              <span className="hidden @min-[28rem]:inline">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
   const addressNote = addressError ? (
     <p role="alert" className="px-4 pb-1 text-sm text-status-danger">
       {addressError}
@@ -276,7 +370,16 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
           </Button>
         </div>
         {addressNote}
-        <div className="flex min-h-0 flex-1 flex-col">{view}</div>
+        {deviceSwitch}
+        {/* The stage keeps the browser mounted when the size changes; only the frame around it moves and scales. */}
+        <div ref={stageRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-sunken">
+          <div
+            className={framed ? "absolute top-1/2 left-1/2 flex flex-col" : "flex min-h-0 flex-1 flex-col"}
+            style={framed ? { width: framed.width, height: framed.height, transform: `translate(-50%, -50%) scale(${scale})` } : undefined}
+          >
+            {view}
+          </div>
+        </div>
         {newLinkConfirm}
       </>
     );

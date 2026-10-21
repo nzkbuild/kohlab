@@ -10,6 +10,7 @@ import {
   DownloadSimple,
   Ghost,
   List,
+  NotePencil,
   PencilSimple,
   Plus,
   Stop,
@@ -172,6 +173,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const route = useApp((s) => s.route);
   const powerTools = useApp((s) => s.powerTools);
   const setPowerTools = useApp((s) => s.setPowerTools);
+  const setNotesFor = useApp((s) => s.setNotesFor);
   const panelRequest = useApp((s) => s.panelRequest);
   const requestPanel = useApp((s) => s.requestPanel);
   const can = useCan();
@@ -225,6 +227,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     try {
       const { url } = await api.preview(workspaceId);
       setPane({ url, t: Date.now() });
+      // The ready card in a chat listens for this, so it can point at the preview the person just opened.
+      window.dispatchEvent(new CustomEvent("kohlab:preview-opened", { detail: { id: workspaceId } }));
     } catch (e) {
       toast.error(`Could not open the preview, ${(e as Error).message}`);
     } finally {
@@ -326,7 +330,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // A chat workspace opens on its chat even when it needs review; the review button is still there.
   // The old "terminal" tab id means the Claude view: the chat or the terminal, whichever was remembered.
   // A chat has no terminal tab, and a project without Claude has no chat tab.
-  const rawTab: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
+  // A chat project has no Changes tab until it has changed a file: then a link to it falls back to the chat.
+  const hasWork = !chat || reviewCount > 0 || w?.lastCommitAt !== undefined;
+  const setHasWork = useApp((s) => s.setHasWork);
+  useEffect(() => setHasWork(workspaceId, hasWork), [workspaceId, hasWork, setHasWork]);
+  const showChanges = hasWork || routeTab === "review";
+  const rawTab0: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
+  const rawTab: TabId = rawTab0 === "review" && !showChanges ? "chat" : rawTab0;
   const tab: TabId =
     rawTab === "terminal" && (chat || claudeTerminal)
       ? chat
@@ -342,12 +352,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const tabs: { id: TabId; label: string }[] = [
     ...(chat || claudeTerminal ? [{ id: "chat" as const, label: "Chat" }] : []),
     ...(chat ? [] : [{ id: "terminal" as const, label: "Terminal" }]),
-    { id: "review", label: "Changes" },
+    ...(showChanges ? [{ id: "review" as const, label: "Changes" }] : []),
     ...(powerTools ? [{ id: "files" as const, label: "Files" }] : []),
   ];
 
+  // A chat project also needs the count: it decides whether the Changes tab and the header Preview exist.
+  // It is read again when the project's state moves (a turn ends, a question comes or goes, a keep or an undo).
+  // bumped when the chat reports a finished turn: the turn may have written the first file
+  const [turnTick, setTurnTick] = useState(0);
   useEffect(() => {
-    if (!needsReview) {
+    if (!needsReview && !chat) {
       setReviewCount(0);
       return;
     }
@@ -363,7 +377,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     return () => {
       alive = false;
     };
-  }, [workspaceId, needsReview, w?.lastCommitAt]);
+  }, [workspaceId, needsReview, chat, w?.lastCommitAt, w?.discardedAt, w?.running, w?.waiting, w?.stopped, turnTick]);
 
   // 1..n switch panes, `.` puts the cursor back in the terminal. Keys are left
   // alone while focus is in a text field or in the terminal itself.
@@ -386,7 +400,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // The tab list depends on power tools and on chat, so the handler is rebound when either changes.
-  }, [workspaceId, powerTools, chat, claudeTerminal]);
+  }, [workspaceId, powerTools, chat, claudeTerminal, showChanges]);
 
   // Ctrl+` (and Ctrl+J, as in VS Code) open and close the terminal panel. Ctrl+`
   // works from anywhere; Ctrl+J stays out of fields and terminals, where it is a newline.
@@ -521,11 +535,6 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </button>
       }
     >
-      <MenuItem onSelect={() => setRenaming(true)}>
-        <PencilSimple size={16} aria-hidden="true" />
-        Rename
-      </MenuItem>
-      <MenuSeparator />
       {(chat || claudeTerminal) && can.mutate ? (
         <>
           <MenuItem
@@ -541,15 +550,31 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           <MenuSub label="Conversations" icon={<ChatCircle size={16} aria-hidden="true" />}>
             <ConversationItems workspaceId={workspaceId} onSwitched={() => goTo("chat")} />
           </MenuSub>
-          <MenuSeparator />
         </>
       ) : null}
-      <MenuItem onSelect={() => openPanel()}>
-        <Terminal size={14} aria-hidden="true" />
-        <span className="flex-1">Open terminal</span>
-        {isTouchOnly() ? null : <span className="whitespace-nowrap text-xs text-text-faint">Ctrl `</span>}
+      {chat && can.mutate ? (
+        <MenuItem onSelect={() => setNotesFor(workspaceId)}>
+          <NotePencil size={16} aria-hidden="true" />
+          {`Notes for ${who ?? "the AI"}…`}
+        </MenuItem>
+      ) : null}
+      <MenuItem onSelect={() => setRenaming(true)}>
+        <PencilSimple size={16} aria-hidden="true" />
+        Rename
       </MenuItem>
-      {chat && w?.agent === "claude" ? (
+      <MenuItem onSelect={() => void api.downloadProject(workspaceId, title).catch((e: Error) => toast.error(`Could not download the project, ${e.message}`))}>
+        <DownloadSimple size={16} aria-hidden="true" />
+        Download project
+      </MenuItem>
+      {/* A chat project's terminals are power tools: listed only once power tools are on. */}
+      {!chat || powerTools ? (
+        <MenuItem onSelect={() => openPanel()}>
+          <Terminal size={14} aria-hidden="true" />
+          <span className="flex-1">Open terminal</span>
+          {isTouchOnly() ? null : <span className="whitespace-nowrap text-xs text-text-faint">Ctrl `</span>}
+        </MenuItem>
+      ) : null}
+      {chat && w?.agent === "claude" && powerTools ? (
         <MenuItem
           disabled={!canContinue(w)}
           title={canContinue(w) ? undefined : "Send Claude a message first, then you can continue it here."}
@@ -559,13 +584,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           Continue in Claude's terminal
         </MenuItem>
       ) : null}
-      <MenuItem onSelect={() => void api.download(workspaceId, "").catch((e: Error) => toast.error(`Could not download the project, ${e.message}`))}>
-        <DownloadSimple size={16} aria-hidden="true" />
-        Download project
-      </MenuItem>
-      <MenuSeparator />
       {chat ? null : (
         <>
+          <MenuSeparator />
           <MenuItem onSelect={() => run("restart")}>
             <ArrowsClockwise size={14} aria-hidden="true" />
             {who ? `Restart ${who}` : "Restart"}
@@ -578,6 +599,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           ) : null}
         </>
       )}
+      <MenuSeparator />
       <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
         <Trash size={16} aria-hidden="true" />
         Delete project…
@@ -664,10 +686,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   return (
     <div className="cockpit max-md:overflow-hidden">
       <Tabs value={tab} onValueChange={(v) => goTo(v as TabId)} className="flex min-h-0 flex-1">
-      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
-      {/* One 56px row per project: the title (its menu), the segmented switch centred, and Preview. On a phone the title row is 52px and the switch sits on its own row below. */}
-      <header className="grid h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 px-4 max-md:h-auto max-md:grid-cols-[minmax(0,1fr)_auto] max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))]">
-        <div className="flex min-w-0 items-center justify-self-start gap-1 max-md:h-13 max-md:w-full max-md:justify-self-stretch">
+      <div className="@container flex min-w-0 min-h-0 flex-1 flex-col">
+      {/* One 56px row per project: the title (its menu), the segmented switch centred, and Preview. The header reads the
+          width of the content column (the @container on its parent), so with the preview pane open, or on a phone, the
+          switch drops to its own centred row under the title and nothing overlaps. The title truncates. */}
+      <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-2 max-md:gap-x-1 max-md:px-1 max-md:pt-[var(--safe-top,env(safe-area-inset-top))] @min-[44rem]:h-14 @min-[44rem]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] @min-[44rem]:gap-y-0 @min-[44rem]:py-0">
+        <div className="col-start-1 row-start-1 flex min-w-0 items-center justify-self-stretch gap-1 max-md:h-13">
           {/* A project reached from Home or search has history behind it: Back, not the menu. */}
           {navIndex > 0 ? (
             <Button variant="quiet" iconOnly aria-label="Back" title="Back" className="shell:hidden size-11 shrink-0" onClick={() => history.back()}>
@@ -678,12 +702,15 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               <List size={20} aria-hidden="true" />
             </Button>
           )}
-          <h1 className="m-0 flex min-w-0 text-base font-medium text-text-primary">
+          <h1 className="m-0 flex min-w-0 flex-1 text-base font-medium text-text-primary">
             {can.mutate ? projectMenu : <span className="min-w-0 truncate px-2.5">{title}</span>}
           </h1>
         </div>
 
-        <TabList label="Project views" className="max-md:col-span-2 max-md:row-start-2 max-md:mb-2 max-md:w-full">
+        <TabList
+          label="Project views"
+          className="col-span-2 col-start-1 row-start-2 w-full justify-self-center @min-[44rem]:col-span-1 @min-[44rem]:col-start-2 @min-[44rem]:row-start-1 @min-[44rem]:w-auto"
+        >
           {tabs.map(({ id, label }) => {
             const badge = badges[id];
             return (
@@ -699,11 +726,14 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           })}
         </TabList>
 
-        <div className="flex shrink-0 items-center justify-self-end gap-1.5 max-md:h-13">
-          <Button variant="quiet" aria-pressed={paneOpen} disabled={previewing} onClick={() => void preview()}>
-            <Browser size={18} aria-hidden="true" />
-            Preview
-          </Button>
+        <div className="col-start-2 row-start-1 flex shrink-0 items-center justify-self-end gap-1.5 max-md:h-13 @min-[44rem]:col-start-3">
+          {/* Nothing to preview until the chat has changed a file. A pane that is already open keeps its button. */}
+          {!chat || hasWork || paneOpen ? (
+            <Button variant="quiet" aria-pressed={paneOpen} disabled={previewing} onClick={() => void preview()}>
+              <Browser size={18} aria-hidden="true" />
+              Preview
+            </Button>
+          ) : null}
           {can.mutate ? null : (
             <span className="chip chip-stopped" title="You can look at this project but not change it.">
               View only
@@ -718,7 +748,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             <TabPanel value="chat" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
               <ErrorBoundary label="Chat">
                 <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
-                  <ChatView key={`${workspaceId}:${w?.chatReset ?? 0}`} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={reloadPane} terminalProject={claudeTerminal} />
+                  <ChatView key={`${workspaceId}:${w?.chatReset ?? 0}`} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={() => { reloadPane(); setTurnTick((t) => t + 1); }} terminalProject={claudeTerminal} />
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>

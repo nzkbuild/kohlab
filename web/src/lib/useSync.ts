@@ -3,6 +3,7 @@ import { socketProtocol } from "../api";
 import { useApp } from "../store";
 import { announce } from "./announce";
 import { parseRoute } from "./route";
+import { projectTitle } from "./format";
 
 const POLL_MS = 6000;
 /** After this many consecutive failed upgrades the chip reads "offline". */
@@ -81,18 +82,22 @@ export function useSync(): void {
         if (seen.has(message.id)) return;
         seen.add(message.id);
 
-        void refresh();
-        announce(`${message.id} finished, ready for review`);
+        // Named by the project's title, never its id. The list is read first, so a new project has its title.
+        void refresh().then(() => {
+          const w = useApp.getState().workspaces.find((x) => x.id === message.id);
+          const title = w ? projectTitle(w) : message.task || "A project";
+          announce(`${title} is ready to check`);
 
-        // An OS notification only when the tab is hidden, always tagged so a
-        // repeat replaces rather than stacks, and never requesting permission
-        // here: that belongs to a user gesture in Settings.
-        if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
-          new Notification("kohlab, ready for review", {
-            body: message.task || `${message.id} finished`,
-            tag: `kohlab-${message.id}`,
-          });
-        }
+          // An OS notification only when the tab is hidden, always tagged so a
+          // repeat replaces rather than stacks, and never requesting permission
+          // here: that belongs to a user gesture in Settings.
+          if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
+            new Notification("kohlab, ready to check", {
+              body: `${title} is ready to check`,
+              tag: `kohlab-${message.id}`,
+            });
+          }
+        });
       };
 
       socket.onclose = () => {
