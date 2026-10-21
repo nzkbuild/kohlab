@@ -1162,7 +1162,7 @@ function Details({ detail, why, className }: { detail?: string; why?: string; cl
 function groupRows(events: ChatEvent[]): ChatEvent[][] {
   const rows: ChatEvent[][] = [];
   for (const e of events) {
-    if (e.kind === "done" || e.kind === "answer" || e.kind === "result") continue;
+    if (e.kind === "done" || e.kind === "plan" || e.kind === "answer" || e.kind === "result") continue;
     // A note is always a row of its own: it never joins a run of tool lines.
     const last = rows[rows.length - 1];
     if (isToolLine(e) && last && isToolLine(last[0])) last.push(e);
@@ -1782,12 +1782,20 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   }, [visibleRows, answers]);
 
   // Each turn's done line, by the message that starts the turn (0 for replies before any message).
+  // A plan line that follows a done line is that turn's plan share (the server sends it once the usage is read).
   const doneByTurn = useMemo(() => {
     const m = new Map<number, Extract<ChatEvent, { kind: "done" }>>();
     let key = 0;
+    let doneKey: number | null = null; // the turn of the latest done line (a new message may come before its plan line)
     for (const e of events) {
       if (e.kind === "user") key = e.n;
-      else if (e.kind === "done") m.set(key, e);
+      else if (e.kind === "done") {
+        m.set(key, e);
+        doneKey = key;
+      } else if (e.kind === "plan" && doneKey !== null) {
+        const d = m.get(doneKey);
+        if (d) m.set(doneKey, { ...d, planDelta: e.planDelta });
+      }
     }
     return m;
   }, [events]);
@@ -2244,7 +2252,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       await copyText(location.origin + url);
       toast.success("Link copied. Anyone who can reach this Kohlab can open it.");
     } catch (e) {
-      toast.error(`Could not copy the link, ${friendly(e)}`);
+      toast.error(`Couldn't copy the link. ${friendly(e)}`);
     }
   };
 
@@ -2871,7 +2879,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                         trigger={
                           <ComposerChip
                             className="md:hidden min-w-0 max-w-[55%] shrink"
-                            label={`${who} · ${modelText}`}
+                            label={isClaude ? modelText : `${who} · ${modelText}`}
                             menu
                             disabled={models.length === 0 && (terminalProject || !ws?.chat)}
                             title={busy ? "Wait until the reply finishes to switch AI" : undefined}

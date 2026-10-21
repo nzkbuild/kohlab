@@ -26,6 +26,8 @@ export interface Workspace {
   chatReset?: number;
   /** From the listing: a chat permission question is pending (unanswered). */
   waiting?: boolean;
+  /** From the listing: the chat's Claude still runs background work after its turn ended. */
+  backgroundWork?: boolean;
   /** Claude model for this project. Undefined = the account default. */
   model?: "opus" | "sonnet" | "haiku";
   /** Model an ACP agent (hermes, omp) runs its chat on: the agent's own model value. */
@@ -66,6 +68,8 @@ export type ChatEvent = { n: number; at: number } & (
     }
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
   | { kind: "done"; worked?: number; planDelta?: number }
+  /** the plan share of the turn that ended just before it; the chat view merges it into that turn's done line */
+  | { kind: "plan"; planDelta: number }
   | { kind: "error"; text: string }
   /** A quiet line in the chat: "Switched to X", "Went back to before: …", compaction or model-fallback notices, "Background task finished: …". */
   | { kind: "note"; text: string }

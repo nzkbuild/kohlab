@@ -14,6 +14,9 @@ const cases: [string, string][] = [
   ["", "my-project"],
   ["   !!!   ", "my-project"],
   ["Café & \u{1F370} bakery!", "caf-bakery"],
+  ["Make a one-page site for a bakery called Crumb, plain HTML", "one-page-site-bakery-crumb"],
+  ["Make a website for my bakery called Crumb", "website-bakery-crumb"],
+  ["a b c d e f g Crumb", "b-c-d-e-crumb"],
 ];
 for (const [input, want] of cases) {
   const got = projectNameFromIdea(input);

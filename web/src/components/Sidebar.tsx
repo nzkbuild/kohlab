@@ -49,7 +49,7 @@ export async function saveProjectName(id: string, next: string, shown: string): 
     announce(`Project renamed to ${name}`);
     return true;
   } catch (e) {
-    toast.error(`Could not rename, ${(e as Error).message}`);
+    toast.error(`Couldn't rename. ${(e as Error).message}`);
     return false;
   }
 }

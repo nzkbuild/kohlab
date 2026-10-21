@@ -72,6 +72,8 @@ writeFileSync(
     workspaces: [
       { id: "ws-review", repo: dir, task: "a finished task waiting for a decision", agent: "sh", created: now - 7_200_000, started: now - 7_000_000, stopped: now - 3_600_000 },
       { id: "ws-idle", repo: dir, task: "never started", agent: "sh", created: now - 86_400_000, started: null, stopped: null },
+      // a terminal project that runs Claude: it opens on its chat, not on Changes, even when it needs review
+      { id: "ws-claude", repo: dir, task: "a Claude project that stopped with changes", agent: "claude", created: now - 7_200_000, started: now - 7_000_000, stopped: now - 3_600_000, stoppedClean: false },
     ],
   }),
 );
@@ -115,6 +117,7 @@ try {
       ["/", "home"],
       ["/new", "new"],
       ["/w/ws-review", "workspace"],
+      ["/w/ws-claude", "claude"],
       ["/settings", "settings"],
     ];
     for (const [path, name] of routes) {
@@ -154,6 +157,10 @@ try {
       if (name === "home") check(`${at}: home asks what to build`, m.composer);
       // /new is New project: it lands on Home's describe box, not the name dialog.
       if (name === "new") check(`${at}: /new lands on the describe box`, m.composer && !m.form);
+      if (name === "claude") {
+        check(`${at}: a Claude terminal project opens on Chat`, m.tab === "tab-chat", `${m.tab}`);
+        check(`${at}: its URL ends in /chat`, m.path.endsWith("/chat"), m.path);
+      }
       if (name === "workspace") {
         check(`${at}: needs-review opens on Review`, m.tab === "tab-review", `${m.tab}`);
         check(`${at}: the tab is in the URL`, m.path === "/w/ws-review/review", m.path);

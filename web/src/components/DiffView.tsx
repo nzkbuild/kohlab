@@ -384,7 +384,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
         await load();
         await refresh();
       } catch (e) {
-        toast.error(`Could not keep this version, ${(e as Error).message}`);
+        toast.error(`Couldn't keep this version. ${(e as Error).message}`);
       } finally {
         setKeeping(false);
       }
@@ -398,7 +398,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
         await load();
         await refresh();
       } catch (e) {
-        toast.error(`Could not undo, ${(e as Error).message}`);
+        toast.error(`Couldn't undo. ${(e as Error).message}`);
       } finally {
         setUndoing(false);
         setConfirmUndo(false);
@@ -414,7 +414,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
         await refresh();
         toast.success("Went back");
       } catch (e) {
-        toast.error(`Could not go back, ${(e as Error).message}`);
+        toast.error(`Couldn't go back. ${(e as Error).message}`);
       } finally {
         setRestoring(false);
         setRestoreTarget(null);

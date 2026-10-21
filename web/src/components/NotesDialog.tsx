@@ -39,7 +39,7 @@ export default function NotesDialog() {
       announce(`Notes for ${ai} saved`);
       setNotesFor(null);
     } catch (e) {
-      toast.error(`Could not save the notes, ${(e as Error).message}`);
+      toast.error(`Couldn't save the notes. ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }

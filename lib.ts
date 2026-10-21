@@ -407,6 +407,7 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
   if (/^resume-\d+$/.test(terminalId)) {
     if (!ws.chat || !ws.chatSession || !/^[\w-]+$/.test(ws.chatSession)) throw new Error("This project has no conversation to continue yet.");
     if (chatBusy.has(ws.id)) throw new Error("Wait until Claude has finished, then try again.");
+    if (chatBackground.has(ws.id)) throw new Error(BACKGROUND_WAIT);
     // The chat's own claude process must not run alongside this one on the same session.
     // Re-attaching to a resume terminal that is already open must leave the chat alone (it is stopped already).
     if (!(await resumeOpen(ws.id))) chatKillers.get(ws.id)?.();
@@ -431,6 +432,7 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
   if (terminalId === "main") intentionallyStopped.delete(ws.id); // a new main terminal's exit counts again
   if (terminalId === "main" && !ws.chat && basename(cmd[0]) === "claude") {
     if (chatBusy.has(ws.id)) throw new Error("Wait until Claude has finished in the chat, then try again.");
+    if (chatBackground.has(ws.id)) throw new Error(BACKGROUND_WAIT);
     chatKillers.get(ws.id)?.();
     if (ws.resumeInTerminal && ws.chatSession && /^[\w-]+$/.test(ws.chatSession)) {
       resumeArgs = ["--resume", ws.chatSession];
@@ -1369,6 +1371,10 @@ export function sessionId(workspaceId: string, terminalId = "main") {
 export const chatBusy = new Set<string>();
 /** Workspaces with a permission question waiting for an answer. chat.ts keeps this current; hooks (handleHook) do it for terminal projects. */
 export const chatWaiting = new Set<string>();
+/** Chats whose claude still runs background work after its turn ended. chat.ts keeps it current; a terminal on the same conversation waits for it. */
+export const chatBackground = new Set<string>();
+/** Shown when a terminal cannot open because the chat's Claude is still finishing background work. */
+export const BACKGROUND_WAIT = "Claude is still finishing work in the background. The terminal opens when it's done.";
 /** Per chat workspace: stop its claude process. chat.ts registers these. */
 export const chatKillers = new Map<string, () => void>();
 
@@ -1701,6 +1707,8 @@ export function startWatcher() {
           continue;
         }
         if (intentionallyStopped.has(w.id)) continue;
+        // a chat-driven terminal project has no PTY by design: its chat's turn or background work is its run
+        if (chatBusy.has(w.id) || chatBackground.has(w.id)) continue;
         if (previouslyRunning.has(w.id) || (w.started && !w.stopped)) {
           finished.add(w.id);
         }
@@ -1826,7 +1834,7 @@ export async function findRepoRoot(dir: string): Promise<string | null> {
 // --- workspace lifecycle -------------------------------------------------
 
 export async function listWorkspaces(): Promise<
-  (Workspace & { running: boolean; waiting: boolean; path: string })[]
+  (Workspace & { running: boolean; waiting: boolean; backgroundWork: boolean; path: string })[]
 > {
   const s = await loadState();
   return Promise.all(
@@ -1834,6 +1842,7 @@ export async function listWorkspaces(): Promise<
       ...w,
       running: await isRunning(w),
       waiting: chatWaiting.has(w.id),
+      backgroundWork: chatBackground.has(w.id),
       path: worktreePath(w),
     })),
   );

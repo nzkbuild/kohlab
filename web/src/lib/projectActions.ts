@@ -33,7 +33,7 @@ export async function changeModel(w: Workspace, model: ModelChoice): Promise<voi
     const who = agentName(w.agent);
     toast.success(w.chat ? `${who} will use ${name} from the next message` : `${who} will use ${name} after Restart ${who}`);
   } catch (e) {
-    toast.error(`Could not change the model, ${(e as Error).message}`);
+    toast.error(`Couldn't change the model. ${(e as Error).message}`);
   }
 }
 

@@ -166,7 +166,7 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
       await copyText(location.origin + shownUrl);
       toast.success("Link copied. Anyone who can reach this Kohlab can open it.");
     } catch (e) {
-      toast.error(`Could not copy the link, ${(e as Error).message}`);
+      toast.error(`Couldn't copy the link. ${(e as Error).message}`);
     }
   };
 
@@ -180,7 +180,7 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
       setConfirmNew(false);
       toast.success("New link made. The old link no longer works.");
     } catch (e) {
-      toast.error(`Could not make a new link, ${(e as Error).message}`);
+      toast.error(`Couldn't make a new link. ${(e as Error).message}`);
     } finally {
       setMaking(false);
     }
@@ -193,7 +193,7 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
       const { url: next } = await api.browserAct(workspaceId, action, target);
       setBrowserUrl(next);
     } catch (e) {
-      toast.error(`Could not ${ACTION_WORDS[action]}, ${(e as Error).message}`);
+      toast.error(`Couldn't ${ACTION_WORDS[action]}. ${(e as Error).message}`);
     }
   };
 

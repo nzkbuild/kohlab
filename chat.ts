@@ -22,6 +22,7 @@ import { ACP_AGENTS, AcpClient, acpStartFailure, isAcpAgent, type AcpHost } from
 import {
   WORKS_DIR,
   chatBusy,
+  chatBackground,
   resumeOpen,
   chatKillers,
   chatWaiting,
@@ -57,6 +58,7 @@ const CHAT_SYSTEM_PROMPT =
   "and put an index.html at the project root, so it works by opening that file; use another technology only if they ask for it. " +
   "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes. " +
   "Never tell the person to open a file in their browser; tell them to press Preview. " +
+  "Never mention git, commits, branches, repositories or terminals to the person. " +
   "When you finish, end with one short sentence saying what to look at in Preview. " +
   "Files the person attaches are saved in the uploads folder of the project; open them with your Read tool, and use pictures from there directly in the page when they ask for that. " +
   "When you run a command, always give it a short plain-English description of what it does and why. " +
@@ -98,6 +100,8 @@ export type Body =
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
   /** worked: how long the turn ran (ms). planDelta: the plan's five-hour window percent the turn used, for the owner only (snapshot strips it for others). */
   | { kind: "done"; worked?: number; planDelta?: number }
+  /** planDelta: the plan share of the turn that ended just before it, sent once the usage is read (owner only). The chat view merges it into that turn's done line. */
+  | { kind: "plan"; planDelta: number }
   | { kind: "error"; text: string };
 
 export type ChatEvent = { n: number; at: number } & Body;
@@ -816,16 +820,17 @@ function turnBegan(id: string, live: Live) {
   live.planStart = planPercent(id);
 }
 
-/** A Claude turn ends: the done line is written once the plan usage is read (at most 3 s), so it can say what share of the plan the turn used.
+/** A Claude turn ends: the done line is written at once. The plan share comes after it as a plan line, once the usage is read (at most 3 s), so the reply never waits for it.
  *  ponytail: if a usage read is already running, the reading taken here may be a little stale. Accepted. */
 function turnDone(id: string, live: Live) {
   const since = live.busySince;
   const planStart = live.planStart;
   const worked = since !== undefined ? Date.now() - since : undefined;
+  emit(id, { kind: "done", ...(worked !== undefined ? { worked } : {}) });
   void Promise.race([readUsage(id, live, true), new Promise((r) => setTimeout(r, 3000))]).then(() => {
     const end = planPercent(id);
     const planDelta = planStart !== undefined && end !== undefined && end >= planStart ? end - planStart : undefined;
-    emit(id, { kind: "done", ...(worked !== undefined ? { worked } : {}), ...(planDelta !== undefined ? { planDelta } : {}) });
+    if (planDelta !== undefined) emit(id, { kind: "plan", planDelta });
   });
 }
 
@@ -834,6 +839,7 @@ function retireStale(id: string, ws: Workspace) {
   const live = procs.get(id);
   if (!live || live.closed || live.notes === notesOf(ws)) return;
   procs.delete(id);
+  chatBackground.delete(id); // the old process's background work is not this one's
   live.stopping = true;
   live.child.kill("SIGTERM");
 }
@@ -843,9 +849,10 @@ function stop(id: string) {
   const live = procs.get(id);
   procs.delete(id);
   chats.delete(id);
+  if (live && chatBusy.has(id)) markSeen(id, live); // the cut-off turn is already in the chat
   chatBusy.delete(id);
   chatWaiting.delete(id);
-  if (live && chatBusy.has(id)) markSeen(id, live); // the cut-off turn is already in the chat
+  chatBackground.delete(id);
   if (live) {
     live.stopping = true;
     live.child.kill("SIGTERM");
@@ -965,6 +972,12 @@ function onLine(id: string, live: Live, line: string) {
   }
   if (m.type === "system" && m.subtype === "background_tasks_changed") {
     live.tasks = bgTasks(m.tasks);
+    // the CLI sends an empty list when the last task ends, so this clears the flag too
+    // only the current process counts: a retired or stopped one may still print lines before it exits
+    if (procs.get(id) === live) {
+      if (live.tasks.length) chatBackground.add(id);
+      else chatBackground.delete(id);
+    }
     return;
   }
   // A retry notice lasts until the next line that is not one.
@@ -1099,6 +1112,7 @@ function onExit(id: string, live: Live) {
     procs.delete(id);
     chatWaiting.delete(id);
   }
+  if (!procs.has(id)) chatBackground.delete(id); // this process's background work ends with it
   live.asks.clear();
   for (const p of live.pending.values()) {
     clearTimeout(p.timer);
@@ -1123,6 +1137,7 @@ function resumeFailed(id: string, live: Live): boolean {
   live.stopping = true;
   live.child.kill("SIGTERM");
   if (procs.get(id) === live) procs.delete(id);
+  chatBackground.delete(id);
   retryFresh(id, live.msg).catch((e) => {
     chatBusy.delete(id);
     console.error("[chat] could not start:", (e as Error).message);
@@ -1233,6 +1248,7 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
   // the plan's share of a turn is the server owner's account data: other people see the turn's time only
   const events = load(id).events
     .filter((e) => e.n > after)
+    .filter((e) => see.owner || e.kind !== "plan")
     .map((e): ChatEvent => (e.kind === "done" && !see.owner && e.planDelta !== undefined ? { n: e.n, at: e.at, kind: "done", ...(e.worked !== undefined ? { worked: e.worked } : {}) } : e));
   const live = procs.get(id);
   // the first read of usage comes with the first poll that finds none (a restart, or a chat not yet used)

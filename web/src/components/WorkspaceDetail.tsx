@@ -32,6 +32,8 @@ import { isTouchOnly } from "../lib/platform";
 import { cn } from "../lib/utils";
 import { useDragSize } from "../lib/useDragSize";
 import ConfirmDialog from "./ConfirmDialog";
+/** Shown while a terminal project's chat still runs background work: the server refuses to start the terminal then. */
+const BACKGROUND_WAIT_LINE = "Claude is still finishing work in the background. The terminal opens when it's done.";
 import { RenameDialog } from "./Sidebar";
 import ErrorBoundary from "./ErrorBoundary";
 import PreviewPanel from "./PreviewPanel";
@@ -230,7 +232,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       // The ready card in a chat listens for this, so it can point at the preview the person just opened.
       window.dispatchEvent(new CustomEvent("kohlab:preview-opened", { detail: { id: workspaceId } }));
     } catch (e) {
-      toast.error(`Could not open the preview, ${(e as Error).message}`);
+      toast.error(`Couldn't open the preview. ${(e as Error).message}`);
     } finally {
       setPreviewing(false);
     }
@@ -301,6 +303,28 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     });
   };
 
+  // A terminal project's Claude cannot start while the chat's Claude still runs background work. The terminal then waits for it.
+  const [waitingBackground, setWaitingBackground] = useState(false);
+  const backgroundBusy = w?.backgroundWork === true;
+  const startClaudeTerminal = () => {
+    startTransition(async () => {
+      setOptimisticRunning(true);
+      try {
+        await api.action(workspaceId, "start");
+        setWaitingBackground(false);
+        await refresh();
+        announce(`${workspaceId} ${ACTION_DONE.start ?? "started"}`);
+      } catch (e) {
+        const message = (e as Error).message;
+        if (message.includes("still finishing work in the background")) setWaitingBackground(true);
+        else {
+          setWaitingBackground(false);
+          toast.error(`Couldn't start the terminal. ${message}`);
+        }
+      }
+    });
+  };
+
   const onDelete = async () => {
     setDeleting(true);
     try {
@@ -335,7 +359,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const setHasWork = useApp((s) => s.setHasWork);
   useEffect(() => setHasWork(workspaceId, hasWork), [workspaceId, hasWork, setHasWork]);
   const showChanges = hasWork || routeTab === "review";
-  const rawTab0: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat ? "review" : "terminal");
+  const rawTab0: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat && !claudeTerminal ? "review" : "terminal");
   const rawTab: TabId = rawTab0 === "review" && !showChanges ? "chat" : rawTab0;
   const tab: TabId =
     rawTab === "terminal" && (chat || claudeTerminal)
@@ -348,6 +372,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   useEffect(() => {
     if (w && tab !== routeTab) setTab(tab);
   }, [w === undefined, routeTab]);
+  // The terminal opens by itself once the background work is done, while its view is open.
+  useEffect(() => {
+    if (waitingBackground && !backgroundBusy && tab === "terminal" && can.mutate) startClaudeTerminal();
+  }, [waitingBackground, backgroundBusy, tab]);
 
   const tabs: { id: TabId; label: string }[] = [
     ...(chat || claudeTerminal ? [{ id: "chat" as const, label: "Chat" }] : []),
@@ -500,8 +528,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const pickClaudeView = (view: ClaudeView) => {
     setClaudeViewState({ id: workspaceId, view });
     writeClaudeView(workspaceId, view);
-    // The chat moved the conversation on: Terminal resumes it there.
-    if (view === "terminal" && w?.resumeInTerminal && can.mutate) run("start");
+    // The chat moved the conversation on: Terminal resumes it there, once the chat's background work is done.
+    if (view === "terminal" && w?.resumeInTerminal && can.mutate) {
+      if (backgroundBusy) setWaitingBackground(true);
+      else startClaudeTerminal();
+    }
   };
 
   // Chat and Terminal remember the choice. Other tabs just switch.
@@ -562,7 +593,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <PencilSimple size={16} aria-hidden="true" />
         Rename
       </MenuItem>
-      <MenuItem onSelect={() => void api.downloadProject(workspaceId, title).catch((e: Error) => toast.error(`Could not download the project, ${e.message}`))}>
+      <MenuItem onSelect={() => void api.downloadProject(workspaceId, title).catch((e: Error) => toast.error(`Couldn't download the project. ${e.message}`))}>
         <DownloadSimple size={16} aria-hidden="true" />
         Download project
       </MenuItem>
@@ -764,7 +795,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                   // away the only surviving record of what the agent did.
                   // The terminal sits in a calm dark panel, inset from the page edges and under the header.
                   <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] bg-surface-terminal">
-                    {running ? null : (
+                    {running ? null : claudeTerminal && (backgroundBusy || waitingBackground) ? (
+                      <div className="flex shrink-0 px-5 pt-3 text-sm text-text-muted">
+                        <span>{BACKGROUND_WAIT_LINE}</span>
+                      </div>
+                    ) : (
                       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-3 text-sm text-text-muted">
                         <span className="min-w-0 flex-1">
                           {can.mutate ? `${who ?? "The terminal"} has stopped. This is the last thing it showed.` : "Not running, showing the last screen."}

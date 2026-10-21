@@ -98,12 +98,12 @@ export default function App() {
       <LaunchSheet open={newOpen && can.mutate} onClose={() => setNewOpen(false)} />
       <Announcer />
       <NotesDialog />
-      {/* Above the composer, centred: a toast never covers Send. Fill and shadow, no border (see .kohlab-toast). */}
+      {/* Top centre of the content area, clear of the phone top bar: a toast never covers Send or the ready card. Fill and shadow, no border (see .kohlab-toast). */}
       <Toaster
         theme="system"
-        position="bottom-center"
-        offset={{ bottom: "11rem" }}
-        mobileOffset={{ bottom: "9.5rem" }}
+        position="top-center"
+        offset={{ top: "1rem" }}
+        mobileOffset={{ top: "4rem" }}
         toastOptions={{ className: "kohlab-toast" }}
       />
 
