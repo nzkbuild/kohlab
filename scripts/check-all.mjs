@@ -86,6 +86,14 @@ try {
   run("shared browser rules (dev command, dev URL, allowed URLs)", "bun", ["scripts/check-browser-unit.mjs"]);
   run("shared browser coordinates (letterbox, clamp)", "bun", ["scripts/check-browser-coords.mjs"]);
   run("chat markdown (code, links, lists, headings)", "bun", ["scripts/check-markdown.mjs"]);
+  run("problems (dev server failures, page rules, share refused)", "bun", ["scripts/check-problems.mjs"]);
+  run("problems text (summaries, fences, the message to the AI)", "bun", ["scripts/check-problems-text.mjs"]);
+  run("point (pick checks, label and line, round trip)", "bun", ["scripts/check-pick.mjs"]);
+  run("point text (labels, lines, chips)", "bun", ["scripts/check-point-text.mjs"]);
+  run("picture markup (strokes, undo, clear)", "bun", ["scripts/check-markup.mjs"]);
+  run("earlier versions as files (no links, dotfiles, climbs)", "bun", ["scripts/check-version-look.mjs"]);
+  run("copy a project (history, notes, gate, title)", "bun", ["scripts/check-copy.mjs"]);
+  run("share link proxy (expiry, credentials, caps, the app's port)", "bun", ["scripts/check-link-proxy.mjs"]);
   run("diff splitter", "bun", ["scripts/check-diff.ts"]);
   run("lifecycle status", "bun", ["scripts/check-status.ts"]);
   run("agent hooks (status from the agent, not the process)", "node", ["scripts/check-hooks.mjs"]);

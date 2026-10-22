@@ -9,7 +9,7 @@ import { execFileSync } from "child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { restoreTree } from "../versions.ts";
+import { restoreTree, treeIsEmpty } from "../versions.ts";
 
 let failures = 0;
 
@@ -39,6 +39,12 @@ try {
   git("add", "-A");
   git("commit", "-q", "-m", "edit a");
   const original = log();
+
+  // The empty first commit has no files to look at.
+  const emptyRoot = execFileSync("git", ["hash-object", "-t", "tree", "/dev/null"], { cwd: dir, encoding: "utf8" }).trim();
+  const emptyCommit = git("commit-tree", emptyRoot, "-m", "start");
+  check("treeIsEmpty: a commit with no files", await treeIsEmpty(dir, emptyCommit));
+  check("treeIsEmpty: a commit with files", !(await treeIsEmpty(dir, first)));
 
   // Unkept work: a tracked edit and a new untracked file. Going back must drop both.
   writeFileSync(join(dir, "a.txt"), "unsaved\n");

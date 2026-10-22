@@ -524,9 +524,21 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                       {i === 0 ? (
                         <span className="shrink-0 text-sm text-text-muted">Current</span>
                       ) : can.mutate ? (
-                        <Button variant="quiet" size="sm" className="shrink-0" disabled={simpleBusy} onClick={() => setRestoreTarget(v)}>
-                          Go back to this one
-                        </Button>
+                        <>
+                          {v.look ? (
+                            <Button
+                              variant="quiet"
+                              size="sm"
+                              className="shrink-0"
+                              onClick={() => window.dispatchEvent(new CustomEvent("kohlab:open-preview", { detail: { id: workspaceId, version: v.id } }))}
+                            >
+                              Look
+                            </Button>
+                          ) : null}
+                          <Button variant="quiet" size="sm" className="shrink-0" disabled={simpleBusy} onClick={() => setRestoreTarget(v)}>
+                            Go back to this one
+                          </Button>
+                        </>
                       ) : null}
                     </li>
                   ))}

@@ -28,6 +28,16 @@ export function containRect(box: Size, image: Size): Box {
 }
 
 /**
+ * Where a box in the page (device pixels) sits on a stage the page is drawn into
+ * (object-contain). Returned relative to the stage's top left.
+ */
+export function boxOnStage(box: Box, device: Size, stage: Size): Box {
+  const drawn = containRect(stage, device);
+  const k = drawn.width / device.width;
+  return { left: drawn.left + box.left * k, top: drawn.top + box.top * k, width: box.width * k, height: box.height * k };
+}
+
+/**
  * Maps a client point to a device pixel of the remote page. `box` is the canvas
  * element's rect; the page is drawn letterboxed inside it. A point in the margin
  * returns null, so it is not sent, unless `clamp` pins it to the nearest edge

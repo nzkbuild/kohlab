@@ -2135,10 +2135,80 @@ export async function previewWorkspace(id: string, fresh = false) {
   });
 }
 
-/** The workspace a preview token belongs to, or null. The token is the credential. */
-export async function workspaceByPreview(token: string): Promise<Workspace | null> {
+/** A fresh unguessable token (the credential in a /p/ path). */
+function randomToken(): string {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
+}
+
+/** The workspace a preview token belongs to, or null. The token is the credential. `share` says it is the share link's token, not the owner's. */
+export async function workspaceByPreview(token: string): Promise<{ ws: Workspace; share: boolean } | null> {
   const s = await loadState();
-  return s.workspaces.find((w) => w.previewToken === token) ?? null;
+  const now = Date.now();
+  const own = s.workspaces.find((w) => w.previewToken === token);
+  if (own) return { ws: own, share: false };
+  const shared = s.workspaces.find((w) => w.shareLink?.token === token && (w.shareLink.expires === null || w.shareLink.expires > now));
+  return shared ? { ws: shared, share: true } : null;
+}
+
+/** The share link's expiry for the person's choice: one day, seven days, or never (null). Anything else is undefined. */
+export function shareExpiry(choice: unknown, now = Date.now()): number | null | undefined {
+  if (choice === "never") return null;
+  if (choice === "1d") return now + 86_400_000;
+  if (choice === "7d") return now + 7 * 86_400_000;
+  return undefined;
+}
+
+/** Make the share link (or keep its token, and change only its expiry). `fresh` makes a new token, so the old link stops working. */
+export async function setShareLink(id: string, expires: number | null, fresh: boolean): Promise<{ ws: Workspace; rotated: boolean }> {
+  return mutateState((s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    const rotated = !ws.shareLink || fresh;
+    ws.shareLink = { token: rotated ? randomToken() : ws.shareLink!.token, expires };
+    return { ws, rotated };
+  });
+}
+
+/** Turn the share link off. The owner's own preview token is replaced too, so nothing that was shared keeps working. */
+export async function turnOffShareLink(id: string): Promise<Workspace> {
+  return mutateState((s) => {
+    const ws = s.workspaces.find((w) => w.id === id);
+    if (!ws) throw new Error(`no workspace '${id}'`);
+    ws.shareLink = undefined;
+    ws.previewToken = randomToken();
+    return ws;
+  });
+}
+
+/**
+ * A copy of a project: the branch it was last kept at (its committed history), its
+ * settings and its notes. Not its chat, its uncommitted work, or any link or token.
+ */
+export async function copyWorkspace(id: string, raw: unknown) {
+  const checked = checkProjectTitle(raw);
+  if (!checked.ok) throw new Error(checked.error);
+  const src = await getWorkspace(id);
+  // ponytail: a project started from a link has no local repo to branch from; copying it needs a clone first.
+  if (!src.repo) throw new Error("Copies of projects started from a link aren't supported yet.");
+  const copy = await createWorkspace({
+    repo: src.repo,
+    task: checked.title,
+    agent: src.agent,
+    branch: `kohlab/${src.id}`,
+    chat: src.chat,
+    ownerId: src.ownerId,
+    limits: src.limits,
+  });
+  return mutateState((s) => {
+    const w = s.workspaces.find((x) => x.id === copy.id);
+    if (!w) throw new Error(`no workspace '${copy.id}'`);
+    w.model = src.model;
+    w.agentModel = src.agentModel;
+    w.effort = src.effort;
+    w.permissionMode = src.permissionMode;
+    w.notes = src.notes;
+    return w;
+  });
 }
 
 export async function startWorkspace(id: string) {

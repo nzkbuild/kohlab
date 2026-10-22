@@ -91,6 +91,35 @@ export interface Version {
   id: string;
   at: number;
   label: string;
+  /** No dev command at the newest version: it can be looked at as a plain page. */
+  look?: boolean;
+}
+
+/** Something that went wrong with the project's page or app, as the server reports it. */
+export interface Problem {
+  kind: "console" | "page" | "request" | "devserver";
+  text: string;
+  detail?: string;
+  at: number;
+}
+
+/** The element the person pointed at in the preview. Page CSS pixels. */
+export interface Pick {
+  tag: string;
+  text: string;
+  id?: string;
+  classes: string[];
+  selector: string;
+  box: { x: number; y: number; width: number; height: number };
+  page: string;
+  viewport: { width: number; height: number };
+}
+
+/** A project's share link: its address (null when off), when it stops (null for never), and whether it can be shared. */
+export interface LinkInfo {
+  url: string | null;
+  expires: number | null;
+  kind: "static" | "app" | "unsupported";
 }
 
 export type AgentStatus = Record<string, boolean> & { claudeSignedIn?: boolean | null; codexSignedIn?: boolean | null };

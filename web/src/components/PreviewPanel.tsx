@@ -1,32 +1,46 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { ArrowClockwise, ArrowLeft, ArrowRight, ArrowSquareOut, CaretLeft, Desktop, DeviceMobile, DeviceTablet, DotsThree, Globe, LinkSimple, X } from "@phosphor-icons/react";
+import { toChat } from "../lib/toChat";
+import { ArrowClockwise, ArrowLeft, ArrowRight, ArrowSquareOut, Camera, CaretLeft, ChatCircle, Desktop, DeviceMobile, DeviceTablet, DotsThree, Globe, HandPointing, ShareNetwork, WarningCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
-import { copyText } from "../lib/clipboard";
-import { useApp, useCan } from "../store";
+import { agentName } from "../lib/agentName";
+import { sidebarWhen } from "../lib/format";
+import { askToFix, useProblems } from "../lib/problems";
+import { problemSummary } from "../lib/problemText";
+import type { Point } from "../lib/browserCoords";
+import { findWorkspace, useApp, useCan } from "../store";
 import { cn } from "../lib/utils";
-import BrowserView from "./BrowserView";
+import BrowserView, { type BrowserHandle } from "./BrowserView";
 import ConfirmDialog from "./ConfirmDialog";
-import { Button, Menu, MenuItem, MenuSeparator } from "./ui";
+import MarkupDialog from "./MarkupDialog";
+import ShareDialog from "./ShareDialog";
+import { Button, Menu, MenuItem, MenuLabel, MenuSeparator } from "./ui";
 
 interface Props {
-  /** The project's own static page. Its shareable link is copied, made new and opened from the menu. */
+  /** The project's own static page. Its address is used for "Open in a new tab". */
   url: string;
-  /** No longer used: the live browser does not reload from it. Kept so WorkspaceDetail needs no change. */
+  /** Changes when the pane opens and when a turn ends: each change reloads the browser, if it is on the project's own page. */
   t: number;
   /** "pane" sits beside the chat on desktop; "sheet" covers the whole phone screen. */
   variant: "pane" | "sheet";
   /** No longer used: Reload asks the shared browser to reload. Kept so WorkspaceDetail needs no change. */
   onReload: () => void;
   onClose: () => void;
-  /** Told the new link after "Make a new link", so the parent can keep it. */
+  /** Told the new address after a share link is turned off, so the parent can keep it. */
   onNewLink?: (url: string) => void;
+  /** An earlier version to open in the shared browser (from Changes, Look). A new object opens it again. */
+  version?: { sha: string } | null;
+  /** Goes to the project's chat, where a problem sent to the AI shows up. */
+  onShowChat?: () => void;
 }
 
 /** A downward drag from the sheet's top bar this far closes it. */
 const SWIPE_CLOSE_PX = 80;
 
-const ACTION_WORDS = { back: "go back", forward: "go forward", reload: "reload the page", open: "open that address", home: "open the project page" } as const;
+const ACTION_WORDS = { back: "go back", forward: "go forward", reload: "reload the page", open: "open that address", home: "open the project page", version: "open that version" } as const;
+
+/** The address of an earlier version: its commit id is the only part that changes. */
+const VERSION_PATH = /^\/p\/[^/]+\/v\/([0-9a-f]{40})\//;
 
 /** The pane's device sizes. Desktop follows the pane's own width. Sizes are CSS pixels; the frame is scaled to fit. */
 type DeviceId = "phone" | "tablet" | "desktop";
@@ -54,24 +68,36 @@ function writeDevice(id: string, device: DeviceId) {
 }
 
 /**
- * The shared browser for this project, live, with an address bar. The menu keeps
- * the project's own static page: its link, a new link, and a way back to it.
+ * The shared browser for this project, live, with an address bar. The menu holds
+ * the project's page, a share link and a picture of the page. Problems, pointing
+ * and earlier versions have their own controls in the bar.
  */
-export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props) {
+export default function PreviewPanel({ url, t, variant, onClose, onNewLink, version, onShowChat }: Props) {
   const sheet = variant === "sheet";
   // The project this preview belongs to: the panel only ever opens inside a workspace.
   const workspaceId = useApp((s) => (s.route.kind === "workspace" ? s.route.id : null));
+  const agent = useApp((s) => (s.route.kind === "workspace" ? findWorkspace(s.workspaces, s.route.id)?.agent : undefined));
+  const refresh = useApp((s) => s.refresh);
+  const who = agentName(agent ?? "claude");
   const can = useCan();
-  // The link on screen. "Make a new link" changes it here too, so the menu uses the new one even before the parent catches up.
-  const [shownUrl, setShownUrl] = useState(url);
   // The address the shared browser is on, from BrowserView and from the nav actions.
   const [browserUrl, setBrowserUrl] = useState("");
   // What the address field holds while it is being typed in. Null means "show the browser's address".
   const [draft, setDraft] = useState<string | null>(null);
   // Why the typed address was not opened, shown under the field.
   const [addressError, setAddressError] = useState("");
-  const [confirmNew, setConfirmNew] = useState(false);
-  const [making, setMaking] = useState(false);
+  const [pointing, setPointing] = useState(false);
+  // The box a point picked, outlined on the page for a moment. A new object outlines again.
+  const [outline, setOutline] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  // The picture being marked up (Add picture). Null when the dialog is closed.
+  const [picture, setPicture] = useState<Blob | null>(null);
+  const shot = useRef<BrowserHandle>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  /** How many files hold changes that were not kept: going back throws them away, so the dialog says so. */
+  const [unkept, setUnkept] = useState(0);
+  const [restoring, setRestoring] = useState(false);
+  const [sendingFix, setSendingFix] = useState(false);
   // The sheet slides up from the bottom on mount. Reduced motion skips the transition (see classes).
   const [entered, setEntered] = useState(false);
   const [dragY, setDragY] = useState(0);
@@ -80,17 +106,17 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
   const [device, setDevice] = useState<DeviceId>(() => readDevice(workspaceId));
   const stageRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState({ w: 0, h: 0 });
+  // Problems with the page or the app. Read while the preview is open, and only a person who can change the project is told.
+  const { problems, refresh: refreshProblems } = useProblems(workspaceId ?? "", !!workspaceId && can.mutate);
 
-  useEffect(() => setShownUrl(url), [url]);
-
-  // The page's own static address, as a path: "/p/<token>/". The browser on that path is "Your page".
+  // The project's own static address, as a path: "/p/<token>/". The browser on that path is "Your page".
   const ownPath = useMemo(() => {
     try {
-      return new URL(shownUrl, location.origin).pathname;
+      return new URL(url, location.origin).pathname;
     } catch {
       return "";
     }
-  }, [shownUrl]);
+  }, [url]);
   const isOwnPage = (address: string) => {
     if (!address) return false;
     try {
@@ -122,15 +148,15 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
     if (workspaceId) writeDevice(workspaceId, next);
   };
 
-  // Escape backs out of the phone sheet, as a dialog would. Not while the confirm asks: that Escape is the dialog's.
+  // Escape backs out of the phone sheet, as a dialog would. Not while a dialog is open: that Escape is the dialog's.
   useEffect(() => {
     if (!sheet) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape" && !confirmNew) onClose();
+      if (e.key === "Escape" && !shareOpen && !restoreOpen && !picture) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheet, onClose, confirmNew]);
+  }, [sheet, onClose, shareOpen, restoreOpen, picture]);
 
   useEffect(() => {
     if (!sheet) return;
@@ -161,31 +187,6 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
     else setDragY(0);
   };
 
-  const copyLink = async () => {
-    try {
-      await copyText(location.origin + shownUrl);
-      toast.success("Link copied. Anyone who can reach this Kohlab can open it.");
-    } catch (e) {
-      toast.error(`Couldn't copy the link. ${(e as Error).message}`);
-    }
-  };
-
-  const makeNew = async () => {
-    if (!workspaceId) return;
-    setMaking(true);
-    try {
-      const { url: next } = await api.preview(workspaceId, true);
-      setShownUrl(next);
-      onNewLink?.(next);
-      setConfirmNew(false);
-      toast.success("New link made. The old link no longer works.");
-    } catch (e) {
-      toast.error(`Couldn't make a new link. ${(e as Error).message}`);
-    } finally {
-      setMaking(false);
-    }
-  };
-
   /** One browser action (back, forward, reload, or open an address). The server answers with the address it is on now. */
   const browserAct = async (action: keyof typeof ACTION_WORDS, target?: string) => {
     if (!workspaceId) return;
@@ -196,6 +197,70 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
       toast.error(`Couldn't ${ACTION_WORDS[action]}. ${(e as Error).message}`);
     }
   };
+
+  // The shared browser may already be on the project's page from before: reload it once per open (the pane is mounted
+  // on open) and once per finished turn (t changes). Another site the person went to is left alone.
+  useEffect(() => {
+    if (!workspaceId || !can.mutate) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const { url: here } = await api.browser(workspaceId);
+        if (!alive || !here || !isOwnPage(here)) return;
+        const { url: next } = await api.browserAct(workspaceId, "reload");
+        if (alive) setBrowserUrl(next);
+      } catch {
+        /* a page that did not reload stays as it was */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [t, workspaceId]);
+
+  // An earlier version opens in the same browser. The browser is started first, since it may not be running yet.
+  useEffect(() => {
+    if (!version || !workspaceId) return;
+    let alive = true;
+    void (async () => {
+      try {
+        await api.browser(workspaceId);
+        const { url: next } = await api.browserAct(workspaceId, "version", version.sha);
+        if (alive) setBrowserUrl(next);
+      } catch (e) {
+        if (alive) toast.error(`Couldn't open that version. ${(e as Error).message}`);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [version, workspaceId]);
+
+  // Which earlier version the browser shows, if any, and when it was kept.
+  const versionSha = useMemo(() => {
+    try {
+      return VERSION_PATH.exec(new URL(browserUrl, location.origin).pathname)?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  }, [browserUrl]);
+  const [looking, setLooking] = useState<{ sha: string; at: number | null } | null>(null);
+  useEffect(() => {
+    if (!versionSha || !workspaceId) return;
+    let alive = true;
+    api
+      .versions(workspaceId)
+      .then((list) => {
+        if (alive) setLooking({ sha: versionSha, at: list.find((v) => v.id === versionSha)?.at ?? null });
+      })
+      .catch(() => {
+        if (alive) setLooking({ sha: versionSha, at: null });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [versionSha, workspaceId]);
+  const lookingAt = versionSha && looking?.sha === versionSha ? looking.at : null;
 
   /** A bare name such as "example.com" is taken as a secure address. A "/path" is on the page the browser is on. */
   const goToAddress = (typed: string) => {
@@ -232,19 +297,71 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
     }
   };
 
-  const newLinkConfirm = (
-    <ConfirmDialog
-      open={confirmNew}
-      onOpenChange={(v) => {
-        if (!v) setConfirmNew(false);
-      }}
-      title="Make a new link?"
-      description="The old link will stop working for anyone you sent it to."
-      confirmLabel="Make a new link"
-      busy={making}
-      onConfirm={() => void makeNew()}
-    />
-  );
+  /** A point picked on the page: its box is outlined, and the chat's composer gets a chip for it. */
+  const onPoint = async (spot: Point) => {
+    if (!workspaceId) return;
+    setPointing(false);
+    try {
+      const { pick } = await api.pick(workspaceId, spot.x, spot.y);
+      setOutline({ x: pick.box.x, y: pick.box.y, width: pick.box.width, height: pick.box.height });
+      toChat("kohlab:point", { id: workspaceId, pick });
+    } catch (e) {
+      toast.error(`Couldn't point at that. ${(e as Error).message}`);
+    }
+  };
+
+  /** Takes a picture of the page as it is now, and opens the dialog to mark it up. */
+  const addPicture = async () => {
+    const blob = (await shot.current?.snapshot()) ?? null;
+    if (!blob) {
+      toast.error("There's no picture of the page yet. Wait for the page to show, then try again.");
+      return;
+    }
+    setPicture(blob);
+  };
+
+  /** Sends the problems to the AI, then goes to the chat, where the message shows. */
+  const fixWithAi = async () => {
+    if (!workspaceId || sendingFix) return;
+    setSendingFix(true);
+    try {
+      await askToFix(workspaceId, problems);
+      refreshProblems();
+      if (sheet) onClose();
+      onShowChat?.();
+    } catch (e) {
+      toast.error(`Couldn't send that to ${who}. ${(e as Error).message}`);
+    } finally {
+      setSendingFix(false);
+    }
+  };
+
+  const askGoBack = () => {
+    if (!workspaceId) return;
+    setUnkept(0);
+    setRestoreOpen(true);
+    api
+      .diff(workspaceId)
+      .then((files) => setUnkept(files.length))
+      .catch(() => {});
+  };
+
+  /** Puts the version the browser shows back as the project's current version, then opens the project page. */
+  const goBackToVersion = async () => {
+    if (!workspaceId || !versionSha) return;
+    setRestoring(true);
+    try {
+      await api.restoreVersion(workspaceId, versionSha);
+      await refresh();
+      setRestoreOpen(false);
+      toast.success("Went back");
+      await browserAct("home");
+    } catch (e) {
+      toast.error(`Couldn't go back. ${(e as Error).message}`);
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   // Viewers see the browser but cannot drive it: the nav and the address are read-only for them.
   const navDisabled = !can.mutate;
@@ -297,6 +414,39 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
     />
   );
 
+  const problemMenu =
+    workspaceId && can.mutate && problems.length > 0 ? (
+      <Menu
+        label="Problem with the page"
+        trigger={
+          <Button variant="quiet" className={cn("shrink-0 gap-1.5 px-2.5 text-text-secondary", sheet ? "h-11" : "h-10")}>
+            <WarningCircle size={16} aria-hidden="true" />
+            Problem
+          </Button>
+        }
+      >
+        <MenuLabel>{problemSummary(problems)}</MenuLabel>
+        <MenuItem disabled={sendingFix} onSelect={() => void fixWithAi()}>
+          <ChatCircle size={16} aria-hidden="true" />
+          {`Ask ${who} to fix it`}
+        </MenuItem>
+      </Menu>
+    ) : null;
+
+  const pointButton = can.mutate ? (
+    <Button
+      variant="quiet"
+      iconOnly
+      aria-label="Point at something"
+      aria-pressed={pointing}
+      title="Point at something on the page"
+      className={navSize}
+      onClick={() => setPointing((on) => !on)}
+    >
+      <HandPointing size={20} aria-hidden="true" />
+    </Button>
+  ) : null;
+
   const menu = workspaceId ? (
     <Menu
       label="More preview actions"
@@ -310,23 +460,37 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
         <Globe size={16} aria-hidden="true" />
         Open project page
       </MenuItem>
-      <MenuItem onSelect={() => window.open(location.origin + shownUrl, "_blank", "noopener")}>
+      <MenuItem onSelect={() => window.open(location.origin + url, "_blank", "noopener")}>
         <ArrowSquareOut size={16} aria-hidden="true" />
         Open in a new tab
       </MenuItem>
-      <MenuItem onSelect={() => void copyLink()}>
-        <LinkSimple size={16} aria-hidden="true" />
-        Copy link
-      </MenuItem>
-      <MenuSeparator />
-      <MenuItem onSelect={() => setConfirmNew(true)}>
-        <LinkSimple size={16} aria-hidden="true" />
-        Make a new link
-      </MenuItem>
+      {can.mutate ? (
+        <>
+          <MenuSeparator />
+          <MenuItem onSelect={() => setShareOpen(true)}>
+            <ShareNetwork size={16} aria-hidden="true" />
+            Share a link…
+          </MenuItem>
+          <MenuItem onSelect={() => void addPicture()}>
+            <Camera size={16} aria-hidden="true" />
+            Add picture
+          </MenuItem>
+        </>
+      ) : null}
     </Menu>
   ) : null;
 
-  const view = workspaceId ? <BrowserView workspaceId={workspaceId} onUrl={setBrowserUrl} viewport={framed} /> : null;
+  const view = workspaceId ? (
+    <BrowserView
+      ref={shot}
+      workspaceId={workspaceId}
+      onUrl={setBrowserUrl}
+      viewport={framed}
+      pointing={pointing}
+      onPoint={(spot) => void onPoint(spot)}
+      outline={outline}
+    />
+  ) : null;
 
   // The device switch: the shared browser's viewport follows it (Desktop follows the pane). Pane only, not the phone sheet.
   const deviceSwitch = sheet ? null : (
@@ -357,6 +521,46 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
       {addressError}
     </p>
   ) : null;
+  const pointingNote = pointing ? (
+    <p role="status" className="px-4 pb-1 text-sm text-text-muted">
+      Tap or click the thing you mean.
+    </p>
+  ) : null;
+  // Under the bar when the browser shows an earlier version: it is only looked at until the person goes back to it.
+  const versionRow = versionSha ? (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-2 text-sm text-text-secondary">
+      <span className="mr-auto">{lookingAt ? `You're looking at the version from ${sidebarWhen(lookingAt)}.` : "You're looking at an earlier version."}</span>
+      {can.mutate ? (
+        <>
+          <Button variant="primary" size="sm" disabled={restoring} onClick={askGoBack}>
+            Go back to this one
+          </Button>
+          <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => void browserAct("home")}>
+            Back to now
+          </Button>
+        </>
+      ) : null}
+    </div>
+  ) : null;
+
+  const dialogs = (
+    <>
+      <ShareDialog workspaceId={workspaceId} open={shareOpen} onOpenChange={setShareOpen} onPreviewUrl={(next) => onNewLink?.(next)} />
+      <MarkupDialog workspaceId={workspaceId ?? ""} image={picture} onOpenChange={(open) => !open && setPicture(null)} />
+      <ConfirmDialog
+        open={restoreOpen}
+        onOpenChange={(v) => {
+          if (!v) setRestoreOpen(false);
+        }}
+        title="Go back to this version?"
+        description={`Your project will look the way it did then. Nothing is lost: you can come back to the current version from Changes.${unkept > 0 ? " Changes you haven't kept will be thrown away." : ""}`}
+        confirmLabel="Go back"
+        tone={unkept > 0 ? "danger" : "commit"}
+        busy={restoring}
+        onConfirm={() => void goBackToVersion()}
+      />
+    </>
+  );
 
   if (!sheet) {
     return (
@@ -364,12 +568,16 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
         <div role="toolbar" aria-label="Preview actions" className="flex h-14 shrink-0 items-center gap-1 px-2">
           {navButtons}
           {address}
+          {problemMenu}
+          {pointButton}
           {menu}
           <Button variant="quiet" iconOnly aria-label="Close preview" title="Close preview" className="size-10 shrink-0" onClick={onClose}>
             <X size={16} aria-hidden="true" />
           </Button>
         </div>
         {addressNote}
+        {versionRow}
+        {pointingNote}
         {deviceSwitch}
         {/* The stage keeps the browser mounted when the size changes; only the frame around it moves and scales. */}
         <div ref={stageRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-sunken">
@@ -380,7 +588,7 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
             {view}
           </div>
         </div>
-        {newLinkConfirm}
+        {dialogs}
       </>
     );
   }
@@ -409,6 +617,8 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
           </Button>
           {navButtons}
           <span className="flex-1" />
+          {problemMenu}
+          {pointButton}
           {menu}
         </div>
       </div>
@@ -416,8 +626,10 @@ export default function PreviewPanel({ url, variant, onClose, onNewLink }: Props
         <div className="flex">{address}</div>
         {addressNote}
       </div>
+      {versionRow}
+      {pointingNote}
       <div className="flex min-h-0 flex-1 flex-col bg-surface-sunken p-2">{view}</div>
-      {newLinkConfirm}
+      {dialogs}
     </div>
   );
 }

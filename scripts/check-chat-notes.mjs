@@ -64,6 +64,7 @@ rmSync(formatterDir, { recursive: true, force: true });
 
 check("a turn of 72 s", workedLine({ worked: 72000 }), "Worked for 1m 12s");
 check("with the plan share", workedLine({ worked: 72000, planDelta: 3 }), "Worked for 1m 12s · 3% of your plan");
+check("0% of the plan: not shown", workedLine({ worked: 72000, planDelta: 0.3 }), "Worked for 1m 12s");
 check("5 s or less: no line", workedLine({ worked: 5000 }), null);
 check("just over 5 s", workedLine({ worked: 5001 }), "Worked for 5s");
 check("no time, no line", workedLine({}), null);

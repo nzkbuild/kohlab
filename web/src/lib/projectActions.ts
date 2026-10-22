@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useApp } from "../store";
 import type { Workspace } from "../types";
 import { agentName } from "./agentName";
+import { projectTitle } from "./format";
 
 export type ModelChoice = "opus" | "sonnet" | "haiku" | "default";
 
@@ -41,4 +42,19 @@ export async function changeModel(w: Workspace, model: ModelChoice): Promise<voi
 export async function switchConversation(workspaceId: string, sid: string | null): Promise<void> {
   await api.chatSwitch(workspaceId, sid);
   await useApp.getState().refresh();
+}
+
+/**
+ * Makes a copy of a project as its last kept version (its notes and model carry
+ * over; the chat and unkept changes do not), then opens the copy. Errors are shown here.
+ */
+export async function copyProject(w: Workspace): Promise<void> {
+  try {
+    const copy = await api.copyProject(w.id, `${projectTitle(w)} copy`.slice(0, 80));
+    await useApp.getState().refresh();
+    useApp.getState().navigate({ kind: "workspace", id: copy.id });
+    toast.success("Made a copy. The original is unchanged.");
+  } catch (e) {
+    toast.error(`Couldn't make a copy. ${(e as Error).message}`);
+  }
 }

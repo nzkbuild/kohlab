@@ -8,9 +8,9 @@
 import { chownSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Workspace } from "./types";
-import { identityOf, ownBase, previewWorkspace, wsDir } from "./lib";
-import { SAFE_ENV_KEYS, ensureDevServer, stopDevServer } from "./devserver";
+import type { Pick as Picked, Problem, Workspace } from "./types";
+import { identityOf, listVersions, ownBase, previewWorkspace, wsDir } from "./lib";
+import { SAFE_ENV_KEYS, clearDevServerProblem, devServerOrigin, devServerProblem, ensureDevServer, stopDevServer } from "./devserver";
 
 /** At most this many Chrome instances run at once; the least recently used is closed for a new one. */
 const MAX_BROWSERS = 3;
@@ -29,6 +29,17 @@ export class BrowserError extends Error {
 
 /** Running browsers this server started, by workspace id, with when they were last used. */
 const running = new Map<string, { ws: Workspace; used: number }>();
+
+/** Page errors the person has sent to the AI (or cleared). agent-browser keeps its error list after `errors --clear`, so they are filtered here. */
+const clearedErrors = new Map<string, Set<string>>();
+/** Page problems for a workspace, for a few seconds: the chat and the preview both poll them. */
+const problemCache = new Map<string, { at: number; list: Problem[] }>();
+// ponytail: a 3 s cache per workspace; a poll every 5 s already costs one CLI round, so this only absorbs two panels at once.
+const PROBLEM_CACHE_MS = 3_000;
+const MAX_PROBLEMS = 20;
+/** Requests seen without a status, by workspace and "METHOD url", with when they were first seen. */
+const pendingSeen = new Map<string, Map<string, number>>();
+const PENDING_FAIL_MS = 5_000;
 
 export function browserSession(ws: Pick<Workspace, "id">): string {
   return `kohlab-${ws.id}`;
@@ -204,8 +215,8 @@ export async function browserAction(
   return browserUrl(ws);
 }
 
-/** The page's current URL, or null when no browser runs. */
-export async function browserUrl(ws: Workspace): Promise<string | null> {
+/** The page's real URL (where the browser is), or null when no browser runs. Internal: it may carry the share token. */
+async function currentUrl(ws: Workspace): Promise<string | null> {
   try {
     const url = jsonOut(await cli(ws, ["--json", "get", "url"], 10_000))?.data?.url;
     return typeof url === "string" && url ? url : null;
@@ -214,9 +225,24 @@ export async function browserUrl(ws: Workspace): Promise<string | null> {
   }
 }
 
+/** The page's URL as the owner may see it, or null when no browser runs. The share token never shows. */
+export async function browserUrl(ws: Workspace): Promise<string | null> {
+  const url = await currentUrl(ws);
+  return url === null ? null : hideShare(ws, url);
+}
+
+/** The share link's token replaced in anything the owner sees: a page address, a problem, a point. */
+export function hideShare(ws: Pick<Workspace, "shareLink">, text: string): string {
+  const token = ws.shareLink?.token;
+  return token ? text.split(token).join("share-link") : text;
+}
+
 /** Close the workspace's browser and its dev server. Best-effort: a browser the idle timeout already closed is fine. */
 export async function stopBrowser(ws: Workspace): Promise<void> {
   running.delete(ws.id);
+  clearedErrors.delete(ws.id);
+  pendingSeen.delete(ws.id);
+  problemCache.delete(ws.id);
   stopDevServer(ws);
   await cli(ws, ["close"], 10_000).catch(() => {});
 }
@@ -286,4 +312,206 @@ export function browserToolPolicy(toolName: string, currentUrl: string | null, o
   if (BROWSER_READ_ONLY.has(short) || short.startsWith("get_") || short.startsWith("wait")) return "allow";
   if (BROWSER_INTERACTION.has(short) && isOwnPage(currentUrl, ownPages)) return "allow";
   return "ask";
+}
+
+// --- problems, points and earlier versions ----------------------------------
+
+/** The workspace's own pages: its Kohlab preview (versions included, they sit under it) and its dev server's origin. */
+function ownPagesFor(ws: Workspace): OwnPages {
+  return { previewPrefix: ws.previewToken ? `${ownBase()}/p/${ws.previewToken}/` : null, devOrigin: devServerOrigin(ws) };
+}
+
+const clip = (s: string, n: number) => Array.from(s).slice(0, n).join("");
+const errorKey = (e: { text?: unknown; line?: unknown; column?: unknown }) => `${e.text}|${e.line}|${e.column}`;
+
+/** The /p/<token>/ a page sits under is a credential: what the chat is told keeps only the path inside it. */
+const noToken = (s: string) => s.replace(/\/p\/[A-Za-z0-9_-]{16,}\//g, "/");
+
+/** One problem, with the share token hidden and the sizes kept to what the chat can take. */
+function problemOf(ws: Workspace, kind: Problem["kind"], text: string, detail: string | undefined, at: number): Problem {
+  const p: Problem = { kind, text: clip(noToken(hideShare(ws, text)).replace(/\s+/g, " ").trim() || "(no message)", 300), at };
+  if (detail !== undefined) p.detail = clip(noToken(hideShare(ws, detail)), 4000);
+  return p;
+}
+
+/** Errors, failed requests and console errors of the page as it is now. Only while the browser shows an own page. */
+async function pageProblems(ws: Workspace): Promise<Problem[]> {
+  const here = await currentUrl(ws);
+  // An earlier version is only being looked at: its errors are not the project's to fix.
+  if (!isOwnPage(here, ownPagesFor(ws)) || /\/p\/[^/]+\/v\/[0-9a-f]{40}\//.test(here ?? "")) return [];
+  const messages = jsonOut(await cli(ws, ["--json", "console"], 10_000))?.data?.messages ?? [];
+  const errors = jsonOut(await cli(ws, ["--json", "errors"], 10_000))?.data?.errors ?? [];
+  const requests = jsonOut(await cli(ws, ["--json", "network", "requests"], 10_000))?.data?.requests ?? [];
+  const cleared = clearedErrors.get(ws.id) ?? new Set<string>();
+  const at = Date.now();
+  const list: Problem[] = [];
+  const seen = pendingSeen.get(ws.id) ?? new Map<string, number>();
+  const stillOpen = new Set<string>();
+  for (const m of messages) {
+    if (m?.type === "error" && typeof m.text === "string") list.push(problemOf(ws, "console", m.text, undefined, at));
+  }
+  for (const e of errors) {
+    if (typeof e?.text !== "string" || cleared.has(errorKey(e))) continue;
+    list.push(problemOf(ws, "page", e.text.split("\n")[0], e.text, at));
+  }
+  for (const r of requests) {
+    if (typeof r?.url !== "string") continue;
+    let path = "";
+    try {
+      path = new URL(r.url).pathname;
+    } catch {
+      /* not an address: keep it */
+    }
+    if (path === "/favicon.ico") continue;
+    if (typeof r.status === "number" && r.status < 400) continue;
+    // No status yet may only mean the request is still going: it counts as failed once it has been seen without one for 5 s.
+    if (typeof r.status !== "number") {
+      const key = `${r.method} ${r.url}`;
+      const first = seen.get(key) ?? at;
+      seen.set(key, first);
+      stillOpen.add(key);
+      if (at - first < PENDING_FAIL_MS) continue;
+    }
+    const what = typeof r.status === "number" ? `returned ${r.status}` : "got no answer";
+    list.push(problemOf(ws, "request", `${typeof r.method === "string" ? r.method : "GET"} ${r.url} ${what}`, undefined, at));
+  }
+  for (const key of seen.keys()) if (!stillOpen.has(key)) seen.delete(key);
+  pendingSeen.set(ws.id, seen);
+  return list;
+}
+
+/**
+ * What the page and the dev server got wrong, for "ask the AI to fix it". Never starts
+ * a browser: with none running only a dev server problem can come back. Page problems
+ * are cached for 3 s per workspace; a poll every 5 s already costs one CLI round.
+ * ponytail: three CLI calls per uncached poll; agent-browser's `batch` can do them in one.
+ */
+export async function browserProblems(ws: Workspace): Promise<Problem[]> {
+  const dev = devServerProblem(ws);
+  const base = dev ? [dev] : [];
+  if (!running.has(ws.id)) return base;
+  const hit = problemCache.get(ws.id);
+  let list: Problem[];
+  if (hit && Date.now() - hit.at < PROBLEM_CACHE_MS) {
+    list = hit.list;
+  } else {
+    // a browser that does not answer is not a problem with the app
+    list = await pageProblems(ws).catch(() => []);
+    problemCache.set(ws.id, { at: Date.now(), list });
+  }
+  return [...base, ...list].sort((a, b) => a.at - b.at).slice(-MAX_PROBLEMS);
+}
+
+/** Clear what was reported: the browser's buffers and the dev server's failure. */
+export async function clearBrowserProblems(ws: Workspace): Promise<void> {
+  clearDevServerProblem(ws);
+  problemCache.delete(ws.id);
+  if (!running.has(ws.id)) return;
+  await cli(ws, ["--json", "console", "--clear"], 10_000);
+  // `errors --clear` answers with the list but keeps it (agent-browser 0.39.1), so the ones seen are remembered here
+  const seen = jsonOut(await cli(ws, ["--json", "errors", "--clear"], 10_000))?.data?.errors ?? [];
+  const set = clearedErrors.get(ws.id) ?? new Set<string>();
+  for (const e of seen) set.add(errorKey(e));
+  clearedErrors.set(ws.id, set);
+  await cli(ws, ["--json", "network", "requests", "--clear"], 10_000);
+}
+
+/** The JS that names the element at a point. Only two integers are added to it, by pickElement. */
+const PICK_JS = `function (x, y) {
+  var el = document.elementFromPoint(x, y);
+  if (!el || el === document.documentElement || el === document.body) return "null";
+  var selector = "";
+  var node = el;
+  for (var depth = 0; node && node.nodeType === 1 && depth < 6; depth++) {
+    if (node.id) { selector = "#" + CSS.escape(node.id) + (selector ? " > " + selector : ""); break; }
+    var part = node.tagName.toLowerCase();
+    var parent = node.parentElement;
+    if (parent) {
+      var same = Array.prototype.filter.call(parent.children, function (c) { return c.tagName === node.tagName; });
+      if (same.length > 1) part += ":nth-of-type(" + (same.indexOf(node) + 1) + ")";
+    }
+    selector = part + (selector ? " > " + selector : "");
+    node = parent;
+  }
+  var r = el.getBoundingClientRect();
+  return JSON.stringify({
+    tag: el.tagName.toLowerCase(),
+    text: (el.innerText || "").replace(/\\s+/g, " ").trim().slice(0, 80),
+    id: el.id || undefined,
+    classes: Array.prototype.slice.call(el.classList, 0, 5).map(function (c) { return c.slice(0, 40); }),
+    selector: selector.slice(0, 300),
+    box: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) },
+    page: location.pathname,
+    viewport: { width: innerWidth, height: innerHeight }
+  });
+}`;
+
+function clampCoord(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(4000, Math.max(0, Math.round(v))) : null;
+}
+
+/** The numeric fields of `keys` in `o`, rounded and clamped; null when any is missing or not a number. */
+function numbersOf(o: any, keys: string[], hi: number): Record<string, number> | null {
+  if (!o || typeof o !== "object") return null;
+  const out: Record<string, number> = {};
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v !== "number" || !Number.isFinite(v)) return null;
+    out[k] = Math.min(hi, Math.max(0, Math.round(v)));
+  }
+  return out;
+}
+
+/** A pick the page sent, re-checked here: lengths, shapes and the path form. Null when it does not fit. */
+export function checkPick(ws: Workspace, raw: string): Picked | null {
+  let o: any;
+  try {
+    o = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  const tag = typeof o.tag === "string" && /^[a-z][a-z0-9-]{0,30}$/.test(o.tag) ? o.tag : null;
+  const selector = typeof o.selector === "string" && o.selector ? clip(hideShare(ws, o.selector), 300) : null;
+  // the /p/<token> the page sits under is a credential: the chat only needs the path inside it
+  const page = typeof o.page === "string" && o.page.startsWith("/") ? clip(hideShare(ws, o.page.replace(/^\/p\/[A-Za-z0-9_-]+(?=\/)/, "")), 200) : null;
+  const box = numbersOf(o.box, ["x", "y", "width", "height"], 10_000);
+  const viewport = numbersOf(o.viewport, ["width", "height"], 10_000);
+  if (!tag || !selector || !page || !box || !viewport) return null;
+  const classes = Array.isArray(o.classes)
+    ? o.classes.filter((c: unknown): c is string => typeof c === "string").slice(0, 5).map((c: string) => clip(c, 40))
+    : [];
+  const text = clip(typeof o.text === "string" ? o.text.replace(/\s+/g, " ").trim() : "", 80);
+  const pick: Picked = { tag, text, classes, selector, box: box as Picked["box"], page, viewport: viewport as Picked["viewport"] };
+  if (typeof o.id === "string" && o.id) pick.id = clip(o.id, 80);
+  return pick;
+}
+
+/** The element at a page point (CSS pixels of the browser's viewport). Needs a running browser on an own page. */
+export async function pickElement(ws: Workspace, x: unknown, y: unknown): Promise<Picked> {
+  if (!running.has(ws.id) || !isOwnPage(await currentUrl(ws), ownPagesFor(ws))) throw new BrowserError(400, "Point works on your own page.");
+  const px = clampCoord(x);
+  const py = clampCoord(y);
+  if (px === null || py === null) throw new BrowserError(400, "Point at a place on the page.");
+  const js = `(${PICK_JS})(${JSON.stringify(px)}, ${JSON.stringify(py)})`;
+  const raw = jsonOut(await cli(ws, ["--json", "eval", "-b", Buffer.from(js).toString("base64")], 10_000))?.data?.result;
+  const pick = typeof raw === "string" ? checkPick(ws, raw) : null;
+  if (!pick) throw new BrowserError(404, "Nothing to point at there.");
+  touchBrowser(ws);
+  return pick;
+}
+
+/** Open an earlier version in the shared browser, at its own address under the preview (the version is in the path). */
+export async function openVersion(ws: Workspace, sha: string): Promise<string | null> {
+  if (!(await listVersions(ws.id)).some((v) => v.id === sha)) throw new BrowserError(404, "That version isn't in this project's history.");
+  const { url } = await previewWorkspace(ws.id);
+  await prepare(ws);
+  await cli(ws, ["open", `${ownBase()}${url}v/${sha}/`], 30_000);
+  track(ws);
+  return browserUrl(ws);
+}
+
+/** After the share link changes: a running browser goes back to the start page, which now uses the new link. */
+export async function reopenHome(ws: Workspace): Promise<void> {
+  if (running.has(ws.id)) await browserAction(ws, "home");
 }

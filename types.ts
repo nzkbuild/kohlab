@@ -41,6 +41,8 @@ export interface Workspace {
   share?: string;
   /** secret token for the web preview at /p/<token>/ (created on first Preview) */
   previewToken?: string;
+  /** a share link to the app, served at /p/<token>/ to anyone with it. Expires unless `expires` is null. Never reaches the owner's browser or problem routes. */
+  shareLink?: { token: string; expires: number | null };
   /** secret for the agent's hook callbacks (POST /api/hook/<id>), written into its Claude settings */
   hookToken?: string;
   /** optional resource caps applied to the agent's PTY session */
@@ -101,4 +103,31 @@ export interface Invite {
   /** epoch ms, after this the invitation is dead and must be re-sent. */
   expires: number;
   invitedBy?: string;
+}
+
+/** Something a person can ask the AI to fix: a browser error, a failed request, or a dev server that did not start. */
+export interface Problem {
+  kind: "console" | "page" | "request" | "devserver";
+  /** One line, at most 300 characters. */
+  text: string;
+  /** More to read, at most 4000 characters. */
+  detail?: string;
+  /** When Kohlab noticed it (epoch ms). */
+  at: number;
+}
+
+/** An element the person pointed at in the shared browser, as the chat is told about it. */
+export interface Pick {
+  tag: string;
+  /** The element's visible text, one line, at most 80 characters. */
+  text: string;
+  id?: string;
+  /** At most 5 class names, each at most 40 characters. */
+  classes: string[];
+  /** A CSS selector for the element, at most 300 characters. */
+  selector: string;
+  box: { x: number; y: number; width: number; height: number };
+  /** The page's path only, at most 200 characters. */
+  page: string;
+  viewport: { width: number; height: number };
 }

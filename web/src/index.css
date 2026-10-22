@@ -76,6 +76,9 @@
   --line-accent: var(--text-primary);
   /* Focus indicator only: soft grey, 3:1 on every surface it sits over (check-contrast.mjs). */
   --focus-ring: #8a8a8a;
+  /* Pen colours for marking up a picture of the page (Add picture). Two, so a mark can be told from the page. */
+  --ink-1: oklch(0.7 0.19 25);
+  --ink-2: oklch(0.72 0.14 250);
 
   /* --- semantic: status lifecycle ---------------------------------------- */
   /* One tone per status, chosen so the chip LABEL passes 4.5:1 against the
@@ -177,6 +180,8 @@
     --line-strong: oklch(0.6 0.005 286);
     --line-accent: var(--text-primary);
     --focus-ring: #8a8a8a;
+    --ink-1: oklch(0.55 0.21 25);
+    --ink-2: oklch(0.5 0.16 255);
 
     --status-running: oklch(0.46 0.14 130);
     --status-review: var(--text-primary);
@@ -256,6 +261,8 @@
   --color-line-strong: var(--line-strong);
   --color-line-accent: var(--line-accent);
   --color-focus: var(--focus-ring);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
 
   --color-status-running: var(--status-running);
   --color-status-review: var(--status-review);
@@ -1425,6 +1432,17 @@ input[type="radio"] {
   border-radius: var(--radius-card);
   background: var(--surface-overlay);
   box-shadow: 0 1.5rem 4rem oklch(0.08 0.002 286 / 0.55);
+}
+
+/* A dialog that holds a picture (Add picture): wider than the default 30rem. */
+.dialog-content.dialog-wide {
+  width: min(48rem, calc(100% - 2rem));
+}
+/* Higher than the default, so the picture and its buttons fit on a short screen. Phones keep the bottom sheet. */
+@media (min-width: 48rem) {
+  .dialog-content.dialog-wide {
+    inset-block-start: 4dvh;
+  }
 }
 
 /* Phone: every .dialog-content is a bottom sheet with a grab handle. The

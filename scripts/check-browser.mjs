@@ -122,7 +122,10 @@ try {
     ];
     for (const [path, name] of routes) {
       await page.goto(base + path);
-      await page.waitForSelector("h1");
+      // The workspace chunk is lazy: wait until the view is ready (one h1, and the open tab on workspace routes), not just for the first h1.
+      // (a function, not a string: the page's CSP forbids eval)
+      const withTab = name === "workspace" || name === "claude";
+      await page.waitForFunction((tab) => document.querySelectorAll("h1").length === 1 && (!tab || !!document.querySelector("[role=tab][aria-selected=true]")), withTab, { timeout: 15000 }).catch(() => {});
       await page.waitForTimeout(600);
       const m = await page.evaluate(() => {
         const visible = (el) => {

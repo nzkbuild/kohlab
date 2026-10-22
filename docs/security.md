@@ -46,6 +46,29 @@ it runs.
   [isolation.md](isolation.md).
 - **Share links** (`?share=<token>`) are public-read by design: one workspace's
   terminal, diff and log. They can never start, stop, commit or delete.
+- **App share links** (`/p/<token>/`, from the Share menu) serve the project to anyone
+  with the address until it expires (1 day, 7 days, or never) or is turned off. A
+  static project is served as its files. A Vite app runs its dev server under that
+  link, and the proxy reaches only the port Kohlab gave that server: a dev server
+  that announces any other port is refused, never proxied. The proxy sends the app
+  only an allowlist of request headers (never cookies, authorization, `x-kohlab-*`
+  or websocket keys), sets no cookies back, replaces the app's policy with the
+  preview sandbox, refuses dot segments, and caps bodies (1 MB in, 20 MB out),
+  time (30 s) and redirects (followed by the browser, never by the server). Share
+  tokens never reach the owner's browser, problem or point routes; turning the link
+  off replaces the owner's preview token too, so both old addresses stop working.
+  Share sessions cannot read problems, copy, or change link settings.
+- **Earlier versions** (`/p/<token>/v/<commit>/`) use the owner's token only, and only
+  for a commit in the project's own history (the last 50 first-parent commits). A
+  file comes from `git cat-file blob`: never a symlink, a submodule, a dotfile, or
+  a path that climbs out; nothing is checked out and nothing runs.
+- **Point and problems.** Pointing sends one fixed script to the browser with two
+  whole numbers in it; the element it names is checked again on the server before
+  the chat sees it. Problems are read only while the browser shows the project's own
+  page, and reading them never starts a browser.
+- **Copies** are an owner or member action, audited. A copy takes the committed
+  history, settings and notes only: no chat, no uncommitted work, no tokens or
+  sessions.
 - **Over-the-air updates** (`POST /api/release/update`) are owner-only and
   audited: 401 without credentials, 403 with the wrong role.
 

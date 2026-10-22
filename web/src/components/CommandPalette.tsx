@@ -20,6 +20,7 @@ import {
   Terminal,
   TerminalWindow,
   X,
+  Copy,
 } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
@@ -28,7 +29,7 @@ import { copyText } from "../lib/clipboard";
 import { readDraft } from "../lib/drafts";
 import { PROMPT_MAX } from "../lib/route";
 import { isApple, isTouchOnly, isTypingTarget } from "../lib/platform";
-import { canContinue } from "../lib/projectActions";
+import { canContinue, copyProject } from "../lib/projectActions";
 import { agentName, isAiAgent } from "../lib/agentName";
 import { startNewProject } from "../lib/newProject";
 import type { PanelAction, PanelRequest } from "../store";
@@ -76,6 +77,7 @@ function projectActionItems(
     ...(mutate && w.chat
       ? [{ id: "project-notes", label: `Notes for ${isAiAgent(w.agent) ? agentName(w.agent) : "the AI"}…`, group, icon: <NotePencil size={16} />, keywords: ["remember", "business", "colours", "tone", "brand", "instructions"], onAction: () => setNotesFor(w.id) }]
       : []),
+    ...(mutate ? [{ id: "project-copy", label: "Make a copy", group, icon: <Copy size={16} />, keywords: ["duplicate", "fork", "clone", "copy"], onAction: () => copyProject(w) }] : []),
     { id: "project-file", label: "Open file…", group, icon: <File size={16} />, keywords: ["files", "code", "browse"], onAction: panel("files") },
     { id: "project-versions", label: "Earlier versions", group, icon: <ClockCounterClockwise size={16} />, keywords: ["changes", "history", "undo", "versions"], onAction: panel("changes") },
     { id: "project-download", label: "Download project", group, icon: <DownloadSimple size={16} />, keywords: ["zip", "save", "export", "archive"], onAction: () => api.downloadProject(w.id, projectTitle(w)) },

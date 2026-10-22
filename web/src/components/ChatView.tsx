@@ -2,9 +2,13 @@ import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMem
 import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage } from "../api";
-import type { ChatEvent as StoredChatEvent, TurnFile } from "../types";
+import type { ChatEvent as StoredChatEvent, Pick, TurnFile } from "../types";
 import { announce } from "../lib/announce";
 import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
+import { chatShown, takeWaiting } from "../lib/toChat";
+import { MAX_POINTS, composeSent, pointChipText, pointLine, splitPointed } from "../lib/point";
+import { problemSummary } from "../lib/problemText";
+import { askToFix, useProblems } from "../lib/problems";
 import { parsePatch, type PatchLine } from "../lib/diff";
 import { BIG_PASTE, DRAFT_SAVE_MS, addSaved, readDraft, writeDraft } from "../lib/drafts";
 import { isApple } from "../lib/platform";
@@ -125,10 +129,10 @@ export function formatElapsed(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
-/** The quiet line under a reply: "Worked for 1m 12s", with the plan share when the server has it. Null for a turn of 5 s or less. Pure. */
+/** The quiet line under a reply: "Worked for 1m 12s", with the plan share when the server has it and it rounds to more than 0%. Null for a turn of 5 s or less. Pure. */
 export function workedLine(d: { worked?: number; planDelta?: number }): string | null {
   if (d.worked === undefined || d.worked <= 5000) return null;
-  return `Worked for ${formatElapsed(d.worked)}${d.planDelta !== undefined ? ` · ${d.planDelta}% of your plan` : ""}`;
+  return `Worked for ${formatElapsed(d.worked)}${d.planDelta !== undefined && Math.round(d.planDelta) > 0 ? ` · ${Math.round(d.planDelta)}% of your plan` : ""}`;
 }
 
 /** The message "Check it works" sends: a fixed request, so the person needs no words of their own. */
@@ -1546,6 +1550,20 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachNote, setAttachNote] = useState<string | null>(null);
+  // Elements pointed at in the preview, waiting to be sent with the message (at most MAX_POINTS).
+  const [points, setPoints] = useState<{ key: number; pick: Pick }[]>([]);
+  const pointKey = useRef(0);
+  // Problems with the page, read while the chat is open. A "Not now" hides the list until it changes.
+  const { problems, key: problemKey, refresh: refreshProblems } = useProblems(workspaceId, can);
+  const [problemHidden, setProblemHidden] = useState<string | null>(null);
+  const [fixing, setFixing] = useState(false);
+  useEffect(() => {
+    try {
+      setProblemHidden(localStorage.getItem(`kohlab:problem-hidden:${workspaceId}`));
+    } catch {
+      setProblemHidden(null);
+    }
+  }, [workspaceId]);
   const [uploading, setUploading] = useState(false);
   const attachKey = useRef(0);
   const attachRef = useRef(attachments);
@@ -1668,9 +1686,12 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   turnEndRef.current = onTurnEnd;
   useEffect(() => {
     if (!busy) void refresh();
-    if (wasBusy.current && !busy) turnEndRef.current?.();
+    if (wasBusy.current && !busy) {
+      turnEndRef.current?.();
+      refreshProblems();
+    }
     wasBusy.current = busy;
-  }, [busy, refresh]);
+  }, [busy, refresh, refreshProblems]);
 
   // The Preview counts as looked at once it has been opened since the last reply finished. The header's Preview says so with an event.
   const [previewSeen, setPreviewSeen] = useState(false);
@@ -1896,6 +1917,47 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     setAttachments((prev) => [...prev, ...next]);
   };
 
+  // A picture marked up in the preview arrives as a file for the composer. The ref keeps the newest takeFiles.
+  const takeFilesRef = useRef(takeFiles);
+  takeFilesRef.current = takeFiles;
+  useEffect(() => {
+    const onAttach = (e: Event) => {
+      const d = (e as CustomEvent<{ id?: string; files?: File[] }>).detail;
+      if (d?.files && d.id === workspaceId) takeFilesRef.current(d.files);
+    };
+    window.addEventListener("kohlab:attach", onAttach);
+    return () => window.removeEventListener("kohlab:attach", onAttach);
+  }, [workspaceId]);
+
+  // An element pointed at in the preview becomes a chip above the box. Chips stop at MAX_POINTS.
+  const addPickRef = useRef((_pick: Pick) => {});
+  addPickRef.current = (pick) => {
+    if (!can) return;
+    if (points.length >= MAX_POINTS) {
+      setAttachNote(`You can point at up to ${MAX_POINTS} things at a time.`);
+      return;
+    }
+    setPoints((list) => [...list, { key: ++pointKey.current, pick }]);
+  };
+  useEffect(() => {
+    const onPoint = (e: Event) => {
+      const d = (e as CustomEvent<{ id?: string; pick?: Pick }>).detail;
+      if (d?.pick && d.id === workspaceId) addPickRef.current(d.pick);
+    };
+    window.addEventListener("kohlab:point", onPoint);
+    // Pictures and points sent while another tab was showing wait for this chat.
+    const off = chatShown(workspaceId);
+    for (const w of takeWaiting(workspaceId)) {
+      const d = w.detail as { files?: File[]; pick?: Pick };
+      if (w.name === "kohlab:attach" && d.files) takeFilesRef.current(d.files);
+      else if (d.pick) addPickRef.current(d.pick);
+    }
+    return () => {
+      off();
+      window.removeEventListener("kohlab:point", onPoint);
+    };
+  }, [workspaceId]);
+
   const removeAttachment = (key: number) => {
     const gone = attachments.find((a) => a.key === key);
     if (gone?.url) URL.revokeObjectURL(gone.url);
@@ -1934,12 +1996,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const send = async () => {
     const text = draft.trim();
     // While Claude works, a message is queued: the CLI runs it after the turn.
-    if ((!text && attachments.length === 0) || waiting !== null || sending || uploading) return;
-    let message = text;
+    if ((!text && attachments.length === 0 && points.length === 0) || waiting !== null || sending || uploading) return;
+    let paths: string[] = [];
     if (attachments.length > 0) {
       setUploading(true);
       setSendError(null);
-      let paths: string[];
       try {
         paths = await uploadAll();
       } catch (e) {
@@ -1948,9 +2009,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       } finally {
         setUploading(false);
       }
-      const line = `Attached: ${paths.join(", ")}`;
-      message = text ? `${text}\n\n${line}` : line;
     }
+    // Pointed-at lines sit after the text, and the Attached line stays last (splitAttached reads it there).
+    const message = composeSent(text, points.map((p) => pointLine(p.pick)), paths);
     // Edit and resend: the message's files go back first (when it has a checkpoint), then the new text is sent as a normal message.
     if (editing?.tree) {
       try {
@@ -1963,6 +2024,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     if (await sendText(message)) {
       setDraft("");
       clearAttachments();
+      setPoints([]);
       setEditing(null);
     }
   };
@@ -2248,8 +2310,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   /** Copies the link to this project's Preview, as the Preview panel does. */
   const copyPreviewLink = async () => {
     try {
-      const { url } = await api.preview(workspaceId);
-      await copyText(location.origin + url);
+      // The share link (it expires, and Share a link can turn it off), not the owner's own preview address.
+      let info = await api.link(workspaceId);
+      if (!info.url) info = await api.setLink(workspaceId, "1d", false);
+      if (!info.url) throw new Error("Links for this kind of app aren't ready yet.");
+      await copyText(location.origin + info.url);
       toast.success("Link copied. Anyone who can reach this Kohlab can open it.");
     } catch (e) {
       toast.error(`Couldn't copy the link. ${friendly(e)}`);
@@ -2344,7 +2409,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
     switch (e.kind) {
       case "user": {
-        const { body, files } = splitAttached(e.text);
+        const attached = splitAttached(e.text);
+        const { body, points: pointed } = splitPointed(attached.body);
+        const files = attached.files;
         // Pictures show as thumbnails; the other files stay as chips. Attachments are always saved in uploads/.
         const pictures = files.filter((name) => pictureType(name) !== null);
         const others = files.filter((name) => pictureType(name) === null);
@@ -2357,6 +2424,15 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           <div className="group/msg flex flex-col items-end">
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
               {body}
+              {pointed.length > 0 ? (
+                <ul className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
+                  {pointed.map((line, i) => (
+                    <li key={i} title={line} className="flex max-w-full items-center rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-text-secondary">
+                      <span className="truncate">{pointChipText(line)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {pictures.map((name, i) => (
                 <div key={i} className="mt-1">
                   <ProjectImage path={`uploads/${name}`} alt={name} thumbClass="max-h-32" />
@@ -2509,7 +2585,30 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           ? `Message ${who}`
           : commandsEnabled ? `Message ${who} — / for commands, @ for files` : `Message ${who} — @ for files`;
   // While the AI works, the round button is always Stop. Enter with text queues the message (see the card above the box).
-  const hasDraft = draft.trim() !== "" || attachments.length > 0;
+  const hasDraft = draft.trim() !== "" || attachments.length > 0 || points.length > 0;
+
+  /** Sends the problems to the AI, then reads the chat again so the new message shows. */
+  const fixProblems = async () => {
+    setFixing(true);
+    try {
+      await askToFix(workspaceId, problems);
+      refreshProblems();
+      repoll();
+    } catch (e) {
+      toast.error(`Couldn't send that to ${who}. ${(e as Error).message}`);
+    } finally {
+      setFixing(false);
+    }
+  };
+  /** Hides this list of problems until something new goes wrong (the key changes). */
+  const notNow = () => {
+    try {
+      localStorage.setItem(`kohlab:problem-hidden:${workspaceId}`, problemKey);
+    } catch {
+      /* not remembered: it shows again on the next visit */
+    }
+    setProblemHidden(problemKey);
+  };
 
   return (
     <WorkspaceCtx.Provider value={workspaceId}>
@@ -2622,6 +2721,20 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </div>
                 {readyHint ? <p className="text-xs text-text-muted">Look at it in Preview, then keep it or undo it.</p> : null}
               </section>
+                ) : null}
+                {!compact && !busy && can && problems.length > 0 && problemHidden !== problemKey ? (
+                  <section aria-label="Problem with the page" className="flex flex-col gap-3 rounded-card bg-surface-raised px-5 py-[18px]">
+                    <p className="text-base font-semibold text-text-primary">The page has a problem</p>
+                    <p className="text-small text-text-muted">{problemSummary(problems)}</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Button variant="primary" disabled={fixing} aria-busy={fixing} onClick={() => void fixProblems()}>
+                        {`Ask ${who} to fix it`}
+                      </Button>
+                      <Button variant="quiet" className="text-text-secondary" onClick={notNow}>
+                        Not now
+                      </Button>
+                    </div>
+                  </section>
                 ) : null}
                 {todos.length > 0 ? <Checklist todos={todos} /> : null}
                 {working ? (
@@ -2776,7 +2889,32 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   }}
                   onDropFiles={(files) => takeFiles(files)}
                   attachments={
-                    attachments.length > 0 ? (
+                    attachments.length > 0 || points.length > 0 ? (
+                      <>
+                      {points.length > 0 ? (
+                        <ul aria-label="Pointed at" className="flex flex-wrap gap-1.5 pt-1">
+                          {points.map((p) => {
+                            const label = pointChipText(pointLine(p.pick));
+                            return (
+                              <li key={p.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-active py-1 pr-1 pl-2.5 text-sm text-text-secondary">
+                                <span className="min-w-0 truncate" title={label}>
+                                  {label}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${label}`}
+                                  disabled={uploading}
+                                  onClick={() => setPoints((list) => list.filter((x) => x.key !== p.key))}
+                                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
+                                >
+                                  <X size={12} aria-hidden="true" />
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
+                      {attachments.length > 0 ? (
                       <ul aria-label="Files to send" className="flex flex-wrap gap-1.5 pt-1">
                         {attachments.map((a) => (
                           <li key={a.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-active py-1 pr-1 pl-1.5 text-sm text-text-secondary">
@@ -2798,6 +2936,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                           </li>
                         ))}
                       </ul>
+                      ) : null}
+                      </>
                     ) : null
                   }
                   leading={

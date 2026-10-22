@@ -79,12 +79,17 @@ import {
   getPrefs,
   setPrefs,
   mutateState,
+  copyWorkspace,
+  setShareLink,
+  shareExpiry,
+  turnOffShareLink,
   slugify,
 } from "./lib";
 import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
-import { resolvePreviewFile } from "./preview";
-import { BrowserError, browserAction, browserUrl, ensureBrowser, startUrlFor, touchBrowser } from "./browser";
-import { stopAllDevServers } from "./devserver";
+import { resolvePreviewFile, versionFile } from "./preview";
+import { headPackage, treeIsEmpty } from "./versions";
+import { BrowserError, browserAction, browserProblems, browserUrl, clearBrowserProblems, ensureBrowser, openVersion, pickElement, reopenHome, startUrlFor, touchBrowser } from "./browser";
+import { appKind, detectDevCommand, devProxyPort, ensureDevServer, stopAllDevServers, stopDevServer } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
 import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, noteChat, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage } from "./chat";
@@ -254,10 +259,27 @@ async function handlePreview(token: string, rest: string, req: Request): Promise
     "x-content-type-options": "nosniff",
     "cache-control": "no-store",
     "referrer-policy": "no-referrer",
+    // the sandboxed page has an opaque origin: its module scripts are fetched in CORS mode and need this. The token in the path is the credential; no cookies exist here.
+    "access-control-allow-origin": "*",
   };
   const notFound = (html: string) => new Response(html, { status: 404, headers: { ...headers, "content-type": "text/html; charset=utf-8" } });
-  const ws = await workspaceByPreview(token);
-  if (!ws) return notFound("<!doctype html><title>Not found</title><p>This preview link is not valid.</p>");
+  const hit = await workspaceByPreview(token);
+  if (!hit) return notFound("<!doctype html><title>Not found</title><p>This preview link is not valid.</p>");
+  const { ws, share } = hit;
+  if (share) return sharedPreview(ws, token, rest, req, headers);
+  if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { ...headers, allow: "GET, HEAD" } });
+  // An earlier version: the owner's own address only, and only a commit in this project's history.
+  const version = /^v\/([0-9a-f]{40})(?:\/(.*))?$/.exec(rest);
+  if (version) {
+    const known = (await listVersions(ws.id)).some((v) => v.id === version[1]);
+    if (!known) return notFound("<!doctype html><title>Not found</title><p>This version is not in the history.</p>");
+    const dirTo = new URL(req.url).pathname + "/";
+    if (version[2] === undefined) return new Response(null, { status: 301, headers: { ...headers, location: dirTo } });
+    const got = await versionFile(worktreePath(ws), version[1], version[2]);
+    if (got === "redirect") return new Response(null, { status: 301, headers: { ...headers, location: dirTo } });
+    if (!got) return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+    return new Response(req.method === "HEAD" ? null : got.bytes, { headers: { ...headers, "content-type": Bun.file(got.name).type } });
+  }
   const file = await resolvePreviewFile(worktreePath(ws), rest);
   if (!file) {
     if (rest === "" || rest.endsWith("/")) {
@@ -266,6 +288,129 @@ async function handlePreview(token: string, rest: string, req: Request): Promise
     return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
   }
   return new Response(req.method === "HEAD" ? null : Bun.file(file), { headers });
+}
+
+/**
+ * A share link's page. A project with no dev command is served as its files, as the owner's preview is.
+ * A Vite app runs its dev server under the link (see devserver.ts) and this proxies to that one port only.
+ * Anything else says it is not ready yet: a link never runs a command the owner did not get to see work.
+ */
+async function sharedPreview(ws: Workspace, token: string, rest: string, req: Request, headers: Record<string, string>): Promise<Response> {
+  const page = (msg: string, status: number) =>
+    new Response(`<!doctype html><meta charset="utf-8"><title>${msg}</title><p style="font-family:sans-serif;padding:2rem">${msg}</p>`, {
+      status,
+      headers: { ...headers, "content-type": "text/html; charset=utf-8" },
+    });
+  const pkg = await readFile(join(worktreePath(ws), "package.json"), "utf8").then(JSON.parse, () => null);
+  const kind = appKind(pkg);
+  if (kind === "unsupported") return page("Links for this kind of app aren't ready yet.", 404);
+  if (kind === "static") {
+    if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { ...headers, allow: "GET, HEAD" } });
+    const file = await resolvePreviewFile(worktreePath(ws), rest);
+    if (!file) return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+    return new Response(req.method === "HEAD" ? null : Bun.file(file), { headers });
+  }
+  let port = devProxyPort(ws);
+  if (port === null) {
+    await ensureDevServer(ws);
+    port = devProxyPort(ws);
+  }
+  if (port === null) return page("This app isn't running right now.", 503);
+  return proxyApp(port, token, rest, req, headers);
+}
+
+const PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
+/** The only request headers the app gets: never a cookie, an authorization header, Kohlab's own headers or a websocket key. */
+const PROXY_REQUEST_HEADERS = ["accept", "accept-language", "content-type", "if-none-match", "if-modified-since", "range"];
+/** Response headers the app may not set on the link: cookies, its own policy, and framing that would fight ours. */
+const PROXY_DROP_RESPONSE = ["set-cookie", "content-encoding", "content-length", "transfer-encoding", "connection", "content-security-policy", "location"];
+const PROXY_MAX_REQUEST = 1024 * 1024;
+const PROXY_MAX_RESPONSE = 20 * 1024 * 1024;
+
+/** A segment that would climb out of the app's base path (".", ".." or their encodings). */
+function dotSegment(s: string): boolean {
+  try {
+    const d = decodeURIComponent(s);
+    return d === "." || d === "..";
+  } catch {
+    return true;
+  }
+}
+
+/** The request body up to `max` bytes, or null when it is bigger. Counted as it arrives, so a chunked body cannot slip past. */
+async function readBodyCapped(req: Request, max: number): Promise<Uint8Array | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+/** The body, ending with an error once it is more than `max` bytes (the app is cut off, not trusted). */
+function capBody(body: ReadableStream<Uint8Array>, max: number): ReadableStream<Uint8Array> {
+  let total = 0;
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        total += chunk.byteLength;
+        if (total > max) controller.error(new Error("response too big"));
+        else controller.enqueue(chunk);
+      },
+    }),
+  );
+}
+
+/** Forward one request to the share link's dev server on 127.0.0.1:<port>, under its base path. No redirects followed, 30 s at most. */
+async function proxyApp(port: number, token: string, rest: string, req: Request, headers: Record<string, string>): Promise<Response> {
+  if (!PROXY_METHODS.includes(req.method)) return new Response("method not allowed", { status: 405, headers: { ...headers, allow: PROXY_METHODS.join(", ") } });
+  if (rest.split("/").some(dotSegment)) return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+  let body: Uint8Array | undefined;
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const got = await readBodyCapped(req, PROXY_MAX_REQUEST);
+    if (got === null) return new Response("Too big", { status: 413, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+    body = got;
+  }
+  const up = new Headers();
+  for (const h of PROXY_REQUEST_HEADERS) {
+    const v = req.headers.get(h);
+    if (v !== null) up.set(h, v);
+  }
+  const origin = `http://127.0.0.1:${port}`;
+  let res: Response;
+  try {
+    res = await fetch(`${origin}/p/${token}/${rest}${new URL(req.url).search}`, {
+      method: req.method,
+      headers: up,
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    return new Response("The app didn't answer.", { status: 502, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+  }
+  const out = new Headers();
+  res.headers.forEach((v, k) => {
+    if (!PROXY_DROP_RESPONSE.includes(k.toLowerCase())) out.set(k, v);
+  });
+  // a redirect within the app stays on the link; one to anywhere else is not passed on
+  const loc = res.headers.get("location");
+  if (loc?.startsWith(origin)) out.set("location", loc.slice(origin.length));
+  if (Number(res.headers.get("content-length") ?? 0) > PROXY_MAX_RESPONSE) return new Response("The app's answer is too big.", { status: 502, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+  for (const [k, v] of Object.entries(headers)) out.set(k, v);
+  // module scripts are fetched in CORS mode, and the sandboxed page's origin is opaque: without this they never load
+  out.set("access-control-allow-origin", "*");
+  const noBody = req.method === "HEAD" || res.status === 204 || res.status === 205 || res.status === 304;
+  return new Response(noBody || !res.body ? null : capBody(res.body, PROXY_MAX_RESPONSE), { status: res.status, statusText: res.statusText, headers: out });
 }
 
 /** A picture's page: its own sandbox CSP, so the page runs as an opaque origin and not under the app's policy. */
@@ -605,9 +750,80 @@ async function handleDiscard(id: string): Promise<Response> {
 
 async function handleVersions(id: string): Promise<Response> {
   try {
-    return json(await listVersions(id));
+    // look = the project has no dev command at HEAD: an earlier version can then be shown as its files
+    const look = !detectDevCommand(await headPackage(worktreePath(await getWorkspace(id))));
+    const list = await listVersions(id);
+    // ponytail: only the oldest entry is checked (the empty first commit); any other empty version would still say Look.
+    const tree = worktreePath(await getWorkspace(id));
+    const firstEmpty = list.length > 0 && (await treeIsEmpty(tree, list[list.length - 1].id));
+    return json(list.map((v, i) => ({ ...v, look: look && !(firstEmpty && i === list.length - 1) })));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** The problems the chat and preview ask the AI to fix. GET reads (with a key for "Not now"); POST clears. */
+async function handleProblems(id: string, req: Request): Promise<Response> {
+  try {
+    const ws = await getWorkspace(id);
+    if (req.method === "GET") {
+      const problems = await browserProblems(ws);
+      return json({ problems, key: new Bun.CryptoHasher("sha256").update(JSON.stringify(problems)).digest("hex") });
+    }
+    const body = (await req.json().catch(() => ({}))) as { action?: unknown };
+    if (body.action !== "clear") return json({ error: "action must be clear" }, 400);
+    await clearBrowserProblems(ws);
+    return json({ ok: true });
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 503);
+  }
+}
+
+/** A copy of the project: its committed history, settings and notes. Answers like a new workspace. */
+async function handleCopy(id: string, req: Request): Promise<Response> {
+  try {
+    const body = (await req.json().catch(() => ({}))) as { name?: unknown };
+    const ws = await copyWorkspace(id, body.name);
+    return json({ ...ws, running: false, path: worktreePath(ws) });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** The share link as the owner sees it: its address while it works, and what kind of app it serves. */
+async function linkInfo(ws: Workspace) {
+  const live = ws.shareLink && (ws.shareLink.expires === null || ws.shareLink.expires > Date.now()) ? ws.shareLink : null;
+  const kind = appKind(await readFile(join(worktreePath(ws), "package.json"), "utf8").then(JSON.parse, () => null));
+  // a relative address: the page that shows it knows its own origin
+  return { url: live ? `/p/${live.token}/` : null, expires: live ? live.expires : null, kind };
+}
+
+/** GET, POST (make or change the link) and DELETE (turn it off). A dev server is restarted when the link's token changes. */
+async function handleLink(id: string, req: Request, actor: string): Promise<Response> {
+  try {
+    if (req.method === "GET") return json(await linkInfo(await getWorkspace(id)));
+    if (req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { expires?: unknown; fresh?: unknown };
+      const expires = shareExpiry(body.expires);
+      if (expires === undefined) return json({ error: "expires must be 1d, 7d or never" }, 400);
+      containFailure(audit(actor, "link", id), "audit");
+      const { ws, rotated } = await setShareLink(id, expires, body.fresh === true);
+      if (rotated) {
+        stopDevServer(ws);
+        await reopenHome(ws);
+      }
+      return json(await linkInfo(ws));
+    }
+    if (req.method === "DELETE") {
+      containFailure(audit(actor, "link.off", id), "audit");
+      const ws = await turnOffShareLink(id);
+      stopDevServer(ws);
+      await reopenHome(ws);
+      return json({ ok: true, previewUrl: `/p/${ws.previewToken}/` });
+    }
+    return json({ error: "method not allowed" }, 405);
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 400);
   }
 }
 
@@ -1298,7 +1514,6 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     // Web preview: before the auth gate and the SPA fallback. Read-only.
     const previewM = path.match(/^\/p\/([A-Za-z0-9_-]+)\/(.*)$/);
     if (previewM) {
-      if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
       return handlePreview(previewM[1], previewM[2], req);
     }
     // A picture drawn in chat: the random token is the credential, as with /p/. Before the auth gate.
@@ -1315,7 +1530,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       return handleHookPost(hookM[1], req);
     }
-    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|download|notes|fs|image|share|preview|rename|log|versions|restore|model|terminal)$/);
+    const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|download|notes|fs|image|share|preview|rename|log|versions|restore|model|terminal|problems|copy|link)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
     // resolve the actor once: named user / legacy key / share / anonymous / null(denied)
@@ -1440,13 +1655,18 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot use the browser");
       if (refused) return refused;
-      const body = (await req.json().catch(() => ({}))) as { action?: string; url?: string; width?: number; height?: number };
-      if (body.action !== "open" && body.action !== "home" && body.action !== "back" && body.action !== "forward" && body.action !== "reload" && body.action !== "viewport") {
-        return json({ error: "action must be open, home, back, forward, reload or viewport" }, 400);
+      const body = (await req.json().catch(() => ({}))) as { action?: string; url?: string; width?: number; height?: number; x?: unknown; y?: unknown; version?: unknown };
+      if (body.action !== "open" && body.action !== "home" && body.action !== "back" && body.action !== "forward" && body.action !== "reload" && body.action !== "viewport" && body.action !== "pick" && body.action !== "version") {
+        return json({ error: "action must be open, home, back, forward, reload, viewport, pick or version" }, 400);
       }
       // A viewport resize fires on every drag, so it is not audited.
       if (body.action !== "viewport") containFailure(audit(actor, "browser." + body.action, bid), "audit");
       try {
+        if (body.action === "pick") return json({ pick: await pickElement(await getWorkspace(bid), body.x, body.y) });
+        if (body.action === "version") {
+          if (typeof body.version !== "string" || !/^[0-9a-f]{40}$/.test(body.version)) return json({ error: "version must be a commit id" }, 400);
+          return json({ url: await openVersion(await getWorkspace(bid), body.version) });
+        }
         return json({ url: await browserAction(await getWorkspace(bid), body.action, body.url, { width: body.width as number, height: body.height as number }) });
       } catch (e) {
         return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 503);
@@ -1455,6 +1675,8 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
 
     if (m) {
       const [, id, action] = m;
+      // a share link never reaches the owner's problems, copies or link settings
+      if (auth?.kind === "share" && (action === "problems" || action === "copy" || action === "link")) return json({ error: "forbidden, a shared link cannot do this" }, 403);
       const shareReadOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "download" || action === "log";
       // share-token access to this workspace is read-only
       if (shareIdRes === id && shareReadOnly) {
@@ -1470,7 +1692,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       // v1.8 ownership: a named member/viewer may only touch their own
       // workspaces (share-token reads already returned above). Owners and
       // the legacy/anonymous single-user flows pass through.
-      const readOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "download" || action === "log" || action === "versions";
+      const readOnly = action === "diff" || action === "files" || action === "file" || action === "raw" || action === "download" || action === "log" || action === "versions" || (action === "problems" && req.method === "GET");
       if (!(await mayAccessWorkspace(auth, id))) {
         return json({ error: "forbidden, not your workspace" }, 403);
       }
@@ -1517,6 +1739,11 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
           return handlePreviewCreate(id, fresh);
         }
         case "versions": return handleVersions(id);
+        case "problems":
+          if (req.method !== "GET") containFailure(audit(actor, "problems.clear", id), "audit");
+          return handleProblems(id, req);
+        case "copy": containFailure(audit(actor, "copy", id), "audit"); return handleCopy(id, req);
+        case "link": return handleLink(id, req, actor);
         case "restore":
           if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
           containFailure(audit(actor, "restore", id), "audit");
@@ -1767,7 +1994,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         if (w && !(await mayAccessWorkspace(auth, w.id))) return json({ error: "forbidden, not your workspace" }, 403);
         // a share link shows the project, not the owner's private notes, hook secret, or conversation bookkeeping
         if (!w) return json([]);
-        const { notes: _n, hookToken: _h, payload: _p, agentSessions: _a, agentSeen: _s, handoffAfter: _o, branchContext: _b, restoredFrom: _r, ...pub } = w;
+        const { notes: _n, hookToken: _h, payload: _p, agentSessions: _a, agentSeen: _s, handoffAfter: _o, branchContext: _b, restoredFrom: _r, shareLink: _l, previewToken: _t, ...pub } = w;
         return json([pub]);
       }
       if (denied) return json({ error: "unauthorized" }, 401);

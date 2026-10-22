@@ -1,4 +1,4 @@
-import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, ReleaseStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
+import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, LinkInfo, Pick, Problem, ReleaseStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -277,12 +277,46 @@ export const api = {
     }),
   /** The shared browser's address. Starts the browser if needed, which can take ~30 s the first time. */
   browser: (id: string) => json<{ url: string | null }>(`/api/workspaces/${id}/browser`),
-  browserAct: (id: string, action: "open" | "home" | "back" | "forward" | "reload" | "viewport", url?: string, size?: { width: number; height: number }) =>
+  /** `target` is the address for open, or the version's commit id for "version" (that page is opened in the same browser). */
+  browserAct: (id: string, action: "open" | "home" | "back" | "forward" | "reload" | "viewport" | "version", target?: string, size?: { width: number; height: number }) =>
     json<{ url: string }>(`/api/workspaces/${id}/browser`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, url, ...size }),
+      body: JSON.stringify(action === "version" ? { action, version: target } : { action, url: target, ...size }),
     }),
+  /** Points at the element under a spot on the shared browser's page (page CSS pixels). 404 and 400 come back as errors with a sentence. */
+  pick: (id: string, x: number, y: number) =>
+    json<{ pick: Pick }>(`/api/workspaces/${id}/browser`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "pick", x, y }),
+    }),
+  /** What is wrong with the page or the app: the browser's console and failed requests, and a dev server that did not start. */
+  problems: (id: string) => json<{ problems: Problem[]; key: string }>(`/api/workspaces/${id}/problems`),
+  clearProblems: (id: string) =>
+    json<{ ok: true }>(`/api/workspaces/${id}/problems`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "clear" }),
+    }),
+  /** A copy of the project as its last kept version, with its notes and model. The original is not changed. */
+  copyProject: (id: string, name: string) =>
+    json<Workspace>(`/api/workspaces/${id}/copy`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+  /** The project's share link, if any. */
+  link: (id: string) => json<LinkInfo>(`/api/workspaces/${id}/link`),
+  /** Make a share link for `expires`. The same link comes back unless `fresh` makes a new one, which stops the old one working. */
+  setLink: (id: string, expires: "1d" | "7d" | "never", fresh = false) =>
+    json<LinkInfo>(`/api/workspaces/${id}/link`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expires, fresh }),
+    }),
+  /** Turns the share link off. The project's internal preview address changes too, so `previewUrl` replaces the pane's. */
+  linkOff: (id: string) => json<{ ok: true; previewUrl: string }>(`/api/workspaces/${id}/link`, { method: "DELETE" }),
   versions: (id: string) => json<Version[]>(`/api/workspaces/${id}/versions`),
   restoreVersion: (id: string, version: string) =>
     json<{ ok: true }>(`/api/workspaces/${id}/restore`, {

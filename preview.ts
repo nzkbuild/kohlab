@@ -3,8 +3,14 @@
  * the workspace's own worktree. Pure string checks live in previewRelPath so the
  * rules can be tested without a filesystem; resolvePreviewFile adds the disk checks.
  */
+import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+/** A version's page is read whole, so it has a cap of its own. */
+const VERSION_MAX_BYTES = 20 * 1024 * 1024;
 
 /**
  * Turn the part after `/p/<token>/` into a relative file path, or null to refuse.
@@ -60,4 +66,43 @@ export async function resolvePreviewFile(worktree: string, rest: string): Promis
   const inside = real.slice(root.length + 1).split(sep);
   if (inside.some((s) => s.startsWith("."))) return null;
   return real;
+}
+
+/** One entry of a version's tree, from `git ls-tree -l`: the exact path, or null. */
+async function treeEntry(tree: string, sha: string, rel: string): Promise<{ mode: string; type: string; size: number } | null> {
+  const { stdout } = await execFileAsync("git", ["-c", "safe.directory=*", "ls-tree", "-l", "-z", sha, "--", rel], { cwd: tree, maxBuffer: 1 << 20 });
+  for (const rec of stdout.split("\0")) {
+    const tab = rec.indexOf("\t");
+    if (tab < 0 || rec.slice(tab + 1) !== rel) continue;
+    const [mode, type, , size] = rec.slice(0, tab).trim().split(/\s+/);
+    return { mode, type, size: size === "-" ? 0 : Number(size) };
+  }
+  return null;
+}
+
+/**
+ * A file as it was at `sha`, for "look at an earlier version". Same path rules as
+ * the live preview (previewRelPath). Only regular files: a symlink, a submodule or
+ * a dotfile is refused. A directory without a trailing slash is "redirect" (the
+ * browser then needs the slash for relative links). The bytes come from
+ * `git cat-file blob`, so nothing is ever checked out or run through a shell.
+ */
+export async function versionFile(tree: string, sha: string, rest: string): Promise<{ bytes: Buffer; name: string } | "redirect" | null> {
+  const rel = previewRelPath(rest);
+  if (rel === null) return null;
+  try {
+    const entry = await treeEntry(tree, sha, rel);
+    if (!entry) return null;
+    if (entry.type === "tree") return rest.endsWith("/") ? null : "redirect";
+    if (entry.type !== "blob" || (entry.mode !== "100644" && entry.mode !== "100755")) return null;
+    if (entry.size > VERSION_MAX_BYTES) return null;
+    const { stdout } = await execFileAsync("git", ["-c", "safe.directory=*", "cat-file", "blob", `${sha}:${rel}`], {
+      cwd: tree,
+      encoding: "buffer",
+      maxBuffer: VERSION_MAX_BYTES + 1,
+    });
+    return { bytes: stdout, name: basename(rel) };
+  } catch {
+    return null;
+  }
 }

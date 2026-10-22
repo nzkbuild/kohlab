@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent, type Ref } from "react";
 import { api, socketProtocol } from "../api";
-import { toDevicePoint, type Point, type Size } from "../lib/browserCoords";
+import { boxOnStage, toDevicePoint, type Box, type Point, type Size } from "../lib/browserCoords";
 import { useCan } from "../store";
+import { cn } from "../lib/utils";
 import { Button } from "./ui";
 
 interface Props {
@@ -10,7 +11,22 @@ interface Props {
   onUrl?: (url: string) => void;
   /** A device size to lay the page out at. Null (the default) lays it out at the size of this view. */
   viewport?: Size | null;
+  /** Point mode: the next press (mouse or tap) is not sent to the page. It reports the spot instead, in page pixels. */
+  pointing?: boolean;
+  onPoint?: (p: Point) => void;
+  /** A box in page pixels to outline for a moment (what a point picked). A new object outlines again. */
+  outline?: { x: number; y: number; width: number; height: number } | null;
+  ref?: Ref<BrowserHandle>;
 }
+
+/** What a parent can ask the browser for. */
+export interface BrowserHandle {
+  /** The picture on screen as a PNG, at the page's own size. Null before the first picture is drawn. */
+  snapshot: () => Promise<Blob | null>;
+}
+
+/** How long a point's outline stays on the page. */
+const OUTLINE_MS = 1500;
 
 type Phase = "starting" | "live" | "reconnecting" | "error";
 type MouseButton = "left" | "middle" | "right";
@@ -64,7 +80,7 @@ function keyFields(e: KeyboardEvent) {
  * A live view of the project's shared browser. The frames are drawn on a canvas and
  * clicks, typing and scrolling are sent back, so the user and Claude share one browser.
  */
-export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
+export default function BrowserView({ workspaceId, onUrl, viewport, pointing = false, onPoint, outline, ref }: Props) {
   const viewW = viewport?.width;
   const viewH = viewport?.height;
   const can = useCan();
@@ -74,6 +90,8 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
   const [errorText, setErrorText] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
+  // The outline of a point, drawn where the page is on screen (CSS pixels of the stage).
+  const [drawnOutline, setDrawnOutline] = useState<Box | null>(null);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -82,6 +100,8 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
   const deviceRef = useRef<Size | null>(null);
   const canInputRef = useRef(can.mutate);
   const onUrlRef = useRef(onUrl);
+  const pointingRef = useRef(pointing);
+  const onPointRef = useRef(onPoint);
   const pressedRef = useRef(false);
   const lastMoveRef = useRef<{ x: number; y: number; buttons: number } | null>(null);
   const moveFrameRef = useRef(0);
@@ -90,7 +110,35 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
   useEffect(() => {
     canInputRef.current = can.mutate;
     onUrlRef.current = onUrl;
-  }, [can.mutate, onUrl]);
+    pointingRef.current = pointing;
+    onPointRef.current = onPoint;
+  }, [can.mutate, onUrl, pointing, onPoint]);
+
+  // ponytail: a PNG of the canvas, which holds the last JPEG frame. A server screenshot is the upgrade if this is too soft.
+  useImperativeHandle(
+    ref,
+    () => ({
+      snapshot: () =>
+        new Promise<Blob | null>((resolve) => {
+          const canvas = canvasRef.current;
+          if (!canvas || canvas.width === 0 || canvas.height === 0) return resolve(null);
+          canvas.toBlob((blob) => resolve(blob), "image/png");
+        }),
+    }),
+    [],
+  );
+
+  // The outline is placed once, from the page size and the stage size at that moment, and removed after a moment.
+  useEffect(() => {
+    if (!outline) return;
+    const el = wrapperRef.current;
+    const device = deviceRef.current;
+    if (!el || !device) return;
+    const box = { left: outline.x, top: outline.y, width: outline.width, height: outline.height };
+    setDrawnOutline(boxOnStage(box, device, { width: el.clientWidth, height: el.clientHeight }));
+    const timer = window.setTimeout(() => setDrawnOutline(null), OUTLINE_MS);
+    return () => window.clearTimeout(timer);
+  }, [outline]);
 
   /** Sends one message if the socket is open. */
   const send = (m: object) => {
@@ -268,6 +316,11 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
       if (!canInputRef.current) return;
+      if (pointingRef.current) {
+        const p = e.touches[0] ? toPoint(e.touches[0].clientX, e.touches[0].clientY) : null;
+        if (p) onPointRef.current?.(p);
+        return;
+      }
       const pts = touchPoints(e.touches, false);
       if (!pts.length) return;
       ripple(e.touches[0].clientX, e.touches[0].clientY);
@@ -298,6 +351,11 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "touch") return;
     e.currentTarget.focus({ preventScroll: true });
+    if (pointing) {
+      const spot = toPoint(e.clientX, e.clientY);
+      if (spot && canInputRef.current) onPoint?.(spot);
+      return;
+    }
     const button = BUTTONS[e.button];
     if (!button) return;
     const p = toPoint(e.clientX, e.clientY);
@@ -310,7 +368,7 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
     send({ type: "input_mouse", eventType: "mousePressed", x: p.x, y: p.y, button, clickCount: 1 });
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch" || !canInputRef.current) return;
+    if (e.pointerType === "touch" || !canInputRef.current || pointing) return;
     lastMoveRef.current = { x: e.clientX, y: e.clientY, buttons: e.buttons };
     if (moveFrameRef.current) return;
     moveFrameRef.current = requestAnimationFrame(() => {
@@ -366,7 +424,7 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
       role="region"
       aria-label="Shared browser"
       tabIndex={0}
-      className="relative min-h-0 flex-1 touch-none select-none overflow-hidden bg-surface-sunken cursor-default"
+      className={cn("relative min-h-0 flex-1 touch-none select-none overflow-hidden bg-surface-sunken", pointing ? "cursor-crosshair" : "cursor-default")}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -376,6 +434,13 @@ export default function BrowserView({ workspaceId, onUrl, viewport }: Props) {
       onPaste={onPaste}
     >
       <canvas ref={canvasRef} className="absolute inset-0 block size-full cursor-default object-contain" />
+      {drawnOutline ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute rounded-sm outline-2 outline-offset-0 outline-solid outline-accent"
+          style={{ left: drawnOutline.left, top: drawnOutline.top, width: drawnOutline.width, height: drawnOutline.height }}
+        />
+      ) : null}
       {ripples.map((r) => (
         <span key={r.id} aria-hidden="true" className="browser-ripple" style={{ left: r.x, top: r.y }} />
       ))}

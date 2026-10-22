@@ -6,6 +6,7 @@ import {
   Check,
   ChatCircle,
   CaretDown,
+  Copy,
   CaretLeft,
   DownloadSimple,
   Ghost,
@@ -26,7 +27,7 @@ import { useApp, useCan } from "../store";
 import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
 import { projectTitle, relativeTime } from "../lib/format";
-import { canContinue, switchConversation } from "../lib/projectActions";
+import { canContinue, copyProject, switchConversation } from "../lib/projectActions";
 import { agentName, isAiAgent } from "../lib/agentName";
 import { isTouchOnly } from "../lib/platform";
 import { cn } from "../lib/utils";
@@ -192,6 +193,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [reviewCount, setReviewCount] = useState(0);
   // The preview of a terminal project: the same pane the chat opens, beside the project when wide.
   const [pane, setPane] = useState<{ url: string; t: number } | null>(null);
+  // An earlier version the preview should open on (from Changes, Look). A new object opens it again.
+  const [openVersion, setOpenVersion] = useState<{ sha: string } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   // The Claude tab's view. Kept with the project id, so a change of project shows that project's own choice.
@@ -238,6 +241,18 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     }
   };
   const reloadPane = () => setPane((p) => (p ? { ...p, t: Date.now() } : p));
+
+  // Look at an earlier version (Changes): the preview opens, then shows that version in the shared browser.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const d = (e as CustomEvent<{ id?: string; version?: string }>).detail;
+      if (!d || d.id !== workspaceId) return;
+      if (d.version) setOpenVersion({ sha: d.version });
+      void preview();
+    };
+    window.addEventListener("kohlab:open-preview", onOpen);
+    return () => window.removeEventListener("kohlab:open-preview", onOpen);
+  }, [workspaceId]);
 
   const addShell = () => {
     shellSeq.current += 1;
@@ -494,6 +509,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     };
   }, [tab, focusTick]);
 
+  // The chat is shown when the preview sends a picture or a point (assigned below, once the pane helpers exist). Hooks stay above the early returns.
+  const showChatRef = useRef(() => {});
+  useEffect(() => {
+    const onShow = (e: Event) => {
+      if ((e as CustomEvent<{ id?: string }>).detail?.id === workspaceId) showChatRef.current();
+    };
+    window.addEventListener("kohlab:show-chat", onShow);
+    return () => window.removeEventListener("kohlab:show-chat", onShow);
+  }, [workspaceId]);
+
   if (!w) {
     if (loading) {
       return (
@@ -593,6 +618,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <PencilSimple size={16} aria-hidden="true" />
         Rename
       </MenuItem>
+      {can.mutate && w ? (
+        <MenuItem onSelect={() => void copyProject(w)}>
+          <Copy size={16} aria-hidden="true" />
+          Make a copy
+        </MenuItem>
+      ) : null}
       <MenuItem onSelect={() => void api.downloadProject(workspaceId, title).catch((e: Error) => toast.error(`Couldn't download the project. ${e.message}`))}>
         <DownloadSimple size={16} aria-hidden="true" />
         Download project
@@ -642,6 +673,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const sheetOpen = !wide && pane !== null;
   const closePreview = () => setPane(null);
 
+  // A picture or a pointed-at element came from the preview while the chat was not showing: show the chat (on a phone, over the sheet) so it can take it.
+  showChatRef.current = () => {
+    goTo("chat");
+    if (!wide) closePreview();
+  };
   // Docked on desktop, a full-screen sheet on a phone (Back closes it).
   const terminalPanel = showPanel ? (
     <section
@@ -844,11 +880,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       {paneOpen && pane ? (
         <aside aria-label="Preview" className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised" style={{ width: paneSize }}>
           <div {...paneHandle} aria-label="Resize preview" className="resize-handle resize-handle-x" />
-          <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
+          <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} version={openVersion} onShowChat={() => goTo("chat")} />
         </aside>
       ) : null}
       {sheetOpen && pane ? (
-        <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} />
+        <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} version={openVersion} onShowChat={() => goTo("chat")} />
       ) : null}
       </Tabs>
 

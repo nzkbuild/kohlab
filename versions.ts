@@ -38,3 +38,21 @@ export async function restoreTree(tree: string, sha: string, message: string): P
   await git(tree, ["commit", "-m", message]);
   return true;
 }
+
+/** The package.json at HEAD, parsed, or null. Read from git: a version is what HEAD's history says, not the worktree. */
+export async function headPackage(tree: string): Promise<any | null> {
+  try {
+    return JSON.parse(await git(tree, ["show", "HEAD:package.json"]));
+  } catch {
+    return null;
+  }
+}
+
+/** True when `sha`'s tree holds no files (the empty first commit): there is nothing to look at. */
+export async function treeIsEmpty(tree: string, sha: string): Promise<boolean> {
+  try {
+    return !(await git(tree, ["ls-tree", sha])).trim();
+  } catch {
+    return false;
+  }
+}
