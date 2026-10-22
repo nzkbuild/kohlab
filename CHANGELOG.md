@@ -9,6 +9,25 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.3.0] - 2026-10-22
+
+### Added
+- **The page has a problem → Ask the AI to fix it.** When something on your page breaks (a picture that won't load, an error, an app that doesn't start), Kohlab notices, shows "Problem" in Preview and a card in the chat, and one click asks the AI to fix it.
+- **Point to change.** Press the hand in Preview, click any part of your page, and it becomes a chip in your message ("The heading “Bean Café”"), so you can say "make this bigger".
+- **Add a picture of your page** to your message, with a pen to mark what you mean.
+- **Look at an earlier version** before going back to it, from Changes → Earlier versions.
+- **Make a copy** of a project to try an idea without touching the original.
+- **Share a link** that works for 1 day, 7 days or until you turn it off. Links now also work for apps built with Vite.
+
+### Changed
+- Preview reloads your page when you open it and after each reply, so it never shows an old version.
+- "Show someone: Copy link" gives a proper share link instead of your private preview address.
+- Going back to an earlier version warns you when it will throw away changes you haven't kept.
+
+### Fixed
+- Pages using modern JavaScript modules didn't run in Preview.
+- Opening a project from a fresh page load could show "Workspace failed to render".
+
 ## [2.2.0] - 2026-10-21
 
 Built from a Laws of UX review and a study of Lovable, Bolt, v0, Replit, Claude, ChatGPT and T3 Code.
