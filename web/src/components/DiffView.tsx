@@ -77,7 +77,7 @@ function FileDiff({ name, diff }: { name: string; diff: string }) {
   if (!stats) {
     return (
       <div className="h-full overflow-y-auto overscroll-contain p-4">
-        <p className="flex items-center gap-1.5 text-xs font-medium text-status-review">
+        <p className="flex items-center gap-2 text-xs font-medium text-status-review">
           <WarningCircle size={14} aria-hidden="true" />
           Not a text file
         </p>
@@ -173,6 +173,8 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
   const load = async () => {
     setLoading(true);
     try {
+      // Both reads start together, so the first paint waits for one round trip, not two.
+      const earlier = simple ? api.versions(workspaceId).catch(() => versions) : null;
       const next = await api.diff(workspaceId);
       setFiles(next);
       setError(null);
@@ -181,7 +183,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
       );
       // Drop review marks for files that no longer differ.
       setReviewed((prev) => new Set([...prev].filter((name) => next.some((f) => f.name === name))));
-      if (simple) setVersions(await api.versions(workspaceId).catch(() => versions));
+      if (earlier) setVersions(await earlier);
     } catch (e) {
       // Keep the files already loaded: a failed refresh must not cost the
       // reviewer the diffs they can still read.
@@ -483,7 +485,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                   })}
                 </ul>
                 {can.mutate ? (
-                  <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <Button variant="primary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={simpleBusy} onClick={() => void keepSimple()}>
                       <Check size={14} className="max-md:hidden" aria-hidden="true" />
                       Keep this version
@@ -496,7 +498,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 ) : null}
                 {/* The code is mounted only once opened: the editor is the heavy part. */}
                 <details className="group mt-4" onToggle={(e) => setShowCode(e.currentTarget.open)}>
-                  <summary className="flex min-h-11 w-fit cursor-pointer list-none select-none items-center gap-1.5 rounded-lg px-3 text-small text-text-muted hover:bg-surface-hover hover:text-text-primary [&::-webkit-details-marker]:hidden">
+                  <summary className="flex min-h-11 w-fit cursor-pointer list-none select-none items-center gap-2 rounded-lg px-3 text-small text-text-muted hover:bg-surface-hover hover:text-text-primary [&::-webkit-details-marker]:hidden">
                     <CaretRight size={14} aria-hidden="true" className="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
                     Show the code
                   </summary>
@@ -516,15 +518,15 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 </h3>
                 <ul className="mt-2 flex flex-col">
                   {versions.map((v, i) => (
-                    <li key={v.id} className="flex min-h-11 items-center gap-3 rounded-lg px-3 max-md:min-h-13">
-                      <span className="tnum shrink-0 text-sm text-text-muted">{sidebarWhen(v.at)}</span>
-                      <span className="min-w-0 flex-1 truncate text-base text-text-primary" title={v.label}>
+                    <li key={v.id} className="grid min-h-11 grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg px-3 max-md:grid-cols-[4rem_minmax(0,1fr)] max-md:py-1">
+                      <span className="tnum text-sm text-text-muted">{sidebarWhen(v.at)}</span>
+                      <span className="truncate text-base text-text-primary" title={v.label}>
                         {v.label}
                       </span>
                       {i === 0 ? (
-                        <span className="shrink-0 text-sm text-text-muted">Current</span>
+                        <span className="text-sm text-text-muted max-md:col-start-2">Current</span>
                       ) : can.mutate ? (
-                        <>
+                        <div className="flex items-center gap-1 max-md:col-start-2">
                           {v.look ? (
                             <Button
                               variant="quiet"
@@ -538,7 +540,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                           <Button variant="quiet" size="sm" className="shrink-0" disabled={simpleBusy} onClick={() => setRestoreTarget(v)}>
                             Go back to this one
                           </Button>
-                        </>
+                        </div>
                       ) : null}
                     </li>
                   ))}
@@ -591,7 +593,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
         {files.length > 0 ? <Totals added={totals.added} removed={totals.removed} /> : null}
         <div className="flex-1" />
         {files.length > 0 ? (
-          <span className="tnum hidden text-2xs text-text-muted shell:inline">
+          <span className="tnum hidden text-xs text-text-muted shell:inline">
             {reviewed.size}/{files.length} reviewed
           </span>
         ) : null}
@@ -679,7 +681,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
         <div className="split-view flex-col shell:flex-row">
           <div className={LIST_CLASS}>
             <div
-              className="flex flex-wrap items-center gap-1.5 px-2 py-1.5"
+              className="flex flex-wrap items-center gap-2 px-2 py-1.5"
               role="group"
               aria-label="Filter changed files by review state"
             >
@@ -695,7 +697,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 </Button>
               ))}
               <div className="flex-1" />
-              <span className="hidden items-center gap-1.5 text-xs text-text-muted shell:inline-flex">
+              <span className="hidden items-center gap-2 text-xs text-text-muted shell:inline-flex">
                 <Kbd>j</Kbd>
                 <Kbd>k</Kbd> move
                 <span aria-hidden="true">·</span>
@@ -750,12 +752,12 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                         {file.name}
                       </button>
                       {stats ? (
-                        <span className="tnum shrink-0 text-2xs">
+                        <span className="tnum shrink-0 text-xs">
                           <span className="text-status-running">+{stats.added}</span>{" "}
                           <span className="text-status-danger">−{stats.removed}</span>
                         </span>
                       ) : (
-                        <span className="shrink-0 text-2xs text-text-faint" title="No line stats">
+                        <span className="shrink-0 text-xs text-text-faint" title="No line stats">
                           n/a
                         </span>
                       )}
@@ -776,7 +778,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                   ) : (
                     <span className="text-xs text-text-muted">no line stats</span>
                   )}
-                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 py-1 text-xs text-text-secondary">
+                  <label className="flex shrink-0 cursor-pointer items-center gap-2 py-1 text-xs text-text-secondary">
                     <input
                       type="checkbox"
                       className="size-3.5 accent-accent"

@@ -77,7 +77,15 @@ function writeClaudeView(id: string, view: ClaudeView) {
     /* storage disabled: nothing to keep */
   }
 }
-const DiffView = lazy(() => import("./DiffView"));
+// Once Changes code has been fetched (it is, shortly after the tab exists), render it directly: a lazy component always
+// suspends once, and React holds a revealed fallback for 300 ms, which was most of the wait to see the changes.
+let diffViewLoaded: typeof import("./DiffView").default | null = null;
+const loadDiffView = () => import("./DiffView").then((m) => ((diffViewLoaded = m.default), m));
+const DiffViewLazy = lazy(loadDiffView);
+function DiffView(props: { workspaceId: string; simple: boolean }) {
+  const Loaded = diffViewLoaded;
+  return Loaded ? <Loaded {...props} /> : <DiffViewLazy {...props} />;
+}
 const FilesView = lazy(() => import("./FilesView"));
 
 type TabId = WorkspaceTab;
@@ -374,6 +382,19 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const setHasWork = useApp((s) => s.setHasWork);
   useEffect(() => setHasWork(workspaceId, hasWork), [workspaceId, hasWork, setHasWork]);
   const showChanges = hasWork || routeTab === "review";
+  // Hover, focus or the start of a press on the Changes tab: the diff and versions are on their way before the click lands.
+  const warmChanges = { onPointerEnter: () => api.prefetchChanges(workspaceId), onFocus: () => api.prefetchChanges(workspaceId), onPointerDown: () => api.prefetchChanges(workspaceId) };
+  // Changes opens on a first paint, not a download: fetch its code as soon as the tab exists.
+  useEffect(() => {
+    if (showChanges) void loadDiffView();
+  }, [showChanges]);
+  // And when any project page opens, once the browser is idle: the first click on a cold browser then finds the code already there.
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((f: () => void) => window.setTimeout(f, 1500));
+    const cancel = window.cancelIdleCallback ?? window.clearTimeout;
+    const h = idle(() => void loadDiffView());
+    return () => cancel(h);
+  }, []);
   const rawTab0: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat && !claudeTerminal ? "review" : "terminal");
   const rawTab: TabId = rawTab0 === "review" && !showChanges ? "chat" : rawTab0;
   const tab: TabId =
@@ -412,7 +433,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     api
       .diff(workspaceId)
       .then((files) => {
-        if (alive) setReviewCount(files.length);
+        if (!alive) return;
+        setReviewCount(files.length);
+        // The person is likely to open Changes next: start what it paints from.
+        if (chat && files.length > 0) api.prefetchChanges(workspaceId);
       })
       .catch(() => {
         if (alive) setReviewCount(0);
@@ -584,7 +608,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       trigger={
         <button
           type="button"
-          className="inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-row px-2.5 text-base font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="inline-flex h-9 pointer-coarse:h-11 min-w-0 max-w-full items-center gap-2 rounded-row px-2.5 text-base font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           <span className="min-w-0 truncate">{title}</span>
           <CaretDown size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
@@ -711,7 +735,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                   aria-pressed={active}
                   onClick={() => setActiveShell(shell.id)}
                   className={cn(
-                    "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm whitespace-nowrap",
+                    "inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-sm whitespace-nowrap",
                     active ? "text-text-primary" : "text-text-muted hover:text-text-primary",
                   )}
                 >
@@ -774,6 +798,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           </h1>
         </div>
 
+        {/* A switch with one segment is a control with one choice: show it only when there is something to switch to. */}
+        {tabs.length > 1 ? (
         <TabList
           label="Project views"
           className="col-span-2 col-start-1 row-start-2 w-full justify-self-center @min-[44rem]:col-span-1 @min-[44rem]:col-start-2 @min-[44rem]:row-start-1 @min-[44rem]:w-auto"
@@ -781,10 +807,15 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
           {tabs.map(({ id, label }) => {
             const badge = badges[id];
             return (
-              <Tab key={id} value={id} aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}>
+              <Tab
+                key={id}
+                value={id}
+                aria-label={badge ? `${label}, ${badge.count} ${badge.noun}` : undefined}
+                {...(id === "review" ? warmChanges : {})}
+              >
                 {label}
                 {badge ? (
-                  <span className="tnum text-text-faint" aria-hidden="true">
+                  <span className="tnum text-text-muted" aria-hidden="true">
                     {badge.count}
                   </span>
                 ) : null}
@@ -792,8 +823,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             );
           })}
         </TabList>
+        ) : null}
 
-        <div className="col-start-2 row-start-1 flex shrink-0 items-center justify-self-end gap-1.5 max-md:h-13 @min-[44rem]:col-start-3">
+        <div className="col-start-2 row-start-1 flex shrink-0 items-center justify-self-end gap-2 max-md:h-13 @min-[44rem]:col-start-3">
           {/* Nothing to preview until the chat has changed a file. A pane that is already open keeps its button. */}
           {!chat || hasWork || paneOpen ? (
             <Button variant="quiet" aria-pressed={paneOpen} disabled={previewing} onClick={() => void preview()}>

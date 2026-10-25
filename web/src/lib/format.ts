@@ -24,6 +24,13 @@ export function sidebarWhen(ts: number, now = Date.now()): string {
   return DAY_MONTH.format(ts);
 }
 
+/** Sentence form of `sidebarWhen`: "just now", "55 min ago", "3 hr ago", "on Mon", "on 12 Oct". */
+export function sinceWhen(ts: number, now = Date.now()): string {
+  const w = sidebarWhen(ts, now);
+  if (w === "now") return "just now";
+  return /^\d+ (min|hr)$/.test(w) ? `${w} ago` : `on ${w}`;
+}
+
 /** "4m 12s", for elapsed run time. */
 export function elapsed(from: number, to: number): string {
   const s = Math.max(0, Math.round((to - from) / 1000));

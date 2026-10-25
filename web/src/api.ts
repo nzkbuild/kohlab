@@ -47,9 +47,9 @@ export function hasKey() {
 export const UNREACHABLE_MESSAGE = "Can't reach Kohlab. Check your connection and try again.";
 
 /**
- * Reads started ahead of time, by hovering or focusing a sidebar row. Only the
- * chat snapshot (after 0) and the diff are ever stored here, so a screen that
- * opens next paints at once. An entry serves reads for 10 s, and any write
+ * Reads started ahead of time, by hovering or focusing a sidebar row or the Changes tab.
+ * Only the chat snapshot (after 0), the diff and the versions list are ever stored here, so a
+ * screen that opens next paints at once. An entry serves reads for 10 s, and any write
  * drops them all, so a Keep or an Undo is never shown from before it.
  */
 const PREFETCH_MS = 10_000;
@@ -161,6 +161,11 @@ export const api = {
   prefetchProject: (id: string, chat: boolean): void => {
     if (chat) prefetch(`/api/workspaces/${encodeURIComponent(id)}/chat?after=0`);
     prefetch(`/api/workspaces/${id}/diff`);
+  },
+  /** Warms what the Changes tab paints from: the diff and the earlier versions. Called when the tab is hovered, focused or pressed. */
+  prefetchChanges: (id: string): void => {
+    prefetch(`/api/workspaces/${id}/diff`);
+    prefetch(`/api/workspaces/${id}/versions`);
   },
   /** The notes the AI should always keep in mind for this project. At most 4000 characters. */
   setNotes: (id: string, notes: string) =>

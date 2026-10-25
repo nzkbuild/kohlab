@@ -44,7 +44,7 @@ check(
   ),
   [
     { kind: "assistant", text: "Looking now" },
-    { kind: "tool", text: "Read src/a.ts" },
+    { kind: "tool", text: "Looked around" },
   ],
 );
 check(

@@ -285,8 +285,6 @@
 
   /* rem-based type scale (Resize Text / SC 1.4.4, never px, never clamp()).
      12 = xs, 13 = sm (controls, menus), 14 = small, 15 = base (body). */
-  --text-2xs: 0.75rem;
-  --text-2xs--line-height: 1.0625rem;
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.0625rem;
   --text-sm: 0.8125rem;
@@ -481,7 +479,7 @@ input[type="radio"] {
     min-height: var(--control-h);
     align-items: center;
     justify-content: center;
-    gap: 0.4375rem;
+    gap: 0.5rem;
     border: 1px solid transparent;
     border-radius: 9999px;
     padding: 0.5rem 0.875rem;
@@ -586,7 +584,7 @@ input[type="radio"] {
     max-width: 100%;
     min-height: var(--control-h-sm);
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.5rem;
     border-radius: 9999px;
     padding: 0 0.625rem;
     font-size: 0.8125rem;
@@ -652,7 +650,7 @@ input[type="radio"] {
   .field {
     display: flex;
     flex-direction: column;
-    gap: 0.375rem;
+    gap: 0.5rem;
   }
   .field-label {
     font-size: 0.8125rem;
@@ -695,7 +693,7 @@ input[type="radio"] {
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.5rem;
     border: 1px solid transparent;
     border-radius: 999px;
     padding: 0.25rem 0.625rem 0.25rem 0.5rem;
@@ -867,7 +865,7 @@ input[type="radio"] {
   min-height: var(--row-h);
   width: 100%;
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.5rem;
   border: 1px solid transparent;
   border-radius: var(--radius-row);
   padding: 0.25rem 0.5rem;
@@ -924,12 +922,12 @@ input[type="radio"] {
 .sidebar-more {
   position: absolute;
   top: 50%;
-  inset-inline-end: 0.25rem;
+  inset-inline-end: 0.125rem;
   display: grid;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2rem;
+  height: 2rem;
   place-items: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-row);
   transform: translateY(-50%);
   color: var(--text-muted);
   opacity: 0;
@@ -981,13 +979,18 @@ input[type="radio"] {
   }
 }
 
-/* The one status shown in the rail: needs you, or ready to check. */
+/* The one status shown in the rail, told apart by shape, not colour: a filled dot is "needs you", a ring is "ready to check". */
 .sidebar-dot {
-  width: 0.4375rem;
-  height: 0.4375rem;
+  box-sizing: border-box;
+  width: 0.5rem;
+  height: 0.5rem;
   flex: none;
   border-radius: 999px;
   background: var(--text-primary);
+}
+.sidebar-dot[data-shape="ring"] {
+  border: 0.125rem solid var(--text-primary);
+  background: transparent;
 }
 
 /* Collapsed rail only: the project's initial stands in for the title. */
@@ -1001,7 +1004,7 @@ input[type="radio"] {
   flex: none;
   place-items: center;
   background: var(--surface-raised);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-row);
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--text-secondary);
@@ -1714,7 +1717,7 @@ input[type="radio"] {
   display: flex;
   min-height: var(--row-h);
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.5rem;
   border-radius: var(--radius-md);
   padding: 0 0.625rem;
   font-size: 0.875rem;
@@ -1869,7 +1872,7 @@ input[type="radio"] {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.5rem;
   border-radius: var(--radius-md);
   padding: 0.5rem 0.625rem;
   color: var(--text-secondary);
@@ -1892,7 +1895,7 @@ input[type="radio"] {
   display: flex;
   min-height: 1.75rem;
   align-items: center;
-  gap: 0.375rem;
+  gap: 0.5rem;
   border-radius: var(--radius-sm);
   padding-inline: 0.375rem;
   font-family: var(--font-mono);
@@ -1974,7 +1977,7 @@ input[type="radio"] {
 @media (hover: none) and (pointer: coarse) {
   .termkeys {
     display: flex;
-    gap: 0.375rem;
+    gap: 0.5rem;
     overflow-x: auto;
     border-top: 1px solid var(--line-subtle);
     background: var(--surface-raised);

@@ -54,7 +54,7 @@ export interface AskQuestion {
 export type ChatEvent = { n: number; at: number } & (
   | { kind: "user"; text: string; uuid?: string; tree?: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool"; text: string; toolId?: string; detail?: string }
+  | { kind: "tool"; text: string; toolId?: string; detail?: string; file?: string }
   | { kind: "result"; toolId: string; output: string; failed?: boolean }
   | {
       kind: "ask";

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useApp } from "../store";
 import { isApple, isTouchOnly, isTypingTarget } from "../lib/platform";
-import { Dialog, Kbd } from "./ui";
+import { Button, Dialog, Kbd } from "./ui";
 
 const MOD = isApple ? "⌘" : "Ctrl";
 
@@ -69,7 +69,7 @@ export default function ShortcutsDialog() {
                   {group.rows.map((row) => (
                     <div key={row.label} className="flex items-center justify-between gap-6 py-1.5 text-sm">
                       <dt className="min-w-0 text-text-secondary">{row.label}</dt>
-                      <dd className="flex shrink-0 gap-1.5 whitespace-nowrap">
+                      <dd className="flex shrink-0 gap-2 whitespace-nowrap">
                         {row.keys.map((key) => (
                           <Kbd key={key}>{key}</Kbd>
                         ))}
@@ -79,6 +79,13 @@ export default function ShortcutsDialog() {
                 </dl>
               </section>
             ))}
+          </div>
+          <div className="mt-5 flex justify-end">
+            <Dialog.Close asChild>
+              <Button variant="quiet" size="sm">
+                Done
+              </Button>
+            </Dialog.Close>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

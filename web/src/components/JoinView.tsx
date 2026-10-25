@@ -48,7 +48,7 @@ export default function JoinView() {
   return (
     <div className="grid h-full place-items-center bg-surface-base p-4">
       <div className="panel w-full max-w-[24rem] p-6">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <span
             className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-text-on-accent"
             aria-hidden="true"
@@ -61,7 +61,7 @@ export default function JoinView() {
         {!token ? (
           <>
             <p className="mt-1 text-xs text-text-muted">nothing to accept</p>
-            <p className="mt-5 flex items-start gap-1.5 text-xs text-status-danger">
+            <p className="mt-5 flex items-start gap-2 text-xs text-status-danger">
               <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
               This link is missing its invitation. It may have been truncated, ask the person who
               invited you to send it again, and open it exactly as it arrives.
@@ -75,7 +75,7 @@ export default function JoinView() {
               invited you will not see your work, and you will not see theirs.
             </p>
             {error ? (
-              <p className="mt-3 flex items-start gap-1.5 text-xs text-status-danger">
+              <p className="mt-3 flex items-start gap-2 text-xs text-status-danger">
                 <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
                 {error}
               </p>

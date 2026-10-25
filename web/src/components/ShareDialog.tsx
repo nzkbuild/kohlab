@@ -110,7 +110,7 @@ export default function ShareDialog({ workspaceId, open, onOpenChange, onPreview
       <fieldset className="mt-4 flex flex-col gap-1">
         <legend className="mb-1 text-sm text-text-muted">How long it works</legend>
         {CHOICES.map((c) => (
-          <label key={c.value} className="flex min-h-11 cursor-pointer items-center gap-2.5 text-base text-text-primary">
+          <label key={c.value} className="flex min-h-11 cursor-pointer items-center gap-2 text-base text-text-primary">
             <input
               type="radio"
               name="share-expiry"
@@ -159,7 +159,7 @@ export default function ShareDialog({ workspaceId, open, onOpenChange, onPreview
       <>
         <p className="mt-4 text-sm text-text-secondary">{status}</p>
         <div className="mt-4 flex flex-col-reverse gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="quiet" size="sm" className="text-text-secondary" disabled={busy} onClick={() => setConfirmNew(true)}>
               Make a new link
             </Button>
@@ -185,6 +185,15 @@ export default function ShareDialog({ workspaceId, open, onOpenChange, onPreview
             Anyone with the link can see this project's page. Turn the link off to stop them.
           </Dialog.Description>
           {body}
+          {confirmNew ? null : (
+            <div className="mt-2 flex justify-end">
+              <Dialog.Close asChild>
+                <Button variant="quiet" size="sm">
+                  Done
+                </Button>
+              </Dialog.Close>
+            </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

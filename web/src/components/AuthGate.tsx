@@ -97,7 +97,7 @@ export default function AuthGate() {
           </span>
           <div className="min-w-0">
             <h1 className="m-0 text-lg font-semibold leading-none tracking-tight text-text-primary">kohlab</h1>
-            <p className="mt-1.5 flex items-baseline gap-1.5 text-xs text-text-muted">
+            <p className="mt-1.5 flex items-baseline gap-2 text-xs text-text-muted">
               <span>Build with Claude</span>
               <span aria-hidden="true" className="text-text-faint">
                 /

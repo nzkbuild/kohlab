@@ -157,7 +157,7 @@ export default function MarkupDialog({ workspaceId, image, onOpenChange }: Props
             )}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <div role="group" aria-label="Pen colour" className="flex items-center gap-1">
               {INKS.map((c) => (
                 <button

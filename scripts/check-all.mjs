@@ -115,9 +115,13 @@ try {
   run("merge last mile", "node", ["scripts/check-merge.mjs"]);
   run("review gate (accept and discard)", "node", ["scripts/check-review-gate.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
+  run("hooks stay above early returns (the cold-load crash)", "node", ["scripts/check-hooks-order.mjs"]);
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
   // Against the built web/dist; skips with a reason when no Chromium is present.
   run("rendered UI (browser)", "node", ["scripts/check-browser.mjs"]);
+  // Own throwaway servers with two chat projects; skip with a reason when no Chromium is present.
+  run("hard load of a project does not crash (browser)", "node", ["scripts/check-cold-load.mjs"]);
+  run("design rules: one primary, targets, one-segment switch, contrast (browser)", "node", ["scripts/check-design.mjs"]);
   run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);
   // Its own throwaway server, with a fake claude on PATH: a terminal waits for the chat's background work.
   run("background work holds the terminal (fake claude)", "node", ["scripts/check-chat-background.mjs"]);

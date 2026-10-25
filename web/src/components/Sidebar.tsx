@@ -293,7 +293,7 @@ export default function Sidebar({ open, onClose }: Props) {
       <div className="sidebar-head flex min-h-[3.25rem] items-center gap-1 px-3">
         <button
           type="button"
-          className="sidebar-label min-h-8 min-w-0 truncate rounded-md text-start text-base font-semibold tracking-tight text-text-primary"
+          className="sidebar-label min-h-8 min-w-0 truncate rounded-row text-start text-base font-semibold tracking-tight text-text-primary"
           onClick={() => navigate({ kind: "workspaces" })}
         >
           kohlab
@@ -477,7 +477,7 @@ export default function Sidebar({ open, onClose }: Props) {
                     {/* The status dot and the More button share one slot at the pill's right edge: the button replaces the dot when the row is hovered, focused, selected or open. */}
                     {dotLabel && !editing ? (
                       <span className="sidebar-status sidebar-label" aria-hidden="true">
-                        <span className="sidebar-dot" />
+                        <span className="sidebar-dot" data-shape={status === "needs-you" ? "filled" : "ring"} />
                       </span>
                     ) : null}
                     {canMenu && !editing ? (

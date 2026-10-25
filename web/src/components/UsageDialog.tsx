@@ -96,6 +96,13 @@ export default function UsageDialog() {
               </section>
             ) : null}
           </div>
+          <div className="mt-5 flex justify-end">
+            <Dialog.Close asChild>
+              <Button variant="quiet" size="sm">
+                Done
+              </Button>
+            </Dialog.Close>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -106,7 +113,7 @@ function UsageRow({ label, window: w }: { label: string; window: ChatUsageWindow
   const pct = w ? Math.max(0, Math.min(100, Math.round(w.percent))) : null;
   const reset = w ? resetsText(w.resetsAt) : null;
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <span className="text-sm text-text-secondary">{label}</span>
       {pct === null ? (
         <p className="text-xs text-text-muted">Not shown for this plan</p>

@@ -215,7 +215,7 @@ export function Tab({ className, ...rest }: RadixTabs.TabsTriggerProps) {
   return (
     <RadixTabs.Trigger
       className={cn(
-        "flex h-[30px] items-center justify-center gap-1.5 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:h-11",
+        "flex h-[30px] items-center justify-center gap-2 rounded-full px-4 text-sm whitespace-nowrap text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:h-11",
         "aria-selected:bg-surface-active aria-selected:font-medium aria-selected:text-text-primary",
         className,
       )}

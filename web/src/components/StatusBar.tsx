@@ -41,10 +41,10 @@ export default function StatusBar() {
       {w ? <span className="mono min-w-0 truncate">{w.path}</span> : null}
       {isTouchOnly() ? null : (
         <span className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap">
-          <span className="flex items-center gap-1.5">
+          <span className="flex items-center gap-2">
             <Kbd>Ctrl `</Kbd> Terminal
           </span>
-          <span className="flex items-center gap-1.5">
+          <span className="flex items-center gap-2">
             <Kbd>{isApple ? "⌘K" : "Ctrl K"}</Kbd> Commands
           </span>
         </span>

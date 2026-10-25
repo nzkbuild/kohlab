@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, handoffText, helperLabel, noticeText, rankFiles, readCapsFile, resultText, toolDetail, todosOf, usageOf, writeCapsFile, planUsageOf, controlReplyOf } from "../chat.ts";
+import { answerResponse, applyTaskEvent, newTaskId, askForm, describeAsk, describeTool, friendlyError, handoffText, helperLabel, noticeText, rankFiles, readCapsFile, resultText, toolDetail, toolFile, todosOf, usageOf, writeCapsFile, planUsageOf, controlReplyOf } from "../chat.ts";
 
 const cwd = "/srv/works/demo/tree";
 let failures = 0;
@@ -21,12 +21,16 @@ function check(name, got, want) {
 }
 
 // what the agent did
-check("Write inside the worktree is shown relative", describeTool("Write", { file_path: `${cwd}/hello.txt` }, cwd), "Created hello.txt");
-check("Write outside the worktree stays absolute", describeTool("Write", { file_path: "/etc/x" }, cwd), "Created /etc/x");
-check("Edit uses the file path", describeTool("Edit", { file_path: `${cwd}/src/a.ts` }, cwd), "Edited src/a.ts");
+check("toolFile: a Write inside the worktree is relative", toolFile("Write", { file_path: `${cwd}/index.html` }, cwd), "index.html");
+check("toolFile: an Edit keeps its path", toolFile("Edit", { file_path: `${cwd}/src/a.ts` }, cwd), "src/a.ts");
+check("toolFile: a Read has none", toolFile("Read", { file_path: `${cwd}/a.ts` }, cwd), undefined);
+check("Write is plain, with no file name", describeTool("Write", { file_path: `${cwd}/hello.txt` }, cwd), "Updated your page");
+check("Write outside the worktree names no path either", describeTool("Write", { file_path: "/etc/x" }, cwd), "Updated your page");
+check("Edit names no file", describeTool("Edit", { file_path: `${cwd}/src/a.ts` }, cwd), "Updated your page");
+check("Read is looking around", describeTool("Read", { file_path: `${cwd}/src/a.ts` }, cwd), "Looked around");
 check("Bash prefers its description", describeTool("Bash", { command: "ls -la", description: "List files" }, cwd), "Ran: List files");
 check("Bash without description cuts the command at 80", describeTool("Bash", { command: "x".repeat(100) }, cwd), `Ran: ${"x".repeat(80)}`);
-check("Glob is a search", describeTool("Glob", { pattern: "*.ts" }, cwd), "Searched the files");
+check("Glob is looking around", describeTool("Glob", { pattern: "*.ts" }, cwd), "Looked around");
 check("WebSearch names the query", describeTool("WebSearch", { query: "cats" }, cwd), "Searched the web for cats");
 check("unknown tool falls back", describeTool("Frobnicate", {}, cwd), "Used Frobnicate");
 check("browser open", describeTool("mcp__browser__agent_browser_open", { url: "https://example.com" }, cwd), "Opened https://example.com in the browser");
@@ -252,6 +256,7 @@ check("handoffText: a note is skipped", handoffText([hev(1, { kind: "user", text
 check("handoffText: a note alone is empty", handoffText([hev(1, { kind: "note", text: "Went back to before: “x”" })], "claude"), "");
 check("handoffText: an old saved go-back tool line is skipped too", handoffText([hev(1, { kind: "user", text: "hi" }), hev(2, { kind: "tool", text: "Went back to before: “x”" })], "claude"), "Person: hi");
 check("handoffText: an old saved background line is skipped too", handoffText([hev(1, { kind: "user", text: "hi" }), hev(2, { kind: "tool", text: "Background task finished: npm test" })], "claude"), "Person: hi");
+check("handoffText: an update names its file for the next AI", handoffText([hev(1, { kind: "tool", text: "Updated your page", file: "index.html" })], "claude"), "Did: Updated your page (index.html)");
 check("handoffText: a real AI step is still kept", handoffText([hev(1, { kind: "tool", text: "Created index.html" })], "claude"), "Did: Created index.html");
 
 // @ mentions: a case-insensitive substring of the path; basename prefix matches first; at most 50

@@ -41,7 +41,7 @@ function Branch({ nodes, prefix, depth, ...rest }: Omit<Props, "nodes"> & { node
                 aria-expanded={open}
                 onClick={() => onToggle(path)}
                 style={indent}
-                className="flex min-h-8 w-full items-center gap-1.5 rounded-lg pe-2 text-start text-small text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:min-h-11"
+                className="flex min-h-8 w-full items-center gap-2 rounded-lg pe-2 text-start text-small text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:min-h-11"
               >
                 <CaretRight size={12} className={cn("shrink-0 text-text-muted transition-transform", open && "rotate-90")} aria-hidden="true" />
                 <span className="min-w-0 truncate">{node.name}</span>
@@ -64,7 +64,7 @@ function Branch({ nodes, prefix, depth, ...rest }: Omit<Props, "nodes"> & { node
               onClick={() => onOpen(path)}
               style={indent}
               className={cn(
-                "flex min-h-8 w-full items-center gap-1.5 rounded-lg pe-2 text-start hover:bg-surface-hover max-md:min-h-11",
+                "flex min-h-8 w-full items-center gap-2 rounded-lg pe-2 text-start hover:bg-surface-hover max-md:min-h-11",
                 active ? "bg-surface-active text-text-primary" : "text-text-secondary hover:text-text-primary",
               )}
             >

@@ -4,7 +4,7 @@ import { ArrowClockwise, ArrowLeft, ArrowRight, ArrowSquareOut, Camera, CaretLef
 import { toast } from "sonner";
 import { api } from "../api";
 import { agentName } from "../lib/agentName";
-import { sidebarWhen } from "../lib/format";
+import { sinceWhen } from "../lib/format";
 import { askToFix, useProblems } from "../lib/problems";
 import { problemSummary } from "../lib/problemText";
 import type { Point } from "../lib/browserCoords";
@@ -419,7 +419,7 @@ export default function PreviewPanel({ url, t, variant, onClose, onNewLink, vers
       <Menu
         label="Problem with the page"
         trigger={
-          <Button variant="quiet" className={cn("shrink-0 gap-1.5 px-2.5 text-text-secondary", sheet ? "h-11" : "h-10")}>
+          <Button variant="quiet" className={cn("shrink-0 gap-2 px-2.5 text-text-secondary", sheet ? "h-11" : "h-10")}>
             <WarningCircle size={16} aria-hidden="true" />
             Problem
           </Button>
@@ -506,7 +506,7 @@ export default function PreviewPanel({ url, t, variant, onClose, onNewLink, vers
               aria-pressed={device === id}
               title={label}
               onClick={() => chooseDevice(id)}
-              className="inline-flex min-h-(--control-h-sm) items-center gap-1.5 rounded-full px-3 text-sm text-text-secondary hover:text-text-primary aria-pressed:bg-surface-active aria-pressed:text-text-primary pointer-coarse:min-h-11"
+              className="inline-flex min-h-(--control-h-sm) items-center gap-2 rounded-full px-3 text-sm text-text-secondary hover:text-text-primary aria-pressed:bg-surface-active aria-pressed:text-text-primary pointer-coarse:min-h-11"
             >
               <Icon size={16} aria-hidden="true" />
               <span className="hidden @min-[28rem]:inline">{label}</span>
@@ -529,10 +529,10 @@ export default function PreviewPanel({ url, t, variant, onClose, onNewLink, vers
   // Under the bar when the browser shows an earlier version: it is only looked at until the person goes back to it.
   const versionRow = versionSha ? (
     <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-2 text-sm text-text-secondary">
-      <span className="mr-auto">{lookingAt ? `You're looking at the version from ${sidebarWhen(lookingAt)}.` : "You're looking at an earlier version."}</span>
+      <span className="mr-auto">{lookingAt ? `You're looking at the version from ${sinceWhen(lookingAt)}.` : "You're looking at an earlier version."}</span>
       {can.mutate ? (
         <>
-          <Button variant="primary" size="sm" disabled={restoring} onClick={askGoBack}>
+          <Button variant="secondary" size="sm" disabled={restoring} onClick={askGoBack}>
             Go back to this one
           </Button>
           <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => void browserAct("home")}>

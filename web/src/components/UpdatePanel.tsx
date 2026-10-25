@@ -124,7 +124,7 @@ export default function UpdatePanel() {
       {status?.available ? <p className="text-sm text-text-primary">A new version of Kohlab is ready.</p> : null}
 
       {error ? (
-        <p className="flex items-start gap-1.5 text-sm text-status-danger">
+        <p className="flex items-start gap-2 text-sm text-status-danger">
           <WarningCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
           {error}
         </p>
@@ -175,8 +175,8 @@ export default function UpdatePanel() {
         <p
           className={
             lastRun.danger
-              ? "flex items-center gap-1.5 text-sm text-status-danger"
-              : "flex items-center gap-1.5 text-sm text-text-muted"
+              ? "flex items-center gap-2 text-sm text-status-danger"
+              : "flex items-center gap-2 text-sm text-text-muted"
           }
         >
           {lastRun.danger ? <WarningCircle size={14} aria-hidden="true" /> : <CheckCircle size={14} aria-hidden="true" />}

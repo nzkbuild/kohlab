@@ -347,7 +347,7 @@ export default function Settings() {
               is sent while you are looking at Kohlab.
             </p>
             {permission === "denied" ? (
-              <p className="mt-1.5 flex items-start gap-1.5 text-xs text-status-danger">
+              <p className="mt-1.5 flex items-start gap-2 text-xs text-status-danger">
                 <WarningCircle size={13} className="mt-px shrink-0" aria-hidden="true" />
                 Your browser will not ask again. Allow notifications for this site in the browser settings, then reload.
               </p>

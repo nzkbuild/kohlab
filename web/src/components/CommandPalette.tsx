@@ -381,7 +381,7 @@ export default function CommandPalette() {
                       {entry.hint && !isTouchOnly() ? <span className="shrink-0 whitespace-nowrap text-xs text-text-faint">{entry.hint}</span> : null}
                       {entry.status === "needs-you" || entry.status === "needs-review" ? (
                         <>
-                          <span className="sidebar-dot" aria-hidden="true" />
+                          <span className="sidebar-dot" data-shape={entry.status === "needs-you" ? "filled" : "ring"} aria-hidden="true" />
                           <span className="sr-only">{STATUS_LABEL[entry.status]}</span>
                         </>
                       ) : null}

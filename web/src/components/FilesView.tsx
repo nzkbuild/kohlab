@@ -386,7 +386,7 @@ function Files({ workspaceId }: Props) {
                       title={tab.path}
                       onClick={() => setActive(tab.path)}
                       className={cn(
-                        "mono flex min-w-0 items-center gap-1.5 py-1.5 ps-2.5 text-sm",
+                        "mono flex min-w-0 items-center gap-2 py-1.5 ps-2.5 text-sm",
                         isActive ? "text-text-primary" : "text-text-muted hover:text-text-primary",
                       )}
                     >

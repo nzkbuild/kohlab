@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUp, GithubLogo, X } from "@phosphor-icons/react";
+import { ArrowUp, CaretRight, ChatCircleDots, CheckCircle, GithubLogo, Image, Question, X } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
@@ -157,7 +157,7 @@ function NewProjectForm({ onCancel }: { onCancel: () => void }) {
         />
       </Field>
 
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2">
         <span className="field-label">AI</span>
         <div>
           <AgentChip agent={newAgent.agent} options={newAgent.options} onChange={newAgent.setAgent} disabled={busy} />
@@ -269,7 +269,7 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
 const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator", "A booking page", "A menu for my café", "A portfolio"];
 const CHIP = "inline-flex min-h-9 items-center rounded-full bg-surface-raised px-3.5 text-small text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none pointer-coarse:min-h-11";
 /** A project in the Home list: a full-width tonal row, 44px and up. */
-const ROW = "flex min-h-11 w-full items-center rounded-card bg-surface-raised px-4 text-left text-base text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+const ROW = "flex min-h-11 w-full items-center gap-3 rounded-card bg-surface-raised px-4 text-left text-base text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 /** The text the "Ask me a few questions first" link puts in the box. It is not sent. */
 const QUESTIONS_FIRST = "Before you build anything, ask me a few short questions about what I want.";
 
@@ -522,9 +522,11 @@ export function HomeScreen() {
 
               <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
                 <Button variant="quiet" size="sm" onClick={() => shotInput.current?.click()}>
+                  <Image size={16} aria-hidden="true" />
                   Attach a screenshot of a site you like
                 </Button>
                 <Button variant="quiet" size="sm" onClick={() => fill(QUESTIONS_FIRST)}>
+                  <Question size={16} aria-hidden="true" />
                   Ask me a few questions first
                 </Button>
               </div>
@@ -554,14 +556,18 @@ export function HomeScreen() {
                   {needsYou[0] ? (
                     <li>
                       <button type="button" className={ROW} onClick={() => open(needsYou[0].id)}>
-                        {`${projectTitle(needsYou[0])} has a question`}
+                        <ChatCircleDots size={18} className="shrink-0 text-text-muted" aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate">{`${projectTitle(needsYou[0])} has a question`}</span>
+                        <CaretRight size={16} className="shrink-0 text-text-muted" aria-hidden="true" />
                       </button>
                     </li>
                   ) : null}
                   {readyToCheck[0] ? (
                     <li>
                       <button type="button" className={ROW} onClick={() => open(readyToCheck[0].id)}>
-                        {`${projectTitle(readyToCheck[0])} is ready to check`}
+                        <CheckCircle size={18} className="shrink-0 text-text-muted" aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate">{`${projectTitle(readyToCheck[0])} is ready to check`}</span>
+                        <CaretRight size={16} className="shrink-0 text-text-muted" aria-hidden="true" />
                       </button>
                     </li>
                   ) : null}

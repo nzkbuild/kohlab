@@ -184,6 +184,7 @@ const CHECKS = [
   ["text primary / raised", "--text-primary", "--surface-raised", 4.5, "secondary button label"],
   ["text primary / button hover", "--text-primary", "--surface-active", 4.5, "secondary button hovered"],
   ["text primary / button pressed", "--text-primary", "--surface-pressed", 4.5, "secondary button pressed"],
+  ["text muted / active", "--text-muted", "--surface-active", 4.5, "Changes count badge on the active segment"],
   ["text primary / bubble", "--text-primary", "--surface-bubble", 4.5, "user message"],
   ["accent / sidebar", "--accent", "--surface-sidebar", 3, "needs-you dot (SC 1.4.11)"],
 

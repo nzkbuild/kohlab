@@ -1,5 +1,5 @@
 import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, Paperclip, Stop, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, Paperclip, Stop, WarningCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage } from "../api";
 import type { ChatEvent as StoredChatEvent, Pick, TurnFile } from "../types";
@@ -77,45 +77,43 @@ function friendly(err: unknown): string {
 /** A toast or inline error: "Couldn't undo. No file checkpoint found." */
 const failed = (what: string, err: unknown) => `Couldn't ${what}. ${friendly(err)}`;
 
-/** The tool lines of one run, as one plain sentence: "looked at 3 files, wrote 2 and ran 1 command". Prefixes come from describeTool in chat.ts. */
+/** What the tool lines of one kind start with. describeTool in chat.ts writes the first form; the older forms are still in saved conversations. */
+const WROTE_LINE = /^(Updated your page|Created |Edited )/;
+const LOOKED_LINE = /^(Looked around|Read |Searched the files)/;
+
+/** The tool lines of one run, as one plain sentence: "looked around, updated your page and checked it". Prefixes come from describeTool in chat.ts. */
 function summarizeTools(lines: string[]): string {
-  let read = 0;
-  let ran = 0;
-  let searched = 0;
-  let looked = 0;
+  let looked = false;
+  let wrote = false;
+  let ran = false;
+  let pages = 0;
   let helped = 0;
   let other = 0;
-  const wrote = new Set<string>();
   for (const t of lines) {
-    if (t.startsWith("Created ") || t.startsWith("Edited ")) wrote.add(t.slice(t.indexOf(" ") + 1));
-    else if (t.startsWith("Read ")) read++;
-    else if (t.startsWith("Ran: ")) ran++;
-    else if (t.startsWith("Searched the web") || t.startsWith("Opened ")) looked++;
-    else if (t.startsWith("Searched")) searched++;
+    if (WROTE_LINE.test(t)) wrote = true;
+    else if (LOOKED_LINE.test(t)) looked = true;
+    else if (t.startsWith("Ran: ")) ran = true;
+    else if (t.startsWith("Searched the web") || t.startsWith("Opened ")) pages++;
     else if (t.startsWith("Asked a helper")) helped++;
     else other++;
   }
   const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
   const parts: string[] = [];
-  if (read) parts.push(`looked at ${n(read, "file", "files")}`);
-  if (wrote.size) parts.push(`wrote ${n(wrote.size, "file", "files")}`);
-  if (ran) parts.push(`ran ${n(ran, "command", "commands")}`);
-  if (searched) parts.push(`searched ${n(searched, "time", "times")}`);
-  if (looked) parts.push(`looked up ${n(looked, "page", "pages")}`);
+  if (looked) parts.push("looked around");
+  if (wrote) parts.push("updated your page");
+  if (ran) parts.push("checked it");
+  if (pages) parts.push(`looked up ${n(pages, "page", "pages")}`);
   if (helped) parts.push(`asked ${n(helped, "helper", "helpers")}`);
   if (other) parts.push(`did ${n(other, "other thing", "other things")}`);
   return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
-/** Present-tense version of a describeTool line for the working line: "Created a.html" -> "Writing a.html". */
+/** Present-tense version of a describeTool line for the working line: "Updated your page" -> "Updating your page". */
 function workingLine(t: string): string {
-  const rest = (n: number) => t.slice(n);
-  if (t.startsWith("Created ")) return `Writing ${rest(8)}`;
-  if (t.startsWith("Edited ")) return `Editing ${rest(7)}`;
-  if (t.startsWith("Read ")) return `Reading ${rest(5)}`;
-  if (t.startsWith("Ran: ")) return "Running a command";
+  if (WROTE_LINE.test(t)) return "Updating your page";
+  if (LOOKED_LINE.test(t)) return "Looking around";
+  if (t.startsWith("Ran: ")) return "Checking it";
   if (t.startsWith("Searched the web")) return "Searching the web";
-  if (t.startsWith("Searched")) return "Searching the files";
   if (t.startsWith("Opened ")) return "Opening a page";
   if (t.startsWith("Asked a helper")) return "Asking a helper";
   return "Working";
@@ -220,7 +218,7 @@ function Checklist({ todos }: { todos: Todo[] }) {
         <CaretRight size={14} aria-hidden="true" className={cn("shrink-0 transition-transform", open && "rotate-90")} />
       </button>
       {open ? (
-        <ul aria-label="Checklist" className="mt-2 flex flex-col gap-1.5">
+        <ul aria-label="Checklist" className="mt-2 flex flex-col gap-2">
           {todos.map((t, i) => (
             <li
               key={i}
@@ -263,6 +261,7 @@ function HelperList({ helpers }: { helpers: string[] }) {
 /** The working line: a pulsing dot, the current action, how long the turn has run, helpers working and background tasks (buttons that open their lists). The timer ticks only while this line is shown. */
 function WorkingLine({
   action,
+  step,
   since,
   background,
   tasksOpen,
@@ -272,6 +271,8 @@ function WorkingLine({
   onHelpers,
 }: {
   action: string;
+  /** "step 2 of 5" while Claude has a checklist, else null */
+  step: string | null;
   since: number | null;
   background: number;
   tasksOpen: boolean;
@@ -289,6 +290,7 @@ function WorkingLine({
     <p className="flex items-center gap-2 text-small text-text-muted">
       <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-text-muted" aria-hidden="true" />
       <span className="shimmer-text min-w-0">{action}</span>
+      {step ? <span className="shrink-0 tabular-nums">· {step}</span> : null}
       {/* aria-hidden: the timer changes every second and must not be read out */}
       {since !== null ? <span aria-hidden="true" className="tabular-nums text-text-faint">{formatElapsed(now - since)}</span> : null}
       {helpers.length > 0 ? (
@@ -769,8 +771,8 @@ function Prose({ text, streaming = false }: { text: string; streaming?: boolean 
     <div className="flex max-w-[66ch] min-w-0 flex-col gap-3 text-base leading-6 text-text-primary max-md:max-w-none max-md:w-full max-md:text-base">
       {parseBlocks(text).map((block, i) => {
         if (block.kind === "p") return <p key={i} className="whitespace-pre-line">{rich(block.lines.join("\n"))}</p>;
-        if (block.kind === "h") return <p key={i} className="text-lg font-semibold text-text-primary">{rich(block.text)}</p>;
-        if (block.kind === "subh") return <p key={i} className="text-base font-semibold text-text-primary">{rich(block.text)}</p>;
+        if (block.kind === "h") return <p key={i} className="text-xl font-semibold text-text-primary">{rich(block.text)}</p>;
+        if (block.kind === "subh") return <p key={i} className="text-lg font-semibold text-text-primary">{rich(block.text)}</p>;
         if (block.kind === "quote") {
           // A fill bar, not a border: the quote is muted text beside a tonal bar.
           return (
@@ -817,7 +819,7 @@ function Prose({ text, streaming = false }: { text: string; streaming?: boolean 
         // Each nested level indents the item by one step (two levels and up share the last step).
         if (block.kind === "ul") {
           return (
-            <ul key={i} className="space-y-1.5">
+            <ul key={i} className="space-y-2">
               {block.items.map((item, j) => (
                 <li
                   key={j}
@@ -833,7 +835,7 @@ function Prose({ text, streaming = false }: { text: string; streaming?: boolean 
           );
         }
         return (
-          <ol key={i} className="list-decimal space-y-1.5 pl-[18px] marker:text-text-muted">
+          <ol key={i} className="list-decimal space-y-2 pl-[18px] marker:text-text-muted">
             {block.items.map((item, j) => (
               <li key={j} className={NEST[Math.min(block.levels?.[j] ?? 0, NEST.length - 1)]}>
                 {rich(item)}
@@ -858,7 +860,7 @@ function ToolRun({ lines, results }: { lines: ChatEvent[]; results: Map<string, 
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-left text-small text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
+        className="flex min-h-11 items-center gap-2 rounded-lg px-1 text-left text-small text-text-muted hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
       >
         <CaretRight size={14} aria-hidden="true" className={cn("shrink-0 motion-safe:transition-transform", open && "rotate-90")} />
         {cap(summary)}
@@ -879,20 +881,20 @@ function ToolLine({ e, result }: { e: ToolEvent; result?: ToolResult }) {
   const [open, setOpen] = useState(false);
   if (!e.detail && !result?.output)
     return (
-      <li className="flex items-center gap-1.5 pl-6">
+      <li className="flex items-center gap-2 pl-6">
         <span className="min-w-0 flex-1">{e.text}</span>
         {result?.failed ? <span className="shrink-0 text-xs font-medium text-status-danger">Failed</span> : null}
       </li>
     );
   // an edit or a new file: its "+ " and "- " lines are coloured as in the diff
-  const isChange = e.text.startsWith("Edited ") || e.text.startsWith("Created ");
+  const isChange = WROTE_LINE.test(e.text);
   return (
     <li>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex min-h-11 w-full items-center gap-1.5 rounded-lg px-1 text-left hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
+        className="flex min-h-11 w-full items-center gap-2 rounded-lg px-1 text-left hover:bg-surface-hover hover:text-text-primary shell:min-h-8"
       >
         <CaretRight size={14} aria-hidden="true" className={cn("shrink-0 motion-safe:transition-transform", open && "rotate-90")} />
         <span className="min-w-0 flex-1">{e.text}</span>
@@ -934,7 +936,7 @@ function AnsweredAsk({ e, allowed, reply }: { e: AskEvent; allowed: boolean; rep
     const said = allowed ? (reply ? `You answered: ${reply}` : `You answered ${who}'s question`) : `You skipped ${who}'s question`;
     return (
       <div className="text-small text-text-muted">
-        <p className="flex items-start gap-1.5">
+        <p className="flex items-start gap-2">
           <Icon size={14} className="mt-[5px] shrink-0" aria-hidden="true" />
           <span className="min-w-0">{said}</span>
         </p>
@@ -945,7 +947,7 @@ function AnsweredAsk({ e, allowed, reply }: { e: AskEvent; allowed: boolean; rep
     const said = allowed ? "You approved the plan" : reply ? `You asked for changes: ${reply}` : "You didn't approve the plan";
     return (
       <div className="text-small text-text-muted">
-        <p className="flex items-start gap-1.5">
+        <p className="flex items-start gap-2">
           <Icon size={14} className="mt-[5px] shrink-0" aria-hidden="true" />
           <span className="min-w-0">{said}</span>
         </p>
@@ -958,17 +960,19 @@ function AnsweredAsk({ e, allowed, reply }: { e: AskEvent; allowed: boolean; rep
       </div>
     );
   }
-  // "Claude wants to create the file index.html" reads as "You allowed Claude to create index.html".
-  const what = e.text.replace(/^\S+ wants to /, "").replace(/^(create|change) the file /, "$1 ");
+  // "Claude wants to create the file index.html" reads as "You allowed Claude to update your page"; the file name stays behind "Show details".
+  const file = /^\S+ wants to (?:create|change) the file (.+)$/.exec(e.text)?.[1];
+  const what = file ? "update your page" : e.text.replace(/^\S+ wants to /, "");
+  const detail = e.detail ?? file;
   return (
     <div className="text-small text-text-muted">
-      <p className="flex items-start gap-1.5">
+      <p className="flex items-start gap-2">
         <Icon size={14} className="mt-[5px] shrink-0" aria-hidden="true" />
         <span className="min-w-0">{allowed ? `You allowed ${who} to ${what}` : `You didn't allow ${who} to ${what}`}</span>
       </p>
-      {e.detail || e.why ? (
+      {detail || e.why ? (
         <div className="ml-5">
-          <Details detail={e.detail} why={e.why} />
+          <Details detail={detail} why={e.why} />
         </div>
       ) : null}
     </div>
@@ -998,10 +1002,11 @@ function QuestionCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; b
   };
   return (
     <section aria-label={`${who} is asking`} className="rounded-card bg-surface-raised px-5 py-[18px]">
-      <p className="text-base font-semibold text-text-primary">{e.text}</p>
+      {/* One question needs no title above it: the question is the title. */}
+      {questions.length === 1 ? null : <p className="text-base font-semibold text-text-primary">{e.text}</p>}
       {can ? (
         <>
-          <div className="mt-4 flex flex-col gap-5">
+          <div className={cn("flex flex-col gap-5", questions.length !== 1 && "mt-4")}>
             {questions.map((q, i) => (
               <div key={i} className="flex flex-col gap-2">
                 {q.header ? <p className="text-small text-text-muted">{q.header}</p> : null}
@@ -1079,7 +1084,7 @@ function PlanCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; busy:
           </div>
           {changing ? (
             <div className="flex flex-col items-start gap-3">
-              <label className="flex w-full flex-col gap-1.5 text-small text-text-muted">
+              <label className="flex w-full flex-col gap-2 text-small text-text-muted">
                 What should change?
                 <textarea className="field-textarea border-0 bg-surface-base focus:outline-2 focus:outline-offset-2 focus:outline-focus" rows={3} value={message} disabled={busy} onChange={(ev) => setMessage(ev.target.value)} />
               </label>
@@ -1096,22 +1101,18 @@ function PlanCard({ e, can, busy, onAnswer }: { e: AskEvent; can: boolean; busy:
   );
 }
 
-/** Several answered asks in a row (and the tool runs between them) as one line: "You allowed 3 changes to index.html". */
+/** Several answered asks in a row (and the tool runs between them) as one line: "You allowed 3 changes to your page". */
 function AnsweredGroup({ events, answers }: { events: ChatEvent[]; answers: Map<string, boolean> }) {
   const asks = events.filter((e): e is AskEvent => e.kind === "ask");
   const allowed = asks.filter((a) => answers.get(a.requestId));
   const denied = asks.length - allowed.length;
-  const files = new Set<string>();
   let changes = 0;
   let commands = 0;
   let others = 0;
   for (const a of allowed) {
     // The agent's name leads the ask's text ("Codex wants to ..."), so the match does not depend on which agent it is.
-    const f = /^\S+ wants to (?:create|change) the file (.+)$/.exec(a.text);
-    if (f) {
-      changes++;
-      files.add(f[1]);
-    } else if (/^\S+ wants to run a command$/.test(a.text)) commands++;
+    if (/^\S+ wants to (?:create|change) the file /.test(a.text)) changes++;
+    else if (/^\S+ wants to run a command$/.test(a.text)) commands++;
     else others++;
   }
   const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -1120,11 +1121,11 @@ function AnsweredGroup({ events, answers }: { events: ChatEvent[]; answers: Map<
   if (commands) parts.push(n(commands, "command", "commands"));
   if (others) parts.push(n(others, "other step", "other steps"));
   let text = parts.length === 0 ? "" : `You allowed ${parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`}`;
-  if (files.size === 1 && changes && !commands && !others) text += ` to ${[...files][0]}`;
+  if (changes && !commands && !others) text += " to your page"; // the file names stay in "Show details"
   if (denied) text += `${text ? ", and you" : "You"} didn't allow ${n(denied, "step", "steps")}`;
   return (
     <div className="text-small text-text-muted">
-      <p className="flex items-start gap-1.5">
+      <p className="flex items-start gap-2">
         <Check size={14} className="mt-[5px] shrink-0" aria-hidden="true" />
         <span className="min-w-0">{text}</span>
       </p>
@@ -1441,7 +1442,7 @@ function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; 
               <p className="text-small text-text-muted">{`${count} ${count === 1 ? "file" : "files"} changed`}</p>
               <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
                 {files.map((f) => (
-                  <section key={f.path} className="flex min-w-0 flex-col gap-1.5">
+                  <section key={f.path} className="flex min-w-0 flex-col gap-2">
                     <h3 className="mono text-xs break-all text-text-secondary">
                       <span className="text-text-muted">{CHANGE_WORD[f.status]}</span> {f.path}
                     </h3>
@@ -1876,16 +1877,19 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const sendText = async (text: string): Promise<boolean> => {
     setSending(true);
     setSendError(null);
+    // Optimistic: Stop shows at once, not after the server answers. A failed send puts it back (below) and the poll corrects it.
+    const wasBusy = busy;
+    setBusy(true);
     try {
       await api.chatSend(workspaceId, text);
-      setBusy(true);
       stickRef.current = true;
       setFarFromEnd(false);
       return true;
     } catch (e) {
       // 409 "still working": Claude is busy, so the composer locks until it is not.
       setSendError(friendly(e));
-      setBusy(true);
+      // Only "still working" means Claude is busy; any other failure (offline, refused) ran nothing, so Stop must not stay.
+      setBusy(e instanceof Error && /still working/i.test(e.message) ? true : wasBusy);
       return false;
     } finally {
       setSending(false);
@@ -2259,6 +2263,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         ? workingLine(latestTool.text)
         : "Working";
 
+  // With a checklist, the working line says which step it is on: done + 1, up to the total.
+  const todosDone = todos.filter((t) => t.status === "done").length;
+  const step = todos.length > 0 && todosDone < todos.length ? `step ${todosDone + 1} of ${todos.length}` : null;
+
   // Keep / Undo only while the AI's changes are waiting to be kept or undone.
   const ws = findWorkspace(workspaces, workspaceId);
   const hasChanges = !terminalProject && ws !== null && workspaceStatus(ws) === "needs-review";
@@ -2299,6 +2307,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     setKeeping(true);
     try {
       await api.commit(workspaceId, keepMessage);
+      repoll();
       await refresh();
     } catch (e) {
       toast.error(failed("save", e));
@@ -2331,6 +2340,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     setUndoing(true);
     try {
       await api.action(workspaceId, "discard");
+      repoll();
       await refresh();
     } catch (e) {
       toast.error(failed("undo", e));
@@ -2396,7 +2406,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         return (
           <>
             <NoteLine text={note} />
-            <div className="flex items-center justify-center gap-1.5 text-xs text-text-muted">
+            <div className="flex items-center justify-center gap-2 text-xs text-text-muted">
               <span>Show someone:</span>
               <Button variant="quiet" size="sm" className="text-xs text-text-secondary" onClick={() => void copyPreviewLink()}>
                 Copy link
@@ -2425,7 +2435,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
             <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
               {body}
               {pointed.length > 0 ? (
-                <ul className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
+                <ul className="mt-1 flex flex-wrap gap-2 whitespace-normal">
                   {pointed.map((line, i) => (
                     <li key={i} title={line} className="flex max-w-full items-center rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-text-secondary">
                       <span className="truncate">{pointChipText(line)}</span>
@@ -2439,7 +2449,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </div>
               ))}
               {others.length > 0 ? (
-                <ul className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
+                <ul className="mt-1 flex flex-wrap gap-2 whitespace-normal">
                   {others.map((name, i) => (
                     <li key={i} className="flex max-w-full items-center gap-1 rounded-lg bg-surface-raised px-2 py-0.5 text-sm text-text-secondary">
                       <Paperclip size={12} aria-hidden="true" className="shrink-0" />
@@ -2514,8 +2524,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       }
       case "error":
         return (
-          <p className="flex items-center gap-1.5 text-sm text-status-danger">
-            <Warning size={12} aria-hidden="true" />
+          <p className="flex items-center gap-2 text-sm text-text-muted">
+            <WarningCircle size={16} className="shrink-0" aria-hidden="true" />
             {e.text}
           </p>
         );
@@ -2572,7 +2582,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const keepButton = (
     <Button variant={previewPrimary ? "secondary" : "primary"} className="max-md:px-3" disabled={keeping} onClick={() => void keep()}>
       <Check size={16} className="max-md:hidden" aria-hidden="true" />
-      Keep this version
+      {keeping ? "Keeping…" : "Keep this version"}
     </Button>
   );
 
@@ -2614,8 +2624,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     <WorkspaceCtx.Provider value={workspaceId}>
     <AgentCtx.Provider value={who}>
       <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
-        <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col", empty && "justify-center")}>
-          {/* An empty chat centres its heading and composer together; the first message docks the composer at the bottom. */}
+        <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col", empty && "justify-start pt-[max(0px,calc(12vh-52px))]")}>
+          {/* An empty chat puts its heading where Home's is (12vh plus Home's own 28px, less the 56px project header and the column's 24px padding above it; there is no header-height variable to use, the header is a fixed h-14); the first message docks the composer at the bottom. */}
           <div className={cn("relative min-h-0", empty ? "flex-none" : "flex-1")}>
             <div
               ref={scrollRef}
@@ -2648,7 +2658,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
               >
                 {empty ? (
                   <div className="flex flex-col items-center gap-2 px-2 text-center">
-                    <h2 className="text-xl font-semibold text-text-primary">{`What should ${who} build?`}</h2>
+                    <h2 className="text-2xl font-medium tracking-tight text-text-primary">{`What should ${who} build?`}</h2>
                     <p className="text-base text-text-muted">{`Describe it in your own words. ${who} will ask before changing anything important.`}</p>
                   </div>
                 ) : null}
@@ -2703,12 +2713,12 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   <p className="text-base font-semibold text-text-primary">Ready to check</p>
                   <p className="text-small text-text-muted">{changed === null ? "Changes to check" : `Changed ${changed} ${changed === 1 ? "file" : "files"}`}</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
                   {previewPrimary ? previewButton : null}
                   {keepButton}
                   {previewPrimary ? null : previewButton}
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
                   {previewOpen ? null : (
                     <Button variant="quiet" className="text-text-secondary max-md:px-2.5" disabled={sending} onClick={() => void sendText(CHECK_TEXT)}>
                       Check it works
@@ -2716,7 +2726,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   )}
                   <Button variant="quiet" className="text-text-secondary max-md:px-2.5" disabled={undoing} onClick={() => setConfirmUndo(true)}>
                     <ArrowCounterClockwise size={16} aria-hidden="true" />
-                    Undo all since last keep
+                    Undo these changes
                   </Button>
                 </div>
                 {readyHint ? <p className="text-xs text-text-muted">Look at it in Preview, then keep it or undo it.</p> : null}
@@ -2726,7 +2736,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   <section aria-label="Problem with the page" className="flex flex-col gap-3 rounded-card bg-surface-raised px-5 py-[18px]">
                     <p className="text-base font-semibold text-text-primary">The page has a problem</p>
                     <p className="text-small text-text-muted">{problemSummary(problems)}</p>
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button variant="primary" disabled={fixing} aria-busy={fixing} onClick={() => void fixProblems()}>
                         {`Ask ${who} to fix it`}
                       </Button>
@@ -2740,6 +2750,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 {working ? (
                   <WorkingLine
                     action={currentAction}
+                    step={step}
                     since={busySince}
                     background={background}
                     tasksOpen={tasksOpen}
@@ -2788,7 +2799,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 ) : null}
 
                 {editing ? (
-                  <p className="mb-2 flex flex-wrap items-center gap-x-1.5 text-sm text-text-muted">
+                  <p className="mb-2 flex flex-wrap items-center gap-x-2 text-sm text-text-muted">
                     <span>{editing.tree ? "Editing your last message" : "Editing your last message (files stay as they are)"}</span>
                     <span aria-hidden="true">·</span>
                     <Button
@@ -2852,6 +2863,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   
                 <Composer
                   ariaLabel="Message"
+                  // The reading column pads 24px from 900px up (px-6), so the box's text starts where the messages do.
+                  className={compact ? undefined : "shell:px-6"}
                   textareaRef={taRef}
                   value={draft}
                   onChange={(v) => {
@@ -2892,7 +2905,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     attachments.length > 0 || points.length > 0 ? (
                       <>
                       {points.length > 0 ? (
-                        <ul aria-label="Pointed at" className="flex flex-wrap gap-1.5 pt-1">
+                        <ul aria-label="Pointed at" className="flex flex-wrap gap-2 pt-1">
                           {points.map((p) => {
                             const label = pointChipText(pointLine(p.pick));
                             return (
@@ -2915,7 +2928,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                         </ul>
                       ) : null}
                       {attachments.length > 0 ? (
-                      <ul aria-label="Files to send" className="flex flex-wrap gap-1.5 pt-1">
+                      <ul aria-label="Files to send" className="flex flex-wrap gap-2 pt-1">
                         {attachments.map((a) => (
                           <li key={a.key} className="flex max-w-full items-center gap-2 rounded-xl bg-surface-active py-1 pr-1 pl-1.5 text-sm text-text-secondary">
                             {a.url ? (

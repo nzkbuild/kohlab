@@ -59,6 +59,7 @@ const CHAT_SYSTEM_PROMPT =
   "Kohlab shows them a Preview button that opens index.html, and Keep / Undo buttons to save or throw away your changes. " +
   "Never tell the person to open a file in their browser; tell them to press Preview. " +
   "Never mention git, commits, branches, repositories or terminals to the person. " +
+  "Call the person's site \"your page\". Do not name files, folders or code (such as index.html) in what you say to them unless they ask. " +
   "When you finish, end with one short sentence saying what to look at in Preview. " +
   "Files the person attaches are saved in the uploads folder of the project; open them with your Read tool, and use pictures from there directly in the page when they ask for that. " +
   "When you run a command, always give it a short plain-English description of what it does and why. " +
@@ -88,8 +89,8 @@ export type Body =
   /** tree: the project's files as they were just before this message (checkpoints.ts). Not set when the snapshot could not be taken. */
   | { kind: "user"; text: string; uuid?: string; tree?: string }
   | { kind: "assistant"; text: string }
-  /** toolId: the tool's id, which its result refers to. detail: what it did (the command, the change), for the expandable line. */
-  | { kind: "tool"; text: string; toolId?: string; detail?: string }
+  /** toolId: the tool's id, which its result refers to. detail: what it did (the command, the change), for the expandable line. file: the file an edit or a new file touched; the chat does not show it, a handoff to another AI does. */
+  | { kind: "tool"; text: string; toolId?: string; detail?: string; file?: string }
   /** A quiet divider line for something that happened to the conversation (a switch of AI, going back, a compaction, a background task), not an AI step. */
   | { kind: "note"; text: string }
   /** result: what a tool gave back, trimmed by resultText. failed: the tool errored. */
@@ -121,24 +122,22 @@ function rel(p: unknown, cwd: string): string {
   return s;
 }
 
-/** A plain-English one-liner of an action the agent took.
- *  ChatView parses these prefixes to group the lines ("Read ", "Created ", "Edited ", "Ran: ",
- *  "Searched", "Opened ", "Asked a helper"): keep them in step with its classifier. */
-export function describeTool(name: string, input: Record<string, any>, cwd: string): string {
+/** A plain-English one-liner of an action the agent took, with no file names ("Updated your page", "Looked around").
+ *  ChatView parses these prefixes to group the lines ("Updated your page", "Looked around", "Ran: ",
+ *  "Searched", "Opened ", "Asked a helper"): keep them in step with its classifier (it also still reads the older "Created ", "Edited ", "Read "). */
+export function describeTool(name: string, input: Record<string, any>, _cwd: string): string {
   switch (name) {
     case "Write":
-      return `Created ${rel(input.file_path, cwd)}`;
     case "Edit":
     case "MultiEdit":
     case "NotebookEdit":
-      return `Edited ${rel(input.file_path ?? input.notebook_path, cwd)}`;
+      return "Updated your page";
     case "Read":
-      return `Read ${rel(input.file_path, cwd)}`;
-    case "Bash":
-      return `Ran: ${input.description || String(input.command ?? "").slice(0, 80)}`;
     case "Glob":
     case "Grep":
-      return "Searched the files";
+      return "Looked around";
+    case "Bash":
+      return `Ran: ${input.description || String(input.command ?? "").slice(0, 80)}`;
     case "WebFetch":
       return `Opened ${input.url ?? ""}`;
     case "WebSearch":
@@ -150,6 +149,13 @@ export function describeTool(name: string, input: Record<string, any>, cwd: stri
       if (name === "mcp__browser__agent_browser_open") return `Opened ${input.url ?? "a page"} in the browser`;
       return name.startsWith("mcp__browser__") ? "Used the browser" : `Used ${name}`;
   }
+}
+
+/** The file a Write or Edit touched, relative to the worktree, or undefined. The tool line names no file, so this is kept beside it. Pure. */
+export function toolFile(name: string, input: Record<string, any>, cwd: string): string | undefined {
+  if (!["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(name)) return undefined;
+  const p = input.file_path ?? input.notebook_path;
+  return typeof p === "string" && p ? rel(p, cwd) : undefined;
 }
 
 /** What a tool did, in full, for an expandable line: the command, the lines changed, the address or the search. Undefined when there is nothing to show. Pure. */
@@ -337,7 +343,7 @@ export function handoffText(events: ChatEvent[], _fromName: string, budget = 120
   for (const e of events) {
     if (e.kind === "user") lines.push(oneLine(`Person: ${e.text}`));
     else if (e.kind === "assistant") lines.push(oneLine(`Assistant: ${e.text}`));
-    else if (e.kind === "tool" && e.text.trim() && !OLD_NOTE_LINE.test(e.text)) lines.push(oneLine(`Did: ${e.text}`));
+    else if (e.kind === "tool" && e.text.trim() && !OLD_NOTE_LINE.test(e.text)) lines.push(oneLine(`Did: ${e.text}${e.file ? ` (${e.file})` : ""}`));
     else if (e.kind === "ask" && answered.has(e.requestId)) lines.push(oneLine(`Assistant asked: ${e.questions?.map((q) => q.question).join(" ") || e.plan || e.text}`));
   }
   if (lines.length === 0) return "";
@@ -719,8 +725,9 @@ export function transcriptEvents(lines: string[], cwd: string): Body[] {
         if (b?.type === "text" && typeof b.text === "string" && b.text.trim()) out.push({ kind: "assistant", text: b.text.trim() });
         else if (b?.type === "tool_use" && typeof b.name === "string" && !HIDDEN_TOOLS.has(b.name)) {
           const detail = toolDetail(b.name, b.input ?? {}, cwd);
+          const file = toolFile(b.name, b.input ?? {}, cwd);
           shown.add(b.id);
-          out.push({ kind: "tool", text: describeTool(b.name, b.input ?? {}, cwd), toolId: b.id, ...(detail !== undefined ? { detail } : {}) });
+          out.push({ kind: "tool", text: describeTool(b.name, b.input ?? {}, cwd), toolId: b.id, ...(detail !== undefined ? { detail } : {}), ...(file !== undefined ? { file } : {}) });
         }
       }
     }
@@ -1047,8 +1054,9 @@ function onLine(id: string, live: Live, line: string) {
       else if (b?.type === "tool_use" && !HIDDEN_TOOLS.has(b.name)) {
         if (b.name === "Task" || b.name === "Agent") live.helpers.set(b.id, helperLabel(b.input));
         const detail = toolDetail(b.name, b.input ?? {}, live.cwd);
+        const file = toolFile(b.name, b.input ?? {}, live.cwd);
         live.shownTools.add(b.id);
-        emit(id, { kind: "tool", text: describeTool(b.name, b.input ?? {}, live.cwd), toolId: b.id, ...(detail !== undefined ? { detail } : {}) });
+        emit(id, { kind: "tool", text: describeTool(b.name, b.input ?? {}, live.cwd), toolId: b.id, ...(detail !== undefined ? { detail } : {}), ...(file !== undefined ? { file } : {}) });
       }
     }
     return;
