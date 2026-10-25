@@ -9,6 +9,26 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.4.0] - 2026-10-25
+
+A design and speed release, from a review against uilaws.com and the Laws of UX.
+
+### Changed
+- Everything answers at once: Stop appears the moment you send, Keep shows "Keeping…" and the "Kept this version" note in a fraction of a second, and Changes opens about 7 times faster.
+- Plainer words: the AI's steps read "Looked around, updated your page and checked it", with no file names; "You allowed Claude to update your page"; and "Undo these changes".
+- While the AI works through a checklist, the working line says which step it is on ("step 2 of 5").
+- The sidebar shows a filled dot when a project needs you and a ring when it is ready to check.
+- Home's "has a question" and "is ready to check" rows and its two quiet links have icons.
+- An empty chat looks like Home; headings in replies are easier to scan.
+- Error lines are calm grey with an icon instead of red; a single question no longer repeats a title.
+- Earlier versions show "22 min ago" in a neat column, with one clear main button.
+- The Usage, Keyboard shortcuts and Share windows have a Done button.
+- Consistent spacing, sizes and corners everywhere; the Changes count is easier to read.
+
+### Fixed
+- A message that failed to send could leave the Stop button showing.
+- When a different AI takes over a chat, it is told which files were changed.
+
 ## [2.3.0] - 2026-10-22
 
 ### Added
