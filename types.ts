@@ -65,6 +65,10 @@ permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk";
   handoffAfter?: number;
   /** After "New chat from here": what the conversation it started from said, sent with the next message. Cleared by that message. */
   branchContext?: string;
+  /** Continue fresh: do it by itself when the chat's memory is nearly full. On unless false. */
+  autoFresh?: boolean;
+  /** After "Continue fresh": the handoff note the new session starts from. Sent with its first message, then cleared. */
+  freshNote?: string;
   /** After "Go back to here": the message the files were put back before (shortened). Sent as a note with the next message, then cleared. */
   restoredFrom?: string;
 }

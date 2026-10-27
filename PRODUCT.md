@@ -64,7 +64,10 @@ access. A server that is reachable is never keyless.
 Claude builds it and asks before risky steps, you open the preview, then press
 Keep this version or Undo. Projects that need an answer sit at the top of the
 sidebar under Needs you; finished work waits under Ready to check. Developers
-can still launch terminal agents, read diffs and merge.
+can still launch terminal agents, read diffs and merge. Above the message box a
+single line always says which AI is working, with which account, model and mode, and what
+it is doing; opening it shows the Run panel with its helpers, what it was told and what each
+reply used.
 
 **Team.** Teammates are *invited*, not handed a secret out of band: the owner
 creates a single-use, expiring invite link (`/join#token`), Kohlab provisions
@@ -95,6 +98,7 @@ Shipped and claimed:
 - Browser terminals, including additional sessions per workspace.
 - Share links, image paste, agent install/status, GitHub repository browsing.
 - A `kohlab` command for all of it, from any shell.
+- One place for your AI helpers: Settings → AI shows every AI on this computer, whether it is signed in, which account, how much of its plan is used and when that resets, and which models it offers. Model menus list only AIs that are signed in.
 
 Constraints, stated plainly rather than discovered by a user:
 
@@ -108,6 +112,7 @@ Constraints, stated plainly rather than discovered by a user:
   workspace created from a URL (an isolated member's) has no checkout on the
   server, so its merge is `kohlab merge <id> --into <checkout>`, run as that
   member.
+- The AI hub reads the server owner's AI accounts. Members see which AIs are ready and their models, not the owner's email, plan or usage. An AI that a member runs under their own computer account may be signed in differently from what the hub shows.
 - Claiming an unclaimed server from the browser is designed, not built
   (`ROADMAP.md`); the owner key comes from the installer.
 
@@ -115,7 +120,7 @@ Constraints, stated plainly rather than discovered by a user:
 
 - Product name: Kohlab.
 - Calm, friendly, plain English; consumer-grade like Claude desktop. Not a
-  landing page, not an instrument panel.
+  landing page, not an instrument panel. The one deliberate exception is the AI: its account, model, mode, helpers and usage are always visible, in plain words, with two quiet meters and no gauges.
 - Plain language in every string a user reads: no commits, branches, diffs,
   repositories or agents in the main path.
 - No invented metrics, customers, benchmarks or pricing claims.
@@ -130,7 +135,7 @@ Constraints, stated plainly rather than discovered by a user:
 
 ## Product Principles
 
-1. Show what is happening now before explaining the system.
+1. Show what is happening now before explaining the system. The AI's state is always in view: who is working, with which account and model, and what it is doing.
 2. Make "what needs me" the center of gravity: questions first, then work ready to check.
 3. Preserve work through disconnects without making persistence feel complex.
 4. Keep destructive and irreversible actions explicit.

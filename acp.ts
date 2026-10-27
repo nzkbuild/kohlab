@@ -320,7 +320,7 @@ export class AcpClient {
       console.warn("[acp] prompt failed:", err.slice(0, 200));
       this.host.emit({ kind: "error", text: "The agent ran into a problem. Try again." });
     }
-    this.host.emit({ kind: "done", worked: Date.now() - since });
+    this.host.emit({ kind: "done", worked: Date.now() - since, ...(this.model ? { model: this.model } : {}) });
     this.wrapUp();
   }
 

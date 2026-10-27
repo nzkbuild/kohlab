@@ -2,7 +2,7 @@ import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMem
 import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, Paperclip, Stop, WarningCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage } from "../api";
-import type { ChatEvent as StoredChatEvent, Pick, TurnFile } from "../types";
+import type { ChatEvent as StoredChatEvent, HelperNode, Pick, TurnFile } from "../types";
 import { announce } from "../lib/announce";
 import { splitAttached, pastedName, safeAttachName, withSuffix } from "../lib/attach";
 import { chatShown, takeWaiting } from "../lib/toChat";
@@ -22,7 +22,11 @@ import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import { agentName } from "../lib/agentName";
 import ConfirmDialog from "./ConfirmDialog";
 import { Composer, SaveLaterChip, SavedChip } from "./Composer";
-import { AgentChip, useAgentReasons, useNewAgent } from "./WorkspacesView";
+import ModelPicker, { ClaudeModelChoices, ModelChoices, modelName, shortModel, type ModelInfo } from "./ModelPicker";
+import RunPanel, { useRunPanel } from "./RunPanel";
+import RunStrip from "./RunStrip";
+import { accountLabel, helpersWorkingText } from "../lib/aiHub";
+import { useProviders } from "../lib/useProviders";
 import { Button, ComposerChip, Dialog, Menu, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
@@ -145,37 +149,6 @@ const KEPT_NOTE = "Kept this version";
 /** Set once the first "Ready to check" card has shown: after that, its hint line is not shown again. */
 const READY_HINT_KEY = "kohlab:ready-hint-seen";
 
-/** The Claude model menu's choices: the newest of each family, with a plain line about it. */
-const FAMILY_BLURB: Record<string, string> = { opus: "Best for complex work", sonnet: "Best for everyday work", haiku: "Fastest for quick answers" };
-
-/** Which Claude family a model belongs to, from its value or name ("claude-opus-5-5", "Opus 5.5"); undefined for any other. */
-function familyOf(m: ModelInfo): string | undefined {
-  return /\b(opus|sonnet|haiku)\b/i.exec(`${m.value} ${m.displayName}`)?.[1].toLowerCase();
-}
-
-/** A model's version as numbers, from its value or name ("claude-sonnet-4-5" -> [4, 5]); [0] when it has none. */
-function versionOf(m: ModelInfo): number[] {
-  // A date suffix (claude-opus-4-20250514) is not a minor version: the minor is one or two digits.
-  const v = /(\d+)(?:[.-](\d{1,2})(?!\d))?/.exec(m.value) ?? /(\d+)(?:[.-](\d{1,2})(?!\d))?/.exec(m.displayName);
-  return v ? [Number(v[1]), Number(v[2] ?? 0)] : [0];
-}
-
-/** Whether version a is newer than version b. */
-const newerThan = (a: number[], b: number[]) => {
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const d = (a[i] ?? 0) - (b[i] ?? 0);
-    if (d !== 0) return d > 0;
-  }
-  return false;
-};
-
-/** "claude-opus-5-5" -> "Opus 5.5"; a name it does not know is shown as it is. */
-function modelName(id: string): string {
-  const m = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)(?:-\d{8})?$/.exec(id);
-  if (m) return `${cap(m[1])} ${m[2]}.${m[3]}`;
-  return ["opus", "sonnet", "haiku"].includes(id) ? cap(id) : id;
-}
-
 /** Permission modes in plain words: the Mode menu's choices, plus the CLI's other names for them. One table for every label. */
 const MODES: Record<string, { label: string; detail?: string }> = {
   default: { label: "Asks first", detail: "Asks before changing files or running commands" },
@@ -196,12 +169,6 @@ interface CommandInfo {
   name: string;
   description: string;
   argumentHint: string;
-}
-interface ModelInfo {
-  value: string;
-  displayName: string;
-  description: string;
-  supportedEffortLevels: string[];
 }
 
 /** Claude's checklist (its TodoWrite list): one row with the count and the active item, the full list when opened. */
@@ -242,19 +209,6 @@ function Checklist({ todos }: { todos: Todo[] }) {
         </ul>
       ) : null}
     </div>
-  );
-}
-
-/** The helpers Claude has running (its sub-agents), by label. Opened from the "helpers working" text. */
-function HelperList({ helpers }: { helpers: string[] }) {
-  return (
-    <ul aria-label="Helpers" className="flex flex-col gap-1 pl-5 text-sm text-text-muted">
-      {helpers.map((h, i) => (
-        <li key={i} className="min-w-0 truncate">
-          Helper: {h}
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -1176,123 +1130,11 @@ function groupRows(events: ChatEvent[]): ChatEvent[][] {
   return rows;
 }
 
-/** Models past this many get a search box at the top of the model menu. */
-const MODEL_SEARCH_AT = 12;
-
 /** Commands past this many get a search box at the top of the Commands menu. */
 const COMMAND_SEARCH_AT = 12;
 
 /** Marks the composer's textarea for the workspace page's focus (WorkspaceDetail finds it by this attribute, not by its label). */
 const COMPOSER_MARK = { "data-composer": "" };
-
-/** A model's short name for the chip: the last part of its provider path ("openrouter/anthropic/claude-haiku-4.5" -> "claude-haiku-4.5"). */
-const shortModel = (value: string): string => value.slice(value.lastIndexOf("/") + 1);
-
-/** The model menu's choices. Past MODEL_SEARCH_AT models, a search box leads: it filters by name or value. ArrowDown or Tab moves into the list; Enter picks the first match. */
-function ModelChoices({ models, value, onPick }: { models: ModelInfo[]; value: string; onPick: (v: string) => void }) {
-  const [query, setQuery] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
-  const search = models.length > MODEL_SEARCH_AT;
-  const q = query.trim().toLowerCase();
-  const shown = search && q ? models.filter((m) => `${m.displayName} ${m.value}`.toLowerCase().includes(q)) : models;
-  // The menu takes focus when it opens; the search box takes it a frame later.
-  useEffect(() => {
-    if (!search) return;
-    const frame = requestAnimationFrame(() => searchRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
-  }, [search]);
-  // The first item of this menu, for the keys that move into the list.
-  const firstItem = (el: HTMLElement) => el.closest<HTMLElement>('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemradio"]');
-  return (
-    <>
-      {search ? (
-        <input
-          ref={searchRef}
-          type="search"
-          aria-label="Search models"
-          placeholder="Search models"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            // The menu's own keys (typeahead, arrows, Tab) would take these: the search box keeps them.
-            e.stopPropagation();
-            if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
-              e.preventDefault();
-              firstItem(e.currentTarget)?.focus();
-            } else if (e.key === "Enter") {
-              e.preventDefault();
-              firstItem(e.currentTarget)?.click();
-            }
-          }}
-          className="field-input mx-1 mb-1 block w-[calc(100%-0.5rem)] border-0 bg-surface-base"
-        />
-      ) : null}
-      <div className="max-h-80 overflow-y-auto">
-        <MenuRadioGroup value={value} onValueChange={onPick}>
-          {shown.map((m) => (
-            <MenuRadioItem key={m.value} value={m.value}>
-              <span className="block">{m.displayName}</span>
-              {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
-            </MenuRadioItem>
-          ))}
-        </MenuRadioGroup>
-      </div>
-      {search && shown.length === 0 ? <p className="px-2.5 py-1.5 text-small text-text-muted">No model matches "{query}".</p> : null}
-    </>
-  );
-}
-
-/** Claude's model menu: Default, then the newest Opus, Sonnet and Haiku. The other models sit behind "Show older models". */
-function ClaudeModelChoices({ models, value, onPick }: { models: ModelInfo[]; value: string; onPick: (v: string) => void }) {
-  const [olderOpen, setOlderOpen] = useState(false);
-  const newest = new Map<string, ModelInfo>();
-  for (const m of models) {
-    const fam = familyOf(m);
-    if (!fam) continue;
-    const have = newest.get(fam);
-    if (!have || newerThan(versionOf(m), versionOf(have))) newest.set(fam, m);
-  }
-  const choices: { value: string; label: string }[] = [{ value: "default", label: "Default (recommended)" }];
-  for (const fam of ["opus", "sonnet", "haiku"]) {
-    const m = newest.get(fam);
-    if (!m) continue;
-    const [major, minor] = versionOf(m);
-    const name = major > 0 ? `${cap(fam)} ${major}${minor ? `.${minor}` : ""}` : cap(fam);
-    choices.push({ value: m.value, label: `${name} — ${FAMILY_BLURB[fam]}` });
-  }
-  const chosen = new Set(choices.map((c) => c.value));
-  const older = models.filter((m) => !chosen.has(m.value));
-  const inMain = choices.some((c) => c.value === value);
-  return (
-    <>
-      <MenuRadioGroup value={inMain ? value : ""} onValueChange={onPick}>
-        {choices.map((c) => (
-          <MenuRadioItem key={c.value} value={c.value}>
-            <span className="block">{c.label}</span>
-          </MenuRadioItem>
-        ))}
-      </MenuRadioGroup>
-      {older.length > 0 ? (
-        <>
-          {/* Stays open: the older models list opens inside this menu. */}
-          <MenuItem aria-expanded={olderOpen} onSelect={(e) => { e.preventDefault(); setOlderOpen((o) => !o); }} className="text-text-secondary">
-            {olderOpen ? "Hide older models" : "Show older models"}
-          </MenuItem>
-          {olderOpen ? (
-            <MenuRadioGroup value={inMain ? "" : value} onValueChange={onPick}>
-              {older.map((m) => (
-                <MenuRadioItem key={m.value} value={m.value}>
-                  <span className="block">{m.displayName}</span>
-                  {m.description ? <span className="block text-xs text-text-muted">{m.description}</span> : null}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          ) : null}
-        </>
-      ) : null}
-    </>
-  );
-}
 
 /** The Commands menu's choices: each command's name and its one-line description. Past COMMAND_SEARCH_AT commands, a search box leads, as in the model menu. */
 function CommandChoices({ commands, onPick }: { commands: CommandInfo[]; onPick: (c: CommandInfo) => void }) {
@@ -1473,6 +1315,79 @@ function ChangesDialog({ workspaceId, n, onOpenChange }: { workspaceId: string; 
   );
 }
 
+/** Continue fresh, by hand: the AI writes a handoff note first and it is shown here, ready to read or change; "Use this note" starts the fresh session from it. */
+function FreshDialog({ workspaceId, who, onClose, onDone }: { workspaceId: string; who: string; onClose: () => void; onDone: () => void }) {
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.chatFresh(workspaceId, { draft: true }).then(
+      (r) => {
+        if (!alive) return;
+        if (typeof r.note === "string" && r.note.trim() !== "") setNote(r.note);
+        else setError("");
+      },
+      (e: unknown) => {
+        if (alive) setError(friendly(e));
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [workspaceId]);
+  const start = async (text: string | null) => {
+    setStarting(true);
+    try {
+      await api.chatFresh(workspaceId, text === null ? undefined : { note: text });
+      onDone();
+    } catch (e) {
+      setError(friendly(e));
+      setStarting(false);
+    }
+  };
+  return (
+    <Dialog.Root open onOpenChange={(v) => !v && !starting && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content aria-describedby={undefined} className="dialog-content flex max-h-[85vh] w-[90vw] max-w-[640px] flex-col gap-3 p-4">
+          <Dialog.Title className="text-base font-semibold text-text-primary">Continue with a fresh memory</Dialog.Title>
+          <p className="text-small text-text-muted">{`${who} writes a short note about where you are. The new memory starts from it. Your chat stays as it is.`}</p>
+          {note === null && error === null ? <p role="status" className="text-small text-text-muted">Writing a handoff note…</p> : null}
+          {note !== null ? (
+            <textarea
+              aria-label="Handoff note"
+              className="field-input mono min-h-48 flex-1 resize-y text-xs leading-5"
+              maxLength={8000}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          ) : null}
+          {error !== null && note === null ? (
+            <p role="alert" className="text-small text-text-secondary">
+              {error ? `${error} You can still continue; Kohlab will use a short summary of the chat.` : `${who} did not write a note. You can still continue; Kohlab will use a short summary of the chat.`}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="secondary" disabled={starting} onClick={onClose}>
+              Cancel
+            </Button>
+            {note !== null ? (
+              <Button variant="primary" disabled={starting || note.trim() === ""} onClick={() => void start(note.trim())}>
+                {starting ? "Starting…" : "Use this note"}
+              </Button>
+            ) : error !== null ? (
+              <Button variant="primary" disabled={starting} onClick={() => void start(null)}>
+                {starting ? "Starting…" : "Continue fresh"}
+              </Button>
+            ) : null}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export default function ChatView({ workspaceId, onPreview, previewing = false, previewOpen = false, onTurnEnd, compact = false, terminalProject = false }: Props) {
   const refresh = useApp((s) => s.refresh);
   const workspaces = useApp((s) => s.workspaces);
@@ -1481,9 +1396,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const agent = findWorkspace(workspaces, workspaceId)?.agent ?? "claude";
   const who = agentName(agent);
   const isClaude = agent === "claude";
-  // The AIs this chat can switch to: Claude, and the ACP agents the server reports installed.
-  const agentOptions = useNewAgent().options;
-  const agentReasons = useAgentReasons();
+  // The AI cards (account for the run strip, groups for the picker), and where the Run panel shows.
+  const { cards: providerCards } = useProviders();
+  const owner = useCan().own;
+  const run = useRunPanel({ previewOpen, compact });
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
   // When the current turn started (ms), whoever started it; background tasks still running; the model and mode the CLI reports.
@@ -1496,7 +1412,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // Claude's checklist (its TodoWrite list), and the helper agents it has running, by label.
   const [todos, setTodos] = useState<Todo[]>([]);
   const [helpers, setHelpers] = useState<string[]>([]);
-  const [helpersOpen, setHelpersOpen] = useState(false);
+  // The helpers as a tree (parents before children), the server's clock against this device's, and a fresh start waiting for idle.
+  const [helperTree, setHelperTree] = useState<HelperNode[]>([]);
+  const skewRef = useRef(0);
+  const [freshPending, setFreshPending] = useState(false);
+  // Continue fresh: the manual dialog, the banner's snooze (the percent it was dismissed at), and the switch while a save is in flight.
+  const [freshOpen, setFreshOpen] = useState(false);
+  const [bannerSnooze, setBannerSnooze] = useState<number | null>(null);
+  const [autoFreshLocal, setAutoFreshLocal] = useState<boolean | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
   // The CLI is retrying a request: which try, of how many. And the chat's usage, read when the last turn ended.
   const [retry, setRetry] = useState<{ attempt: number; max: number } | null>(null);
@@ -1623,6 +1546,9 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         // an older server sends no checklist or helpers
         setTodos(res.todos ?? []);
         setHelpers(res.helpers ?? []);
+        setHelperTree(res.helperTree ?? []);
+        setFreshPending(res.freshPending === true);
+        skewRef.current = res.now - Date.now();
         setRetry(res.retry);
         setUsage(res.usage);
         setModel(res.model);
@@ -1661,10 +1587,6 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   useEffect(() => {
     if (tasks.length === 0) setTasksOpen(false);
   }, [tasks.length]);
-  // The helper list closes itself when the last helper is gone.
-  useEffect(() => {
-    if (helpers.length === 0) setHelpersOpen(false);
-  }, [helpers.length]);
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -2250,6 +2172,24 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
+  /** Another AI's model was picked in the picker: switch to that AI, then choose the model once its snapshot lists it. */
+  const pendingModel = useRef<{ agent: string; value: string } | null>(null);
+  const pickOther = async (to: string, value: string | null) => {
+    if (value !== null) {
+      pendingModel.current = { agent: to, value };
+      window.setTimeout(() => {
+        if (pendingModel.current?.agent === to) pendingModel.current = null;
+      }, 15_000);
+    }
+    await switchAgent(to);
+  };
+  useEffect(() => {
+    const p = pendingModel.current;
+    if (!p || p.agent !== agent || !models.some((m) => m.value === p.value)) return;
+    pendingModel.current = null;
+    void pick("model", p.value, model, setModel);
+  }, [agent, models]);
+
   const working = busy && waiting === null;
   // The line under the last message: the newest tool line of this turn if the code has one, else "Working".
   const lastUserAllN = Math.max(0, ...events.filter((e) => e.kind === "user").map((e) => e.n));
@@ -2522,6 +2462,13 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           </div>
         );
       }
+      case "handoff":
+        return (
+          <details className="rounded-card bg-surface-raised px-4 py-2.5 text-sm">
+            <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary pointer-coarse:min-h-11">Handoff note</summary>
+            <pre className="mono mt-2 max-h-80 overflow-auto text-xs leading-5 whitespace-pre-wrap break-words text-text-secondary">{e.text}</pre>
+          </details>
+        );
       case "error":
         return (
           <p className="flex items-center gap-2 text-sm text-text-muted">
@@ -2544,6 +2491,40 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Default";
   // Never a bare "Mode": an unknown or not-yet-known mode shows the default mode's label.
   const modeText = (mode !== null ? MODES[mode] : undefined)?.label ?? MODES.default.label;
+  // The run strip: who, which account, model and mode, and what it is doing. Words only.
+  const ctxPercent = isClaude && usage?.context ? usage.context.percent : null;
+  const autoFresh = autoFreshLocal ?? ws?.autoFresh !== false;
+  const freshWaiting = isClaude && autoFresh && (freshPending || (ctxPercent !== null && ctxPercent >= 85 && (busy || waiting !== null || background > 0)));
+  const runningHelpers = helperTree.length > 0 ? helperTree.filter((h) => h.status === "running").length : helpers.length;
+  const stripState = waiting !== null ? "Waiting for you" : busy ? "Working" : freshWaiting && background > 0 ? "Will continue fresh when the background work finishes" : background > 0 || runningHelpers > 0 ? "In the background" : "Ready";
+  const stripExtra = [helpersWorkingText(runningHelpers), freshWaiting && (busy || waiting !== null) ? "Will continue fresh after this reply" : ""].filter(Boolean).join(" · ") || null;
+  const stripAccount = accountLabel(providerCards?.find((c) => c.id === agent) ?? { id: agent, name: who, kind: "cli", installed: true, version: null, state: "connected", checkedAt: 0, stale: false, accounts: [], actions: [] }, owner);
+  const strip = compact ? null : (
+    <RunStrip
+      ai={who}
+      account={stripAccount}
+      model={modelText}
+      mode={isClaude ? modeText : null}
+      state={stripState}
+      since={working ? busySince : null}
+      extra={stripExtra}
+      expanded={run.open}
+      onToggle={run.toggle}
+    />
+  );
+  // The banner: a long Claude chat offers a fresh memory at 70%, and again after each 10% more if it was put off.
+  const showBanner = can && !compact && ctxPercent !== null && ctxPercent >= 70 && !busy && waiting === null && background === 0 && (bannerSnooze === null || ctxPercent >= bannerSnooze + 10);
+  const setAutoFresh = async (on: boolean) => {
+    setAutoFreshLocal(on);
+    try {
+      await api.chatAutoFresh(workspaceId, on);
+      await refresh();
+    } catch (e) {
+      toast.error(failed("change that", e));
+    } finally {
+      setAutoFreshLocal(null);
+    }
+  };
   // The model menu's body, shared by the desktop model chip and the phone's combined chip.
   const modelMenu = (
     <>
@@ -2756,11 +2737,10 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     tasksOpen={tasksOpen}
                     onTasks={() => setTasksOpen((o) => !o)}
                     helpers={helpers}
-                    helpersOpen={helpersOpen}
-                    onHelpers={() => setHelpersOpen((o) => !o)}
+                    helpersOpen={run.open}
+                    onHelpers={run.toggle}
                   />
                 ) : null}
-                {working && helpersOpen && helpers.length > 0 ? <HelperList helpers={helpers} /> : null}
                 {!busy && background > 0 ? (
                   <button
                     type="button"
@@ -2861,6 +2841,24 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   />
                 ) : null}
   
+                {showBanner ? (
+                  <section aria-label="This chat is getting long" className="mb-2 flex flex-col gap-3 rounded-card bg-surface-raised px-4 py-3">
+                    <p className="text-small text-text-secondary">This chat is getting long. Continue with a fresh memory? Nothing is lost.</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <Button variant="secondary" size="sm" onClick={() => setFreshOpen(true)}>
+                        Continue fresh
+                      </Button>
+                      <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setBannerSnooze(ctxPercent)}>
+                        Not now
+                      </Button>
+                      <label className="flex min-h-8 cursor-pointer items-center gap-2 text-xs text-text-muted pointer-coarse:min-h-11" htmlFor="banner-auto-fresh">
+                        <input id="banner-auto-fresh" type="checkbox" className="size-4 shrink-0 accent-accent" checked={autoFresh} onChange={(e) => void setAutoFresh(e.target.checked)} />
+                        Do it for me
+                      </label>
+                    </div>
+                  </section>
+                ) : null}
+                {strip}
                 <Composer
                   ariaLabel="Message"
                   // The reading column pads 24px from 900px up (px-6), so the box's text starts where the messages do.
@@ -2998,64 +2996,15 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                           <CommandChoices commands={commands} onPick={insertCommand} />
                         </Menu>
                       ) : null}
-                      {!terminalProject && ws?.chat ? (
-                        <AgentChip
-                          className="max-md:hidden"
-                          agent={agent}
-                          options={agentOptions}
-                          onChange={(v) => void switchAgent(v)}
-                          disabled={busy}
-                          title={busy ? "Wait until the reply finishes" : undefined}
-                        />
-                      ) : null}
-                      <Menu
-                        side="top"
-                        align="start"
-                        label={`Model: ${modelText}`}
-                        trigger={
-                          <ComposerChip
-                            className="max-w-48 shrink-0 max-md:hidden"
-                            label={modelText}
-                            menu
-                            disabled={models.length === 0}
-                            title={models.length === 0 ? `Models load when ${who} starts` : !isClaude && model ? model : undefined}
-                          />
-                        }
-                      >
-                        {modelMenu}
-                      </Menu>
-                      {/* Phones: one chip for the AI and the model, its menu holding both groups. */}
-                      <Menu
-                        side="top"
-                        align="start"
-                        label={`AI and model: ${who}, ${modelText}`}
-                        trigger={
-                          <ComposerChip
-                            className="md:hidden min-w-0 max-w-[55%] shrink"
-                            label={isClaude ? modelText : `${who} · ${modelText}`}
-                            menu
-                            disabled={models.length === 0 && (terminalProject || !ws?.chat)}
-                            title={busy ? "Wait until the reply finishes to switch AI" : undefined}
-                          />
-                        }
-                      >
-                        {!terminalProject && ws?.chat ? (
-                          <>
-                            <MenuLabel>AI</MenuLabel>
-                            <MenuRadioGroup value={agent} onValueChange={(next) => !agentReasons[next] && void switchAgent(next)}>
-                              {agentOptions.map((o) => (
-                                <MenuRadioItem key={o} value={o} disabled={busy || !!agentReasons[o]}>
-                                  {agentName(o)}
-                                  {agentReasons[o] ? <span className="block text-xs text-text-muted">{agentReasons[o]}</span> : null}
-                                </MenuRadioItem>
-                              ))}
-                            </MenuRadioGroup>
-                            <MenuSeparator />
-                          </>
-                        ) : null}
-                        <MenuLabel>Model</MenuLabel>
-                        {modelMenu}
-                      </Menu>
+                      <ModelPicker
+                        agent={agent}
+                        modelText={modelText}
+                        currentMenu={modelMenu}
+                        canSwitch={!terminalProject && !!ws?.chat}
+                        busy={busy}
+                        noModels={models.length === 0}
+                        onPickOther={(a, m) => void pickOther(a, m)}
+                      />
                       {isClaude ? (
                         <Menu
                           side="top"
@@ -3109,10 +3058,59 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 ) : null}
               </div>
             </div>
+          ) : strip ? (
+            <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shell:px-6">
+              <div className="mx-auto w-full max-w-[720px]">{strip}</div>
+            </div>
           ) : null}
   
         </div>
-  
+
+        <RunPanel
+          docked={run.docked}
+          open={run.open}
+          onClose={() => run.setOpen(false)}
+          workspaceId={workspaceId}
+          agent={agent}
+          who={who}
+          isClaude={isClaude}
+          busy={busy}
+          waiting={waiting}
+          since={working ? busySince : null}
+          background={background}
+          helperTree={helperTree}
+          skew={skewRef.current}
+          canMutate={can}
+          owner={owner}
+          stopping={stopping}
+          onStopHelper={(id) => void stopTask(id)}
+          nowExtra={
+            <>
+              {todos.length > 0 ? <Checklist todos={todos} /> : null}
+              {background > 0 ? <TaskList tasks={tasks} stopping={stopping} onStop={(id) => void stopTask(id)} /> : null}
+            </>
+          }
+          events={events}
+          refetchKey={`${agent}|${ws?.notes ?? ""}|${events.reduce((m, e) => (e.kind === "done" ? e.n : m), 0)}`}
+          autoFresh={autoFresh}
+          onAutoFresh={(on) => void setAutoFresh(on)}
+          onContinueFresh={() => setFreshOpen(true)}
+          ctxPercent={ctxPercent}
+        />
+
+        {freshOpen ? (
+          <FreshDialog
+            workspaceId={workspaceId}
+            who={who}
+            onClose={() => setFreshOpen(false)}
+            onDone={() => {
+              setFreshOpen(false);
+              repoll();
+              void refresh();
+            }}
+          />
+        ) : null}
+
         {changesOf !== null ? (
           <ChangesDialog
             workspaceId={workspaceId}

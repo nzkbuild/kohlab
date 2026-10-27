@@ -66,6 +66,40 @@ Behaviour worth knowing, each asserted by a check:
   and `scripts/check-auth-hardening.mjs` with a real viewer and a real member, both
   created and removed by the check.
 
+## AI hub data
+
+Settings → AI and the model menus read which AIs are on the computer, whether each is
+signed in, its models and (for the owner) its account and plan usage. `providers.ts`
+builds this, and these rules hold for it. `scripts/check-providers.ts` and
+`scripts/check-providers-http.mjs` are the evidence.
+
+- **Owner only:** email, plan, usage windows, versions, error text and actions.
+  Members and viewers get which AIs are ready and their models, and nothing else
+  (`redactCard`, applied on the server). Share links get a 403.
+- **A probe never sends a message or calls a model.** Claude is only asked
+  `initialize` and `get_usage`; Codex only `initialize`, `account/read` and
+  `account/rateLimits/read`. The fake Claude in the check fails if it is ever sent a
+  user message.
+- **No file that holds a sign-in or a key is opened.** The code names no such path
+  (checked by a scan of `providers.ts`). Hermes is read through `hermes auth list`
+  heading lines only; omp through `omp models --json`. Commands that print keys or
+  are slow are never run (`omp token`, `hermes status`, `hermes dump`,
+  `hermes --version`, `codex-acp --help`).
+- **Children get only the allowlisted environment** (`childEnv`): never `KOHLAB_KEY`
+  or `ANTHROPIC_*` from the server. The check starts the server with canary secrets
+  and proves no probe saw them and no response holds them.
+- **Every process is bounded:** a timeout that ends it with SIGKILL, a cap on what it
+  may print, its error output dropped, one Claude probe at a time, Codex on private
+  standard input and output.
+- **Nothing runs on a timer.** A probe runs when someone opens the hub, a menu needs
+  it, or the owner presses Refresh (at most once per AI per 10 s, audited as
+  `providers.refresh`). Results are cached (1 to 10 min) and a failure is cached for
+  30 s, so a broken AI is not started again by every request.
+- **Known limit:** the hub reads the server user's accounts. A member whose AI runs
+  under their own computer account may be signed in differently from what it shows.
+- `GET .../chat/run` shows what the AI was told (the project notes and Kohlab's own
+  text) and tool names only: no tool server command line, settings or environment.
+
 ## Operational hardening
 
 - Run as the dedicated service user, never as root, and set `KOHLAB_KEY`.

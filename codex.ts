@@ -44,7 +44,8 @@ export function codexSignedIn(): Promise<boolean | null> {
     signedInCheck = {
       at: Date.now(),
       result: new Promise<boolean | null>((resolve) => {
-        execFile("codex", ["login", "status"], { timeout: 5000 }, (err, stdout, stderr) => {
+        // only the allowlisted environment, never the server's secrets; SIGKILL at the timeout so no probe lingers
+        execFile("codex", ["login", "status"], { timeout: 5000, killSignal: "SIGKILL", env: childEnv(homedir()) }, (err, stdout, stderr) => {
           const code = err ? (err as { code?: unknown }).code : 0;
           resolve(typeof code === "number" ? parseCodexLoggedIn(`${stdout}${stderr}`, code) : null);
         });

@@ -114,6 +114,10 @@ try {
   run("push stays out of terminals", "node", ["scripts/check-push.mjs"]);
   run("merge last mile", "node", ["scripts/check-merge.mjs"]);
   run("review gate (accept and discard)", "node", ["scripts/check-review-gate.mjs"]);
+  run("AI hub cards (parsers, redaction, picker, cache)", "bun", ["scripts/check-providers.ts"]);
+  run("helper tree and done line (stream lines, cap, order)", "bun", ["scripts/check-helpers.ts"]);
+  run("continue fresh (handoff note, first message, auto rule)", "bun", ["scripts/check-fresh.ts"]);
+  run("run text (picker groups, helper rows, strip, tokens)", "bun", ["scripts/check-run-text.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
   run("hooks stay above early returns (the cold-load crash)", "node", ["scripts/check-hooks-order.mjs"]);
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
@@ -125,6 +129,11 @@ try {
   run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);
   // Its own throwaway server, with a fake claude on PATH: a terminal waits for the chat's background work.
   run("background work holds the terminal (fake claude)", "node", ["scripts/check-chat-background.mjs"]);
+  // Own throwaway servers with fake claude, codex, hermes and omp on PATH; the hub checks create a member and a viewer and remove them again.
+  run("AI hub over HTTP (fake AIs, redaction, canary secrets)", "node", ["scripts/check-providers-http.mjs"]);
+  run("helper tree and run info over HTTP (fake claude)", "node", ["scripts/check-chat-helpers.mjs"]);
+  run("continue fresh over HTTP (fake claude)", "node", ["scripts/check-fresh-http.mjs"]);
+  run("AI hub in the browser (Settings, picker, run strip and panel)", "node", ["scripts/check-ai-hub-ui.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);

@@ -1,22 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, type ChatUsage, type ChatUsageWindow } from "../api";
 import { isTouchOnly } from "../lib/platform";
+import { resetsText, usageText } from "../lib/aiHub";
 import { useApp, useCan } from "../store";
 import { Button, Dialog, SkeletonRows } from "./ui";
 
 type Load = { state: "loading" } | { state: "ready"; plan: NonNullable<ChatUsage["plan"]> } | { state: "none" } | { state: "error" };
 
-/** "7:20 pm", "tomorrow at 9:00 am" or "Monday at 9:00 am": when a plan limit resets, in this device's time. Pure. */
-export function resetsText(iso: string | null, now = new Date()): string | null {
-  const at = iso ? new Date(iso) : null;
-  if (!at || Number.isNaN(at.getTime())) return null;
-  const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
-  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((day(at) - day(now)) / 86_400_000);
-  if (days === 0) return `resets at ${time}`;
-  if (days === 1) return `resets tomorrow at ${time}`;
-  return `resets ${at.toLocaleDateString([], { weekday: "long" })} at ${time}`;
-}
+export { resetsText };
 
 /** The Usage dialog: the owner's plan limits, and this chat's context when a Claude chat is open. Ctrl/Cmd+U opens it. */
 export default function UsageDialog() {
@@ -109,13 +100,13 @@ export default function UsageDialog() {
   );
 }
 
-function UsageRow({ label, window: w }: { label: string; window: ChatUsageWindow | null }) {
+/** One plan window: its name, a slim meter and "34% used · resets at 7:20 pm" (or "Limit reached. Resets …"). The AI hub shows the same rows. */
+export function UsageRow({ label, window: w, limited = false }: { label: string; window: Pick<ChatUsageWindow, "percent" | "resetsAt"> | null; limited?: boolean }) {
   const pct = w ? Math.max(0, Math.min(100, Math.round(w.percent))) : null;
-  const reset = w ? resetsText(w.resetsAt) : null;
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm text-text-secondary">{label}</span>
-      {pct === null ? (
+      {pct === null || !w ? (
         <p className="text-xs text-text-muted">Not shown for this plan</p>
       ) : (
         <>
@@ -130,7 +121,7 @@ function UsageRow({ label, window: w }: { label: string; window: ChatUsageWindow
           >
             <div className="h-full rounded-full bg-text-secondary" style={{ width: `${pct}%` }} />
           </div>
-          <p className="text-xs text-text-muted tabular-nums">{`${pct}% used${reset ? ` · ${reset}` : ""}`}</p>
+          <p className="text-xs text-text-muted tabular-nums">{usageText(w.percent, w.resetsAt, limited)}</p>
         </>
       )}
     </div>

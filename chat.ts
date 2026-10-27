@@ -100,10 +100,12 @@ export type Body =
   /** reply: what the person answered or asked for, when a question or plan card was answered with text. */
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
   /** worked: how long the turn ran (ms). planDelta: the plan's five-hour window percent the turn used, for the owner only (snapshot strips it for others). */
-  | { kind: "done"; worked?: number; planDelta?: number }
+  | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number } }
   /** planDelta: the plan share of the turn that ended just before it, sent once the usage is read (owner only). The chat view merges it into that turn's done line. */
   | { kind: "plan"; planDelta: number }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  /** The handoff note a fresh session starts from (see "Continue fresh"): shown as a collapsed card. */
+  | { kind: "handoff"; text: string };
 
 export type ChatEvent = { n: number; at: number } & Body;
 
@@ -406,6 +408,13 @@ interface Live {
   newTasks: Map<string, { subject: string; form?: string }>;
   /** helper agents still running, by tool_use id, with a label for each */
   helpers: Map<string, string>;
+  /** the helper agents of the run view (tree), from the CLI's own lines. In memory only. */
+  helperTree: HelperNode[];
+  /** the tool names and tool servers the CLI reported in its init line; null until it has */
+  tools: string[] | null;
+  mcp: { name: string; status: string }[];
+  /** the init line has come */
+  inited?: boolean;
   /** tool_use ids whose line was shown, so their result can follow (and is dropped once it has) */
   shownTools: Set<string>;
   /** the CLI is retrying a failed request: which try, and how many tries in all */
@@ -667,6 +676,180 @@ export function helperLabel(input: unknown): string {
   return (d || p || "a helper").slice(0, 80).trim();
 }
 
+/** One helper agent in the run view (chat snapshot helperTree). Opaque ids: parentId points at another node's id. */
+export interface HelperNode {
+  id: string;
+  taskId: string | null;
+  parentId: string | null;
+  label: string;
+  kind: string | null;
+  model: string | null;
+  status: "running" | "done" | "failed" | "stopped";
+  background: boolean;
+  startedAt: number;
+  endedAt: number | null;
+  tools: number | null;
+  tokens: number | null;
+  lastTool: string | null;
+  summary: string | null;
+  canStop: boolean;
+}
+
+const HELPER_CAP = 50;
+const oneLineText = (x: unknown, n: number): string => (typeof x === "string" ? x.replace(/\s+/g, " ").trim().slice(0, n) : "");
+const textOrNull = (x: unknown, n: number): string | null => oneLineText(x, n) || null;
+const countOrNull = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? Math.round(x) : null);
+
+/** Parents before their children (an unknown parent makes a root), otherwise in the order they came. */
+function orderNodes(nodes: HelperNode[]): HelperNode[] {
+  const ids = new Set(nodes.map((n) => n.id));
+  const out: HelperNode[] = [];
+  const seen = new Set<string>();
+  const visit = (n: HelperNode) => {
+    if (seen.has(n.id)) return;
+    seen.add(n.id);
+    out.push(n);
+    for (const c of nodes) if (c.parentId === n.id) visit(c);
+  };
+  for (const n of nodes) if (!n.parentId || !ids.has(n.parentId)) visit(n);
+  for (const n of nodes) visit(n); // a loop of parents: still shown
+  return out;
+}
+
+/** A task event's end time as epoch ms: seconds, milliseconds or an ISO string. Null when it is none of them. */
+function endTimeOf(x: unknown): number | null {
+  const t = typeof x === "string" ? Date.parse(x) : typeof x === "number" ? x : NaN;
+  if (!Number.isFinite(t) || t <= 0) return null;
+  return t < 1e12 ? Math.round(t * 1000) : Math.round(t);
+}
+
+/** The helper agents after one line of the CLI's stream. Every field is optional: a line that is not about helpers changes nothing. Pure (returns a new list). */
+export function applyHelperLine(nodes: HelperNode[], m: any, now: number): HelperNode[] {
+  if (!m || typeof m !== "object") return nodes;
+  const sub = m.type === "system" ? m.subtype : undefined;
+  const isTask = sub === "task_started" || sub === "task_progress" || sub === "task_updated" || sub === "task_notification";
+  if (!isTask && m.type !== "assistant" && m.type !== "user") return nodes;
+  const list = nodes.map((n) => ({ ...n }));
+  const find = (toolUseId: unknown, taskId: unknown) =>
+    list.find((n) => (typeof toolUseId === "string" && toolUseId !== "" && n.id === toolUseId) || (typeof taskId === "string" && taskId !== "" && n.taskId === taskId));
+  const make = (id: string, over: Partial<HelperNode> = {}): HelperNode => ({
+    id, taskId: null, parentId: null, label: "a helper", kind: null, model: null, status: "running", background: false,
+    startedAt: now, endedAt: null, tools: null, tokens: null, lastTool: null, summary: null, canStop: false, ...over,
+  });
+  const finish = (n: HelperNode, status: HelperNode["status"], at: number = now) => {
+    n.status = status;
+    n.endedAt ??= at;
+  };
+  if (m.type === "assistant") {
+    const parent = typeof m.parent_tool_use_id === "string" && m.parent_tool_use_id ? m.parent_tool_use_id : null;
+    const blocks: any[] = Array.isArray(m.message?.content) ? m.message.content : [];
+    if (parent) {
+      const n = list.find((x) => x.id === parent);
+      if (n) {
+        const model = textOrNull(m.message?.model, 100);
+        if (model) n.model = model;
+        const last = [...blocks].reverse().find((b) => b?.type === "tool_use" && typeof b.name === "string");
+        if (last) n.lastTool = oneLineText(last.name, 100);
+      }
+    }
+    for (const b of blocks) {
+      if (b?.type !== "tool_use" || (b.name !== "Agent" && b.name !== "Task") || typeof b.id !== "string" || !b.id) continue;
+      const have = find(b.id, null);
+      const kind = textOrNull(b.input?.subagent_type, 60);
+      const model = textOrNull(b.input?.model, 100);
+      if (have) {
+        have.kind ??= kind;
+        have.model ??= model;
+        continue;
+      }
+      list.push(make(b.id, { parentId: parent, label: helperLabel(b.input), kind, model, background: b.input?.run_in_background === true }));
+    }
+  } else if (m.type === "user") {
+    for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
+      if (b?.type !== "tool_result") continue;
+      const n = find(b.tool_use_id, null);
+      // a helper started in the background answers its call at once and goes on
+      if (n && n.status === "running" && !n.background) finish(n, b.is_error ? "failed" : "done");
+    }
+  } else if (sub === "task_started") {
+    const tuid = typeof m.tool_use_id === "string" && m.tool_use_id ? m.tool_use_id : null;
+    const tid = typeof m.task_id === "string" && m.task_id ? m.task_id : null;
+    if (!tuid && !tid) return nodes;
+    let n = find(tuid, tid);
+    if (!n) {
+      // a background command is a task too, but not a helper
+      if (typeof m.task_type === "string" && /bash|shell/i.test(m.task_type) && !m.subagent_type) return nodes;
+      n = make(tuid ?? `task:${tid}`, { label: oneLineText(m.description, 80) || "a helper" });
+      list.push(n);
+    } else if (n.label === "a helper") n.label = oneLineText(m.description, 80) || n.label;
+    n.taskId ??= tid;
+    n.kind ??= textOrNull(m.subagent_type, 60);
+    if (m.is_backgrounded === true) n.background = true;
+    if (!n.parentId && typeof m.parent_task_id === "string" && m.parent_task_id) n.parentId = list.find((x) => x.taskId === m.parent_task_id)?.id ?? `task:${m.parent_task_id}`;
+  } else if (sub === "task_progress") {
+    const n = find(m.tool_use_id, m.task_id);
+    if (!n) return nodes;
+    const tools = countOrNull(m.usage?.tool_uses);
+    const tokens = countOrNull(m.usage?.total_tokens);
+    if (tools !== null) n.tools = tools;
+    if (tokens !== null) n.tokens = tokens;
+    const last = textOrNull(m.last_tool_name, 100);
+    if (last) n.lastTool = last;
+    const summary = textOrNull(m.summary, 200);
+    if (summary) n.summary = summary;
+  } else if (sub === "task_updated") {
+    const n = find(null, m.task_id);
+    if (!n) return nodes;
+    const patch = m.patch ?? {};
+    const to = patch.status === "completed" ? "done" : patch.status === "failed" ? "failed" : patch.status === "killed" ? "stopped" : patch.status === "pending" || patch.status === "running" || patch.status === "paused" ? "running" : null;
+    if (to && to !== "running") {
+      n.status = to;
+      n.endedAt ??= endTimeOf(patch.end_time) ?? now;
+    } else if (to === "running" && n.status === "running") n.endedAt = null;
+    if (typeof patch.is_backgrounded === "boolean") n.background = patch.is_backgrounded;
+    const err = textOrNull(patch.error, 200);
+    if (err && n.status === "failed") n.summary = err;
+  } else if (sub === "task_notification") {
+    const n = find(m.tool_use_id, m.task_id);
+    if (!n) return nodes;
+    const to = m.status === "completed" ? "done" : m.status === "failed" ? "failed" : m.status === "stopped" ? "stopped" : null;
+    if (to) finish(n, to);
+    const summary = textOrNull(m.summary, 200);
+    if (summary) n.summary = summary;
+    const tools = countOrNull(m.usage?.tool_uses);
+    const tokens = countOrNull(m.usage?.total_tokens);
+    if (tools !== null) n.tools = tools;
+    if (tokens !== null) n.tokens = tokens;
+  }
+  while (list.length > HELPER_CAP) {
+    const old = list.findIndex((n) => n.status !== "running");
+    list.splice(old < 0 ? 0 : old, 1);
+  }
+  return orderNodes(list);
+}
+
+/** A new turn: helpers that finished are gone, the ones still running in the background stay. */
+export const helpersNewTurn = (nodes: HelperNode[]): HelperNode[] => nodes.filter((n) => n.status === "running");
+/** A turn's result: helpers working in the foreground are done, background ones go on. */
+export const helpersAtResult = (nodes: HelperNode[], now: number): HelperNode[] =>
+  nodes.map((n) => (n.status === "running" && !n.background ? { ...n, status: "done" as const, endedAt: now } : n));
+/** The process ended: nothing is running any more. */
+export const helpersAtExit = (nodes: HelperNode[], now: number): HelperNode[] =>
+  nodes.map((n) => (n.status === "running" ? { ...n, status: "stopped" as const, endedAt: now } : n));
+
+/** The model and token count a done line carries, from the turn's result line. Each is left out when unknown. Pure. */
+export function doneFields(model: unknown, usage: unknown): { model?: string; tokens?: { in: number; out: number } } {
+  const u = (usage ?? {}) as Record<string, unknown>;
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : null);
+  const parts = [n(u.input_tokens), n(u.cache_read_input_tokens), n(u.cache_creation_input_tokens)];
+  const out = n(u.output_tokens);
+  const known = parts.some((x) => x !== null) || out !== null;
+  return {
+    ...(typeof model === "string" && model ? { model } : {}),
+    ...(known ? { tokens: { in: parts.reduce<number>((a, x) => a + (x ?? 0), 0), out: out ?? 0 } } : {}),
+  };
+}
+
 /** The usage the footer shows, from the two replies: get_context_usage and get_usage. Pure. */
 export function usageOf(context: any, plan: any): Usage {
   const used = Number(context?.totalTokens);
@@ -804,7 +987,16 @@ function load(id: string): Chat {
   return c;
 }
 
+/** A handoff note being written: the reply is caught here instead of shown, and the turn's end settles it. */
+const captures = new Map<string, { text: string; settle: (text: string | null) => void }>();
+
 function emit(id: string, body: Body): ChatEvent {
+  const cap = captures.get(id);
+  if (cap && (body.kind === "assistant" || body.kind === "done" || body.kind === "error")) {
+    if (body.kind === "assistant") cap.text += (cap.text ? "\n" : "") + body.text;
+    else cap.settle(body.kind === "done" ? cap.text : null);
+    return { n: 0, at: Date.now(), ...body } as ChatEvent; // not kept: this turn is not part of the visible chat
+  }
   const c = load(id);
   const ev = { n: (c.events.at(-1)?.n ?? 0) + 1, at: Date.now(), ...body } as ChatEvent;
   c.events.push(ev);
@@ -823,21 +1015,24 @@ const planPercent = (id: string): number | undefined => usages.get(id)?.plan?.fi
 
 /** A Claude turn begins (a send, a retry, or Claude starting one itself): its clock starts, and the plan reading it starts from is kept. */
 function turnBegan(id: string, live: Live) {
+  live.helperTree = helpersNewTurn(live.helperTree);
   live.busySince = Date.now();
   live.planStart = planPercent(id);
 }
 
 /** A Claude turn ends: the done line is written at once. The plan share comes after it as a plan line, once the usage is read (at most 3 s), so the reply never waits for it.
  *  ponytail: if a usage read is already running, the reading taken here may be a little stale. Accepted. */
-function turnDone(id: string, live: Live) {
+function turnDone(id: string, live: Live, result?: any) {
   const since = live.busySince;
   const planStart = live.planStart;
   const worked = since !== undefined ? Date.now() - since : undefined;
-  emit(id, { kind: "done", ...(worked !== undefined ? { worked } : {}) });
+  const hidden = captures.has(id); // a handoff note's turn: no done line, no plan share
+  emit(id, { kind: "done", ...(worked !== undefined ? { worked } : {}), ...doneFields(live.model, result?.usage) });
   void Promise.race([readUsage(id, live, true), new Promise((r) => setTimeout(r, 3000))]).then(() => {
     const end = planPercent(id);
     const planDelta = planStart !== undefined && end !== undefined && end >= planStart ? end - planStart : undefined;
-    if (planDelta !== undefined) emit(id, { kind: "plan", planDelta });
+    if (planDelta !== undefined && !hidden) emit(id, { kind: "plan", planDelta });
+    maybeAutoFresh(id);
   });
 }
 
@@ -967,6 +1162,12 @@ function onLine(id: string, live: Live, line: string) {
   } catch {
     return; // not JSON: ignore
   }
+  // The helper tree reads every line, including a helper's own (which the chat itself drops below). A bad line must never break the chat.
+  try {
+    live.helperTree = applyHelperLine(live.helperTree, m, Date.now());
+  } catch (e) {
+    console.warn("[chat] helper tree:", (e as Error).message);
+  }
   // Claude can start a turn by itself (a background task finished): show it as working, as a send does.
   if (isTurnStart(m) && !chatBusy.has(id)) {
     chatBusy.add(id);
@@ -983,7 +1184,10 @@ function onLine(id: string, live: Live, line: string) {
     // only the current process counts: a retired or stopped one may still print lines before it exits
     if (procs.get(id) === live) {
       if (live.tasks.length) chatBackground.add(id);
-      else chatBackground.delete(id);
+      else {
+        chatBackground.delete(id);
+        maybeAutoFresh(id); // a continue-fresh that waited for the background work
+      }
     }
     return;
   }
@@ -1029,6 +1233,15 @@ function onLine(id: string, live: Live, line: string) {
     live.resuming = undefined;
     if (typeof m.model === "string") live.model = m.model;
     if (typeof m.permissionMode === "string") live.mode = m.permissionMode;
+    live.inited = true;
+    // names only: never a tool server's command line or settings
+    if (Array.isArray(m.tools)) live.tools = m.tools.filter((t: unknown) => typeof t === "string").slice(0, 200).map((t: string) => t.slice(0, 100));
+    if (Array.isArray(m.mcp_servers)) {
+      live.mcp = m.mcp_servers
+        .filter((x: any) => typeof x?.name === "string")
+        .slice(0, 50)
+        .map((x: any) => ({ name: x.name.slice(0, 100), status: typeof x.status === "string" ? x.status.slice(0, 40) : "unknown" }));
+    }
     lastSeen.set(id, { model: live.model, mode: live.mode });
     persistCaps(id);
     if (typeof m.session_id === "string") {
@@ -1104,10 +1317,11 @@ function onLine(id: string, live: Live, line: string) {
       console.warn("[chat] claude result error:", raw.slice(0, 200));
       emit(id, { kind: "error", text: friendlyError(raw) });
     }
-    turnDone(id, live); // reads the start of the turn's clock first; the done line follows its plan reading
+    turnDone(id, live, m); // reads the start of the turn's clock first; the done line follows its plan reading
     chatBusy.delete(id);
     live.busySince = undefined;
     live.helpers.clear();
+    live.helperTree = helpersAtResult(live.helperTree, Date.now());
     if (live.todos.every((t) => t.status === "done")) live.todos = [];
     finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
   }
@@ -1122,6 +1336,7 @@ function onExit(id: string, live: Live) {
   }
   if (!procs.has(id)) chatBackground.delete(id); // this process's background work ends with it
   live.asks.clear();
+  live.helperTree = helpersAtExit(live.helperTree, Date.now());
   for (const p of live.pending.values()) {
     clearTimeout(p.timer);
     p.reject(new Error("Claude stopped"));
@@ -1215,6 +1430,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     todos: [],
     newTasks: new Map(),
     helpers: new Map(),
+    helperTree: [],
+    tools: null,
+    mcp: [],
     shownTools: new Set(),
     model: null,
     mode: null,
@@ -1257,7 +1475,11 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
   const events = load(id).events
     .filter((e) => e.n > after)
     .filter((e) => see.owner || e.kind !== "plan")
-    .map((e): ChatEvent => (e.kind === "done" && !see.owner && e.planDelta !== undefined ? { n: e.n, at: e.at, kind: "done", ...(e.worked !== undefined ? { worked: e.worked } : {}) } : e));
+    .map((e): ChatEvent => {
+      if (e.kind !== "done" || see.owner || e.planDelta === undefined) return e;
+      const { planDelta: _plan, ...rest } = e;
+      return rest;
+    });
   const live = procs.get(id);
   // the first read of usage comes with the first poll that finds none (a restart, or a chat not yet used)
   if (live && !usages.has(id)) void readUsage(id, live, false);
@@ -1281,6 +1503,10 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     tasks: cur?.tasks ?? [],
     todos: cur?.todos ?? [],
     helpers: [...(cur?.helpers.values() ?? [])],
+    helperTree: (live?.helperTree ?? []).map((n): HelperNode => ({ ...n, canStop: n.status === "running" && n.taskId !== null && live!.tasks.some((t) => t.id === n.taskId) })),
+    // continue-fresh: the person's switch for doing it by itself, and whether it waits for the turn or the background work to end
+    fresh: { auto: ws.autoFresh !== false, pending: freshPending.has(id) },
+    freshPending: freshPending.has(id),
     retry: cur?.retry ?? null,
     usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
     // one rule: a live process, else the project's saved choice, else what was last seen
@@ -1370,13 +1596,14 @@ function handoffMessage(id: string, ws: Workspace, text: string): string {
     if (summary) parts.push(`Context: this conversation started with another assistant. What happened so far:\n${summary}`);
   }
   if (ws.branchContext) parts.push(`Context: this conversation was started from an earlier one. What happened there:\n${ws.branchContext}`);
+  if (ws.freshNote) parts.push(`Context: we are continuing in a fresh session. The handoff note from the previous session:\n${ws.freshNote}`);
   if (ws.restoredFrom !== undefined) parts.push(`Note: the person restored the project files to how they were before their message “${ws.restoredFrom}”. Files changed after that point were undone.`);
   if (parts.length === 0) return text;
   return `${parts.join("\n\n")}\n\nThe person's new message:\n${text}`;
 }
 
 /** Whether the next message still has a catch-up, a branch context or a restore note to carry. */
-const hasPendingContext = (ws: Workspace) => ws.handoffAfter !== undefined || ws.branchContext !== undefined || ws.restoredFrom !== undefined;
+const hasPendingContext = (ws: Workspace) => ws.handoffAfter !== undefined || ws.branchContext !== undefined || ws.restoredFrom !== undefined || ws.freshNote !== undefined;
 
 /** The catch-up, context and note a message carried are spent: that message has been sent. */
 function clearHandoff(id: string) {
@@ -1386,6 +1613,7 @@ function clearHandoff(id: string) {
       delete w.handoffAfter;
       delete w.branchContext;
       delete w.restoredFrom;
+      delete w.freshNote;
     }
   });
 }
@@ -1590,8 +1818,19 @@ function freshestPlan(): { plan: NonNullable<Usage["plan"]>; at: number } | null
   return best;
 }
 
-/** Plan usage with no chat running: a claude that is only asked get_usage. No user message, so no model call. Killed after its reply, or at 10 s. */
-async function headlessPlanUsage(): Promise<Usage["plan"]> {
+/** What one headless claude says about the account: who is signed in, the models it offers and the plan limits. */
+export interface ClaudeProbe {
+  /** the initialize reply's account (email, subscriptionType, apiProvider, apiKeySource, tokenSource); null when it had none */
+  account: Record<string, unknown> | null;
+  models: Caps["models"];
+  /** the whole get_usage reply, for the hub's windows */
+  planRaw: any;
+  plan: Usage["plan"];
+  at: number;
+}
+
+/** A claude that is only asked initialize and get_usage. No user message, so no model call. Killed after its replies, or at 12 s. */
+async function headlessProbe(): Promise<ClaudeProbe> {
   const s = await loadState();
   const cmd = (s.agents?.claude || "claude").split(/\s+/)[0];
   const bin = Bun.which(cmd);
@@ -1601,17 +1840,30 @@ async function headlessPlanUsage(): Promise<Usage["plan"]> {
   const child = spawn(bin, args, { cwd: dir, env: childEnv(homedir()), stdio: ["pipe", "pipe", "pipe"] });
   child.stdin!.on("error", () => {}); // a dead process: the exit below reports it
   child.stderr!.on("data", () => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await new Promise<Usage["plan"]>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Claude did not answer in time")), 10_000);
+    return await new Promise<ClaudeProbe>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("Claude did not answer in time")), 12_000);
+      let init: any;
+      let got: any;
+      let bytes = 0;
+      child.stdout!.on("data", (d: Buffer) => {
+        bytes += d.length;
+        if (bytes > 4 * 1024 * 1024) reject(new Error("Claude said too much"));
+      });
       createInterface({ input: child.stdout! }).on("line", (l) => {
-        const init = controlReplyOf(l, "usage-init");
-        if (init && !init.ok) reject(new Error("Claude did not start"));
-        const got = controlReplyOf(l, "usage-get");
-        if (!got) return;
-        clearTimeout(timer);
-        if (got.ok) resolve(planUsageOf(got.response));
-        else reject(new Error("Claude could not say its usage"));
+        const i = controlReplyOf(l, "usage-init");
+        if (i && !i.ok) reject(new Error("Claude did not start"));
+        else if (i) init = i.response ?? {};
+        const g = controlReplyOf(l, "usage-get");
+        if (g) {
+          if (!g.ok) reject(new Error("Claude could not say its usage"));
+          else got = g.response ?? {};
+        }
+        if (init !== undefined && got !== undefined) {
+          const acct = init.account && typeof init.account === "object" ? (init.account as Record<string, unknown>) : null;
+          resolve({ account: acct, models: modelList(init.models), planRaw: got, plan: planUsageOf(got), at: Date.now() });
+        }
       });
       child.on("error", (e) => reject(e));
       child.on("exit", () => reject(new Error("Claude stopped")));
@@ -1619,14 +1871,32 @@ async function headlessPlanUsage(): Promise<Usage["plan"]> {
       child.stdin!.write(JSON.stringify({ type: "control_request", request_id: "usage-get", request: { subtype: "get_usage" } }) + "\n");
     });
   } finally {
+    clearTimeout(timer);
     child.kill("SIGKILL");
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-/** The owner's plan usage for the Usage dialog. A reading under 2 minutes old is used as is; else a live chat reads it now; else a headless claude does, cached 60 s. Throws when none can read it. */
-// ponytail: one headless claude per 60 s at most, no shared process. Upgrade path: keep one warm if the dialog is opened often.
-let headlessCache: { plan: Usage["plan"]; at: number } | null = null;
+/** The account, models and plan limits, from one headless claude. A reading younger than maxAgeMs is reused; callers at the same moment share one spawn (never two at once). Throws when none can read it.
+ *  ponytail: one spawn at a time, no warm process. Upgrade path: keep one warm if the hub is opened very often. */
+let probeCache: ClaudeProbe | null = null;
+let probeInflight: Promise<ClaudeProbe> | null = null;
+export function claudeProbe(maxAgeMs = 300_000): Promise<ClaudeProbe> {
+  if (probeCache && Date.now() - probeCache.at < maxAgeMs) return Promise.resolve(probeCache);
+  probeInflight ??= headlessProbe()
+    .then((p) => (probeCache = p))
+    .finally(() => {
+      probeInflight = null;
+    });
+  return probeInflight;
+}
+
+/** The models an AI offered when last seen (its own list, from a chat with it). Empty until then. */
+export function agentModels(agent: string): Caps["models"] {
+  return agentInfo(agent).models;
+}
+
+/** The owner's plan usage for the Usage dialog. A reading under 2 minutes old is used as is; else a live chat reads it now; else a headless claude does (shared with the AI hub, reused up to 60 s). Throws when none can read it. */
 export function ownerPlanUsage(): Promise<{ plan: Usage["plan"]; at: number }> {
   // Concurrent requests share one read.
   inflightUsage ??= readOwnerPlanUsage().finally(() => {
@@ -1639,7 +1909,7 @@ async function readOwnerPlanUsage(): Promise<{ plan: Usage["plan"]; at: number }
   const now = Date.now();
   const fresh = freshestPlan();
   if (fresh && now - fresh.at < 120_000) return fresh;
-  if (headlessCache && now - headlessCache.at < 60_000) return headlessCache;
+  if (probeCache && now - probeCache.at < 60_000) return probeCache;
   for (const [id, live] of procs) {
     if (live.closed || live.stopping) continue;
     await readUsage(id, live, true);
@@ -1647,8 +1917,8 @@ async function readOwnerPlanUsage(): Promise<{ plan: Usage["plan"]; at: number }
     if (got && got.at >= now) return got;
     break;
   }
-  headlessCache = { plan: await headlessPlanUsage(), at: Date.now() };
-  return headlessCache;
+  const p = await claudeProbe(60_000);
+  return { plan: p.plan, at: p.at };
 }
 
 const MENTION_CAP = 50;
@@ -1875,6 +2145,8 @@ async function switchAgent(id: string, value: unknown): Promise<{ ok: true }> {
  *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo), and "agent" (switch the AI). */
 export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
   if (action === "agent") return switchAgent(id, value);
+  if (action === "fresh") return freshControl(id, value);
+  if (action === "autoFresh") return autoFreshSetting(id, value);
   if (action === "files") return { ok: true, files: await fileMentions(id, value) };
   if (isAcp(await getWorkspace(id))) return acpControl(id, action, value);
   if (action === "stop_task") return stopTask(id, value);
@@ -2147,4 +2419,291 @@ export async function chatBranch(id: string, n: unknown): Promise<void> {
       if (w) w.branchContext = summary;
     });
   }
+}
+
+// ---- Continue fresh: a new AI session that picks up from a handoff note the old one wrote ----
+
+/** The context fullness (percent) from which the chat suggests a fresh start, and from which Kohlab does it by itself (when allowed). */
+export const FRESH_BANNER_PERCENT = 70;
+export const FRESH_AUTO_PERCENT = 85;
+
+/** The one message the old session is sent. It is not shown as the person's message. */
+export const HANDOFF_REQUEST =
+  "Before we continue in a fresh session, write a handoff note so a new session can pick up exactly where we are. " +
+  "Reply ONLY with a fenced block ```handoff containing these headings: Goal, Done, In progress, Next steps, Key decisions, Files that matter, Open questions. " +
+  "Be specific and brief (under 600 words). Do not change any files.";
+
+const HANDOFF_CAP = 8000;
+
+/** The handoff note in an AI's reply: the first closed ```handoff block, trimmed and cut to 8000 characters. Fences inside it (with a language) stay part of it; a block opened with four or more backticks holds plain three-backtick fences. Null when there is none. Pure. */
+export function extractHandoff(reply: string): string | null {
+  const lines = reply.replace(/\r/g, "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^\s{0,3}(`{3,})\s*handoff\s*$/i.exec(lines[i]);
+    if (!open) continue;
+    const ticks = open[1].length;
+    let depth = 0;
+    let closed = false;
+    const body: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const fence = /^\s{0,3}(`{3,})(.*)$/.exec(lines[j]);
+      if (fence) {
+        const n = fence[1].length;
+        const info = fence[2].trim();
+        if (n >= ticks && info === "" && depth === 0) {
+          closed = true;
+          break;
+        }
+        if (ticks === 3 && n === 3) {
+          if (info !== "") depth++;
+          else if (depth > 0) depth--;
+        }
+      }
+      body.push(lines[j]);
+    }
+    const text = body.join("\n").trim();
+    if (closed && text) return text.slice(0, HANDOFF_CAP);
+  }
+  return null;
+}
+
+const HANDOFF_HEADINGS = ["goal", "done", "in progress", "next steps", "key decisions", "files that matter", "open questions"];
+
+/** Whether a handoff note has anything under "In progress" or "Next steps" (so the new session can be sent on at once). Pure. */
+export function handoffHasWork(note: string): boolean {
+  const lines = note.split("\n");
+  const clean = (l: string) => l.replace(/^[\s#>*_-]+/, "").replace(/[\s*_]+$/, "");
+  const empty = (t: string) => t.replace(/^[\s*_-]+/, "").trim() === "" || /^(none|n\/a|nothing|nil|-+)\.?$/i.test(t.replace(/^[\s*_-]+/, "").trim());
+  let current: string | null = null;
+  for (const l of lines) {
+    const c = clean(l);
+    const low = c.toLowerCase();
+    const h = HANDOFF_HEADINGS.find((x) => low === x || low.startsWith(`${x}:`));
+    if (h) {
+      current = h;
+      if ((h === "in progress" || h === "next steps") && low.startsWith(`${h}:`) && !empty(c.slice(h.length + 1))) return true;
+      continue;
+    }
+    if ((current === "in progress" || current === "next steps") && !empty(c)) return true;
+  }
+  return false;
+}
+
+/** The first message of the fresh session: the handoff note, the project's notes and the open checklist. Pure. */
+export function freshMessage(note: string, notes: string, todos: Pick<Todo, "text" | "status">[]): string {
+  const open = todos.filter((t) => t.status !== "done");
+  const parts = [`We are continuing in a fresh session. Here is the handoff note from the previous session:\n${note}`];
+  if (notes) parts.push(`Project notes:\n${notes}`);
+  if (open.length) parts.push(`Open checklist:\n${open.map((t) => `- [${t.status === "active" ? "~" : " "}] ${t.text}`).join("\n")}`);
+  parts.push("Continue with the next step.");
+  return parts.join("\n\n");
+}
+
+/** Whether Kohlab should continue fresh by itself now: "now", "pending" (wait for the turn or the background work to end) or "no". Pure. */
+export function freshDecision(x: { percent: number | null; auto: boolean; busy: boolean; waiting: boolean; background: boolean; recent: boolean; running: boolean }): "now" | "pending" | "no" {
+  if (x.running || x.recent || !x.auto || x.percent === null || x.percent < FRESH_AUTO_PERCENT) return "no";
+  return x.busy || x.waiting || x.background ? "pending" : "now";
+}
+
+/** Projects where a continue-fresh is under way, and those where it waits for the turn or the background work to end. */
+const freshing = new Set<string>();
+const freshPending = new Set<string>();
+/** When each project last continued fresh: a second one right after would loop if the new session starts full. */
+const lastFreshAt = new Map<string, number>();
+
+/** A message the person did not write, sent to the AI as one is, with no bubble in the chat. Claude or an ACP agent. */
+async function sendHidden(id: string, text: string): Promise<void> {
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
+  if (chatBusy.has(id)) throw new ChatError(409, "The AI is still working. Wait until it finishes, then try again.");
+  chatBusy.add(id);
+  chatWaiting.delete(id);
+  try {
+    await markStarted(id);
+    if (isAcp(ws)) {
+      const cur = acps.get(id);
+      const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
+      const notes = notesOf(ws);
+      acp.prompt(acp.freshSession && notes ? notesMessagePrefix(notes) + text : text);
+      acp.freshSession = false;
+      return;
+    }
+    retireStale(id, ws);
+    const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
+    live.msg = text;
+    turnBegan(id, live);
+    live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null }) + "\n");
+  } catch (e) {
+    chatBusy.delete(id);
+    await finish(id).catch(() => {});
+    throw e;
+  }
+}
+
+/** Why a continue-fresh cannot start right now, as a plain sentence; null when it can. */
+async function freshBlocker(id: string, ws: Workspace, term: boolean): Promise<string | null> {
+  if (chatBusy.has(id)) return "The AI is still working. Wait until it finishes, then try again.";
+  if (chatWaiting.has(id)) return "The AI is waiting for your answer. Answer it first, then try again.";
+  if (chatBackground.has(id)) return "The AI is still doing work in the background. Wait until it finishes, then try again.";
+  if (restoring.has(id)) return "The project's files are being put back. Try again in a moment.";
+  if (term ? await isAlive(ws) : await resumeOpen(id)) return "Claude is open in the terminal. Close it there first.";
+  return null;
+}
+
+/** Asks the current session for its handoff note and catches the reply (it is not shown as a message). Falls back to a summary of the chat when there is no block, an error, or no answer in 120 s. */
+async function writeHandoff(id: string): Promise<string> {
+  const ws = await getWorkspace(id);
+  emit(id, { kind: "note", text: "Writing a handoff note…" });
+  const caught = await new Promise<string | null>((resolve) => {
+    const timer = setTimeout(() => settle(null), 120_000);
+    const settle = (text: string | null) => {
+      clearTimeout(timer);
+      captures.delete(id);
+      resolve(text);
+    };
+    captures.set(id, { text: "", settle });
+    sendHidden(id, HANDOFF_REQUEST).catch((e) => {
+      console.warn("[chat] handoff request:", (e as Error).message);
+      settle(null);
+    });
+  });
+  // a turn that did not end in time is cut off, so the chat is free again
+  if (chatBusy.has(id)) stop(id);
+  return (caught !== null ? extractHandoff(caught) : null) ?? handoffText(load(id).events, ws.agent, 7500).slice(0, HANDOFF_CAP);
+}
+
+/** Starts the fresh session: the old one is kept in the project's history, the chat stays as it is, and the new session gets the note with the next message, or at once when the note has work in progress. */
+async function applyFresh(id: string, note: string): Promise<void> {
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
+  const blocked = await freshBlocker(id, ws, term);
+  if (blocked) throw new ChatError(409, blocked);
+  const todos = (procs.get(id)?.todos ?? acps.get(id)?.todos ?? []).map((t) => ({ text: t.text, status: t.status }));
+  // nothing awaits between the check and the stop, so no turn can start in between
+  stop(id);
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) return;
+    if (w.chatSession) w.agentSessions = { ...w.agentSessions, [w.agent]: w.chatSession };
+    w.chatSession = undefined;
+    w.freshNote = note;
+    delete w.handoffAfter; // the note replaces any catch-up: the new session starts from it
+    delete w.branchContext;
+    if (!w.chat) w.resumeInTerminal = true; // the terminal's Claude resumes the new session
+  });
+  rmSync(cursorPath(id), { force: true });
+  usages.delete(id);
+  usageAt.delete(id);
+  lastFreshAt.set(id, Date.now());
+  freshPending.delete(id);
+  emit(id, { kind: "handoff", text: note });
+  emit(id, { kind: "note", text: "Continued with a fresh memory" });
+  if (!handoffHasWork(note)) return; // the new session waits for the person; the note goes with their first message
+  try {
+    await sendHidden(id, freshMessage(note, notesOf(await getWorkspace(id)), todos));
+    await clearHandoff(id).catch(() => {});
+  } catch (e) {
+    console.warn("[chat] fresh first message:", (e as Error).message);
+    emit(id, { kind: "error", text: friendlyError((e as Error).message) }); // the note stays, and goes with the next message
+  }
+}
+
+/** The "fresh" control. With {draft: true} (or no note): writes the handoff note and answers {ok, note} (null when none could be made), starting nothing: the dialog shows it. With {note}: starts the fresh session from exactly that note, writing no new one. */
+async function freshControl(id: string, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
+  if (freshing.has(id)) throw new ChatError(409, "A fresh start is already under way.");
+  const note = (value as { note?: unknown } | null)?.note;
+  if (note !== undefined && (typeof note !== "string" || !note.trim())) throw new ChatError(400, "The note is empty.");
+  freshing.add(id);
+  try {
+    if (typeof note === "string") {
+      await applyFresh(id, note.trim().slice(0, HANDOFF_CAP));
+      return { ok: true };
+    }
+    const blocked = await freshBlocker(id, ws, term);
+    if (blocked) throw new ChatError(409, blocked);
+    if (term && !procs.has(id)) throw new ChatError(409, "Send a message first, then continue fresh.");
+    const text = await writeHandoff(id);
+    return { ok: true, note: text || null };
+  } finally {
+    freshing.delete(id);
+  }
+}
+
+/** The switch for continuing fresh by itself. */
+async function autoFreshSetting(id: string, value: unknown): Promise<{ ok: true }> {
+  if (typeof value !== "boolean") throw new ChatError(400, "The setting must be on or off.");
+  const ws = await getWorkspace(id);
+  if (!ws.chat && !(await viaTerminal(ws))) throw new ChatError(400, "This is not a chat project.");
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (w) w.autoFresh = value;
+  });
+  if (value) maybeAutoFresh(id);
+  else freshPending.delete(id);
+  return { ok: true };
+}
+
+/** After a turn ends, or the background work does: continue fresh by itself when the chat is full, allowed, and idle; else remember to. Never throws. */
+function maybeAutoFresh(id: string): void {
+  void (async () => {
+    const ws = await getWorkspace(id).catch(() => null);
+    if (!ws || !(ws.chat || (await viaTerminal(ws)))) return;
+    const d = freshDecision({
+      percent: usages.get(id)?.context?.percent ?? null,
+      auto: ws.autoFresh !== false,
+      busy: chatBusy.has(id),
+      waiting: chatWaiting.has(id),
+      background: chatBackground.has(id),
+      recent: Date.now() - (lastFreshAt.get(id) ?? 0) < 600_000,
+      running: freshing.has(id),
+    });
+    if (d === "pending") freshPending.add(id);
+    else freshPending.delete(id);
+    if (d !== "now") return;
+    freshing.add(id);
+    try {
+      await applyFresh(id, await writeHandoff(id));
+    } finally {
+      freshing.delete(id);
+    }
+  })().catch((e) => console.warn("[chat] continue fresh:", (e as Error).message));
+}
+
+// ---- Run info: what the AI was told and what it can use (names only, no secrets) ----
+
+export interface RunInfo {
+  agent: string;
+  agentName: string;
+  terminalProject: boolean;
+  instructions: { system: string | null; notes: string; note: string | null };
+  tools: { builtin: string[]; mcp: { name: string; status: string }[] } | null;
+  ready: boolean;
+}
+
+/** What the AI of a project was told, and the tool names it reported. Never a tool server's settings, command line or environment. */
+export async function runInfo(id: string): Promise<RunInfo> {
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
+  const agent = ws.chat ? ws.agent : "claude";
+  const acp = isAcp(ws);
+  const live = acp ? undefined : procs.get(id);
+  const instructions = acp
+    ? { system: null, notes: notesOf(ws), note: "Kohlab adds your notes before your first message. The AI's own built-in instructions are not shown." }
+    : term
+      ? { system: null, notes: "", note: "This project uses your own Claude settings." }
+      : { system: CHAT_SYSTEM_PROMPT, notes: notesOf(ws), note: null };
+  return {
+    agent,
+    agentName: AGENT_NAMES[agent] ?? agent,
+    terminalProject: !ws.chat,
+    instructions,
+    tools: live?.tools ? { builtin: live.tools.filter((t) => !t.startsWith("mcp__")), mcp: live.mcp } : null,
+    ready: acp ? (acps.get(id)?.started ?? false) : live?.inited === true,
+  };
 }

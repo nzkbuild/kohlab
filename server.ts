@@ -92,7 +92,8 @@ import { BrowserError, browserAction, browserProblems, browserUrl, clearBrowserP
 import { appKind, detectDevCommand, devProxyPort, ensureDevServer, stopAllDevServers, stopDevServer } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
-import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, noteChat, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage } from "./chat";
+import { claudeSignedIn, getProviders, PROVIDER_IDS, redactCard, refreshProviders } from "./providers";
+import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, noteChat, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -514,6 +515,14 @@ async function handleChatGet(id: string, req: Request, see: { usage: boolean; ow
   }
 }
 
+async function handleChatRun(id: string): Promise<Response> {
+  try {
+    return json(await runInfo(id));
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof ChatError ? e.status : 400);
+  }
+}
+
 async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined): Promise<Response> {
   try {
     const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown; answers?: unknown; message?: unknown; n?: unknown };
@@ -528,7 +537,7 @@ async function handleChatPost(id: string, req: Request, actor: string, sub: stri
       containFailure(audit(actor, "chat.answer", id), "audit");
       await answerChat(id, body.requestId, body.allow, { answers, message: body.message as string | undefined });
     } else if (sub === "/control") {
-      containFailure(audit(actor, "chat.control", id), "audit");
+      containFailure(audit(actor, body.action === "fresh" ? "chat.fresh" : "chat.control", id), "audit");
       reply = await chatControl(id, body.action, body.value);
     } else if (sub === "/session") {
       containFailure(audit(actor, "chat.session", id), "audit");
@@ -1032,32 +1041,6 @@ async function handleAudit(req: Request): Promise<Response> {
 }
 
 /** Check which agent CLIs are installed on the host. */
-/** Parse `claude auth status` stdout: `loggedIn` as a boolean, or null when it is not that JSON. */
-export function parseClaudeLoggedIn(stdout: string): boolean | null {
-  try {
-    const v = JSON.parse(stdout) as { loggedIn?: unknown } | null;
-    return typeof v?.loggedIn === "boolean" ? v.loggedIn : null;
-  } catch {
-    return null;
-  }
-}
-
-/** One in-flight or finished sign-in check, shared for 60 s so polling never spawns a process per request. */
-let claudeAuthCheck: { at: number; result: Promise<boolean | null> } | null = null;
-function claudeSignedIn(): Promise<boolean | null> {
-  if (!claudeAuthCheck || Date.now() - claudeAuthCheck.at >= 60_000) {
-    claudeAuthCheck = {
-      at: Date.now(),
-      result: new Promise<boolean | null>((resolve) => {
-        execFile("claude", ["auth", "status"], { timeout: 8000 }, (err, stdout) => {
-          resolve(err ? null : parseClaudeLoggedIn(String(stdout)));
-        });
-      }),
-    };
-  }
-  return claudeAuthCheck.result;
-}
-
 async function handleAgentsStatus(): Promise<Response> {
   const names = ["omp", "hermes", "claude", "codex", "codex-acp", "opencode", "pi", "gemini"];
   const { execFile } = await import("child_process");
@@ -1609,7 +1592,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (server.upgrade(req, upgradeOpts)) return undefined;
     }
 
-    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control|\/sessions|\/session|\/turn|\/goback|\/branch)?$/);
+    const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control|\/sessions|\/session|\/turn|\/goback|\/branch|\/run)?$/);
     if (chatM) {
       const [, chatId, sub] = chatM;
       if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, chatId))) return json({ error: "forbidden, not your workspace" }, 403);
@@ -1622,7 +1605,13 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         if (denied) return json({ error: "unauthorized" }, 401);
         return handleChatTurn(chatId, req);
       }
-      if (req.method !== "POST" || sub === "/sessions" || sub === "/turn") return json({ error: "method not allowed" }, 405);
+      // What the AI was told and what it can use: names only. Read access, like viewing the chat.
+      if (req.method === "GET" && sub === "/run") {
+        if (shareIdRes) return json({ error: "forbidden, share links cannot see this" }, 403);
+        if (denied) return json({ error: "unauthorized" }, 401);
+        return handleChatRun(chatId);
+      }
+      if (req.method !== "POST" || sub === "/sessions" || sub === "/turn" || sub === "/run") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
       return handleChatPost(chatId, req, actor, sub);
@@ -1935,6 +1924,23 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (path === "/api/agents-status") {
       if (denied) return json({ error: "unauthorized" }, 401);
       return handleAgentsStatus();
+    }
+    // The AI hub: which AIs are ready, their models, and (owner only) account, plan and usage. Share links never see it.
+    if (path === "/api/providers" && req.method === "GET") {
+      if (auth?.kind === "share" || shareIdRes) return json({ error: "forbidden, share links cannot see this" }, 403);
+      const refused = gate(true);
+      if (refused) return refused;
+      const got = await getProviders();
+      return json(isOwner ? got : { ...got, providers: got.providers.map(redactCard) });
+    }
+    if (path === "/api/providers/refresh" && req.method === "POST") {
+      const refused = gate(isOwner, "forbidden, only an owner can refresh providers");
+      if (refused) return refused;
+      const body = (await req.json().catch(() => ({}))) as { id?: unknown } | null;
+      const pid = body?.id;
+      if (pid !== undefined && (typeof pid !== "string" || !PROVIDER_IDS.includes(pid))) return json({ error: "unknown AI" }, 400);
+      containFailure(audit(actor, "providers.refresh", undefined, pid as string | undefined), "audit");
+      return json(await refreshProviders(pid as string | undefined));
     }
     // Plan usage is the owner's account data: no credentials is 401, a member or viewer is 403.
     if (path === "/api/usage" && req.method === "GET") {

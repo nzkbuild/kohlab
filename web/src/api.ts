@@ -1,4 +1,4 @@
-import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, LinkInfo, Pick, Problem, ReleaseStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
+import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TreeNode, TurnFile, Version, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -127,6 +127,17 @@ export const api = {
   },
   workspaces: () => json<Workspace[]>("/api/workspaces"),
   agentsStatus: () => json<AgentStatus>("/api/agents-status"),
+  /** Every AI on this computer: signed in or not, which account, usage and models. Owners see more than others. */
+  providers: () => json<{ providers: ProviderCard[]; at: number }>("/api/providers"),
+  /** Owner only: read the AIs again now (one AI when `id` is given). */
+  refreshProviders: (id?: string) =>
+    json<{ providers: ProviderCard[]; at: number }>("/api/providers/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(id ? { id } : {}),
+    }),
+  /** What the AI was told and what it can use in this project. */
+  chatRun: (id: string) => json<RunInfo>(`/api/workspaces/${encodeURIComponent(id)}/chat/run`),
   codexLogin: () => json<{ url: string; code: string }>("/api/agents/codex/login", { method: "POST" }),
   codexLoginState: () => json<CodexLogin>("/api/agents/codex/login"),
   create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; location?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
@@ -199,6 +210,10 @@ export const api = {
       todos: { text: string; status: "pending" | "active" | "done" }[];
       /** labels of the helper agents still working */
       helpers: string[];
+      /** the helpers as a tree, parents before children (an older server sends none) */
+      helperTree?: HelperNode[];
+      /** a fresh start is waiting for the turn or the background work to end (an older server sends none) */
+      freshPending?: boolean;
       /** the CLI is retrying a failed request: which try, of how many */
       retry: { attempt: number; max: number } | null;
       /** context in use and plan limits, read when the last turn ended */
@@ -263,6 +278,20 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, value }),
+    }),
+  /** Continue with a fresh memory. With `draft` the server only writes the handoff note and answers it; with `note` it starts from that text. */
+  chatFresh: (id: string, value?: { note?: string; draft?: boolean }) =>
+    json<{ ok: boolean; note?: string }>(`/api/workspaces/${encodeURIComponent(id)}/chat/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "fresh", value }),
+    }),
+  /** Turns "continue fresh by itself" on or off for this project. */
+  chatAutoFresh: (id: string, on: boolean) =>
+    json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "autoFresh", value: on }),
     }),
   /** Give a project a new name (its title in the UI). The server checks the name. */
   rename: (id: string, title: string) =>

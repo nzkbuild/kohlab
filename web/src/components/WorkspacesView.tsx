@@ -12,6 +12,7 @@ import { Composer, SaveLaterChip, SavedChip } from "./Composer";
 import { addSaved, readDraft, writeDraft, DRAFT_SAVE_MS } from "../lib/drafts";
 import { projectNameFromIdea } from "./homeName";
 import { isPhone } from "../lib/viewport";
+import { reasonFor, useProviders } from "../lib/useProviders";
 
 /** A GitHub pick returns either "owner/name" or a full URL; clone needs the URL. */
 function asCloneUrl(repo: string): string {
@@ -28,36 +29,26 @@ function plainError(e: unknown): string {
 
 /* ------------------------------------------------------------ create form -- */
 
-/** The ACP agents a new chat project can use, besides Claude. Each is offered only when the server reports it installed. */
+/** The ACP agents a new chat project can use, besides Claude. Each is offered only when it is installed. */
 const ACP_CHOICES = ["hermes", "omp", "codex"];
 
 /** The AI a new chat project talks through: Claude, or an installed ACP agent. Default Claude. `codexNeedsSignIn` is set when Codex is offered but not signed in. */
 export function useNewAgent() {
   const [agent, setAgent] = useState("claude");
-  const [installed, setInstalled] = useState<string[]>([]);
-  const [codexSignedIn, setCodexSignedIn] = useState(true);
-  useEffect(() => {
-    api.agentsStatus().then((s) => {
-      setInstalled(ACP_CHOICES.filter((n) => s[n] === true));
-      setCodexSignedIn(s.codexSignedIn !== false);
-    }, () => {});
-  }, []);
-  return { agent, setAgent, options: ["claude", ...installed], codexNeedsSignIn: !codexSignedIn };
+  const { cards } = useProviders();
+  const installed = ACP_CHOICES.filter((n) => cards?.some((c) => c.id === n && c.installed && c.state !== "not_installed"));
+  const codexNeedsSignIn = cards?.find((c) => c.id === "codex")?.state === "signed_out";
+  return { agent, setAgent, options: ["claude", ...installed], codexNeedsSignIn };
 }
 
-const SIGN_IN_FIRST = "Sign in first in Settings";
-
-/** Why an AI cannot be used yet, from the server's own check, keyed by agent. Empty when ready or not yet answered. */
+/** Why an AI cannot be used yet, from the shared AI cards, keyed by agent. Empty when ready or not yet answered. */
 export function useAgentReasons(): Record<string, string> {
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  useEffect(() => {
-    api.agentsStatus().then((s) => {
-      const next: Record<string, string> = {};
-      if (s.claude === true && s.claudeSignedIn === false) next.claude = SIGN_IN_FIRST;
-      if (s.codex === true && s.codexSignedIn === false) next.codex = SIGN_IN_FIRST;
-      setReasons(next);
-    }, () => {});
-  }, []);
+  const { cards } = useProviders();
+  const reasons: Record<string, string> = {};
+  for (const c of cards ?? []) {
+    const why = reasonFor(c);
+    if (why) reasons[c.id] = why;
+  }
   return reasons;
 }
 
@@ -304,10 +295,8 @@ export function HomeScreen() {
   const shotInput = useRef<HTMLInputElement>(null);
 
   // Claude missing or signed out: one calm notice above the message box. A failed check shows nothing.
-  const [claudeNeedsSetup, setClaudeNeedsSetup] = useState(false);
-  useEffect(() => {
-    api.agentsStatus().then((s) => setClaudeNeedsSetup(!s.claude || s.claudeSignedIn === false), () => {});
-  }, []);
+  const claudeState = useProviders().cards?.find((c) => c.id === "claude")?.state;
+  const claudeNeedsSetup = claudeState === "not_installed" || claudeState === "signed_out";
 
   // `/new` (an old bookmark) is New project: the box is focused on Home, then the flag is dropped.
   const wantsCreate = route.kind === "workspaces" && !!route.create;

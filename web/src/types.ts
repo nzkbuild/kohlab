@@ -40,6 +40,8 @@ export interface Workspace {
   handoffAfter?: number;
   /** Standing notes for the AI on this project (business name, colours, tone). At most 4000 characters. */
   notes?: string;
+  /** Continue fresh by itself when the chat is nearly full. Undefined = on. */
+  autoFresh?: boolean;
 }
 
 /** One multiple-choice question Claude asks (AskUserQuestion). */
@@ -67,12 +69,14 @@ export type ChatEvent = { n: number; at: number } & (
       plan?: string;
     }
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
-  | { kind: "done"; worked?: number; planDelta?: number }
+  | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number } }
   /** the plan share of the turn that ended just before it; the chat view merges it into that turn's done line */
   | { kind: "plan"; planDelta: number }
   | { kind: "error"; text: string }
   /** A quiet line in the chat: "Switched to X", "Went back to before: …", compaction or model-fallback notices, "Background task finished: …". */
   | { kind: "note"; text: string }
+  /** The handoff note a fresh session starts from: shown as a collapsed card. */
+  | { kind: "handoff"; text: string }
 );
 
 export interface TreeNode {
@@ -150,6 +154,97 @@ export interface ReleaseStatus {
   /** stopped without writing its finish marker: killed, or it never started */
   unfinished: boolean;
   log: string;
+}
+
+/* ------------------------------------------------------------- AI hub -- */
+
+/** One AI on this computer, as GET /api/providers reports it. Owner-only fields are absent for everyone else. */
+export interface ProviderCard {
+  id: string;
+  name: string;
+  kind: "cli" | "router";
+  installed: boolean;
+  version: string | null;
+  state: "connected" | "signed_out" | "not_installed" | "limited" | "error" | "checking";
+  checkedAt: number;
+  stale: boolean;
+  error?: { code: "timeout" | "spawn" | "protocol" | "network" | "auth"; message: string };
+  accounts: ProviderAccount[];
+  actions: ProviderAction[];
+}
+
+export interface ProviderWindow {
+  id: string;
+  label: string;
+  percent: number;
+  resetsAt: string | null;
+  windowMins: number | null;
+  severity: "normal" | "warn" | "limit";
+}
+
+export interface ProviderModel {
+  value: string;
+  label: string;
+  description?: string;
+  efforts?: string[];
+  isDefault?: boolean;
+  group?: string;
+}
+
+export interface ProviderAccount {
+  id: string;
+  label: string;
+  email: string | null;
+  plan: string | null;
+  auth: "oauth" | "api_key" | "router" | "config" | "none";
+  state: "connected" | "signed_out" | "limited" | "error";
+  isolation: Record<string, string>;
+  usage: null | {
+    readAt: number;
+    windows: ProviderWindow[];
+    credits?: { balance: string | null; unlimited: boolean } | null;
+    reachedType?: string | null;
+    note?: string;
+  };
+  models: ProviderModel[];
+  modelsAt: number | null;
+}
+
+export interface ProviderAction {
+  kind: "install" | "sign_in" | "add_account" | "fix" | "refresh" | "sign_out" | "open_dashboard";
+  label: string;
+  via?: "device_code" | "terminal" | "api_key" | "url" | "server";
+  accountId?: string;
+  hint?: string;
+}
+
+/** What GET /api/workspaces/:id/chat/run reports: what the AI was told and what it can use. */
+export interface RunInfo {
+  agent: string;
+  agentName: string;
+  terminalProject: boolean;
+  instructions: { system: string | null; notes: string; note: string | null };
+  tools: { builtin: string[]; mcp: { name: string; status: string }[] } | null;
+  ready: boolean;
+}
+
+/** One helper the AI started, as the chat snapshot's helperTree lists it (parents before children). */
+export interface HelperNode {
+  id: string;
+  taskId: string | null;
+  parentId: string | null;
+  label: string;
+  kind: string | null;
+  model: string | null;
+  status: "running" | "done" | "failed" | "stopped";
+  background: boolean;
+  startedAt: number;
+  endedAt: number | null;
+  tools: number | null;
+  tokens: number | null;
+  lastTool: string | null;
+  summary: string | null;
+  canStop: boolean;
 }
 
 export interface AgentInfo {
