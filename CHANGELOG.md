@@ -9,6 +9,24 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.5.0] - 2026-10-27
+
+You can now see and steer the AI at all times. This is the first step toward Kohlab as an AI-native workspace.
+
+### Added
+- **Settings → AI is the hub for every AI on this computer.** Each one has a card showing whether it is signed in, which account, how much of its plan is used and when that resets (for Claude and Codex), which models it offers, and buttons to sign in or check again. Only the owner sees emails, plans and usage.
+- **One model picker for all AIs.** Models are grouped by AI with the account they will use, and only signed-in AIs are listed. Picking another AI's model switches to it.
+- **Always-visible run line** above the message box: which AI, which account, which model, which mode and what it is doing ("Working 1m 12s", "Waiting for you", "2 helpers working").
+- **Run panel** (docked on wide screens, a sheet on phones):
+  - **Now:** what the AI is doing, its checklist and background work.
+  - **Helpers:** the AI's helpers as a tree, with model, time, steps and tokens, and Stop where possible.
+  - **Replies:** each reply's model, time, tokens and plan share.
+  - **What it was told** and **What it can use**.
+- **Continue fresh.** When a chat gets long, Kohlab offers to carry on with a fresh memory, or does it for you at about 85% once the AI is idle. The AI writes a handoff note (goal, done, in progress, next steps, key decisions, files, open questions), and a new session picks up from it in the same chat. You can read the note, and edit it when you start this yourself. Nothing is lost, and every reply after it is cheaper.
+
+### Changed
+- The model menu and the AI menu are one picker.
+
 ## [2.4.0] - 2026-10-25
 
 A design and speed release, from a review against uilaws.com and the Laws of UX.
