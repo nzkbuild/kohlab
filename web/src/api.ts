@@ -1,4 +1,4 @@
-import type { AgentStatus, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TreeNode, TurnFile, Version, Workspace } from "./types";
+import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TreeNode, TurnFile, Version, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -138,6 +138,34 @@ export const api = {
     }),
   /** What the AI was told and what it can use in this project. */
   chatRun: (id: string) => json<RunInfo>(`/api/workspaces/${encodeURIComponent(id)}/chat/run`),
+  /** What new projects start with. 404 on an older server. */
+  aiDefaults: () => json<{ defaults: AiDefaults }>("/api/ai/defaults"),
+  /** Owner only. A key set to null goes back to the built-in choice. */
+  setAiDefaults: (patch: { [K in keyof AiDefaults]?: AiDefaults[K] | null }) =>
+    json<{ defaults: AiDefaults }>("/api/ai/defaults", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }),
+  /** Owner only: add another login, or a router/API address. The key is sent once and never kept here. */
+  addAccount: (body: { provider: "claude" | "codex"; kind: "login"; label: string } | { provider: "claude"; kind: "router"; label: string; baseUrl: string; key: string }) =>
+    json<{ account: AccountView; check?: RouterCheck }>("/api/ai/accounts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  /** Owner only: a new name for a non-default account. */
+  renameAccount: (id: string, label: string) =>
+    json<{ account: AccountView }>(`/api/ai/accounts/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ label }) }),
+  setAccountKey: (id: string, key: string) =>
+    json<{ ok: boolean }>(`/api/ai/accounts/${encodeURIComponent(id)}/key`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key }) }),
+  testAccount: (id: string) => json<{ check: RouterCheck }>(`/api/ai/accounts/${encodeURIComponent(id)}/test`, { method: "POST" }),
+  removeAccount: (id: string) => json<{ ok: boolean }>(`/api/ai/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  accountSignIn: (id: string) => json<AccountSignIn>(`/api/ai/accounts/${encodeURIComponent(id)}/signin`, { method: "POST" }),
+  accountSignInState: (id: string) => json<AccountSignIn>(`/api/ai/accounts/${encodeURIComponent(id)}/signin`),
+  accountSignInCode: (id: string, code: string) =>
+    json<AccountSignIn>(`/api/ai/accounts/${encodeURIComponent(id)}/signin/code`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }),
+  /** Owner only: a model the AI doesn't list, a new name for any model, or removing a custom one. */
+  addModel: (id: string, value: string, label: string) =>
+    json<{ ok: boolean }>(`/api/ai/accounts/${encodeURIComponent(id)}/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value, label }) }),
+  renameModel: (id: string, value: string, label: string) =>
+    json<{ ok: boolean }>(`/api/ai/accounts/${encodeURIComponent(id)}/models`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ value, label }) }),
+  removeModel: (id: string, value: string) =>
+    json<{ ok: boolean }>(`/api/ai/accounts/${encodeURIComponent(id)}/models`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ value }) }),
+  /** What each project may do without asking (the projects this person can see). */
+  aiRules: () => json<{ projects: { id: string; name: string; rules: PermissionRule[] }[] }>("/api/ai/rules"),
   codexLogin: () => json<{ url: string; code: string }>("/api/agents/codex/login", { method: "POST" }),
   codexLoginState: () => json<CodexLogin>("/api/agents/codex/login"),
   create: (body: { task: string; repo?: string; agent: string; branch?: string; payload?: string; newProject?: string; location?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
@@ -259,13 +287,14 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ n }),
     }),
-  chatSend: (id: string, text: string) =>
+  /** `model` sends this one message on another model; the project keeps its own. */
+  chatSend: (id: string, text: string, model?: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(model ? { text, with: { model } } : { text }),
     }),
-  chatAnswer: (id: string, requestId: string, allow: boolean, extra?: { answers?: Record<string, string>; message?: string }) =>
+  chatAnswer: (id: string, requestId: string, allow: boolean, extra?: { answers?: Record<string, string>; message?: string; always?: boolean }) =>
     json<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}/chat/answer`, {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -54,7 +54,7 @@ export interface AskQuestion {
 
 /** One entry in a chat workspace's conversation. `n` is the sequence number used for polling. */
 export type ChatEvent = { n: number; at: number } & (
-  | { kind: "user"; text: string; uuid?: string; tree?: string }
+  | { kind: "user"; text: string; uuid?: string; tree?: string; with?: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; text: string; toolId?: string; detail?: string; file?: string }
   | { kind: "result"; toolId: string; output: string; failed?: boolean }
@@ -65,6 +65,8 @@ export type ChatEvent = { n: number; at: number } & (
       why?: string;
       detail?: string;
       form?: "question" | "plan";
+      /** The "Always allow" offer: the rule it would save and its plain label. Absent when this step can't be saved as a rule. */
+      always?: { rule: string; label: string };
       questions?: AskQuestion[];
       plan?: string;
     }
@@ -74,7 +76,7 @@ export type ChatEvent = { n: number; at: number } & (
   | { kind: "plan"; planDelta: number }
   | { kind: "error"; text: string }
   /** A quiet line in the chat: "Switched to X", "Went back to before: …", compaction or model-fallback notices, "Background task finished: …". */
-  | { kind: "note"; text: string }
+  | { kind: "note"; text: string; until?: number }
   /** The handoff note a fresh session starts from: shown as a collapsed card. */
   | { kind: "handoff"; text: string }
 );
@@ -189,6 +191,8 @@ export interface ProviderModel {
   efforts?: string[];
   isDefault?: boolean;
   group?: string;
+  /** Added by the owner, not listed by the AI. */
+  custom?: boolean;
 }
 
 export interface ProviderAccount {
@@ -208,6 +212,13 @@ export interface ProviderAccount {
   };
   models: ProviderModel[];
   modelsAt: number | null;
+  /** Owner only. "default" is the AI's own login; "login" another sign-in; "router" an address with a key. */
+  kind?: "default" | "login" | "router";
+  /** Owner only: when this account's limit lifts (ms), if it is at its limit. */
+  limitedUntil?: number | null;
+  hasKey?: boolean;
+  /** Owner only: "127.0.0.1:20128". Never the full address. */
+  baseUrlHost?: string;
 }
 
 export interface ProviderAction {
@@ -218,6 +229,83 @@ export interface ProviderAction {
   hint?: string;
 }
 
+export type Mode = "default" | "acceptEdits" | "auto" | "plan" | "full";
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** What new projects start with (Settings -> AI). A missing key means the built-in choice. */
+export interface AiDefaults {
+  agent?: string;
+  account?: string;
+  model?: string;
+  effort?: Effort;
+  mode?: Mode;
+  autoFresh?: boolean;
+}
+
+/** Where a value comes from: this project, the Settings defaults, or Kohlab's built-in choice. */
+export type Src = "project" | "default" | "builtin";
+export interface AiSetting<T> {
+  value: T | null;
+  source: Src;
+}
+export interface AiResolved {
+  agent: AiSetting<string>;
+  account: AiSetting<string>;
+  model: AiSetting<string>;
+  effort: AiSetting<Effort>;
+  mode: AiSetting<Mode>;
+  autoFresh: AiSetting<boolean>;
+}
+
+/** One step of "If the limit is reached". Account omitted: the same account. */
+export interface FallbackStep {
+  account?: string | null;
+  model?: string;
+}
+export interface Fallback {
+  auto: boolean;
+  steps: FallbackStep[];
+  /** false: the suggested order, worked out by Kohlab. */
+  custom: boolean;
+}
+/** The project moved off an AI that hit its limit. `until` is when it lifts (ms), or null if unknown. */
+export interface LimitState {
+  from: string;
+  to: string;
+  until: number | null;
+  at: number;
+  fromAccount: string | null;
+}
+export interface PermissionRule {
+  rule: string;
+  label: string;
+  source: "kohlab" | "claude-settings" | "session";
+  removable: boolean;
+}
+
+/** An account as GET /api/ai/accounts and the add form report it. Never a key, a folder or a full address. */
+export interface AccountView {
+  id: string;
+  provider: "claude" | "codex";
+  kind: "login" | "router";
+  label: string;
+  baseUrlHost?: string;
+  hasKey?: boolean;
+  signedIn?: boolean;
+  createdAt: number;
+}
+export type RouterCheck = "ok" | "key_rejected" | "unreachable";
+
+/** Another login's sign-in: waiting for the browser (url, and a code to type in or one to paste back), done, failed, or "manual" (run a command yourself). */
+export interface AccountSignIn {
+  state: "idle" | "waiting" | "done" | "failed" | "manual";
+  url?: string;
+  code?: string;
+  needsCode?: boolean;
+  command?: string;
+  error?: string;
+}
+
 /** What GET /api/workspaces/:id/chat/run reports: what the AI was told and what it can use. */
 export interface RunInfo {
   agent: string;
@@ -226,6 +314,15 @@ export interface RunInfo {
   instructions: { system: string | null; notes: string; note: string | null };
   tools: { builtin: string[]; mcp: { name: string; status: string }[] } | null;
   ready: boolean;
+  /** What each setting is for this project and where it comes from. An older server sends none. */
+  ai?: AiResolved;
+  /** The account the project runs on now (null: the AI's own login). */
+  account?: { id: string; label: string; kind: string } | null;
+  fallback?: Fallback;
+  limit?: LimitState | null;
+  rules?: PermissionRule[];
+  /** Plain words about what Full access means here. */
+  accessNote?: string | null;
 }
 
 /** One helper the AI started, as the chat snapshot's helperTree lists it (parents before children). */

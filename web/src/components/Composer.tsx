@@ -123,7 +123,7 @@ export function Composer({
       {/* The chips' 10px inner padding is pulled into the margin, so a chip's glyph or label lines up with the text above. */}
       <div className={cn("-ml-2.5 flex min-w-0 items-center gap-1 flex-wrap", phoneOneRow && "max-md:flex-nowrap")}>
         {leading}
-        <div className="min-w-2 flex-1" />
+        <div className={cn("min-w-2 flex-1", phoneOneRow && "max-md:flex-none")} />
         {trailing}
       </div>
     </div>

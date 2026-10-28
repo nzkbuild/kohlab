@@ -7,15 +7,12 @@
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { homedir } from "node:os";
-import { childEnv } from "./chat";
+import { childEnv, dirOf, getAccount, runAsOf, stripAnsi } from "./accounts";
+
+export { stripAnsi };
 
 const LOGIN_MS = 15 * 60_000; // the code expires in 15 minutes; so does the wait for it
 const FIND_MS = 20_000; // the link and code should print at once; if not, something is wrong
-
-/** Removes terminal colour and cursor codes. Pure. */
-export function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-}
 
 /** The sign-in link and one-time code from `codex login --device-auth` output, colour codes allowed. Null until both are in the text. Pure. */
 export function parseCodexDeviceAuth(text: string): { url: string; code: string } | null {
@@ -35,33 +32,52 @@ export function parseCodexLoggedIn(output: string, exitCode: number): boolean {
   return exitCode === 0 && !/not logged in/i.test(stripAnsi(output));
 }
 
-/** One sign-in check, shared for 60 s so polling never spawns a process per request. */
-let signedInCheck: { at: number; result: Promise<boolean | null> } | null = null;
+/** One sign-in check per account, shared for 60 s, so polling never spawns a process per request. */
+const signedInChecks = new Map<string, { at: number; result: Promise<boolean | null> }>();
 
-/** Whether Codex is signed in on this server. Null when the check could not run or timed out. */
-export function codexSignedIn(): Promise<boolean | null> {
-  if (!signedInCheck || Date.now() - signedInCheck.at >= 60_000) {
-    signedInCheck = {
+/** The process settings for one account of Codex: its own sign-in directory (CODEX_HOME), run as the OS account that owns it. The AI's own login (no account) is the server's home. */
+function codexRun(accountId?: string): { env: Record<string, string>; uid?: number; gid?: number; home: string } {
+  const a = accountId ? getAccount(accountId) : undefined;
+  if (accountId && (!a || a.provider !== "codex" || a.kind !== "login")) throw new Error("That account does not exist");
+  const run = a ? runAsOf(a) : { uid: undefined, gid: undefined, home: homedir() };
+  return { env: childEnv(run.home, a ? { CODEX_HOME: dirOf(a.id) } : undefined), uid: run.uid, gid: run.gid, home: run.home };
+}
+
+/** Whether Codex is signed in on this server (or for one account). Null when the check could not run or timed out. */
+export function codexSignedIn(accountId?: string): Promise<boolean | null> {
+  const key = accountId ?? "default";
+  const have = signedInChecks.get(key);
+  if (!have || Date.now() - have.at >= 60_000) {
+    signedInChecks.set(key, {
       at: Date.now(),
       result: new Promise<boolean | null>((resolve) => {
+        let run: ReturnType<typeof codexRun>;
+        try {
+          run = codexRun(accountId);
+        } catch {
+          return resolve(null);
+        }
         // only the allowlisted environment, never the server's secrets; SIGKILL at the timeout so no probe lingers
-        execFile("codex", ["login", "status"], { timeout: 5000, killSignal: "SIGKILL", env: childEnv(homedir()) }, (err, stdout, stderr) => {
+        execFile("codex", ["login", "status"], { timeout: 5000, killSignal: "SIGKILL", env: run.env, uid: run.uid, gid: run.gid, cwd: run.home }, (err, stdout, stderr) => {
           const code = err ? (err as { code?: unknown }).code : 0;
           resolve(typeof code === "number" ? parseCodexLoggedIn(`${stdout}${stderr}`, code) : null);
         });
       }),
-    };
+    });
   }
-  return signedInCheck.result;
+  return signedInChecks.get(key)!.result;
 }
 
 /** Forgets the cached check: the next read asks codex again (after a sign-in). */
-export function clearCodexSignedIn(): void {
-  signedInCheck = null;
+export function clearCodexSignedIn(accountId?: string): void {
+  if (accountId === undefined) signedInChecks.clear();
+  else signedInChecks.delete(accountId);
 }
 
 type LoginState = "waiting" | "done" | "failed";
 interface Login {
+  /** the account this sign-in is for; undefined = the AI's own login */
+  accountId?: string;
   child: ChildProcess;
   state: LoginState;
   url?: string;
@@ -73,19 +89,25 @@ interface Login {
 /** The current or last sign-in. One at a time. */
 let login: Login | null = null;
 
-/** Where the sign-in stands, for the page to poll. */
-export function codexLoginState(): { state: LoginState | "idle"; url?: string; code?: string; error?: string } {
-  if (!login) return { state: "idle" };
+/** Where the sign-in stands, for the page to poll. For one account's page, only that account's sign-in counts. */
+export function codexLoginState(accountId?: string): { state: LoginState | "idle"; url?: string; code?: string; error?: string } {
+  if (!login || login.accountId !== accountId) return { state: "idle" };
   return { state: login.state, ...(login.state === "waiting" && login.url ? { url: login.url, code: login.code } : {}), ...(login.error ? { error: login.error } : {}) };
 }
 
-/** Starts a device-code sign-in, or returns the one already waiting. Resolves with the link and code once the CLI prints them. */
-export function startCodexLogin(): Promise<{ url: string; code: string }> {
-  if (login?.state === "waiting") return login.ready;
-  const child = spawn("codex", ["login", "--device-auth"], { env: childEnv(homedir()), stdio: ["ignore", "pipe", "pipe"] });
+/** Starts a device-code sign-in, or returns the one already waiting. Resolves with the link and code once the CLI prints them.
+ *  ponytail: one sign-in at a time across all accounts; a second account's waits for the first to finish. */
+export function startCodexLogin(accountId?: string): Promise<{ url: string; code: string }> {
+  if (login?.state === "waiting") {
+    if (login.accountId !== accountId) return Promise.reject(new Error("Another sign-in is waiting. Finish it first."));
+    return login.ready;
+  }
+  const run = codexRun(accountId);
+  const child = spawn("codex", ["login", "--device-auth"], { env: run.env, uid: run.uid, gid: run.gid, cwd: run.home, stdio: ["ignore", "pipe", "pipe"] });
   let reject!: (e: Error) => void;
   let settle!: (v: { url: string; code: string }) => void;
   const cur = {
+    accountId,
     child,
     state: "waiting",
     out: "",
@@ -122,7 +144,7 @@ export function startCodexLogin(): Promise<{ url: string; code: string }> {
     if (cur.state !== "waiting") return;
     if (code === 0) {
       cur.state = "done";
-      clearCodexSignedIn();
+      clearCodexSignedIn(accountId);
     } else fail(cur.url ? "Sign-in did not finish. Start again." : "Could not start Codex sign-in. Try again.");
   });
   const findTimer = setTimeout(() => {

@@ -3,7 +3,8 @@
  * whether it is signed in, which account, how much of its plan is used and which models it offers.
  *
  * Rules (SECURITY.md, "AI hub data"): a probe never sends a message or calls a model; no file that holds a
- * sign-in or a key is opened; children get only the allowlisted environment (childEnv); every process is
+ * sign-in is opened (the router keys in accounts/secrets.json are read only by accounts.ts, to ask that router for its models);
+ * children get only the allowlisted environment (childEnv) and, for an account, its own directory or router; every process is
  * bounded by a timeout that kills it and a cap on what it may print; nothing runs on a timer (a probe runs
  * when someone asks); the owner's email, plan, usage, versions and error text never reach anyone else
  * (redactCard).
@@ -11,8 +12,9 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
-import { agentModels, childEnv, claudeProbe, type Caps, type ClaudeProbe } from "./chat";
+import { agentModels, claudeProbe, forgetProbe, type Caps, type ClaudeProbe } from "./chat";
 import { clearCodexSignedIn, codexSignedIn } from "./codex";
+import { childEnv, dirOf, envOfAccount, getAccount, groupRouterModels, hasKey, limitedUntil, listAccounts, markLimited, overlayOf, runAsOf, setSignedIn, testRouter, type Account } from "./accounts";
 
 export type ProviderId = "claude" | "codex" | "hermes" | "omp" | (string & {});
 
@@ -23,6 +25,8 @@ export interface ProviderModel {
   efforts?: string[];
   isDefault?: boolean;
   group?: string;
+  /** added by the owner for this account (Settings), not listed by the AI */
+  custom?: boolean;
 }
 export interface ProviderWindow {
   id: string;
@@ -50,6 +54,14 @@ export interface ProviderAccount {
   usage: ProviderUsage | null;
   models: ProviderModel[];
   modelsAt: number | null;
+  /** "default" = the AI's own login; "login" = another sign-in added here; "router" = Claude through a router or API address (owner only) */
+  kind?: "default" | "login" | "router";
+  /** when the account's limit lifts (epoch ms), if it is at one (owner only) */
+  limitedUntil?: number | null;
+  /** a router account: a key is stored (the key itself never leaves the server) */
+  hasKey?: boolean;
+  /** a router account: its host and port, never the full address */
+  baseUrlHost?: string;
 }
 export interface ProviderAction {
   kind: "install" | "sign_in" | "add_account" | "fix" | "refresh" | "sign_out" | "open_dashboard";
@@ -110,14 +122,17 @@ function dropMemos(id: string): void {
 type Ran = { out: string; code: number | null; fail: "spawn" | "timeout" | "protocol" | null };
 
 /** Runs a program with the allowlisted environment. Killed (SIGKILL) at timeoutMs or when it prints more than maxBytes; what it writes to stderr is dropped. */
-function run(cmd: string, args: string[], timeoutMs: number, maxBytes = 512 * 1024): Promise<Ran> {
+function run(cmd: string, args: string[], timeoutMs: number, maxBytes = 512 * 1024, account?: Account): Promise<Ran> {
   return new Promise((resolve) => {
     const bin = Bun.which(cmd);
     if (!bin) return resolve({ out: "", code: null, fail: "spawn" });
     let out = "";
     let fail: Ran["fail"] = null;
     let done = false;
-    const child = spawn(bin, args, { cwd: homedir(), env: childEnv(homedir()), stdio: ["ignore", "pipe", "pipe"] });
+    // an account's own process: its sign-in directory, and the OS account that owns it
+    const as = account ? runAsOf(account) : { uid: undefined, gid: undefined, home: homedir() };
+    const extra = account?.kind === "login" ? envOfAccount(account) : undefined;
+    const child = spawn(bin, args, { cwd: as.home, uid: as.uid, gid: as.gid, env: childEnv(as.home, extra), stdio: ["ignore", "pipe", "pipe"] });
     const end = (code: number | null) => {
       if (done) return;
       done = true;
@@ -379,6 +394,41 @@ function accountCard(id: ProviderId, now: number, version: string | null, accoun
   return { ...baseCard(id, now), version, state: account.state === "limited" ? "limited" : "connected", accounts: [account] };
 }
 
+/** An account's models with the owner's names and added models on top. Pure. */
+export function withOverlay(models: ProviderModel[], o: { names: Record<string, string>; custom: { value: string; label: string }[] }): ProviderModel[] {
+  const named = models.map((m) => (o.names[m.value] ? { ...m, label: o.names[m.value] } : m));
+  const have = new Set(named.map((m) => m.value));
+  return [...named, ...o.custom.filter((c) => !have.has(c.value)).map((c): ProviderModel => ({ value: c.value, label: c.label, custom: true }))];
+}
+
+/** One card from several accounts. Connected when any account is; limited only when every usable one is. With none, the signed-out card. Pure. */
+export function combineAccounts(id: ProviderId, now: number, version: string | null, accounts: ProviderAccount[], signedOut: ProviderAction, extra: ProviderAction[]): ProviderCard {
+  if (accounts.length === 0) return { ...signedOutCard(id, now, version, signedOut), actions: [signedOut, ...extra, refreshAction] };
+  const usable = accounts.filter((a) => a.state === "connected" || a.state === "limited");
+  const state: ProviderCard["state"] = usable.length === 0 ? (accounts.some((a) => a.state === "error") ? "error" : "signed_out") : usable.every((a) => a.state === "limited") ? "limited" : "connected";
+  return { ...baseCard(id, now), version, state, accounts, actions: usable.length === 0 ? [signedOut, ...extra, refreshAction] : [...extra, refreshAction] };
+}
+
+/** A router's account row from its check: connected with its models, or why not. Pure. */
+export function routerAccountFrom(a: { id: string; label: string; host: string; hasKey: boolean; now: number; check: "ok" | "key_rejected" | "unreachable"; models: string[]; overlay: Parameters<typeof withOverlay>[1] }): ProviderAccount {
+  const listed: ProviderModel[] = groupRouterModels(a.models).flatMap((g) => g.ids.map((id): ProviderModel => ({ value: id, label: id.includes("/") ? id.slice(id.indexOf("/") + 1) : id, group: g.group })));
+  return {
+    id: a.id,
+    label: a.label,
+    email: null,
+    plan: null,
+    auth: "router",
+    state: a.check === "ok" ? "connected" : "error",
+    isolation: {},
+    usage: { readAt: a.now, windows: [], note: "Usage is on the router's own dashboard." },
+    models: withOverlay(listed, a.overlay),
+    modelsAt: a.check === "ok" ? a.now : null,
+    kind: "router",
+    hasKey: a.hasKey,
+    baseUrlHost: a.host,
+  };
+}
+
 /** Claude's card from `auth status` and one initialize + get_usage reading. Signed out shows no models; an API key shows no plan windows. Pure. */
 export function claudeCardFrom(
   a: { now: number; version: string | null; loggedIn: boolean | null; method: string | null; probe: Pick<ClaudeProbe, "account" | "models" | "planRaw" | "at"> },
@@ -479,7 +529,8 @@ export function redactCard(c: ProviderCard): ProviderCard {
     ...(c.error ? { error: { code: c.error.code, message: GENERIC_ERROR } } : {}),
     accounts: c.accounts.map((a) => ({
       id: a.id,
-      label: c.name,
+      // another sign-in is told apart by the name the owner gave it; the AI's own login is just the AI. The kind, limit time, key flag and router host stay with the owner.
+      label: a.kind === "login" || a.kind === "router" ? a.label : c.name,
       email: null,
       plan: null,
       auth: "none" as const,
@@ -518,10 +569,10 @@ export function pickerModels(cards: ProviderCard[]): PickerGroup[] {
 
 type Ctx = { force: boolean };
 
-/** claude auth status: signed in or not, and how. Shared for 60 s. */
-function claudeAuth(): Promise<{ loggedIn: boolean | null; method: string | null }> {
-  return memo("claude:auth", TTL_CARD, async () => {
-    const r = await run("claude", ["auth", "status"], 8000);
+/** claude auth status: signed in or not, and how. Shared for 60 s. For an account, under its own sign-in directory. */
+function claudeAuth(account?: Account): Promise<{ loggedIn: boolean | null; method: string | null }> {
+  return memo(account ? `claude:${account.id}:auth` : "claude:auth", TTL_CARD, async () => {
+    const r = await run("claude", ["auth", "status"], 8000, 512 * 1024, account);
     if (r.fail === "spawn") throw new ProbeError("spawn", "");
     if (r.fail) return { loggedIn: null, method: null };
     return { loggedIn: parseClaudeLoggedIn(r.out), method: parseClaudeAuthMethod(r.out) };
@@ -549,21 +600,77 @@ function classify(e: unknown): NonNullable<ProviderCard["error"]>["code"] {
   return "protocol";
 }
 
+/** Marks an account limited until its window resets, when a reading says one is full. Reading usage is the only time Kohlab learns this without a chat failing. */
+function noteLimit(provider: string, accountId: string | null, acct: ProviderAccount): void {
+  const until = acct.usage?.windows.filter((w) => w.severity === "limit" && w.resetsAt).map((w) => Date.parse(w.resetsAt!)).filter((t) => Number.isFinite(t) && t > clock());
+  if (until?.length) markLimited(provider, accountId, Math.min(...until));
+}
+
+/** What the card adds to an account row: its kind, and when its limit lifts. */
+function tagged(provider: string, accountId: string | null, acct: ProviderAccount, kind: "default" | "login"): ProviderAccount {
+  noteLimit(provider, accountId, acct);
+  const until = limitedUntil(provider, accountId);
+  return { ...acct, kind, limitedUntil: until || null, state: acct.state === "connected" && until ? "limited" : acct.state };
+}
+
 async function claudeProbeCard(ctx: Ctx): Promise<ProviderCard> {
   const now = clock();
   if (!Bun.which("claude")) return notInstalledCard("claude", now);
   const version = await versionOf("claude", "claude", ["--version"]);
+  const accounts: ProviderAccount[] = [];
+  // the AI's own login first
   const auth = await claudeAuth();
-  if (auth.loggedIn === false) return signedOutCard("claude", now, version, serverSignIn("On the server, run claude auth login."));
-  const probe = await claudeProbe(ctx.force ? 0 : TTL_USAGE);
-  return claudeCardFrom({ now, version, loggedIn: auth.loggedIn, method: auth.method, probe });
+  if (auth.loggedIn !== false) {
+    const probe = await claudeProbe(ctx.force ? 0 : TTL_USAGE);
+    const one = claudeCardFrom({ now, version, loggedIn: auth.loggedIn, method: auth.method, probe }).accounts[0];
+    if (one) accounts.push({ ...tagged("claude", null, one, "default"), models: withOverlay(one.models, overlayOf("claude", "default")) });
+  }
+  // then every other sign-in, one after the other (never two Claude processes at once), and every router
+  for (const a of listAccounts("claude")) {
+    if (a.kind === "router") {
+      const key = hasKey(a.id);
+      const got = await memo(`claude:${a.id}:router`, TTL_CARD, () => testRouter(a.id)).catch(() => ({ check: "unreachable" as const, models: [] as string[] }));
+      accounts.push(routerAccountFrom({ id: a.id, label: a.label, host: hostOf(a.baseUrl), hasKey: key, now, check: got.check, models: got.check === "ok" ? (getAccount(a.id)?.models ?? got.models) : [], overlay: overlayOf("claude", a.id) }));
+      continue;
+    }
+    const au = await claudeAuth(a).catch(() => ({ loggedIn: null as boolean | null, method: null }));
+    if (au.loggedIn !== null) setSignedIn(a.id, au.loggedIn);
+    if (au.loggedIn === false) {
+      accounts.push({ id: a.id, label: a.label, email: null, plan: null, auth: "none", state: "signed_out", isolation: {}, usage: null, models: [], modelsAt: null, kind: "login", limitedUntil: null });
+      continue;
+    }
+    try {
+      const probe = await claudeProbe(ctx.force ? 0 : TTL_USAGE, a.id);
+      const one = claudeCardFrom({ now, version, loggedIn: au.loggedIn, method: au.method, probe }).accounts[0];
+      if (one) accounts.push({ ...tagged("claude", a.id, one, "login"), id: a.id, label: a.label, models: withOverlay(one.models, overlayOf("claude", a.id)) });
+      else accounts.push({ id: a.id, label: a.label, email: null, plan: null, auth: "none", state: "signed_out", isolation: {}, usage: null, models: [], modelsAt: null, kind: "login", limitedUntil: null });
+    } catch (e) {
+      console.warn(`[providers] claude account ${a.id}:`, (e as Error).message);
+      accounts.push({ id: a.id, label: a.label, email: null, plan: null, auth: "none", state: "error", isolation: {}, usage: null, models: [], modelsAt: null, kind: "login", limitedUntil: null });
+    }
+  }
+  const add: ProviderAction[] = [
+    { kind: "add_account", label: "Add another Claude account", via: "url" },
+    { kind: "add_account", label: "Use Claude through a router or API address", via: "api_key" },
+  ];
+  return combineAccounts("claude", now, version, accounts, serverSignIn("On the server, run claude auth login."), add);
+}
+
+/** The host of a router's address, for a card (never its path). */
+function hostOf(url: string | undefined): string {
+  try {
+    return url ? new URL(url).host : "";
+  } catch {
+    return "";
+  }
 }
 
 /** One short conversation with `codex app-server` on private stdio: initialize, account/read, and the rate limits for a ChatGPT account. No model is called. Killed when done or at 10 s. */
-async function codexRead(): Promise<{ account: any; rateLimits: any }> {
+async function codexRead(account?: Account): Promise<{ account: any; rateLimits: any }> {
   const bin = Bun.which("codex");
   if (!bin) throw new ProbeError("spawn", "");
-  const child = spawn(bin, ["app-server"], { cwd: homedir(), env: childEnv(homedir()), stdio: ["pipe", "pipe", "pipe"] });
+  const as = account ? runAsOf(account) : { uid: undefined, gid: undefined, home: homedir() };
+  const child = spawn(bin, ["app-server"], { cwd: as.home, uid: as.uid, gid: as.gid, env: childEnv(as.home, account ? { CODEX_HOME: dirOf(account.id) } : undefined), stdio: ["pipe", "pipe", "pipe"] });
   child.stderr!.on("data", () => {});
   child.stdin!.on("error", () => {});
   let seq = 0;
@@ -622,12 +729,34 @@ async function codexProbeCard(ctx: Ctx): Promise<ProviderCard> {
   const now = clock();
   if (!Bun.which("codex") || !Bun.which("codex-acp")) return notInstalledCard("codex", now);
   const version = await versionOf("codex", "codex", ["--version"]);
+  void ctx;
+  const accounts: ProviderAccount[] = [];
   const signedIn = await codexSignedIn();
   if (signedIn === null) throw new ProbeError("protocol", "");
-  if (!signedIn) return signedOutCard("codex", now, version, { kind: "sign_in", label: "Sign in with ChatGPT", via: "device_code" });
-  void ctx;
-  const read = await memo("codex:read", TTL_USAGE, codexRead);
-  return codexCardFrom({ now, version, account: read.account, rateLimits: read.rateLimits, models: agentModels("codex") });
+  if (signedIn) {
+    const read = await memo("codex:read", TTL_USAGE, () => codexRead());
+    const one = codexCardFrom({ now, version, account: read.account, rateLimits: read.rateLimits, models: agentModels("codex") }).accounts[0];
+    if (one) accounts.push({ ...tagged("codex", null, one, "default"), models: withOverlay(one.models, overlayOf("codex", "default")) });
+  }
+  for (const a of listAccounts("codex")) {
+    const si = await codexSignedIn(a.id);
+    if (si !== null) setSignedIn(a.id, si);
+    const row: ProviderAccount = { id: a.id, label: a.label, email: null, plan: null, auth: "none", state: si === false ? "signed_out" : "error", isolation: {}, usage: null, models: [], modelsAt: null, kind: "login", limitedUntil: null };
+    if (!si) {
+      accounts.push(row);
+      continue;
+    }
+    try {
+      const read = await memo(`codex:${a.id}:read`, TTL_USAGE, () => codexRead(a));
+      const one = codexCardFrom({ now, version, account: read.account, rateLimits: read.rateLimits, models: agentModels("codex") }).accounts[0];
+      accounts.push(one ? { ...tagged("codex", a.id, one, "login"), id: a.id, label: a.label, models: withOverlay(one.models, overlayOf("codex", a.id)) } : row);
+    } catch (e) {
+      console.warn(`[providers] codex account ${a.id}:`, (e as Error).message);
+      accounts.push(row);
+    }
+  }
+  const add: ProviderAction[] = [{ kind: "add_account", label: "Add another Codex login", via: "device_code" }];
+  return combineAccounts("codex", now, version, accounts, { kind: "sign_in", label: "Sign in with ChatGPT", via: "device_code" }, add);
 }
 
 async function hermesProbeCard(): Promise<ProviderCard> {
@@ -753,10 +882,46 @@ export async function refreshProviders(id?: string): Promise<{ providers: Provid
       lastForced.set(pid, t);
       dropMemos(pid);
       if (pid === "codex") clearCodexSignedIn();
+      if (pid === "claude") forgetClaudeProbes();
       await build(pid, true);
     }),
   );
   return current();
+}
+
+/** Forgets one AI's card so the next read builds it again from the (cached) probes: after an account, a key or a model was changed. */
+export function invalidateProvider(id: string): void {
+  kept.delete(id);
+  lastGood.delete(id);
+}
+
+/** A check of one account that never costs anything: a router is asked for its models; a sign-in is asked who it is (`auth status`, `login status`). Sets what the rest of Kohlab knows about it. */
+export async function testAccount(id: string): Promise<{ check: "ok" | "key_rejected" | "unreachable" | "signed_out"; models?: number }> {
+  const a = getAccount(id);
+  if (!a) return { check: "unreachable" };
+  invalidateProvider(a.provider);
+  if (a.kind === "router") {
+    const got = await testRouter(id);
+    return { check: got.check, models: got.models.length };
+  }
+  if (a.provider === "claude") {
+    memos.delete(`claude:${id}:auth`);
+    const au = await claudeAuth(a).catch(() => ({ loggedIn: null as boolean | null, method: null }));
+    if (au.loggedIn === null) return { check: "unreachable" };
+    setSignedIn(id, au.loggedIn);
+    return { check: au.loggedIn ? "ok" : "signed_out" };
+  }
+  clearCodexSignedIn(id);
+  const si = await codexSignedIn(id);
+  if (si === null) return { check: "unreachable" };
+  setSignedIn(id, si);
+  return { check: si ? "ok" : "signed_out" };
+}
+
+/** A forced refresh of Claude also reads every account again (the 5 min reading of each is dropped). */
+function forgetClaudeProbes(): void {
+  forgetProbe();
+  for (const a of listAccounts("claude")) forgetProbe(a.id);
 }
 
 /** For the checks only: a fake clock, fake probes, and a clean slate. */

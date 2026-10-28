@@ -2,7 +2,7 @@
 // State lives in $WORKS_DIR/state.json. Sessions are node-pty sessions
 // owned by pty-daemon.cjs, spoken to over a Unix socket.
 
-import type { Workspace, User, Role, WorkspaceLimits } from "./types";
+import type { AiDefaults, Workspace, User, Role, WorkspaceLimits } from "./types";
 import { restoreTree, type Version } from "./versions";
 import { chmodSync, chownSync, rmSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { appendFile, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "fs/promises";
@@ -411,7 +411,7 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
     // The chat's own claude process must not run alongside this one on the same session.
     // Re-attaching to a resume terminal that is already open must leave the chat alone (it is stopped already).
     if (!(await resumeOpen(ws.id))) chatKillers.get(ws.id)?.();
-    cmd = [(s.agents.claude || "claude").split(/\s+/)[0], "--resume", ws.chatSession, ...(ws.model ? ["--model", ws.model] : [])];
+    cmd = [(s.agents.claude || "claude").split(/\s+/)[0], "--resume", ws.chatSession, ...(ws.model && ws.model !== "default" ? ["--model", ws.model] : [])];
   } else {
     cmd = terminalId.startsWith("shell-")
       ? [Bun.which("bash") ? "bash" : "sh", ...(Bun.which("bash") ? ["-l"] : [])]
@@ -448,7 +448,7 @@ export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols
   // the same shared browser the person watches in the panel (browser.ts)
   const mcpFile = terminalId === "main" && basename(cmd[0]) === "claude" ? writeBrowserMcp(ws, who) : null;
   // A project's model applies when its Claude starts. Resume already carries --model above.
-  const modelArgs = ws.model && terminalId === "main" && basename(cmd[0]) === "claude" ? ["--model", ws.model] : [];
+  const modelArgs = ws.model && ws.model !== "default" && terminalId === "main" && basename(cmd[0]) === "claude" ? ["--model", ws.model] : [];
   const res = await ptyRequest<{ ok?: boolean; error?: string }>(
     "open",
     {
@@ -1408,6 +1408,8 @@ export async function markStarted(id: string): Promise<Workspace> {
     if (!ws) throw new Error(`no workspace '${id}'`);
     ws.started = Date.now();
     ws.stopped = null;
+    // the first message settles the AI and account: later changes to the server defaults never move a conversation
+    ws.agentPinned = true;
     return ws;
   });
 }
@@ -1494,6 +1496,8 @@ interface State {
   agents: Record<string, string>;
   /** Per-account preferences, keyed by account id. */
   prefs?: Record<string, { powerTools?: boolean }>;
+  /** What new chat projects start with (AI control, v2.6). Additive: an older build ignores it. */
+  defaults?: AiDefaults;
 }
 
 /** The shape this build writes. See migrateState(). */
@@ -1865,6 +1869,8 @@ export async function createWorkspace(opts: {
   url?: string;
   /** Talk through chat.ts: no PTY, and the payload is not used (the first chat message is the task). */
   chat?: boolean;
+  /** The caller named no AI: a chat project starts on the server's default AI and account (until its first message). */
+  inherit?: boolean;
 }): Promise<Workspace & { running: boolean; path: string }> {
   if (opts.branch !== undefined && !(await validBranch(opts.branch))) throw new Error(`not a valid branch name: ${opts.branch}`);
   // `opts.url` reaches `git clone --bare` as root with safe.directory=*.
@@ -1900,11 +1906,17 @@ export async function createWorkspace(opts: {
     if (s.workspaces.some((w) => w.id === id)) {
       throw new Error(`workspace '${id}' already exists (delete or reuse it)`);
     }
+    const d = s.defaults;
+    const fromDefault = !!opts.chat && !!opts.inherit && !!d?.agent && d.agent in s.agents;
+    const agentName = fromDefault ? d!.agent! : opts.agent;
     const w: Workspace = {
       id,
       repo: repo ?? "",
       task: opts.task,
-      agent: opts.agent in s.agents ? opts.agent : "sh",
+      agent: agentName in s.agents ? agentName : "sh",
+      // a chat project whose AI was chosen on purpose (not the server default) keeps it; otherwise it follows the defaults until its first message
+      ...(opts.chat && !opts.inherit && agentName !== (d?.agent ?? "claude") ? { agentPinned: true } : {}),
+      ...(fromDefault && d?.account ? { account: d.account } : {}),
       created: Date.now(),
       started: null,
       stopped: null,

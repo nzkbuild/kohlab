@@ -99,6 +99,7 @@ Shipped and claimed:
 - Share links, image paste, agent install/status, GitHub repository browsing.
 - A `kohlab` command for all of it, from any shell.
 - One place for your AI helpers: Settings → AI shows every AI on this computer, whether it is signed in, which account, how much of its plan is used and when that resets, and which models it offers. Model menus list only AIs that are signed in.
+- Control the AI: choose defaults for new projects; add another Claude account or a router address; set the mode per project (Asks first, Edits allowed, Auto, Full access, Plan first), save "Always allow" rules and take them back; send one message on another model; and set what happens when an AI reaches its limit (carry on with another account or a cheaper model, then come back). The AI, account, model, mode and any one-off model stay in view in the run strip.
 
 Constraints, stated plainly rather than discovered by a user:
 
@@ -112,6 +113,8 @@ Constraints, stated plainly rather than discovered by a user:
   workspace created from a URL (an isolated member's) has no checkout on the
   server, so its merge is `kohlab merge <id> --into <checkout>`, run as that
   member.
+- Full access means the AI never asks: it can change and delete anything it can reach, and runs commands as the server's own account unless the owner has set up a smaller one. Only the owner can turn it on, and it asks once in plain words first.
+- Another Claude login is signed in once inside Kohlab and kept only on the server; a router key is stored on the server and can never be shown again.
 - The AI hub reads the server owner's AI accounts. Members see which AIs are ready and their models, not the owner's email, plan or usage. An AI that a member runs under their own computer account may be signed in differently from what the hub shows.
 - Claiming an unclaimed server from the browser is designed, not built
   (`ROADMAP.md`); the owner key comes from the installer.

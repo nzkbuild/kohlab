@@ -133,7 +133,14 @@ try {
   run("AI hub over HTTP (fake AIs, redaction, canary secrets)", "node", ["scripts/check-providers-http.mjs"]);
   run("helper tree and run info over HTTP (fake claude)", "node", ["scripts/check-chat-helpers.mjs"]);
   run("continue fresh over HTTP (fake claude)", "node", ["scripts/check-fresh-http.mjs"]);
+  // AI control (v2.6): each starts its own throwaway server with a fake claude (and fake router, Codex, omp) on PATH; no model is called.
+  run("AI defaults (project > default > built in, pinned by the first message, reset)", "bun", ["scripts/check-defaults.mjs"]);
+  run("AI permissions (modes, Always allow, Full access, ACP decisions)", "bun", ["scripts/check-policy.mjs"]);
+  run("AI accounts (second sign-in, router, canary key, custom models)", "bun", ["scripts/check-accounts.mjs"]);
+  run("usage-limit fallback (next account or model, once, the way back)", "bun", ["scripts/check-fallback.mjs"]);
+  run("omp model (the hub's pick sticks, a refusal is said plainly) and ACP permissions", "bun", ["scripts/check-omp-model.mjs"]);
   run("AI hub in the browser (Settings, picker, run strip and panel)", "node", ["scripts/check-ai-hub-ui.mjs"]);
+  run("AI control in the browser (defaults, accounts, fallback, permissions, one message)", "node", ["scripts/check-ai-control-ui.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);

@@ -311,7 +311,7 @@ for (const [what, re] of [
   check(`source: no ${what}`, !re.test(src));
 check('source: never writes a type "user" line', !/type\s*:\s*["'`]user["'`]/.test(src));
 check("source: no commands that print a key or are slow", !/["'`]token["'`]/.test(code) && !/["'`]dump["'`]/.test(code) && !/hermes[^\n]*--version/.test(code) && !/codex-acp[^\n]*--help/.test(code) && !/["'`]status["'`]\s*\]/.test(code.replace(/\["auth", "status"\]/g, "")));
-check("source: children only get childEnv", !/process\.env/.test(code) && (code.match(/env: childEnv\(homedir\(\)\)/g) ?? []).length >= 2);
+check("source: children only get childEnv", !/process\.env/.test(code) && (code.match(/env: childEnv\(as\.home/g) ?? []).length >= 2);
 check("source: every spawn is killed with SIGKILL", (code.match(/SIGKILL/g) ?? []).length >= 3 && !/SIGTERM/.test(code));
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

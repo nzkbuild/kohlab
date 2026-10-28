@@ -8,12 +8,15 @@
  * flight at restart is lost. Upgrade path: host it in the PTY daemon.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chownSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { createInterface } from "node:readline";
-import type { Workspace } from "./types";
+import type { AiDefaults, AiResolved, Fallback, FallbackStep, LimitState, PermissionRule, Workspace } from "./types";
+import { accountEnv, childEnv, clearLimit, configDirOf, envOfAccount, getAccount, laneKey, limitedUntil, listAccounts, markLimited, overlayOf, runAsOf, signedInOf, usableBy } from "./accounts";
+import { RESET_FIELDS, resolveAi } from "./defaults";
+import { PERSONAL_ASKS, claudeArgsFor, cleanRules, defaultSteps, describeRule, isMode, limitReached, ruleFor, ruleParts, validRule } from "./policy";
 import { notifyNeedsYou } from "./push";
 import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
 import { devServerOrigin } from "./devserver";
@@ -26,6 +29,7 @@ import {
   resumeOpen,
   chatKillers,
   chatWaiting,
+  audit,
   closeMain,
   getWorkspace,
   identityOf,
@@ -40,16 +44,8 @@ import {
   worktreePath,
 } from "./lib";
 
-/** The only keys copied into the claude process, never the server's secrets (KOHLAB_KEY and friends).
- *  Same allowlist as the PTY daemon: see SAFE_ENV_KEYS in pty-daemon.cjs for why. */
-const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USER", "LOGNAME"];
-/** The environment a child agent gets: the allowlisted keys from the server's, and its own HOME. */
-export function childEnv(home: string): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const k of SAFE_ENV_KEYS) if (process.env[k] !== undefined) env[k] = process.env[k]!;
-  env.HOME = home;
-  return env;
-}
+/** The environment a child agent gets: the allowlisted keys from the server's, its own HOME, and an account's own variables (accounts.ts). */
+export { childEnv };
 /** Appended to claude's system prompt: who it talks to, and the Preview / Keep / Undo buttons it can rely on. */
 const CHAT_SYSTEM_PROMPT =
   "The person you are working with is not a programmer. Use plain, friendly language and avoid jargon. Write short plain sentences; avoid Markdown headings. " +
@@ -87,23 +83,26 @@ export type AskQuestion = { question: string; header?: string; multiSelect?: boo
 export type Body =
   /** uuid: the id Claude keeps for this message, which Undo names. Not set on lines imported from a terminal's transcript. */
   /** tree: the project's files as they were just before this message (checkpoints.ts). Not set when the snapshot could not be taken. */
-  | { kind: "user"; text: string; uuid?: string; tree?: string }
+  /** with: the model this one message was sent with (Send with…), when it was not the project's own. */
+  | { kind: "user"; text: string; uuid?: string; tree?: string; with?: string }
   | { kind: "assistant"; text: string }
   /** toolId: the tool's id, which its result refers to. detail: what it did (the command, the change), for the expandable line. file: the file an edit or a new file touched; the chat does not show it, a handoff to another AI does. */
   | { kind: "tool"; text: string; toolId?: string; detail?: string; file?: string }
   /** A quiet divider line for something that happened to the conversation (a switch of AI, going back, a compaction, a background task), not an AI step. */
-  | { kind: "note"; text: string }
+  /** until: when a usage limit lifts (epoch ms), for a note about one: the page writes the time in the viewer's zone. */
+  | { kind: "note"; text: string; until?: number }
   /** result: what a tool gave back, trimmed by resultText. failed: the tool errored. */
   | { kind: "result"; toolId: string; output: string; failed?: boolean }
   /** form: a question card ("question", with questions) or a plan card ("plan", with plan). Neither is set for a permission question. */
-  | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string; form?: "question" | "plan"; questions?: AskQuestion[]; plan?: string }
+  /** always: the standing rule an "Always allow" would save for this ask (only for a permission question that is safe to remember). */
+  | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string; form?: "question" | "plan"; questions?: AskQuestion[]; plan?: string; always?: { rule: string; label: string } }
   /** reply: what the person answered or asked for, when a question or plan card was answered with text. */
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
   /** worked: how long the turn ran (ms). planDelta: the plan's five-hour window percent the turn used, for the owner only (snapshot strips it for others). */
   | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number } }
   /** planDelta: the plan share of the turn that ended just before it, sent once the usage is read (owner only). The chat view merges it into that turn's done line. */
   | { kind: "plan"; planDelta: number }
-  | { kind: "error"; text: string }
+  | { kind: "error"; text: string; until?: number }
   /** The handoff note a fresh session starts from (see "Continue fresh"): shown as a collapsed card. */
   | { kind: "handoff"; text: string };
 
@@ -293,7 +292,7 @@ export function answerResponse(
   tool: string,
   input: Record<string, unknown>,
   allow: boolean,
-  extra: { answers?: Record<string, string>; message?: string },
+  extra: { answers?: Record<string, string>; message?: string; remember?: string },
 ): { response: Record<string, unknown>; reply?: string } {
   if (tool === "AskUserQuestion") {
     if (!allow) return { response: { behavior: "deny", message: "The user chose not to answer." } };
@@ -317,12 +316,16 @@ export function answerResponse(
     if (!message) return { response: { behavior: "deny", message: "The user did not approve the plan." } };
     return { response: { behavior: "deny", message: `The user wants changes to the plan: ${message}` }, reply: message };
   }
-  return allow ? { response: { behavior: "allow", updatedInput: input } } : { response: { behavior: "deny", message: "The user said no." } };
+  if (!allow) return { response: { behavior: "deny", message: "The user said no." } };
+  // "Always allow": Claude is also told to remember the rule for this session (best effort; the rule is kept on the project and passed with --allowedTools at every start)
+  const remember = extra.remember && validRule(extra.remember) ? [{ type: "addRules", rules: [ruleParts(extra.remember)], behavior: "allow", destination: "session" }] : undefined;
+  return { response: { behavior: "allow", updatedInput: input, ...(remember ? { updatedPermissions: remember } : {}) } };
 }
 
 /** What the user reads when Claude fails. The raw CLI text goes to the server log, not the chat. */
 export function friendlyError(raw: string): string {
-  if (/usage limit|rate limit|limit reached|quota|overloaded|529/i.test(raw)) return "Claude has reached its usage limit for now. Try again in a little while.";
+  if (/overloaded|\b529\b/i.test(raw) && !limitReached(raw)) return "Claude is busy right now. Try again in a little while.";
+  if (/usage limit|rate limit|limit reached|quota/i.test(raw) || limitReached(raw)) return "Claude has reached its usage limit for now. Try again in a little while.";
   if (/not logged in|log ?in|login|authenticat|401|invalid api key|credential/i.test(raw)) return "Claude is signed out on this server. Open Settings → Agents to check the connection.";
   if (/is not installed on this server/i.test(raw)) return "Claude is not set up on this server yet. Open Settings → Agents.";
   return "Something went wrong on Claude's side. Try again.";
@@ -378,8 +381,14 @@ export function handoffText(events: ChatEvent[], _fromName: string, budget = 120
 interface Live {
   child: ChildProcess;
   cwd: string;
-  /** unanswered permission asks: requestId -> the tool and its input (echoed back on allow) */
-  asks: Map<string, { tool: string; input: Record<string, unknown> }>;
+  /** unanswered permission asks: requestId -> the tool and its input (echoed back on allow), and the rule an "Always allow" would save */
+  asks: Map<string, { tool: string; input: Record<string, unknown>; always?: { rule: string; label: string } }>;
+  /** Full access: Kohlab answers every permission ask itself (never AskUserQuestion or ExitPlanMode). Claude stays in its "default" mode. */
+  fullAccess: boolean;
+  /** the message sent with another model: the model to go back to when its turn ends (never written to the project) */
+  restoreModel?: string;
+  /** the person's own words for the message in flight, to send again after a usage limit moved the conversation on */
+  rawMsg?: string;
   stderr: string;
   /** killed on purpose (stop or delete): its exit is not an error */
   stopping: boolean;
@@ -487,7 +496,7 @@ const usageAt = new Map<string, number>();
 const usageReading = new Set<string>();
 let requestSeq = 0;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-const MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk"];
+const MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk", "full"];
 
 function capsOf(id: string): Caps {
   let c = caps.get(id);
@@ -536,8 +545,8 @@ const TAIL_BYTES = 8 * 1024 * 1024;
 const FIRST_IMPORT = 300;
 
 /** Claude Code's transcript for a session: under the home, in a folder named after the worktree path. */
-function transcriptFile(home: string, cwd: string, sid: string): string {
-  return join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), `${sid}.jsonl`);
+function transcriptFile(home: string, cwd: string, sid: string, configDir?: string): string {
+  return join(configDir ?? join(home, ".claude"), "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), `${sid}.jsonl`);
 }
 
 /** How far into a terminal project's transcript the chat has read, for one session. */
@@ -924,7 +933,7 @@ async function syncFromTerminal(ws: Workspace): Promise<void> {
   if (chatBusy.has(ws.id) || !sid || !/^[\w-]+$/.test(sid)) return;
   try {
     const cwd = worktreePath(ws);
-    const file = transcriptFile(identityOf(ws)?.home || homedir(), cwd, sid);
+    const file = transcriptFile(identityOf(ws)?.home || homedir(), cwd, sid, configDirOf(ws));
     if (!existsSync(file)) return;
     // The server runs as root and the folder may be writable by the agent: never follow a link.
     if (!lstatSync(file).isFile()) return;
@@ -990,7 +999,13 @@ function load(id: string): Chat {
 /** A handoff note being written: the reply is caught here instead of shown, and the turn's end settles it. */
 const captures = new Map<string, { text: string; settle: (text: string | null) => void }>();
 
+/** Projects whose message already moved to another account or model once: a second limit on the same message is shown, not hopped again. Cleared when a turn ends. */
+const hopped = new Set<string>();
+/** Projects whose Claude restarts at the next idle moment (a saved rule was removed; the process holds it until then). */
+const restartAtIdle = new Set<string>();
+
 function emit(id: string, body: Body): ChatEvent {
+  if (body.kind === "done") hopped.delete(id);
   const cap = captures.get(id);
   if (cap && (body.kind === "assistant" || body.kind === "done" || body.kind === "error")) {
     if (body.kind === "assistant") cap.text += (cap.text ? "\n" : "") + body.text;
@@ -1073,6 +1088,11 @@ function pingNeedsYou(id: string, question: string) {
 
 /** Mark the run finished, as the watcher does for a PTY: stop time, cleanliness, then notify. */
 async function finish(id: string): Promise<void> {
+  // a removed rule: the process that still holds it ends now, and the next message resumes the conversation without it
+  if (restartAtIdle.has(id) && !chatBusy.has(id)) {
+    restartAtIdle.delete(id);
+    stop(id);
+  }
   const clean = await worktreeIsClean(id);
   const w = await mutateState((st) => {
     const ws = st.workspaces.find((x) => x.id === id);
@@ -1128,8 +1148,44 @@ function saveAgentInfo(agent: string): void {
     console.warn(`[chat] agent models save: ${(e as Error).message}`);
   }
 }
-/** The model an ACP project runs on: its own choice, else the one last chosen for that agent, else the agent's default (undefined). */
-const wantedModel = (ws: Workspace): string | undefined => ws.agentModel ?? (isAcp(ws) ? (agentInfo(ws.agent).lastModel ?? undefined) : undefined);
+/** The model an ACP project runs on: its own choice, else the server default when the agent offers it, else the agent's own (undefined). */
+const wantedModel = (ws: Workspace, defaults?: AiDefaults): string | undefined => {
+  if (ws.agentModel) return ws.agentModel;
+  const d = ws.chat ? defaults?.model : undefined;
+  return isAcp(ws) && d && d !== "default" && agentInfo(ws.agent).models.some((m) => m.value === d) ? d : undefined;
+};
+
+/** The server's defaults for new projects. */
+const defaultsOf = async (): Promise<AiDefaults | undefined> => (await loadState()).defaults;
+
+/** A project, as it is now. A chat that has had no message yet follows the server defaults for its AI and account, so a changed default reaches it before it is pinned by its first message. */
+async function wsOf(id: string): Promise<Workspace> {
+  const ws = await getWorkspace(id);
+  if (!ws.chat || ws.agentPinned || chatBusy.has(id)) return ws;
+  const d = (await defaultsOf()) ?? {};
+  const agent = d.agent && (d.agent === "claude" || isAcpAgent(d.agent)) && Bun.which(agentBin(d.agent)) ? d.agent : ws.agent;
+  const acct = d.account ? getAccount(d.account) : undefined;
+  const account = acct && acct.provider === agent && usableBy(acct, ws) ? acct.id : undefined;
+  if (agent === ws.agent && account === ws.account) return ws;
+  stop(id); // an AI warmed up for its model list is not this project's any more
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w || w.agentPinned) return;
+    w.agent = agent;
+    w.account = account;
+    w.chatSession = undefined;
+    w.agentModel = undefined;
+  });
+  loadCaps(id);
+  capsOf(id).models = [];
+  lastSeen.delete(id);
+  warmed.delete(id);
+  persistCaps(id);
+  return getWorkspace(id);
+}
+
+/** The command that starts an AI. */
+const agentBin = (agent: string): string => (agent === "claude" ? "claude" : (ACP_AGENTS[agent]?.[0] ?? agent));
 
 /** Saves the menus and settings when they differ from the file. Never throws: a failed save must not stop the chat. */
 function persistCaps(id: string): void {
@@ -1296,6 +1352,11 @@ function onLine(id: string, live: Live, line: string) {
   if (m.type === "control_request" && m.request?.subtype === "can_use_tool") {
     const input = (m.request.input ?? {}) as Record<string, unknown>;
     const tool = String(m.request.tool_name ?? "");
+    if (live.fullAccess && !PERSONAL_ASKS.has(tool)) {
+      // Full access: Kohlab says yes itself. A question or a plan is still the person's to answer.
+      writeAnswer(live, m.request_id, answerResponse(tool, input, true, {}).response);
+      return;
+    }
     if (browserToolPolicy(tool, null, NO_OWN_PAGES) === null) askPerson(id, live, m.request_id, tool, input, null);
     else {
       // fail closed: any error while working out the page or the own pages asks the person, never allows and never leaves Claude waiting
@@ -1310,21 +1371,65 @@ function onLine(id: string, live: Live, line: string) {
     live.draft = "";
     const byPerson = live.interrupted; // a stopped turn ends without an error
     live.interrupted = false;
+    restoreOneShot(live);
     if (m.subtype !== "success" && resumeFailed(id, live)) return;
     markSeen(id, live);
     if (m.subtype !== "success" && !byPerson) {
       const raw = String(m.result ?? m.subtype ?? "unknown");
       console.warn("[chat] claude result error:", raw.slice(0, 200));
+      const lim = limitReached(raw, Date.now(), planWindows(id));
+      if (lim) {
+        void limitFlow(id, live, raw, lim.until, m); // the message moves on, or the person is told why it cannot
+        return;
+      }
       emit(id, { kind: "error", text: friendlyError(raw) });
     }
-    turnDone(id, live, m); // reads the start of the turn's clock first; the done line follows its plan reading
-    chatBusy.delete(id);
+    endClaudeTurn(id, live, m);
+  }
+}
+
+/** A Claude turn is over: the done line, and the project is free again. */
+function endClaudeTurn(id: string, live: Live, m: any) {
+  turnDone(id, live, m); // reads the start of the turn's clock first; the done line follows its plan reading
+  chatBusy.delete(id);
+  live.busySince = undefined;
+  live.helpers.clear();
+  live.helperTree = helpersAtResult(live.helperTree, Date.now());
+  if (live.todos.every((t) => t.status === "done")) live.todos = [];
+  finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+}
+
+/** A message sent with another model: Claude goes back to the model the project is on. */
+function restoreOneShot(live: Live) {
+  if (live.restoreModel === undefined) return;
+  const back = live.restoreModel;
+  live.restoreModel = undefined;
+  ask(live, { subtype: "set_model", model: back })
+    .then(() => {
+      live.model = back;
+    })
+    .catch((e) => console.warn("[chat] could not go back to the model:", (e as Error).message));
+}
+
+/** The plan windows last read for a project, as limitReached wants them (a full window is a limit). */
+function planWindows(id: string): { resetsAt: string | null; severity?: string }[] {
+  const p = usages.get(id)?.plan;
+  return [p?.fiveHour, p?.week].flatMap((w) => (w ? [{ resetsAt: w.resetsAt, ...(w.percent >= 100 ? { severity: "limit" } : {}) }] : []));
+}
+
+/** A Claude turn failed on a usage limit: try the fallback list. Moved on: nothing more here. Otherwise the turn ends as an error. */
+async function limitFlow(id: string, live: Live, raw: string, until: number, m: any) {
+  const r = await onLimit(id, live.rawMsg, until).catch((e) => {
+    console.warn("[chat] fallback:", (e as Error).message);
+    return "off" as const;
+  });
+  if (r === "moved") {
     live.busySince = undefined;
     live.helpers.clear();
-    live.helperTree = helpersAtResult(live.helperTree, Date.now());
-    if (live.todos.every((t) => t.status === "done")) live.todos = [];
-    finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+    return;
   }
+  if (r === "off") emit(id, { kind: "error", text: friendlyError(raw) });
+  endClaudeTurn(id, live, m);
 }
 
 function onExit(id: string, live: Live) {
@@ -1347,11 +1452,25 @@ function onExit(id: string, live: Live) {
   markSeen(id, live);
   const last = live.stderr.trim().split("\n").pop()?.trim() ?? "";
   console.warn("[chat] claude stopped unexpectedly:", last.slice(0, 200));
+  const lim = limitReached(last);
+  const endDead = () => {
+    emit(id, { kind: "done" });
+    chatBusy.delete(id); // the turn died with the process: without this, send() answers 409 forever
+    live.busySince = undefined;
+    finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+  };
+  if (lim) {
+    void onLimit(id, live.rawMsg, lim.until)
+      .catch(() => "off" as const)
+      .then((r) => {
+        if (r === "moved") return;
+        if (r === "off") emit(id, { kind: "error", text: friendlyError(last) });
+        endDead();
+      });
+    return;
+  }
   emit(id, { kind: "error", text: friendlyError(last) });
-  emit(id, { kind: "done" });
-  chatBusy.delete(id); // the turn died with the process: without this, send() answers 409 forever
-  live.busySince = undefined;
-  finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+  endDead();
 }
 
 /** The old session could not be resumed (e.g. it lived under another config dir): forget it and answer in a fresh one. Quiet for the user. */
@@ -1381,9 +1500,10 @@ async function retryFresh(id: string, msg: string) {
   live.child.stdin!.write(JSON.stringify({ type: "user", message: { role: "user", content: msg }, parent_tool_use_id: null }) + "\n");
 }
 
-async function start(ws: Workspace, id: string): Promise<Live> {
+async function start(ws: Workspace, id: string, opts: { model?: string } = {}): Promise<Live> {
   loadCaps(id); // before the new process can save over the file
   const s = await loadState();
+  const ai = resolveAi(ws, s.defaults);
   const cmd = (s.agents?.claude || "claude").split(/\s+/)[0];
   const bin = Bun.which(cmd);
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
@@ -1392,21 +1512,28 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   // A terminal project's chat continues the person's own Claude (their settings, skills and MCP servers), as their terminal does.
   const term = !ws.chat;
   // Chat users get a clean Claude with the same login: no user settings, skills, MCP servers or CLAUDE.md.
-  // CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies.
-  // --include-partial-messages streams Claude's reply as it is written (stream_event lines). --model only when the project chose one; otherwise the account default.
+  // A copy of the owner's CLAUDE_CONFIG_DIR was rejected: token refresh would split the credentials into two copies. A second account is a
+  // fresh directory signed in once, here, so it is the only copy: its Claude gets that directory (accounts.ts) and nothing else of the account.
+  // --include-partial-messages streams Claude's reply as it is written (stream_event lines). --model only when the project (or the default) chose one; otherwise the account default.
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"];
   // The mode the person picked in the chat. Otherwise a terminal project keeps its own settings, as its terminal does, and chat users get "default".
   const picked = MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined;
-  const mode = picked ?? (term ? undefined : "default");
-  if (mode) args.push("--permission-mode", mode);
+  const mode = term ? picked : ai.mode.value;
+  const policy = mode ? claudeArgsFor(mode) : null;
+  if (policy) args.push("--permission-mode", policy.permissionMode);
+  // what the person chose "Always allow" for, so it holds from this start on
+  const rules = cleanRules(ws.allowRules);
+  if (rules.length) args.push("--allowedTools", rules.join(","));
   if (!term) args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
   // strict: only our browser tools load, never the user's MCP servers
   const mcpFile = writeBrowserMcp(ws, who);
   if (mcpFile) args.push("--mcp-config", mcpFile);
   if (!term) args.push("--append-system-prompt", systemPromptFor(notesOf(ws)));
   if (ws.chatSession) args.push("--resume", ws.chatSession);
-  if (ws.model) args.push("--model", ws.model);
-  const env = childEnv(home);
+  const wantModel = term ? ws.model : ai.model.value;
+  const useModel = opts.model ?? wantModel;
+  if (useModel && useModel !== "default") args.push("--model", useModel);
+  const env = childEnv(home, term ? undefined : accountEnv(ws));
   // A copy of each file before Claude edits it, so Undo can put it back.
   // ponytail: the copies live under this home's .claude/file-history and grow with every edit; nothing prunes them yet.
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = "1";
@@ -1419,6 +1546,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
     child,
     cwd,
     asks: new Map(),
+    fullAccess: policy?.fullAccess ?? false,
+    // one message sent with another model: this process starts on it and goes back after the turn
+    ...(opts.model !== undefined && opts.model !== wantModel ? { restoreModel: wantModel ?? "default" } : {}),
     stderr: "",
     stopping: false,
     closed: false,
@@ -1452,7 +1582,7 @@ async function start(ws: Workspace, id: string): Promise<Live> {
   live.ready = ask(live, { subtype: "initialize" }, "init-1");
   live.ready.catch(() => {}); // a missed init is reported to the control that waits for it
   // The effort level the person chose survives a restart: the new process starts at the model's own default.
-  const effort = ws.effort;
+  const effort = term ? ws.effort : ai.effort.value;
   if (effort && EFFORTS.includes(effort)) {
     live.ready
       .then(() => ask(live, { subtype: "apply_flag_settings", settings: { effortLevel: effort } }))
@@ -1466,7 +1596,9 @@ async function start(ws: Workspace, id: string): Promise<Live> {
 
 /** The chat transcript after event `after`, and whether a turn is in flight. */
 export async function snapshot(id: string, after: number, see: { usage: boolean; owner: boolean } = { usage: false, owner: false }) {
-  const ws = await getWorkspace(id);
+  const ws = await wsOf(id);
+  const defaults = await defaultsOf();
+  const ai = resolveAi(ws, defaults);
   const term = await viaTerminal(ws);
   if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
   loadCaps(id);
@@ -1494,6 +1626,11 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     start(ws, id).catch((e) => console.warn("[chat] warm-up:", (e as Error).message));
   }
   const cur = live ?? acps.get(id); // an ACP agent's chat keeps the same fields
+  if (acps.has(id)) setPolicy(id, ws, defaults); // a changed default reaches a running agent at its next request
+  const savedMode = ai.mode.source !== "builtin" ? (ai.mode.value as string) : undefined;
+  const seenMode = cur?.mode ?? savedMode ?? lastSeen.get(id)?.mode ?? (ws.chat ? "default" : null);
+  // Full access is Kohlab's, not Claude's: Claude itself reports "default"
+  const shownMode = savedMode === "full" && (cur?.mode == null || cur.mode === "default") ? "full" : seenMode;
   return {
     events,
     busy: chatBusy.has(id),
@@ -1505,14 +1642,14 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     helpers: [...(cur?.helpers.values() ?? [])],
     helperTree: (live?.helperTree ?? []).map((n): HelperNode => ({ ...n, canStop: n.status === "running" && n.taskId !== null && live!.tasks.some((t) => t.id === n.taskId) })),
     // continue-fresh: the person's switch for doing it by itself, and whether it waits for the turn or the background work to end
-    fresh: { auto: ws.autoFresh !== false, pending: freshPending.has(id) },
+    fresh: { auto: ai.autoFresh.value !== false, pending: freshPending.has(id) },
     freshPending: freshPending.has(id),
     retry: cur?.retry ?? null,
     usage: see.usage ? shownUsage(usages.get(id), see.owner) : null,
     // one rule: a live process, else the project's saved choice, else what was last seen
-    model: cur?.model ?? wantedModel(ws) ?? ws.model ?? lastSeen.get(id)?.model ?? null,
-    mode: cur?.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined) ?? lastSeen.get(id)?.mode ?? (ws.chat ? "default" : null),
-    effort: cur?.effort ?? ws.effort ?? null,
+    model: cur?.model ?? wantedModel(ws, defaults) ?? (ai.model.source !== "builtin" && ai.model.value !== "default" ? ai.model.value : null) ?? lastSeen.get(id)?.model ?? null,
+    mode: shownMode,
+    effort: cur?.effort ?? ai.effort.value ?? null,
     // clean chats run with --disable-slash-commands: they get no "/" menu
     commandsEnabled: term,
     commands: term ? (caps.get(id)?.commands ?? []).slice(0, 200) : [],
@@ -1535,6 +1672,13 @@ function isAcp(ws: Workspace): boolean {
   return ws.chat === true && isAcpAgent(ws.agent);
 }
 
+/** The permission mode and saved rules an ACP agent's requests are decided by, per project. Updated when they change; read at every request. */
+const policies = new Map<string, { mode: string; rules: string[] }>();
+function setPolicy(id: string, ws: Workspace, defaults: AiDefaults | undefined): void {
+  const mode = resolveAi(ws, defaults).mode.value;
+  policies.set(id, { mode: mode === "plan" ? "default" : (mode ?? "default"), rules: cleanRules(ws.allowRules) });
+}
+
 /** What an ACP agent reports back to the chat: the same events, state and saves as a Claude process. */
 function acpHost(id: string, agent: string): AcpHost {
   return {
@@ -1555,8 +1699,37 @@ function acpHost(id: string, agent: string): AcpHost {
     exited: (acp) => {
       if (acps.get(id) === acp) acps.delete(id);
     },
+    policy: () => policies.get(id) ?? { mode: "default", rules: [] },
+    note: (text) => {
+      emit(id, { kind: "note", text });
+    },
+    // the model the person chose could not be used: it is forgotten, so the chip shows the model the agent is really on
+    modelRefused: () => {
+      void mutateState((s) => {
+        const w = s.workspaces.find((x) => x.id === id);
+        if (w) w.agentModel = undefined;
+      }).catch(() => {});
+    },
+    limited: (raw) => {
+      const lim = limitReached(raw);
+      if (!lim) return false;
+      const text = acpRaw.get(id);
+      void onLimit(id, text, lim.until)
+        .catch(() => "off" as const)
+        .then((r) => {
+          if (r === "moved") return;
+          if (r === "off") emit(id, { kind: "error", text: "This AI has reached its usage limit for now. Try again in a little while." });
+          emit(id, { kind: "done" });
+          chatBusy.delete(id);
+          finish(id).catch((e) => console.error("[chat] finish:", (e as Error).message));
+        });
+      return true;
+    },
   };
 }
+
+/** The person's own words for the message an ACP agent is working on, to send again after a usage limit moved the conversation on. */
+const acpRaw = new Map<string, string>();
 
 /** Starts the chat's ACP agent and opens its session (the chat's conversation, when the agent can load it). */
 const acpStarting = new Map<string, Promise<AcpClient>>();
@@ -1574,12 +1747,14 @@ async function startAcpNow(ws: Workspace, id: string): Promise<AcpClient> {
   const bin = Bun.which(cmd);
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
   const who = identityOf(ws);
+  const defaults = await defaultsOf();
+  setPolicy(id, ws, defaults);
   const acp = new AcpClient(id, ws.agent, acpHost(id, ws.agent));
   acps.set(id, acp);
   try {
-    await acp.start({ bin, args, cwd: worktreePath(ws), uid: who?.uid, gid: who?.gid, env: childEnv(who?.home || homedir()), resumeSession: ws.chatSession, agentModel: wantedModel(ws) });
+    await acp.start({ bin, args, cwd: worktreePath(ws), uid: who?.uid, gid: who?.gid, env: childEnv(who?.home || homedir(), accountEnv(ws)), resumeSession: ws.chatSession, agentModel: wantedModel(ws, defaults) });
     // a model chosen while the agent was starting
-    await acp.applyModel(wantedModel(await getWorkspace(id)));
+    await acp.applyModel(wantedModel(await getWorkspace(id), defaults));
   } catch (e) {
     acp.stop();
     if (acps.get(id) === acp) acps.delete(id);
@@ -1589,10 +1764,13 @@ async function startAcpNow(ws: Workspace, id: string): Promise<AcpClient> {
 }
 
 /** The text an agent is sent for the person's message. After a switch of AI, its first message carries the conversation it has not seen; after "New chat from here", the conversation it starts from; after "Go back to here", a note. The chat still shows only the person's own words. */
-function handoffMessage(id: string, ws: Workspace, text: string): string {
+function handoffMessage(id: string, ws: Workspace, text: string, skipLast = false): string {
   const parts: string[] = [];
   if (ws.handoffAfter !== undefined) {
-    const summary = handoffText(load(id).events.filter((e) => e.n > ws.handoffAfter!), ws.agent);
+    // a message sent again after a usage limit is already in the chat: it is the new message below, not part of what happened so far
+    const all = load(id).events;
+    const lastUser = skipLast ? all.findLast((e) => e.kind === "user") : undefined;
+    const summary = handoffText(all.filter((e) => e.n > ws.handoffAfter! && e !== lastUser), ws.agent);
     if (summary) parts.push(`Context: this conversation started with another assistant. What happened so far:\n${summary}`);
   }
   if (ws.branchContext) parts.push(`Context: this conversation was started from an earlier one. What happened there:\n${ws.branchContext}`);
@@ -1635,14 +1813,42 @@ function userEventAt(id: string, n: unknown): Extract<ChatEvent, { kind: "user" 
   return ev;
 }
 
+/** What a send may carry beyond the words. */
+interface SendOpts {
+  /** this one message goes to this model; the project's own choice is untouched */
+  model?: string;
+  /** the message is already in the chat (a usage limit moved the conversation on): no new line for it */
+  resend?: boolean;
+}
+
 /** A message to an ACP agent: one prompt turn. A message sent while a turn runs is refused: the agent cannot take it mid-turn. */
-async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
+async function sendAcp(ws: Workspace, id: string, t: string, opts: SendOpts = {}): Promise<void> {
   if (chatBusy.has(id)) throw new ChatError(409, "The AI is still working. Wait until it finishes, then try again.");
   chatBusy.add(id);
   chatWaiting.delete(id); // a new message clears a stale "needs you" from before
-  const sent = handoffMessage(id, ws, t);
-  const tree = await snapshotTree(worktreePath(ws)); // before the agent starts on this message
-  emit(id, { kind: "user", text: t, tree: tree ?? undefined });
+  if (!opts.resend) hopped.delete(id);
+  acpRaw.set(id, t);
+  // Send with…: the agent is on the chosen model before the message goes; if it cannot be, nothing is sent
+  if (opts.model) {
+    const ready = acps.get(id);
+    const acp = ready && !ready.closed && !acpStarting.has(id) ? ready : await startAcp(ws, id).catch(() => undefined); // a start that fails is reported below, as usual
+    if (acp) {
+      const before = acp.model;
+      try {
+        await acp.setModel(opts.model);
+        if (acp.model !== opts.model) throw new Error("the agent stayed on its model");
+      } catch (e) {
+        console.warn("[chat] could not use the model for one message:", (e as Error).message);
+        if (before) await acp.setModel(before).catch(() => {});
+        chatBusy.delete(id);
+        throw new ChatError(409, "That model could not be used.");
+      }
+      acp.restoreModel = before ?? undefined;
+    }
+  }
+  const sent = handoffMessage(id, ws, t, opts.resend);
+  const tree = opts.resend ? null : await snapshotTree(worktreePath(ws)); // before the agent starts on this message
+  if (!opts.resend) emit(id, { kind: "user", text: t, tree: tree ?? undefined, ...(opts.model ? { with: opts.model } : {}) });
   try {
     await markStarted(id);
     const cur = acps.get(id);
@@ -1660,20 +1866,32 @@ async function sendAcp(ws: Workspace, id: string, t: string): Promise<void> {
   }
 }
 
+/** The model ids a person added to this project's account, and a router's own models: known to Kohlab even when the AI's list does not name them. */
+function extraModels(ws: Workspace): string[] {
+  const out = overlayOf(ws.agent, ws.account ?? "default").custom.map((m) => m.value);
+  const a = ws.account ? getAccount(ws.account) : undefined;
+  if (a?.kind === "router") out.push(...(a.models ?? []));
+  return out;
+}
+
+/** A model id the chat may be given: text up to 200 characters, no spaces. */
+const modelText = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 200 && !/[\s\x00-\x1f]/.test(v);
+
 /** The model an ACP chat runs on. With a live agent it is switched there; either way it is saved on the project for the next start. */
 async function acpModel(id: string, value: unknown): Promise<void> {
   loadCaps(id);
-  if (typeof value !== "string" || value.length === 0 || value.length > 200) throw new ChatError(400, "That model is not available.");
+  if (!modelText(value)) throw new ChatError(400, "That model is not available.");
   // The agent's list is known once it has started; before that, the choice is saved and the agent checks it at its start.
   const ws = await getWorkspace(id);
   const offered = capsOf(id).models.length ? capsOf(id).models : agentInfo(ws.agent).models;
-  if (offered.length > 0 && !offered.some((m) => m.value === value)) throw new ChatError(400, "That model is not available.");
+  if (offered.length > 0 && !offered.some((m) => m.value === value) && !extraModels(ws).includes(value)) throw new ChatError(400, "That model is not available.");
   const acp = acps.get(id);
   if (acp && acp.started && !acp.closed) {
     await acp.setModel(value).catch((e) => {
       console.warn("[chat] could not switch the agent's model:", (e as Error).message);
       throw new ChatError(409, "The agent could not switch to that model. Try again.");
     });
+    if (acp.model !== value) throw new ChatError(409, "The agent could not switch to that model. Try again.");
   }
   await mutateState((s) => {
     const w = s.workspaces.find((x) => x.id === id);
@@ -1683,10 +1901,27 @@ async function acpModel(id: string, value: unknown): Promise<void> {
   saveAgentInfo(ws.agent);
 }
 
-/** Controls an ACP chat supports: the model, and stopping the turn. The rest wait for ACP support. */
+/** The permission mode of an ACP chat: kept on the project, and decided by Kohlab at each request, so no restart is needed. */
+async function acpMode(id: string, value: unknown): Promise<void> {
+  if (!isMode(value) || value === "plan") throw new ChatError(400, "That mode is not available.");
+  await mutateState((s) => {
+    const w = s.workspaces.find((x) => x.id === id);
+    if (w) w.permissionMode = value;
+  });
+  setPolicy(id, await getWorkspace(id), await defaultsOf());
+  const acp = acps.get(id);
+  // Full access answers what is already waiting
+  if (value === "full" && acp) for (const requestId of [...acp.asks.keys()]) acp.answer(requestId, true);
+}
+
+/** Controls an ACP chat supports: the model, the permission mode, and stopping the turn. The rest wait for ACP support. */
 async function acpControl(id: string, action: unknown, value: unknown): Promise<{ ok: true }> {
   if (action === "model") {
     await acpModel(id, value);
+    return { ok: true };
+  }
+  if (action === "mode") {
+    await acpMode(id, value);
     return { ok: true };
   }
   if (action !== "interrupt") throw new ChatError(400, "This action is not available for this agent yet.");
@@ -1696,16 +1931,29 @@ async function acpControl(id: string, action: unknown, value: unknown): Promise<
   return { ok: true };
 }
 
-/** Send a user message. Starts the claude process if none is alive. */
-export async function send(id: string, text: string): Promise<void> {
+/** Whether a model may be asked for in one message: the AI's own list, Claude's aliases, "default", or one added to the account. */
+function oneShotModel(ws: Workspace, id: string, value: unknown): string {
+  if (!modelText(value)) throw new ChatError(400, "That model is not available.");
+  loadCaps(id);
+  const listed = capsOf(id).models.length ? capsOf(id).models : agentInfo(ws.agent).models;
+  const known = value === "default" || listed.some((m) => m.value === value) || extraModels(ws).includes(value) || (ws.agent === "claude" && parseModel(value) !== null);
+  if (!known && (listed.length > 0 || ws.agent === "claude")) throw new ChatError(400, "That model is not available.");
+  return value;
+}
+
+/** Send a user message. Starts the claude process if none is alive. `opts.model`: send this one message with another model (never saved on the project). */
+export async function send(id: string, text: string, opts: SendOpts = {}): Promise<void> {
   const t = text.trim();
   if (!t) throw new ChatError(400, "The message is empty.");
   if (t.length > MAX_TEXT) throw new ChatError(400, `The message is over ${MAX_TEXT} characters.`);
   if (restoring.has(id)) throw new ChatError(409, "The project's files are being put back. Try again in a moment.");
-  const ws = await getWorkspace(id);
+  let ws = await wsOf(id);
   const term = await viaTerminal(ws);
   if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
-  if (isAcp(ws)) return sendAcp(ws, id, t);
+  const model = opts.model === undefined ? undefined : oneShotModel(ws, id, opts.model);
+  if (ws.chat && !chatBusy.has(id) && !opts.resend) ws = await limitCheck(id, ws);
+  const so: SendOpts = { ...opts, model };
+  if (isAcp(ws)) return sendAcp(ws, id, t, so);
   if (term) await syncFromTerminal(ws);
   if (!term && (await resumeOpen(id))) throw new ChatError(409, "Claude is open in the terminal. Close it there, then send your message again.");
   // The terminal's Claude moves into the chat: its terminal screen closes first, unless it is still working there.
@@ -1725,24 +1973,47 @@ export async function send(id: string, text: string): Promise<void> {
   const queued = chatBusy.has(id);
   if (!queued) retireStale(id, ws); // notes changed since this process started: the next one is started with them
   if (queued && !procs.has(id)) throw new ChatError(409, "The AI is still working. Wait until it finishes, then try again.");
+  // One message with another model, while a turn runs, would change the model for the turn that is running
+  if (queued && model !== undefined) throw new ChatError(409, "Wait until the current reply finishes, then send with another model.");
   if (!queued) chatBusy.add(id);
   if (!queued) chatWaiting.delete(id); // a new message clears a stale "needs you" from before
+  if (!queued && !opts.resend) hopped.delete(id);
+  // A live process is moved to the model for this message, and moved back when the turn ends. If it cannot be moved, nothing is sent.
+  let restore: string | undefined;
+  const had = procs.get(id);
+  if (!queued && had && model !== undefined) {
+    try {
+      await had.ready;
+      const back = (term ? ws.model : resolveAi(ws, await defaultsOf()).model.value) ?? "default";
+      if (model !== back) {
+        await ask(had, { subtype: "set_model", model });
+        restore = back;
+      }
+    } catch (e) {
+      console.warn("[chat] could not use the model for one message:", (e as Error).message);
+      chatBusy.delete(id);
+      throw new ChatError(409, "That model could not be used.");
+    }
+  }
   // The id is ours, so the message can be named for Undo at once. The CLI keeps the id it is sent with.
   const uuid = randomUUID();
-  const sent = handoffMessage(id, ws, t);
+  const sent = handoffMessage(id, ws, t, opts.resend);
   // A message queued behind a running turn gets no snapshot: the files are mid-turn, so it would mislead.
-  const tree = queued ? null : await snapshotTree(worktreePath(ws));
-  emit(id, { kind: "user", text: t, uuid, tree: tree ?? undefined });
+  const tree = queued || opts.resend ? null : await snapshotTree(worktreePath(ws));
+  if (!opts.resend) emit(id, { kind: "user", text: t, uuid, tree: tree ?? undefined, ...(model !== undefined ? { with: model } : {}) });
   try {
     if (!queued) await markStarted(id);
-    const live = procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id));
+    const live = (had && !had.closed ? had : undefined) ?? procs.get(id) ?? (await start(term ? await getWorkspace(id) : ws, id, model !== undefined ? { model } : {}));
     if (!queued) {
       live.msg = sent;
+      live.rawMsg = t;
+      if (restore !== undefined) live.restoreModel = restore;
       turnBegan(id, live);
     }
     live.child.stdin!.write(JSON.stringify({ type: "user", uuid, message: { role: "user", content: sent }, parent_tool_use_id: null }) + "\n");
     if (hasPendingContext(ws)) await clearHandoff(id).catch(() => {}); // only once Claude has the message
   } catch (e) {
+    if (e instanceof ChatError) throw e;
     console.error("[chat] could not start:", (e as Error).message);
     emit(id, { kind: "error", text: friendlyError((e as Error).message) });
     if (!queued) {
@@ -1829,15 +2100,19 @@ export interface ClaudeProbe {
   at: number;
 }
 
-/** A claude that is only asked initialize and get_usage. No user message, so no model call. Killed after its replies, or at 12 s. */
-async function headlessProbe(): Promise<ClaudeProbe> {
+/** A claude that is only asked initialize and get_usage. No user message, so no model call. Killed after its replies, or at 12 s. With an account, under that account's own sign-in directory (the same one its chats use). */
+async function headlessProbe(accountId?: string): Promise<ClaudeProbe> {
   const s = await loadState();
   const cmd = (s.agents?.claude || "claude").split(/\s+/)[0];
   const bin = Bun.which(cmd);
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
+  const acct = accountId ? getAccount(accountId) : undefined;
+  if (accountId && (!acct || acct.provider !== "claude" || acct.kind !== "login")) throw new Error("That account cannot be read this way");
+  const run = acct ? runAsOf(acct) : { uid: undefined, gid: undefined, home: homedir() };
   const dir = mkdtempSync(join(tmpdir(), "kohlab-usage-"));
+  if (run.uid !== undefined) chownSync(dir, run.uid, run.gid ?? run.uid);
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config"];
-  const child = spawn(bin, args, { cwd: dir, env: childEnv(homedir()), stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(bin, args, { cwd: dir, uid: run.uid, gid: run.gid, env: childEnv(run.home, acct ? envOfAccount(acct) : undefined), stdio: ["pipe", "pipe", "pipe"] });
   child.stdin!.on("error", () => {}); // a dead process: the exit below reports it
   child.stderr!.on("data", () => {});
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1861,8 +2136,8 @@ async function headlessProbe(): Promise<ClaudeProbe> {
           else got = g.response ?? {};
         }
         if (init !== undefined && got !== undefined) {
-          const acct = init.account && typeof init.account === "object" ? (init.account as Record<string, unknown>) : null;
-          resolve({ account: acct, models: modelList(init.models), planRaw: got, plan: planUsageOf(got), at: Date.now() });
+          const acctInfo = init.account && typeof init.account === "object" ? (init.account as Record<string, unknown>) : null;
+          resolve({ account: acctInfo, models: modelList(init.models), planRaw: got, plan: planUsageOf(got), at: Date.now() });
         }
       });
       child.on("error", (e) => reject(e));
@@ -1877,18 +2152,35 @@ async function headlessProbe(): Promise<ClaudeProbe> {
   }
 }
 
-/** The account, models and plan limits, from one headless claude. A reading younger than maxAgeMs is reused; callers at the same moment share one spawn (never two at once). Throws when none can read it.
+/** The account, models and plan limits, from one headless claude per account. A reading younger than maxAgeMs is reused; callers at the same moment share one spawn, and no two spawns run at once, whatever the account. Throws when none can read it.
  *  ponytail: one spawn at a time, no warm process. Upgrade path: keep one warm if the hub is opened very often. */
-let probeCache: ClaudeProbe | null = null;
-let probeInflight: Promise<ClaudeProbe> | null = null;
-export function claudeProbe(maxAgeMs = 300_000): Promise<ClaudeProbe> {
-  if (probeCache && Date.now() - probeCache.at < maxAgeMs) return Promise.resolve(probeCache);
-  probeInflight ??= headlessProbe()
-    .then((p) => (probeCache = p))
-    .finally(() => {
-      probeInflight = null;
-    });
-  return probeInflight;
+const probeCaches = new Map<string, ClaudeProbe>();
+const probeInflights = new Map<string, Promise<ClaudeProbe>>();
+let probeTail: Promise<unknown> = Promise.resolve();
+export function claudeProbe(maxAgeMs = 300_000, accountId?: string): Promise<ClaudeProbe> {
+  const key = accountId ?? "default";
+  const have = probeCaches.get(key);
+  if (have && Date.now() - have.at < maxAgeMs) return Promise.resolve(have);
+  let p = probeInflights.get(key);
+  if (!p) {
+    const run = probeTail.catch(() => {}).then(() => headlessProbe(accountId));
+    probeTail = run;
+    p = run
+      .then((r) => {
+        probeCaches.set(key, r);
+        return r;
+      })
+      .finally(() => {
+        probeInflights.delete(key);
+      });
+    probeInflights.set(key, p);
+  }
+  return p;
+}
+
+/** Forgets what was read for an account (it was removed, or signed in again). */
+export function forgetProbe(accountId?: string): void {
+  probeCaches.delete(accountId ?? "default");
 }
 
 /** The models an AI offered when last seen (its own list, from a chat with it). Empty until then. */
@@ -1909,7 +2201,8 @@ async function readOwnerPlanUsage(): Promise<{ plan: Usage["plan"]; at: number }
   const now = Date.now();
   const fresh = freshestPlan();
   if (fresh && now - fresh.at < 120_000) return fresh;
-  if (probeCache && now - probeCache.at < 60_000) return probeCache;
+  const dflt = probeCaches.get("default");
+  if (dflt && now - dflt.at < 60_000) return dflt;
   for (const [id, live] of procs) {
     if (live.closed || live.stopping) continue;
     await readUsage(id, live, true);
@@ -2036,8 +2329,11 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
     case "model": {
       const models = capsOf(id).models;
       const picked = parseModel(value);
+      // "default" is a choice of its own (the account's own model) and overrides the server default; a terminal project has no server default to override
+      const stored = (v: string): string | undefined => (v === "default" && term ? undefined : v);
+      const custom = modelText(value) && extraModels(ws).includes(value);
       if (live) {
-        const known = value === "default" || models.some((m) => m.value === value);
+        const known = value === "default" || models.some((m) => m.value === value) || custom;
         if (!known) throw new ChatError(400, "That model is not available.");
         await ask(live, { subtype: "set_model", model: value });
         // "default" shows as chosen until the next init reports the real model
@@ -2051,19 +2347,19 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
           await mutateState((s) => {
             const w = s.workspaces.find((x) => x.id === id);
             if (!w) return;
-            w.model = value === "default" ? undefined : (value as Workspace["model"]); // an alias, or a listed model's own name
+            w.model = stored(value); // an alias, or a listed model's own name
             if (dropEffort) w.effort = undefined;
           });
         }
       } else {
         // no process: only an alias is saved, and a listed model when the list is known
-        const known = (picked !== null && (picked === "default" || models.length === 0)) || models.some((m) => m.value === value);
-        if (!known) throw new ChatError(400, "That model is not available.");
+        const known = (picked !== null && (picked === "default" || models.length === 0)) || models.some((m) => m.value === value) || custom;
+        if (!known || typeof value !== "string") throw new ChatError(400, "That model is not available.");
         const levels = models.find((m) => m.value === value)?.supportedEffortLevels ?? [];
         await mutateState((s) => {
           const w = s.workspaces.find((x) => x.id === id);
           if (!w) return;
-          w.model = value === "default" ? undefined : (value as Workspace["model"]); // an alias, or a listed model's own name
+          w.model = stored(value); // an alias, or a listed model's own name
           if (w.effort && !levels.includes(w.effort)) w.effort = undefined;
         });
       }
@@ -2071,12 +2367,7 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
     }
     case "mode": {
       if (typeof value !== "string" || !MODES.includes(value)) throw new ChatError(400, "That mode is not available.");
-      if (live) {
-        const before = live.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined);
-        await ask(live, { subtype: "set_permission_mode", mode: value });
-        if (value === "plan" && before !== "plan") live.beforePlan = before;
-        live.mode = value;
-      }
+      if (live) await applyMode(id, live, ws, value);
       // saved on the project, so it survives a restart and applies when Claude next starts
       await mutateState((s) => {
         const w = s.workspaces.find((x) => x.id === id);
@@ -2101,53 +2392,266 @@ async function setting(id: string, action: "model" | "mode" | "effort", value: u
   persistCaps(id);
 }
 
-/** Switches a chat project's AI. The conversation stays; the agent it switches to gets what it has not seen, with the person's next message. */
-async function switchAgent(id: string, value: unknown): Promise<{ ok: true }> {
+/** Puts a live Claude in a permission mode. "Full access" is Claude's "default" with Kohlab answering the asks itself; a switch to it also answers what is waiting. */
+async function applyMode(id: string, live: Live, ws: Workspace, value: string): Promise<void> {
+  const pol = claudeArgsFor(value);
+  const before = live.fullAccess ? "full" : (live.mode ?? (MODES.includes(ws.permissionMode ?? "") ? ws.permissionMode : undefined));
+  await ask(live, { subtype: "set_permission_mode", mode: pol.permissionMode });
+  if (value === "plan" && before !== "plan") live.beforePlan = before;
+  live.mode = pol.permissionMode;
+  live.fullAccess = pol.fullAccess;
+  if (!pol.fullAccess) return;
+  for (const [requestId, a] of [...live.asks]) {
+    if (PERSONAL_ASKS.has(a.tool)) continue;
+    live.asks.delete(requestId);
+    writeAnswer(live, requestId, answerResponse(a.tool, a.input, true, {}).response);
+    emit(id, { kind: "answer", requestId, allow: true });
+  }
+  if (live.asks.size === 0) chatWaiting.delete(id);
+}
+
+/** Where a conversation can go: an AI (Claude or an ACP agent) and, for Claude and Codex, an account. */
+interface Lane {
+  agent: string;
+  /** an account id; null or undefined = the AI's own login. Left out = keep the current account when the AI stays the same. */
+  account?: string | null;
+}
+interface LaneOptions {
+  /** no "Switched to" line (the caller writes its own) */
+  quiet?: boolean;
+  /** switch even while a turn runs: the turn is over, only its bookkeeping is not yet */
+  force?: boolean;
+  /** the limit hop in force stays set */
+  keepLimit?: boolean;
+  /** the AI and account were chosen on purpose, so later changes to the defaults leave them alone (the default) */
+  pin?: boolean;
+}
+
+/** Moves a chat project to another lane: an AI, or another account of it. Every lane keeps its own session and what it has seen, so switching back resumes it; the lane moved to is told what it has missed, with the person's next message. */
+async function switchLane(id: string, to: Lane, o: LaneOptions = {}): Promise<{ ok: true }> {
   const ws = await getWorkspace(id);
   if (!ws.chat) throw new ChatError(400, "This is not a chat project.");
-  if (typeof value !== "string" || (value !== "claude" && !isAcpAgent(value))) throw new ChatError(400, "That agent is not available.");
-  const agent = value;
-  if (agent === ws.agent) return { ok: true };
+  const agent = to.agent;
+  if (typeof agent !== "string" || (agent !== "claude" && !isAcpAgent(agent))) throw new ChatError(400, "That agent is not available.");
+  const account = to.account === undefined ? (agent === ws.agent ? ws.account : undefined) : (to.account ?? undefined);
+  if (account !== undefined) {
+    const a = getAccount(account);
+    if (!a || a.provider !== agent) throw new ChatError(400, "That account is not available.");
+    if (!usableBy(a, ws)) throw new ChatError(403, "This project runs as its own account, so it keeps its own sign-in.");
+  }
+  const same = agent === ws.agent && (account ?? "") === (ws.account ?? "");
+  if (same) {
+    if (o.pin !== false && !ws.agentPinned) await mutateState((st) => void (st.workspaces.find((x) => x.id === id)!.agentPinned = true));
+    return { ok: true };
+  }
   const bin = agent === "claude" ? ((await loadState()).agents?.claude || "claude").split(/\s+/)[0] : ACP_AGENTS[agent][0];
   if (!Bun.which(bin)) throw new ChatError(400, `${AGENT_NAMES[agent] ?? agent} is not installed on this server.`);
-  if (chatBusy.has(id)) throw new ChatError(409, "Wait until the current reply finishes");
+  if (!o.force && chatBusy.has(id)) throw new ChatError(409, "Wait until the current reply finishes");
   // nothing awaits between this check and the stop, so no turn can start in between
   const lastN = load(id).events.at(-1)?.n ?? 0;
   stop(id);
   await mutateState((st) => {
     const w = st.workspaces.find((x) => x.id === id);
     if (!w) return;
-    const old = w.agent;
+    const oldLane = laneKey(w.agent, w.account);
+    const newLane = laneKey(agent, account);
     const sessions = { ...w.agentSessions };
-    if (w.chatSession) sessions[old] = w.chatSession;
-    else delete sessions[old];
-    const seen = { ...w.agentSeen, [old]: lastN };
-    const resumed = sessions[agent];
+    if (w.chatSession) sessions[oldLane] = w.chatSession;
+    else delete sessions[oldLane];
+    const seen = { ...w.agentSeen, [oldLane]: lastN };
+    const resumed = sessions[newLane];
+    const routers = [w.account, account].some((x) => x && getAccount(x)?.kind === "router");
     w.agentSessions = sessions;
     w.agentSeen = seen;
+    if (w.agent !== agent) w.agentModel = undefined; // an ACP agent's model is its own: the new one starts on the default or its own
+    if (routers) w.model = undefined; // a model of one router means nothing to another sign-in
     w.agent = agent;
+    w.account = account;
     w.chatSession = resumed;
-    w.agentModel = undefined; // an ACP agent's model is its own: the new one starts on its last choice or its default
-    // a new AI has seen nothing; one that resumes its own conversation has seen up to when it last spoke
-    w.handoffAfter = resumed === undefined ? 0 : (seen[agent] ?? 0);
+    // a new lane has seen nothing; one that resumes its own conversation has seen up to when it last spoke
+    w.handoffAfter = resumed === undefined ? 0 : (seen[newLane] ?? 0);
+    if (!o.keepLimit) delete w.limit;
+    if (o.pin !== false) w.agentPinned = true;
   });
-  // the menus are the new agent's: the old ones are cleared, and an ACP agent is warmed up again for its list
+  // the menus are the new lane's: the old ones are cleared, and an ACP agent is warmed up again for its list
   loadCaps(id);
   capsOf(id).models = [];
   lastSeen.delete(id);
   warmed.delete(id);
   persistCaps(id);
-  emit(id, { kind: "note", text: `Switched to ${AGENT_NAMES[agent] ?? agent}` });
+  if (!o.quiet) emit(id, { kind: "note", text: agent !== ws.agent ? `Switched to ${AGENT_NAMES[agent] ?? agent}` : `Switched to ${laneLabel(agent, account)}` });
   return { ok: true };
 }
 
+/** What the person calls a lane: the account's name, or the AI's. */
+function laneLabel(agent: string, account?: string | null): string {
+  return (account ? getAccount(account)?.label : undefined) ?? AGENT_NAMES[agent] ?? agent;
+}
+
+/** The "agent" control: an AI by name, or {agent, account}. */
+async function switchAgent(id: string, value: unknown): Promise<{ ok: true }> {
+  const v = value as { agent?: unknown; account?: unknown } | null;
+  if (typeof value === "string") return switchLane(id, { agent: value });
+  if (v && typeof v === "object" && typeof v.agent === "string" && (v.account === undefined || v.account === null || typeof v.account === "string")) {
+    return switchLane(id, { agent: v.agent, account: v.account as string | null | undefined });
+  }
+  throw new ChatError(400, "That agent is not available.");
+}
+
+/** The "account" control: another sign-in for the same AI (null = the AI's own). */
+async function setAccount(id: string, value: unknown): Promise<{ ok: true }> {
+  if (value !== null && typeof value !== "string") throw new ChatError(400, "That account is not available.");
+  const ws = await getWorkspace(id);
+  if (!ws.chat) throw new ChatError(400, "This is not a chat project.");
+  return switchLane(id, { agent: ws.agent, account: value });
+}
+
+/** The "reset" control: a setting goes back to inheriting the server's default. */
+async function resetField(id: string, value: unknown): Promise<{ ok: true }> {
+  if (typeof value !== "string" || !(RESET_FIELDS as readonly string[]).includes(value)) throw new ChatError(400, "That setting cannot be reset.");
+  const field = value as (typeof RESET_FIELDS)[number];
+  const ws = await getWorkspace(id);
+  const term = await viaTerminal(ws);
+  if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
+  const d = (await defaultsOf()) ?? {};
+  if (field === "agent" || field === "account") {
+    if (!ws.chat) throw new ChatError(400, "This is not a chat project.");
+    // before the first message the project simply follows the defaults again; after it, the conversation moves to them
+    if (!ws.started) {
+      stop(id);
+      await mutateState((st) => {
+        const w = st.workspaces.find((x) => x.id === id);
+        if (!w) return;
+        delete w.agentPinned;
+        delete w.limit;
+      });
+      await wsOf(id);
+      return { ok: true };
+    }
+    const agent = field === "agent" && d.agent ? d.agent : ws.agent;
+    const acct = d.account && getAccount(d.account)?.provider === agent ? d.account : null;
+    return switchLane(id, { agent, account: field === "account" ? acct : agent === ws.agent ? ws.account : acct });
+  }
+  const live = procs.get(id);
+  if (live) await live.ready;
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) return;
+    if (field === "model") {
+      delete w.model;
+      delete w.agentModel;
+    } else if (field === "effort") delete w.effort;
+    else if (field === "mode") delete w.permissionMode;
+    else delete w.autoFresh;
+  });
+  const fresh = await getWorkspace(id);
+  const ai = resolveAi(fresh, d);
+  if (live && !live.closed) {
+    if (field === "model") {
+      await ask(live, { subtype: "set_model", model: ai.model.value ?? "default" }).catch((e) => console.warn("[chat] reset model:", (e as Error).message));
+      live.model = ai.model.value ?? "default";
+    } else if (field === "effort" && ai.effort.value) {
+      await ask(live, { subtype: "apply_flag_settings", settings: { effortLevel: ai.effort.value } }).catch(() => {});
+      live.effort = ai.effort.value;
+    } else if (field === "effort") live.effort = undefined;
+    else if (field === "mode") await applyMode(id, live, fresh, ai.mode.value ?? "default").catch((e) => console.warn("[chat] reset mode:", (e as Error).message));
+  }
+  if (field === "mode" && acps.has(id)) setPolicy(id, fresh, d);
+  if (field === "autoFresh" && ai.autoFresh.value !== false) maybeAutoFresh(id);
+  persistCaps(id);
+  return { ok: true };
+}
+
+/** The "fallback" control: what to do at a usage limit. null = the suggested order. */
+async function setFallback(id: string, value: unknown): Promise<{ ok: true }> {
+  const ws = await getWorkspace(id);
+  if (!ws.chat) throw new ChatError(400, "This is not a chat project.");
+  let next: Workspace["fallback"] | undefined;
+  if (value !== null) {
+    const v = value as { auto?: unknown; steps?: unknown } | undefined;
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new ChatError(400, "That fallback list is not valid.");
+    if (v.auto !== undefined && typeof v.auto !== "boolean") throw new ChatError(400, "That setting must be on or off.");
+    next = { ...ws.fallback };
+    if (v.auto !== undefined) next.auto = v.auto;
+    if (v.steps !== undefined) {
+      if (!Array.isArray(v.steps) || v.steps.length > 10) throw new ChatError(400, "A fallback list has up to 10 steps.");
+      next.steps = v.steps.map((x: any): FallbackStep => {
+        if (!x || typeof x !== "object") throw new ChatError(400, "That fallback step is not valid.");
+        const step: FallbackStep = {};
+        if (x.account !== undefined) {
+          if (x.account !== null && (typeof x.account !== "string" || getAccount(x.account)?.provider !== ws.agent)) throw new ChatError(400, "That account is not available.");
+          step.account = x.account;
+        }
+        if (x.model !== undefined) {
+          if (!modelText(x.model)) throw new ChatError(400, "That model is not valid.");
+          step.model = x.model;
+        }
+        if (step.account === undefined && step.model === undefined) throw new ChatError(400, "A step needs an account or a model.");
+        return step;
+      });
+    }
+  }
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) return;
+    if (next === undefined) delete w.fallback;
+    else w.fallback = next;
+  });
+  return { ok: true };
+}
+
+/** The "rule_remove" control: the project stops allowing an action without asking. Claude holds its rules until it restarts, so that happens when the project is next idle (the next message resumes the conversation). */
+async function removeRule(id: string, value: unknown, actor: string): Promise<{ ok: true }> {
+  const ws = await getWorkspace(id);
+  if (!ws.chat) throw new ChatError(400, "This is not a chat project.");
+  if (typeof value !== "string" || !(ws.allowRules ?? []).includes(value)) throw new ChatError(404, "That action is not on the list.");
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) return;
+    w.allowRules = (w.allowRules ?? []).filter((r) => r !== value);
+    if (!w.allowRules.length) delete w.allowRules;
+  });
+  void audit(actor, "ai.rule.remove", id, value);
+  if (acps.has(id)) setPolicy(id, await getWorkspace(id), await defaultsOf());
+  if (procs.has(id)) {
+    if (chatBusy.has(id)) restartAtIdle.add(id);
+    else stop(id);
+  }
+  return { ok: true };
+}
+
+/** Saves the rule an "Always allow" asked for, when the ask offered one. Returns the rule that was saved. */
+async function addRule(id: string, rule: string): Promise<boolean> {
+  if (!validRule(rule)) return false;
+  let saved = false;
+  await mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) return;
+    const next = cleanRules([...(w.allowRules ?? []), rule]);
+    saved = next.includes(rule);
+    w.allowRules = next;
+  });
+  if (saved && acps.has(id)) setPolicy(id, await getWorkspace(id), await defaultsOf());
+  return saved;
+}
+
 /** The chat's menu actions: stop the turn, or change the model, permission mode or effort (saved even with no process running).
- *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo), and "agent" (switch the AI). */
-export async function chatControl(id: string, action: unknown, value: unknown): Promise<{ ok: true } & Record<string, unknown>> {
+ *  Also the reads and small actions the chat uses: "files" (@ mentions), "stop_task", "rewind_preview" and "rewind" (Undo), "agent" (switch the AI, or the AI and account), "account", "reset", "fallback" and "rule_remove".
+ *  `who.owner`: Full access is the owner's to give, or any project that runs as its own OS account. */
+export async function chatControl(id: string, action: unknown, value: unknown, who: { owner: boolean; actor?: string } = { owner: false }): Promise<{ ok: true } & Record<string, unknown>> {
   if (action === "agent") return switchAgent(id, value);
+  if (action === "account") return setAccount(id, value);
+  if (action === "reset") return resetField(id, value);
+  if (action === "fallback") return setFallback(id, value);
+  if (action === "rule_remove") return removeRule(id, value, who.actor ?? "system");
   if (action === "fresh") return freshControl(id, value);
   if (action === "autoFresh") return autoFreshSetting(id, value);
   if (action === "files") return { ok: true, files: await fileMentions(id, value) };
+  if (action === "mode" && value === "full") {
+    const ws = await getWorkspace(id);
+    if (!who.owner && identityOf(ws) === undefined) throw new ChatError(403, "Full access is only for the owner.");
+    void audit(who.actor ?? "system", "ai.fullaccess", id);
+  }
   if (isAcp(await getWorkspace(id))) return acpControl(id, action, value);
   if (action === "stop_task") return stopTask(id, value);
   if (action === "rewind_preview" || action === "rewind") return rewindFiles(id, value, action === "rewind_preview");
@@ -2191,7 +2695,9 @@ function writeAnswer(live: Live, requestId: string, response: Record<string, unk
 /** Show a permission question to the person and ping them. `url` is the browser's page, when the tool acts on one.
  *  AskUserQuestion and ExitPlanMode get their own cards (askForm); every other tool gets the permission card. */
 function askPerson(id: string, live: Live, requestId: string, tool: string, input: Record<string, unknown>, url: string | null) {
-  live.asks.set(requestId, { tool, input });
+  // the rule an "Always allow" would save, when it is safe to offer one
+  const always = askForm(tool, input as Record<string, any>) ? null : ruleFor(tool, input, live.cwd);
+  live.asks.set(requestId, { tool, input, ...(always ? { always } : {}) });
   const wasWaiting = chatWaiting.has(id);
   chatWaiting.add(id);
   const form = askForm(tool, input as Record<string, any>);
@@ -2201,7 +2707,7 @@ function askPerson(id: string, live: Live, requestId: string, tool: string, inpu
     return;
   }
   const { text, detail, why } = describeAsk(tool, input as Record<string, any>, live.cwd, url);
-  emit(id, { kind: "ask", requestId, text, ...(detail !== undefined ? { detail } : {}), ...(why !== undefined ? { why } : {}) });
+  emit(id, { kind: "ask", requestId, text, ...(detail !== undefined ? { detail } : {}), ...(why !== undefined ? { why } : {}), ...(always ? { always } : {}) });
   if (!wasWaiting) pingNeedsYou(id, text);
 }
 
@@ -2226,20 +2732,23 @@ function ownPagesOf(ws: Workspace | null): OwnPages {
   };
 }
 
-/** Answer a pending permission question. */
-export async function answer(id: string, requestId: string, allow: boolean, extra: { answers?: Record<string, string>; message?: string } = {}): Promise<void> {
+/** Answer a pending permission question. With `always`, an allow also saves the rule the ask offered (Kohlab keeps the rule; the client only says yes). Returns the rule that was saved, if any. */
+export async function answer(id: string, requestId: string, allow: boolean, extra: { answers?: Record<string, string>; message?: string; always?: boolean } = {}): Promise<{ rule?: string }> {
   const acp = acps.get(id);
   if (acp) {
-    if (!acp.asks.has(requestId)) throw new ChatError(404, "That question is no longer waiting.");
+    const entry = acp.asks.get(requestId);
+    if (!entry) throw new ChatError(404, "That question is no longer waiting.");
+    const rule = allow && extra.always && entry.always ? entry.always.rule : undefined;
     acp.answer(requestId, allow);
-    return;
+    return rule && (await addRule(id, rule)) ? { rule } : {};
   }
   const live = procs.get(id);
   if (!live || !live.asks.has(requestId)) throw new ChatError(404, "That question is no longer waiting.");
-  const { tool, input } = live.asks.get(requestId)!;
+  const { tool, input, always } = live.asks.get(requestId)!;
   live.asks.delete(requestId);
   if (live.asks.size === 0) chatWaiting.delete(id);
-  const { response, reply } = answerResponse(tool, input, allow, extra);
+  const rule = allow && extra.always && always ? always.rule : undefined;
+  const { response, reply } = answerResponse(tool, input, allow, { ...extra, ...(rule ? { remember: rule } : {}) });
   writeAnswer(live, requestId, response);
   emit(id, { kind: "answer", requestId, allow, ...(reply ? { reply } : {}) });
   // an approved plan leaves plan mode for the mode it was entered from (default if unknown), through the mode menu's own path, without holding up the reply
@@ -2248,6 +2757,7 @@ export async function answer(id: string, requestId: string, allow: boolean, extr
     live.beforePlan = undefined;
     setting(id, "mode", back).catch((e) => console.warn(`[chat] leave plan mode: ${(e as Error).message}`));
   }
+  return rule && (await addRule(id, rule)) ? { rule } : {};
 }
 
 /** After a server restart: a chat whose newest question has nothing answered after it is still waiting, so its "needs you" dot comes back. */
@@ -2333,7 +2843,7 @@ export function listSessions(dir: string, cwd: string): { id: string; title: str
 
 /** Claude's folder for a project's conversations: the transcripts of its worktree. */
 function sessionDir(ws: Workspace): string {
-  return dirname(transcriptFile(identityOf(ws)?.home || homedir(), worktreePath(ws), "x"));
+  return dirname(transcriptFile(identityOf(ws)?.home || homedir(), worktreePath(ws), "x", configDirOf(ws)));
 }
 
 /** A Claude project's earlier conversations, and which one is current (null for a new one). */
@@ -2655,7 +3165,7 @@ function maybeAutoFresh(id: string): void {
     if (!ws || !(ws.chat || (await viaTerminal(ws)))) return;
     const d = freshDecision({
       percent: usages.get(id)?.context?.percent ?? null,
-      auto: ws.autoFresh !== false,
+      auto: resolveAi(ws, await defaultsOf()).autoFresh.value !== false,
       busy: chatBusy.has(id),
       waiting: chatWaiting.has(id),
       background: chatBackground.has(id),
@@ -2674,6 +3184,159 @@ function maybeAutoFresh(id: string): void {
   })().catch((e) => console.warn("[chat] continue fresh:", (e as Error).message));
 }
 
+// ---- Usage limits: move the message on to the next account or model ----
+
+/** What a clock time reads as in a sentence the server writes: UTC, because the server does not know the viewer's zone. The page writes its own in the viewer's zone. */
+const clockText = (at: number) => `${new Date(at).toISOString().slice(11, 16)} UTC`;
+
+/** A model's name for a sentence: the list's own name, else the alias capitalised. */
+function modelName(id: string, value: string): string {
+  return capsOf(id).models.find((m) => m.value === value)?.displayName ?? (/^[a-z]+$/.test(value) ? value.charAt(0).toUpperCase() + value.slice(1) : value);
+}
+
+/** The lanes a project's AI could fall back to, as defaultSteps wants them: the AI's own login first, then each account this project may use. */
+function laneCandidates(ws: Workspace): { id: string | null; connected: boolean; limited: boolean }[] {
+  const provider = ws.agent;
+  const accounts = provider === "claude" || provider === "codex" ? listAccounts(provider).filter((a) => usableBy(a, ws)) : [];
+  return [
+    { id: null, connected: true, limited: limitedUntil(provider, null) > 0 },
+    ...accounts.map((a) => ({ id: a.id as string | null, connected: signedInOf(a.id) !== false, limited: limitedUntil(provider, a.id) > 0 })),
+  ];
+}
+
+/** The fallback list in force: the project's own, else the suggested order. */
+async function fallbackOf(ws: Workspace): Promise<Fallback> {
+  const ai = resolveAi(ws, await defaultsOf());
+  const custom = ws.fallback?.steps !== undefined;
+  return {
+    auto: ws.fallback?.auto !== false,
+    steps: ws.fallback?.steps ?? defaultSteps({ agent: ws.agent, account: ws.account ?? null, model: ai.model.value, accounts: laneCandidates(ws) }),
+    custom,
+  };
+}
+
+/** Moves the conversation to the next usable step of the fallback list. Returns where it went, "empty" when there is no list to try, or null when every step is at a limit or unusable. Writes the "hit its limit" line. */
+async function fallbackHop(id: string, ws: Workspace, until: number): Promise<{ to: string } | "empty" | null> {
+  const provider = ws.agent;
+  const acct = ws.account ?? null;
+  const steps = (await fallbackOf(ws)).steps;
+  if (steps.length === 0) return "empty";
+  const from = laneLabel(provider, acct);
+  const ai = resolveAi(ws, await defaultsOf());
+  const arrived = async (to: string, fromModel?: string | null) => {
+    const prior = ws.limit;
+    const limit: LimitState = prior ? { ...prior, to, at: Date.now() } : { from, to, until, at: Date.now(), fromAccount: acct, ...(fromModel !== undefined ? { fromModel } : {}) };
+    await mutateState((st) => void (st.workspaces.find((x) => x.id === id)!.limit = limit));
+    emit(id, { kind: "note", text: `${from} hit its limit — continued on ${to}`, until });
+    return { to };
+  };
+  for (const step of steps) {
+    if (step.account !== undefined) {
+      const target = step.account;
+      if (target === acct || limitedUntil(provider, target)) continue;
+      if (target) {
+        const a = getAccount(target);
+        if (!a || a.provider !== provider || !usableBy(a, ws) || signedInOf(target) === false) continue;
+      }
+      try {
+        await switchLane(id, { agent: provider, account: target }, { quiet: true, force: true, keepLimit: true });
+        if (step.model && provider === "claude") await setting(id, "model", step.model).catch(() => {});
+      } catch (e) {
+        console.warn("[chat] fallback step:", (e as Error).message);
+        continue;
+      }
+      return arrived(step.model ? `${laneLabel(provider, target)} (${modelName(id, step.model)})` : laneLabel(provider, target));
+    }
+    if (step.model && provider === "claude") {
+      if (step.model === ai.model.value) continue;
+      try {
+        await setting(id, "model", step.model);
+      } catch (e) {
+        console.warn("[chat] fallback step:", (e as Error).message);
+        continue;
+      }
+      return arrived(modelName(id, step.model), ws.model ?? null);
+    }
+  }
+  return null;
+}
+
+/** A turn failed on a usage limit. Marks the account, then moves the message on to the next step of the fallback list and sends it again there (once per message; the old account is not called). "moved": the message is on its way. "none": every step is at a limit, and the person has been told. "off": nothing was done (switched off, nothing to fall back to, or this message already moved once), the caller shows the usual error. */
+async function onLimit(id: string, text: string | undefined, until: number): Promise<"moved" | "none" | "off"> {
+  const ws = await getWorkspace(id).catch(() => null);
+  if (!ws || !ws.chat) return "off";
+  markLimited(ws.agent, ws.account, until);
+  if (ws.fallback?.auto === false || hopped.has(id) || text === undefined) return "off";
+  const hop = await fallbackHop(id, ws, until);
+  if (hop === "empty") return "off";
+  if (hop === null) {
+    const all = [...laneCandidates(ws).filter((l) => l.limited).map((l) => limitedUntil(ws.agent, l.id)), until];
+    const last = Math.max(...all);
+    emit(id, { kind: "note", text: "Every AI in your fallback list is at its limit", until: last });
+    emit(id, { kind: "error", text: `Every AI in your fallback list is at its limit until ${clockText(last)}.`, until: last });
+    return "none";
+  }
+  hopped.add(id);
+  chatBusy.delete(id);
+  chatWaiting.delete(id);
+  send(id, text, { resend: true }).catch((e) => {
+    console.warn("[chat] could not send again:", (e as Error).message);
+    emit(id, { kind: "error", text: friendlyError((e as Error).message) });
+    emit(id, { kind: "done" });
+    finish(id).catch(() => {});
+  });
+  return "moved";
+}
+
+/** Before a message goes: back to the account that was at its limit once its time has passed, or on to the next step when it is known (from the cache, never a probe) to be at one. Never throws. */
+async function limitCheck(id: string, ws: Workspace): Promise<Workspace> {
+  try {
+    if (ws.limit) {
+      // ponytail: no timer; the way back is checked when the next message is sent
+      if (ws.limit.until !== null && Date.now() >= ws.limit.until && !limitedUntil(ws.agent, ws.limit.fromAccount)) {
+        const lim = ws.limit;
+        if (lim.fromModel !== undefined) {
+          if (lim.fromModel === null) await resetField(id, "model");
+          else await setting(id, "model", lim.fromModel);
+        } else await switchLane(id, { agent: ws.agent, account: lim.fromAccount }, { quiet: true, keepLimit: true });
+        await mutateState((st) => void delete st.workspaces.find((x) => x.id === id)!.limit);
+        emit(id, { kind: "note", text: `${lim.from} is available again, so this message goes there` });
+        return getWorkspace(id);
+      }
+      return ws;
+    }
+    if (ws.fallback?.auto === false || (ws.agent !== "claude" && ws.agent !== "codex" && !isAcpAgent(ws.agent))) return ws;
+    const until = limitedUntil(ws.agent, ws.account);
+    if (until && typeof (await fallbackHop(id, ws, until)) === "object") return getWorkspace(id);
+  } catch (e) {
+    console.warn("[chat] limit check:", (e as Error).message);
+  }
+  return ws;
+}
+
+/** An account was removed: projects on it go back to the AI's own sign-in, with a note. Their conversation there starts from what the chat said so far. */
+export async function forgetAccount(accountId: string, label: string): Promise<void> {
+  const moved: string[] = [];
+  await mutateState((st) => {
+    if (st.defaults?.account === accountId) delete st.defaults.account;
+    for (const w of st.workspaces) {
+      for (const k of Object.keys(w.agentSessions ?? {})) if (k.endsWith(`@${accountId}`)) delete w.agentSessions![k];
+      if (w.limit?.fromAccount === accountId) delete w.limit;
+      if (w.fallback?.steps) w.fallback.steps = w.fallback.steps.filter((x) => x.account !== accountId);
+      if (w.account !== accountId) continue;
+      w.account = undefined;
+      w.chatSession = w.agentSessions?.[w.agent];
+      w.handoffAfter = w.chatSession ? (w.agentSeen?.[w.agent] ?? 0) : 0;
+      moved.push(w.id);
+    }
+  });
+  for (const wid of moved) {
+    stop(wid);
+    clearLimit(((await getWorkspace(wid).catch(() => null)) ?? { agent: "claude" }).agent, accountId);
+    emit(wid, { kind: "note", text: `${label} was removed. This project is back on its own sign-in.` });
+  }
+}
+
 // ---- Run info: what the AI was told and what it can use (names only, no secrets) ----
 
 export interface RunInfo {
@@ -2683,11 +3346,43 @@ export interface RunInfo {
   instructions: { system: string | null; notes: string; note: string | null };
   tools: { builtin: string[]; mcp: { name: string; status: string }[] } | null;
   ready: boolean;
+  /** every setting with where it comes from */
+  ai: AiResolved;
+  /** the sign-in in use; null = the AI's own login */
+  account: { id: string; label: string; kind: "login" | "router" } | null;
+  fallback: Fallback;
+  /** set while the conversation is on another account or model after a limit */
+  limit: LimitState | null;
+  /** what the AI may do without asking: Kohlab's saved ones, and (a live Claude) the ones Claude lists */
+  rules: PermissionRule[];
+  /** in Full access: what that means for this project, in words */
+  accessNote: string | null;
+}
+
+/** Claude's own list of the rules it holds, as plain rows. Only allow rules; nothing it cannot say is guessed. Never throws: without an answer there are none. */
+async function claudeRules(live: Live | undefined, known: Set<string>): Promise<PermissionRule[]> {
+  if (!live || live.closed || live.stopping || !live.inited) return [];
+  try {
+    const r = await Promise.race([ask(live, { subtype: "list_permission_rules" }), new Promise<never>((_, no) => setTimeout(() => no(new Error("no answer")), 2000))]);
+    const rows: any[] = Array.isArray(r?.state?.rules) ? r.state.rules : [];
+    const out: PermissionRule[] = [];
+    for (const x of rows) {
+      if (x?.behavior !== "allow" || typeof x.rule !== "string" || !validRule(x.rule) || known.has(x.rule)) continue;
+      const source = String(x.source ?? "");
+      if (source === "toolsNarrowing" || source === "cliArg") continue; // ours, or the tool list's own
+      out.push({ rule: x.rule, label: describeRule(x.rule), source: source === "session" ? "session" : "claude-settings", removable: false });
+      if (out.length >= 100) break;
+    }
+    return out;
+  } catch (e) {
+    console.warn("[chat] rule list:", (e as Error).message);
+    return [];
+  }
 }
 
 /** What the AI of a project was told, and the tool names it reported. Never a tool server's settings, command line or environment. */
 export async function runInfo(id: string): Promise<RunInfo> {
-  const ws = await getWorkspace(id);
+  const ws = await wsOf(id);
   const term = await viaTerminal(ws);
   if (!ws.chat && !term) throw new ChatError(400, "This is not a chat project.");
   const agent = ws.chat ? ws.agent : "claude";
@@ -2698,12 +3393,27 @@ export async function runInfo(id: string): Promise<RunInfo> {
     : term
       ? { system: null, notes: "", note: "This project uses your own Claude settings." }
       : { system: CHAT_SYSTEM_PROMPT, notes: notesOf(ws), note: null };
+  const defaults = await defaultsOf();
+  const ai = resolveAi(ws, defaults);
+  const acct = ws.chat && ws.account ? getAccount(ws.account) : undefined;
+  const mine = cleanRules(ws.allowRules);
+  const rules: PermissionRule[] = [
+    ...mine.map((rule): PermissionRule => ({ rule, label: describeRule(rule), source: "kohlab", removable: true })),
+    ...(await claudeRules(live, new Set(mine))),
+  ];
+  const name = AGENT_NAMES[agent] ?? agent;
   return {
     agent,
-    agentName: AGENT_NAMES[agent] ?? agent,
+    agentName: name,
     terminalProject: !ws.chat,
     instructions,
     tools: live?.tools ? { builtin: live.tools.filter((t) => !t.startsWith("mcp__")), mcp: live.mcp } : null,
     ready: acp ? (acps.get(id)?.started ?? false) : live?.inited === true,
+    ai,
+    account: acct ? { id: acct.id, label: acct.label, kind: acct.kind } : null,
+    fallback: ws.chat ? await fallbackOf(ws) : { auto: false, steps: [], custom: false },
+    limit: ws.limit ?? null,
+    rules,
+    accessNote: ws.chat ? (identityOf(ws) === undefined ? `${name} runs commands on this server as the server's own account, without asking. Set KOHLAB_AGENT_USER to run it as a smaller account.` : `${name} runs commands without asking.`) : null,
   };
 }

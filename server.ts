@@ -92,8 +92,12 @@ import { BrowserError, browserAction, browserProblems, browserUrl, clearBrowserP
 import { appKind, detectDevCommand, devProxyPort, ensureDevServer, stopAllDevServers, stopDevServer } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
-import { claudeSignedIn, getProviders, PROVIDER_IDS, redactCard, refreshProviders } from "./providers";
-import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, noteChat, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
+import { claudeSignedIn, getProviders, invalidateProvider, PROVIDER_IDS, redactCard, refreshProviders, testAccount } from "./providers";
+import { ACP_AGENTS, isAcpAgent } from "./acp";
+import { AccountError, accountView, addCustomModel, createLogin, createRouter, getAccount, listAccounts, remove as removeAccount, removeCustomModel, renameAccount, renameModel, setKey, signInState, startSignIn, stopSignIns, submitCode, testRouter } from "./accounts";
+import { patchDefaults } from "./defaults";
+import { cleanRules, describeRule } from "./policy";
+import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -225,13 +229,13 @@ async function handleClone(req: Request, actorUserId?: string): Promise<Response
     if (actorUserId) {
       // a named member clones into their own isolated workspace (server does
       // the git work as root, then hands the tree to the member's OS user)
-      const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, ownerId: actorUserId, chat });
+      const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", inherit: body.agent === undefined, branch, payload: body.payload, limits: body.limits, ownerId: actorUserId, chat });
       if (chat && typed) await sendChat(ws.id, typed);
       return json(ws);
     }
     // owner/legacy path: one clone per URL under WORKS_DIR/clones, reused
     const dest = await cloneOrReuse(url);
-    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", branch, payload: body.payload, limits: body.limits, chat });
+    const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", inherit: body.agent === undefined, branch, payload: body.payload, limits: body.limits, chat });
     if (chat && typed) await sendChat(ws.id, typed);
     return json(ws);
   } catch (e) {
@@ -523,9 +527,9 @@ async function handleChatRun(id: string): Promise<Response> {
   }
 }
 
-async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined): Promise<Response> {
+async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined, isOwner = false): Promise<Response> {
   try {
-    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown; answers?: unknown; message?: unknown; n?: unknown };
+    const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown; answers?: unknown; message?: unknown; n?: unknown; always?: unknown; with?: unknown };
     // a control action may answer with data (the files, the undo list): it is sent back as it is
     let reply: Record<string, unknown> = { ok: true };
     if (sub === "/answer") {
@@ -534,11 +538,13 @@ async function handleChatPost(id: string, req: Request, actor: string, sub: stri
       if (answers !== undefined && (typeof answers !== "object" || answers === null || Array.isArray(answers) || !Object.values(answers).every((v) => typeof v === "string")))
         return json({ error: "answers must be text for each question" }, 400);
       if (body.message !== undefined && typeof body.message !== "string") return json({ error: "message must be text" }, 400);
+      if (body.always !== undefined && typeof body.always !== "boolean") return json({ error: "always must be true or false" }, 400);
       containFailure(audit(actor, "chat.answer", id), "audit");
-      await answerChat(id, body.requestId, body.allow, { answers, message: body.message as string | undefined });
+      const saved = await answerChat(id, body.requestId, body.allow, { answers, message: body.message as string | undefined, always: body.always === true });
+      if (saved.rule) containFailure(audit(actor, "ai.rule.add", id, saved.rule), "audit");
     } else if (sub === "/control") {
       containFailure(audit(actor, body.action === "fresh" ? "chat.fresh" : "chat.control", id), "audit");
-      reply = await chatControl(id, body.action, body.value);
+      reply = await chatControl(id, body.action, body.value, { owner: isOwner, actor });
     } else if (sub === "/session") {
       containFailure(audit(actor, "chat.session", id), "audit");
       await switchSession(id, body.sid);
@@ -549,8 +555,11 @@ async function handleChatPost(id: string, req: Request, actor: string, sub: stri
       containFailure(audit(actor, "chat.branch", id), "audit");
       await chatBranch(id, body.n);
     } else {
+      // Send with…: one message goes to another model; nothing about the project changes
+      const withModel = (body.with as { model?: unknown } | undefined)?.model;
+      if (body.with !== undefined && (typeof body.with !== "object" || body.with === null || typeof withModel !== "string")) return json({ error: "with must name a model" }, 400);
       containFailure(audit(actor, "chat", id), "audit");
-      await sendChat(id, typeof body.text === "string" ? body.text : "");
+      await sendChat(id, typeof body.text === "string" ? body.text : "", typeof withModel === "string" ? { model: withModel } : {});
     }
     return json(reply);
   } catch (e) {
@@ -584,7 +593,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
     try {
       const name = (body.newProject ?? "").trim();
       const repo = await newProject(body.newProject, body.location);
-      const ws = await createWorkspace({ repo, task: typed || name, agent: body.agent ?? "sh", payload: body.payload, limits: body.limits, chat });
+      const ws = await createWorkspace({ repo, task: typed || name, agent: body.agent ?? "sh", inherit: body.agent === undefined, payload: body.payload, limits: body.limits, chat });
       if (chat && typed) await sendChat(ws.id, typed);
       return json(ws);
     } catch (e) {
@@ -610,7 +619,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
       repo,
       url,
       task,
-      agent: body.agent ?? "sh",
+      agent: body.agent ?? "sh", inherit: body.agent === undefined,
       branch: body.branch?.trim() || undefined,
       payload: body.payload,
       limits: body.limits,
@@ -1064,6 +1073,157 @@ async function handleAgentsStatus(): Promise<Response> {
 }
 
 /** Owner only: starts Codex's device-code sign-in and answers with the link and code to show. */
+// ---- AI control: defaults, accounts, always-allowed actions (accounts.ts, defaults.ts) ----
+
+/** Whether an AI can be started here. */
+function agentInstalled(agent: string): boolean {
+  return (agent === "claude" || isAcpAgent(agent)) && !!Bun.which(agent === "claude" ? "claude" : ACP_AGENTS[agent][0]);
+}
+
+/** An answer for something an AI-control route refused: the plain sentence, never more. */
+function aiFailure(e: unknown): Response {
+  if (e instanceof AccountError || e instanceof ChatError) return json({ error: e.message }, e.status);
+  console.error("[ai]", (e as Error).message);
+  return json({ error: "Something went wrong. Try again." }, 500);
+}
+
+async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor: string; auth: Awaited<ReturnType<typeof authenticate>> }): Promise<Response> {
+  const owner = (why: string): Response | null => (c.isOwner ? null : json({ error: `forbidden, only an owner can ${why}` }, 403));
+  const read = async (): Promise<Record<string, unknown>> => {
+    const b = await req.json().catch(() => ({}));
+    return b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {};
+  };
+  try {
+    if (path === "/api/ai/defaults") {
+      if (req.method === "GET") return json({ defaults: (await loadState()).defaults ?? {} });
+      if (req.method !== "PUT") return json({ error: "method not allowed" }, 405);
+      const refused = owner("change the defaults");
+      if (refused) return refused;
+      const body = await req.json().catch(() => null);
+      const done = await mutateState((s) => {
+        const got = patchDefaults(s.defaults, body, { installed: agentInstalled, accountOk: (id, agent) => !!getAccount(id) && (!agent || getAccount(id)!.provider === agent), owner: c.isOwner });
+        if ("defaults" in got) s.defaults = got.defaults;
+        return got;
+      });
+      if ("error" in done) return json({ error: done.error }, done.status);
+      containFailure(audit(c.actor, "ai.defaults", undefined, Object.keys(body as object).join(",")), "audit");
+      return json({ defaults: done.defaults });
+    }
+
+    if (path === "/api/ai/rules") {
+      if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
+      const projects: { id: string; name: string; rules: { rule: string; label: string; source: "kohlab"; removable: true }[] }[] = [];
+      for (const w of await listWorkspaces()) {
+        const rules = cleanRules(w.allowRules);
+        if (!rules.length || !(await mayAccessWorkspace(c.auth, w.id))) continue;
+        projects.push({ id: w.id, name: w.task, rules: rules.map((rule) => ({ rule, label: describeRule(rule), source: "kohlab" as const, removable: true as const })) });
+      }
+      return json({ projects });
+    }
+
+    if (path === "/api/ai/accounts") {
+      if (req.method === "GET") return json({ accounts: listAccounts().map((a) => accountView(a, c.isOwner)) });
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      const refused = owner("add accounts");
+      if (refused) return refused;
+      const b = await read();
+      if (b.kind === "router") {
+        if (b.provider !== "claude") return json({ error: "Only Claude can use a router." }, 400);
+        const a = createRouter(b.label, b.baseUrl, b.key);
+        containFailure(audit(c.actor, "ai.account.add", a.id, a.label), "audit");
+        const got = await testRouter(a.id);
+        invalidateProvider("claude");
+        return json({ account: accountView(getAccount(a.id)!, true), check: got.check, models: got.models.length });
+      }
+      if (b.kind !== "login") return json({ error: "Choose a sign-in or a router." }, 400);
+      const a = createLogin(b.provider, b.label);
+      containFailure(audit(c.actor, "ai.account.add", a.id, a.label), "audit");
+      invalidateProvider(a.provider);
+      return json({ account: accountView(a, true) });
+    }
+
+    const m = path.match(/^\/api\/ai\/accounts\/([a-z0-9-]+|default)(\/key|\/test|\/signin|\/signin\/code|\/models)?$/);
+    if (!m) return json({ error: "not found" }, 404);
+    const [, id, sub] = m;
+    const acct = id === "default" ? undefined : getAccount(id);
+    if (sub === "/models") {
+      const refused = owner("change models");
+      if (refused) return refused;
+      const b = await read();
+      const provider = acct ? acct.provider : b.provider === "codex" ? "codex" : "claude";
+      if (id !== "default" && !acct) return json({ error: "That account does not exist." }, 404);
+      if (req.method === "POST") addCustomModel(provider, id, b.value, b.label);
+      else if (req.method === "PATCH") renameModel(provider, id, b.value, b.label);
+      else if (req.method === "DELETE") removeCustomModel(provider, id, b.value);
+      else return json({ error: "method not allowed" }, 405);
+      containFailure(audit(c.actor, "ai.account.models", id, acct?.label), "audit");
+      invalidateProvider(provider);
+      return json({ ok: true });
+    }
+    if (!acct) return json({ error: "That account does not exist." }, 404);
+    if (!sub && req.method === "PATCH") {
+      const refused = owner("rename accounts");
+      if (refused) return refused;
+      const renamed = renameAccount(id, (await read()).label);
+      containFailure(audit(c.actor, "ai.account.rename", id, renamed.label), "audit");
+      invalidateProvider(acct.provider);
+      return json({ account: accountView(renamed, true) });
+    }
+    if (!sub && req.method === "DELETE") {
+      const refused = owner("remove accounts");
+      if (refused) return refused;
+      removeAccount(id);
+      forgetProbe(id);
+      await forgetAccount(id, acct.label);
+      containFailure(audit(c.actor, "ai.account.remove", id, acct.label), "audit");
+      invalidateProvider(acct.provider);
+      return json({ ok: true });
+    }
+    if (sub === "/key" && req.method === "POST") {
+      const refused = owner("replace keys");
+      if (refused) return refused;
+      setKey(id, (await read()).key);
+      containFailure(audit(c.actor, "ai.account.key", id, acct.label), "audit");
+      invalidateProvider(acct.provider);
+      return json({ ok: true });
+    }
+    if (sub === "/test" && req.method === "POST") {
+      const refused = owner("test accounts");
+      if (refused) return refused;
+      return json(await testAccount(id));
+    }
+    if (sub === "/signin" || sub === "/signin/code") {
+      const refused = owner("sign accounts in");
+      if (refused) return refused;
+      if (acct.kind !== "login") return json({ error: "That account has no sign-in." }, 400);
+      if (sub === "/signin/code") {
+        if (req.method !== "POST" || acct.provider !== "claude") return json({ error: "method not allowed" }, 405);
+        return json(submitCode(id, (await read()).code));
+      }
+      if (req.method === "GET") {
+        if (acct.provider === "codex") {
+          const st = codexLoginState(id);
+          if (st.state === "done") invalidateProvider("codex");
+          return json(st);
+        }
+        const st = signInState(id);
+        if (st.state === "done") invalidateProvider("claude");
+        return json(st);
+      }
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      containFailure(audit(c.actor, "ai.account.signin", id, acct.label), "audit");
+      if (acct.provider === "codex") {
+        const got = await startCodexLogin(id);
+        return json({ state: "waiting", url: got.url, code: got.code });
+      }
+      return json(await startSignIn(id));
+    }
+    return json({ error: "method not allowed" }, 405);
+  } catch (e) {
+    return aiFailure(e);
+  }
+}
+
 async function handleCodexLoginStart(): Promise<Response> {
   return startCodexLogin().then(json, (e: Error) => json({ error: e.message }, 500));
 }
@@ -1614,7 +1774,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST" || sub === "/sessions" || sub === "/turn" || sub === "/run") return json({ error: "method not allowed" }, 405);
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
-      return handleChatPost(chatId, req, actor, sub);
+      return handleChatPost(chatId, req, actor, sub, isOwner);
     }
 
     // A picture for a chat frame (see picture.ts). Read access, like viewing the chat: no share links, no credentials, no entry.
@@ -1924,6 +2084,13 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (path === "/api/agents-status") {
       if (denied) return json({ error: "unauthorized" }, 401);
       return handleAgentsStatus();
+    }
+    // AI control: the defaults for new projects, other accounts, always-allowed actions.
+    if (path.startsWith("/api/ai/")) {
+      if (auth?.kind === "share" || shareIdRes) return json({ error: "forbidden, share links cannot see this" }, 403);
+      const refused = gate(true);
+      if (refused) return refused;
+      return handleAi(req, path, { isOwner, actor, auth });
     }
     // The AI hub: which AIs are ready, their models, and (owner only) account, plan and usage. Share links never see it.
     if (path === "/api/providers" && req.method === "GET") {
@@ -2279,6 +2446,7 @@ serve({
 // The dev servers are detached, so they would outlive this process. Stop them on the way out; a signal is sent again once they are stopped, so the exit is the same as before.
 process.once("exit", stopAllDevServers);
 process.once("exit", stopCodexLogin);
+process.once("exit", stopSignIns);
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.once(sig, () => {
     stopAllDevServers();

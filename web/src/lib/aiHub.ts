@@ -1,5 +1,5 @@
 /** Pure helpers for the AI hub, the model picker, the run strip and the Run panel. No React, no fetches: scripts/check-run-text.mjs runs these. */
-import type { ChatEvent, HelperNode, ProviderCard, ProviderModel } from "../types";
+import type { ChatEvent, FallbackStep, HelperNode, Mode, PermissionRule, ProviderAccount, ProviderCard, ProviderModel, Src } from "../types";
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -14,6 +14,20 @@ export function resetsText(iso: string | null, now = new Date()): string | null 
   if (days === 1) return `resets tomorrow at ${time}`;
   return `resets ${at.toLocaleDateString([], { weekday: "long" })} at ${time}`;
 }
+
+/** "2:49 pm", "tomorrow at 2:49 pm" or "Monday at 2:49 pm": a moment in ms, in this device's time zone. Pure. */
+export function untilText(at: number, now = new Date()): string {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(d) - day(now)) / 86_400_000);
+  if (days <= 0) return time;
+  if (days === 1) return `tomorrow at ${time}`;
+  return `${d.toLocaleDateString([], { weekday: "long" })} at ${time}`;
+}
+
+/** A note as the chat shows it: a limit note carries `until` (ms), shown in this device's time zone. */
+export const noteLine = (text: string, until?: number | null): string => (typeof until === "number" && Number.isFinite(until) ? `${text} until ${untilText(until)}` : text);
 
 /** "34% used · resets at 7:20 pm", or "Limit reached. Resets at 7:20 pm" for a window that is full. */
 export function usageText(percent: number, resetsAt: string | null, limited = false, now = new Date()): string {
@@ -71,9 +85,9 @@ export const isUsable = (card: ProviderCard): boolean => card.state === "connect
  * The account a card shows: the owner sees the email, or the provider's own label when it differs from the AI's name.
  * Everyone else sees none (the server already hides it; this is the second guard).
  */
-export function accountLabel(card: ProviderCard, isOwner = true): string | null {
+export function accountLabel(card: ProviderCard, isOwner = true, account?: ProviderAccount): string | null {
   if (!isOwner) return null;
-  const a = card.accounts[0];
+  const a = account ?? card.accounts[0];
   if (!a) return null;
   if (a.email) return a.email;
   return a.label && a.label !== card.name ? a.label : null;
@@ -86,31 +100,37 @@ export function orderCards(cards: ProviderCard[]): ProviderCard[] {
 }
 
 export interface PickerGroup {
+  /** `${card.id}:${accountId}` */
   id: string;
+  /** The AI's id ("claude"). */
+  agent: string;
+  /** The account's id ("default" for the AI's own login). */
+  accountId: string;
   name: string;
   /** "Claude · you@example.com" for the owner, "Claude" for everyone else. */
   label: string;
   models: ProviderModel[];
 }
 
-/** The model menu's groups: only AIs that are connected or at their limit, Claude first, models of all their accounts without repeats. */
+/** An account's name in a heading: the owner sees the email, or the label when it differs from the AI's name. */
+function accountName(card: ProviderCard, a: ProviderAccount, isOwner: boolean): string | null {
+  if (!isOwner) return a.id !== "default" && a.label && a.label !== card.name ? a.label : null;
+  if (a.email) return a.email;
+  return a.label && a.label !== card.name ? a.label : null;
+}
+
+/** The model menu's groups: one per usable account of every AI that is connected or at its limit, Claude first. A signed-out or broken account has none. */
 export function pickerGroups(cards: ProviderCard[], isOwner: boolean): PickerGroup[] {
   return orderCards(cards)
     .filter(isUsable)
-    .map((c) => {
-      const seen = new Set<string>();
-      const models: ProviderModel[] = [];
-      for (const a of c.accounts) {
-        if (a.state === "signed_out" || a.state === "error") continue;
-        for (const m of a.models) {
-          if (seen.has(m.value)) continue;
-          seen.add(m.value);
-          models.push(m);
-        }
-      }
-      const account = accountLabel(c, isOwner);
-      return { id: c.id, name: c.name, label: account ? `${c.name} · ${account}` : c.name, models };
-    });
+    .flatMap((c) =>
+      c.accounts
+        .filter((a) => a.state !== "signed_out" && a.state !== "error")
+        .map((a) => {
+          const account = accountName(c, a, isOwner);
+          return { id: `${c.id}:${a.id}`, agent: c.id, accountId: a.id, name: c.name, label: account ? `${c.name} · ${account}` : c.name, models: a.models };
+        }),
+    );
 }
 
 /* --------------------------------------------------------------- strip -- */
@@ -126,13 +146,16 @@ export interface StripParts {
   stateShort?: string;
   /** More to say after the state ("2 helpers working"). Dropped on a phone. */
   extra?: string | null;
+  /** "next message: Haiku 4.5": the one-off model, kept on a phone too. */
+  next?: string | null;
 }
 
 /** The run strip's one line: "Claude · you@example.com · Sonnet 5.5 · Asks first · Working 1m 12s". Missing parts are left out; a phone keeps AI, model and state. */
 export function stripText(p: StripParts, phone = false): string {
+  const next = p.next ? `next message: ${p.next}` : null;
   const parts = phone
-    ? [p.ai, p.model, p.stateShort ?? p.state]
-    : [p.ai, p.account, p.model, p.mode, p.state, p.extra];
+    ? [p.ai, p.model, p.stateShort ?? p.state, next]
+    : [p.ai, p.account, p.model, p.mode, p.state, p.extra, next];
   return parts.filter((x): x is string => typeof x === "string" && x.trim() !== "").join(" · ");
 }
 
@@ -237,3 +260,74 @@ export function replyRows(events: ChatEvent[], isOwner = false, limit = 20, name
 
 /** A reply row as one line: "Sonnet 5.5 · 1m 12s · 12.3k tokens · 4% of your plan". */
 export const replyLine = (r: ReplyRow): string => [r.model, r.time, r.tokens, r.plan].filter(Boolean).join(" · ");
+
+/* ------------------------------------------------------- AI control -- */
+
+/** Every mode in plain words. The Mode menu offers four (five for Claude); the others are names the CLI may report. */
+export const MODE_LABEL: Record<string, string> = {
+  default: "Asks first",
+  acceptEdits: "Edits allowed",
+  auto: "Auto",
+  full: "Full access",
+  plan: "Plan first",
+  manual: "Asks first",
+  bypassPermissions: "Full access",
+};
+
+/** The modes the menu offers, in order. "Plan first" is Claude's only. */
+export const modeChoices = (isClaude: boolean): Mode[] => (isClaude ? ["default", "acceptEdits", "auto", "full", "plan"] : ["default", "acceptEdits", "auto", "full"]);
+
+/** The one line under a mode in the menu. */
+export function modeDetail(mode: string, isClaude = true): string {
+  switch (mode) {
+    case "default":
+      return "Asks before it changes a file or runs a command";
+    case "acceptEdits":
+      return "Changes files without asking; still asks before commands";
+    case "auto":
+      return isClaude ? "Decides for itself; still asks before risky steps" : "Decides for itself; still asks before risky steps. This AI uses a simple built-in rule.";
+    case "full":
+      return "Never asks. It can change and delete anything the AI can reach.";
+    case "plan":
+      return "Plans and explains before changing anything";
+    default:
+      return "";
+  }
+}
+
+export const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
+export const EFFORT_CHOICES = ["low", "medium", "high", "xhigh", "max"];
+
+/** Where a setting comes from, in words. */
+export const sourceWords = (src: Src | undefined): string => (src === "project" ? "Set for this project" : src === "default" ? "Inherits from Settings" : "Built-in choice");
+
+/** Words for a rule's origin in the Run panel. */
+export const ruleSource = (s: PermissionRule["source"]): string => (s === "claude-settings" ? "From this project's settings" : s === "session" ? "This session" : "You allowed this");
+
+/** "Using Work until 2:49 pm. Claude Pro will be used again after that." */
+export function limitSentence(l: { from: string; to: string; until: number | null }): string {
+  return l.until === null ? `Using ${l.to}. ${l.from} will be used again when its limit lifts.` : `Using ${l.to} until ${untilText(l.until)}. ${l.from} will be used again after that.`;
+}
+
+/** An account's name in a sentence: its plan for the AI's own login ("Pro"), its label for another, "the main account" if neither is known. */
+export function accountWord(account: ProviderAccount | undefined): string {
+  if (account && account.id !== "default") return account.label;
+  return account?.plan ? account.plan.charAt(0).toUpperCase() + account.plan.slice(1) : "the main account";
+}
+
+/** A fallback step as a row: "Work account", "Haiku 4.5 on Pro". `accounts` are the AI's accounts; `current` the one in use (a step with no account means that one). */
+export function stepLabel(step: FallbackStep, accounts: ProviderAccount[], current: string | null | undefined, modelName: (id: string) => string): string {
+  const id = step.account === undefined ? current : step.account;
+  const who = accountWord(accounts.find((a) => a.id === (id ?? "default")));
+  if (step.model) return `${modelName(step.model)} on ${who}`;
+  return who === "the main account" ? "Main account" : `${who} account`;
+}
+
+/** The list with one step moved by `by` places (-1 up, 1 down). A move past either end changes nothing. */
+export function moveStep<T>(steps: T[], index: number, by: -1 | 1): T[] {
+  const to = index + by;
+  if (index < 0 || index >= steps.length || to < 0 || to >= steps.length) return steps;
+  const next = steps.slice();
+  [next[index], next[to]] = [next[to], next[index]];
+  return next;
+}

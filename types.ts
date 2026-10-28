@@ -47,14 +47,24 @@ export interface Workspace {
   hookToken?: string;
   /** optional resource caps applied to the agent's PTY session */
   limits?: WorkspaceLimits;
-  /** Claude model for this project. Undefined = the account default. */
-  model?: "opus" | "sonnet" | "haiku";
+  /** Claude model for this project, as Claude takes it: an alias, a model's own id, a router's id, or "default" (an explicit choice of the account's own). Undefined = inherit the server default. */
+  model?: string;
   /** Standing notes the person wrote for the AI about this project (<= 4000 chars). Always followed by a chat; a running Claude picks them up at its next message. */
   notes?: string;
   /** Claude effort level chosen in the chat; re-applied when its process restarts. */
-  effort?: "low" | "medium" | "high" | "xhigh" | "max";
-/** Permission mode the person picked in the chat, passed to claude when it starts. Undefined = "default" for a chat, the project's own settings for a terminal. */
-permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk";
+  effort?: Effort;
+/** Permission mode the person picked in the chat, passed to claude when it starts. Undefined = the server default for a chat, the project's own settings for a terminal. "full" is Kohlab answering every ask itself; Claude stays in "default". */
+  permissionMode?: Mode | "dontAsk";
+  /** The AI (and account) were chosen for this project: set by its first message or an explicit choice. Until then they follow the server defaults. */
+  agentPinned?: boolean;
+  /** The sign-in this project's AI uses: an account id (accounts.ts). Undefined = the AI's own login. */
+  account?: string;
+  /** What to do when the AI hits its usage limit. Undefined parts are the computed default. */
+  fallback?: { auto?: boolean; steps?: FallbackStep[] };
+  /** Set while a hop to another account or model is in force after a limit; cleared when the first one is usable again. */
+  limit?: LimitState;
+  /** Actions the person chose "Always allow" for (Claude permission rule syntax). */
+  allowRules?: string[];
   /** Model an ACP agent (hermes, omp) runs its chat on, as the agent names it (its model value). Undefined = the agent's own default. */
   agentModel?: string;
   /** The last session id per agent for this chat project (Claude's or an ACP agent's), so switching back resumes it. */
@@ -134,4 +144,61 @@ export interface Pick {
   /** The page's path only, at most 200 characters. */
   page: string;
   viewport: { width: number; height: number };
+}
+
+// ---- AI control (v2.6): the contract between server and web ----
+
+export type Mode = "default" | "acceptEdits" | "auto" | "plan" | "full";
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** What new projects start with. A key left out means "built in". */
+export interface AiDefaults {
+  agent?: string;
+  account?: string;
+  model?: string;
+  effort?: Effort;
+  mode?: Mode;
+  autoFresh?: boolean;
+}
+
+export type Src = "project" | "default" | "builtin";
+export interface AiSetting<T> {
+  value: T | null;
+  source: Src;
+}
+export interface AiResolved {
+  agent: AiSetting<string>;
+  account: AiSetting<string>;
+  model: AiSetting<string>;
+  effort: AiSetting<Effort>;
+  mode: AiSetting<Mode>;
+  autoFresh: AiSetting<boolean>;
+}
+
+/** One step of the usage-limit fallback list. An omitted account means the same account. */
+export interface FallbackStep {
+  account?: string | null;
+  model?: string;
+}
+export interface Fallback {
+  auto: boolean;
+  steps: FallbackStep[];
+  /** false = the computed default order */
+  custom: boolean;
+}
+export interface LimitState {
+  from: string;
+  to: string;
+  /** epoch ms the limit lifts */
+  until: number | null;
+  at: number;
+  fromAccount: string | null;
+  /** a hop to another model on the same account: the model to go back to */
+  fromModel?: string | null;
+}
+export interface PermissionRule {
+  rule: string;
+  label: string;
+  source: "kohlab" | "claude-settings" | "session";
+  removable: boolean;
 }

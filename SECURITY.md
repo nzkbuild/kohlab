@@ -80,11 +80,13 @@ builds this, and these rules hold for it. `scripts/check-providers.ts` and
   `initialize` and `get_usage`; Codex only `initialize`, `account/read` and
   `account/rateLimits/read`. The fake Claude in the check fails if it is ever sent a
   user message.
-- **No file that holds a sign-in or a key is opened.** The code names no such path
+- **No file that holds an AI's own sign-in is opened.** The code names no such path
   (checked by a scan of `providers.ts`). Hermes is read through `hermes auth list`
   heading lines only; omp through `omp models --json`. Commands that print keys or
   are slow are never run (`omp token`, `hermes status`, `hermes dump`,
-  `hermes --version`, `codex-acp --help`).
+  `hermes --version`, `codex-acp --help`). Kohlab never reads Claude's or Codex's
+  own credential files. The one exception is its own: see "Accounts and router
+  keys" below.
 - **Children get only the allowlisted environment** (`childEnv`): never `KOHLAB_KEY`
   or `ANTHROPIC_*` from the server. The check starts the server with canary secrets
   and proves no probe saw them and no response holds them.
@@ -99,6 +101,71 @@ builds this, and these rules hold for it. `scripts/check-providers.ts` and
   under their own computer account may be signed in differently from what it shows.
 - `GET .../chat/run` shows what the AI was told (the project notes and Kohlab's own
   text) and tool names only: no tool server command line, settings or environment.
+
+
+## Accounts and router keys
+
+v2.6 lets the owner add a second sign-in for Claude or Codex, and use Claude through a
+router or an API address. `accounts.ts` holds all of it. `scripts/check-accounts.mjs`
+is the evidence: it uses a canary key and fails if the canary is found anywhere but one
+file.
+
+- **One file holds a secret, and it is Kohlab's own:** `<works>/accounts/secrets.json`
+  (`{account id: router key}`), mode 0600, in a 0700 folder, written atomically (a temp
+  file beside it, then a rename). It is the only file Kohlab writes a secret to and the
+  only one it reads one from. `accounts.json` (0600) holds names, ids and router
+  addresses, no key.
+- **Keys are write-only.** No route returns one; the browser learns only that a key is
+  stored (`hasKey`) and the router's host and port, and only the owner learns that. A
+  key is never in `state.json`, the audit log, a chat transcript, console output, an
+  error, an argument or a request to the PTY daemon. The audit log records the account's
+  id and name.
+- **A key reaches a process only as an environment variable of a project that is on that
+  router** (`accountEnv`: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and the three
+  `ANTHROPIC_DEFAULT_*_MODEL` names, nothing else). `childEnv` drops any other extra
+  key, and `KOHLAB_KEY` never reaches a child. A project on another account, or on none,
+  gets neither the key nor the address.
+- **A second Claude or Codex login is a fresh, empty folder signed in once, here.**
+  It is the only copy of that login, so no rotating refresh token is split between two
+  copies (copying the owner's login was rejected for that reason, and still is). The
+  folder is never copied or synced, never inside a project, never `~/.claude`, and every
+  process of that account (chat, probe, sign-in) uses the same one. Sign-in runs
+  `claude auth login` as a child of the server with piped input and the account's folder;
+  no browser sign-in is ever completed by Kohlab itself.
+- **Who may use an account:** a project that runs as the server's own account, or as the
+  shared agent account (`KOHLAB_AGENT_USER`, whose folder is handed to it). A member whose
+  chat runs as their own computer account keeps their own sign-in; the chooser is hidden
+  and the server refuses (403). Adding, removing, renaming, changing a key or signing in
+  is owner-only and audited (`ai.account.*`).
+- **The router check** asks `GET <address>/v1/models` with the key: http or https only, no
+  user name or password in the address, no redirects followed, a 5 s timeout, at most
+  1 MB read. A router's address in an error is shown as its host only.
+  *Ceiling:* the owner can point it at any address the server can reach (a local router
+  is the point), so a hostile owner could probe the server's network; a member cannot.
+- **Residual risk (measured, spike S4):** Claude's Bash tool sees the process environment,
+  so the AI can read, and could be tricked into printing, its router key. Use a revocable
+  router key made for Kohlab, and rotate it if a chat may have leaked it.
+- **Backups:** `kohlab backup` archives a fixed list of files (state, members, audit log,
+  key, push files). `accounts/` is not in it, so `scripts/backup-offbox.sh` never sends
+  router keys or sign-in folders off the machine. To keep them, back up
+  `<works>/accounts/` yourself, to a place only you can read.
+
+## Full access and "Always allow"
+
+- **Full access is Kohlab answering every permission ask itself.** Claude stays in its
+  `default` mode: it is never started in `bypassPermissions`, which it refuses as root.
+  A question (`AskUserQuestion`) or a plan (`ExitPlanMode`) is never answered for the
+  person. Only the owner can turn it on, or the person whose chat runs as their own
+  computer account ("Full access is only for the owner." otherwise, 403); turning it on is
+  audited (`ai.fullaccess`), and the page asks for confirmation. On a project that runs as
+  the server's own account it means commands run as that account; set `KOHLAB_AGENT_USER`
+  to use a smaller one.
+- **"Always allow" saves a rule only when it is narrow:** one plain command (no `;`, `&`,
+  `|`, backticks, `$`, redirections, newlines), never `sudo`, `rm`, `dd`, `curl`, `wget`,
+  a shell or `git push`; file changes only inside the project and never `.git`, `.env` or
+  keys; a web address by its domain. A refusal never stores a rule. Rules are checked
+  (shape, 200 characters, 50 per project) and passed to Claude with `--allowedTools`;
+  removing one restarts Claude when the project is next idle.
 
 ## Operational hardening
 

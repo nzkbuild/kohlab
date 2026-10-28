@@ -94,6 +94,9 @@ const HANDOFF = { n: 9001, at: Date.now(), kind: "handoff", text: "Goal\nBuild t
 async function mock(page, { member = false, context = null } = {}) {
   await page.route(/\/api\/providers$/, (route) => route.fulfill({ json: { providers: member ? MEMBER_CARDS : OWNER_CARDS, at: Date.now() } }));
   await page.route(/\/api\/workspaces\/[^/]+\/chat\/run$/, (route) => route.fulfill({ json: RUN }));
+  // The v2.6 routes: the defaults panel shows (the cards below it must not change), the rules list is empty.
+  await page.route(/\/api\/ai\/defaults$/, (route) => route.fulfill({ json: { defaults: {} } }));
+  await page.route(/\/api\/ai\/rules$/, (route) => route.fulfill({ json: { projects: [] } }));
   if (member) await page.route(/\/api\/account$/, (route) => route.fulfill({ json: { id: "sam", role: "member", kind: "user" } }));
   await page.route(/\/api\/workspaces\/[^/]+\/chat\?after=/, async (route) => {
     const res = await route.fetch();
@@ -182,9 +185,10 @@ try {
     await mock(page);
     await page.goto(`${fx.base}/settings/agents`);
     await page.locator("section.panel h3").first().waitFor({ timeout: 15000 }).catch(() => {});
-    const names = await page.locator("section.panel h3").evaluateAll((els) => els.map((e) => e.childNodes[0].textContent.trim()));
+    // The AI cards are the panels with a state chip; the defaults and the always-allowed panels sit around them.
+    const names = await page.locator("section.panel:has(.chip) h3").evaluateAll((els) => els.map((e) => e.childNodes[0].textContent.trim()));
     check("Settings -> AI: one card per AI, Claude first, then connected, signed out, not installed", JSON.stringify(names) === JSON.stringify(["Claude", "Hermes", "Codex", "omp"]), names.join(", "));
-    const cards = page.locator("section.panel");
+    const cards = page.locator("section.panel:has(.chip)");
     const words = await cards.evaluateAll((els) => els.map((e) => e.querySelector(".chip")?.textContent.trim() ?? ""));
     check("each card has a state word", JSON.stringify(words) === JSON.stringify(["Connected", "Connected", "Signed out", "Not installed"]), words.join(", "));
     const claudeCard = cards.nth(0);
@@ -195,6 +199,7 @@ try {
     check("models disclosure counts", (await claudeCard.locator("summary").innerText()) === "2 models" && (await cards.nth(1).locator("summary").innerText()) === "14 models");
     await cards.nth(1).locator("summary").click();
     check("a long model list gets a search box", (await cards.nth(1).getByRole("searchbox", { name: "Search models" }).count()) === 1);
+    check("the defaults panel comes first and is not an AI card", (await page.locator("section.panel h3").first().innerText()) === "Defaults for new projects" && !names.includes("Defaults for new projects"));
     check("the owner can Refresh", (await claudeCard.getByRole("button", { name: "Refresh" }).count()) === 1);
     check("signed-out Codex offers Sign in", (await cards.nth(2).getByRole("button", { name: "Sign in to Codex" }).count()) === 1);
     check("not-installed omp says what to do", /Ask whoever installed Kohlab/.test(await cards.nth(3).innerText()));
@@ -331,7 +336,7 @@ try {
 
 /* ------------------------------------------------------- the files themselves -- */
 const root = new URL("../web/src/", import.meta.url).pathname;
-const added = ["components/ProvidersPane.tsx", "components/ModelPicker.tsx", "components/RunStrip.tsx", "components/RunPanel.tsx", "lib/aiHub.ts", "lib/useProviders.ts"];
+const added = ["components/ProvidersPane.tsx", "components/ModelPicker.tsx", "components/RunStrip.tsx", "components/RunPanel.tsx", "components/AccountDialogs.tsx", "components/AiDefaultsPanel.tsx", "components/AiMenus.tsx", "components/RulesPanel.tsx", "lib/aiHub.ts", "lib/useProviders.ts"];
 for (const f of added) {
   const text = readFileSync(join(root, f), "utf8");
   check(`${f}: no colour literal`, !/#[0-9a-fA-F]{3,8}\b|oklch\(|rgba?\(/.test(text));

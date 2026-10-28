@@ -284,6 +284,8 @@ try {
   check("owner: two plan windows with a reset time", acct?.usage?.windows?.length === 2 && acct.usage.windows[0].label === "Next few hours" && acct.usage.windows[0].percent === 38 && /2026-10-25/.test(acct.usage.windows[0].resetsAt));
   check("owner: Claude's models come from its own list", acct?.models?.map((m) => m.value).join() === "default,haiku");
   check("owner: a refresh action is offered", claude?.actions?.some((x) => x.kind === "refresh"));
+  check("owner: the account says it is the AI's own login, and has no limit time", acct?.kind === "default" && acct.limitedUntil === null, JSON.stringify(acct)?.slice(0, 200));
+  check("owner: the card offers both ways to add an account", claude?.actions?.filter((x) => x.kind === "add_account").length === 2);
   const codexSignedOut = card(a, "codex");
   check("signed-out Codex: signed_out, no account, a device-code sign-in", codexSignedOut?.state === "signed_out" && codexSignedOut.accounts.length === 0 && codexSignedOut.actions.some((x) => x.kind === "sign_in" && x.via === "device_code"), JSON.stringify(codexSignedOut)?.slice(0, 300));
   check("signed-out Codex: nothing was asked of its app server", !existsSync(join(fakeDir, "codex-spawns")));
@@ -304,6 +306,8 @@ try {
     for (const secret of [OWNER_EMAIL, "Claude Pro", "2.1.305", "resetsAt", "percent", '"windows"', "0.163.0", "18.4.1", tmp, CANARY_API, KEY]) check(`${role}: the response holds no "${secret.slice(0, 24)}"`, !text.includes(secret));
     const c = card(got, "claude");
     check(`${role}: state and models are there, nothing else`, c?.state === "connected" && c.accounts[0].models.length === 2 && c.accounts[0].usage === null && c.accounts[0].email === null && c.accounts[0].label === "Claude" && c.actions.length === 0 && c.version === null);
+    check(`${role}: no kind, limit time, key flag or router host`, !/"kind":"(default|login|router)"|limitedUntil|hasKey|baseUrlHost/.test(text), text.slice(0, 200));
+    check(`${role}: cannot change the defaults, add accounts or remove them (403)`, (await req("PUT", "/api/ai/defaults", { body: { model: "opus" }, key: made1.body?.key })).status === 403 && (await req("POST", "/api/ai/accounts", { body: { provider: "claude", kind: "login", label: "x" }, key: made1.body?.key })).status === 403);
     check(`${role}: refresh -> 403`, (await req("POST", "/api/providers/refresh", { key: made1.body?.key, body: {} })).status === 403);
   }
 
@@ -316,6 +320,10 @@ try {
   check("a share token exists", typeof token === "string");
   const viaShare = await req("GET", "/api/providers", { key: "", query: `share=${token}` });
   check("share link: GET /api/providers -> 403", viaShare.status === 403, `${viaShare.status} ${viaShare.text.slice(0, 100)}`);
+  for (const path of ["/api/ai/defaults", "/api/ai/accounts", "/api/ai/rules"]) {
+    const sh = await req("GET", path, { key: "", query: `share=${token}` });
+    check(`share link: GET ${path} -> 403`, sh.status === 403, `${sh.status} ${sh.text.slice(0, 100)}`);
+  }
 
   // refresh: owner only, rate limited, audited
   check("refresh: an unknown AI -> 400", (await req("POST", "/api/providers/refresh", { body: { id: "../x" } })).status === 400);

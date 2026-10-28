@@ -4,13 +4,14 @@
  * an interrupt here instead of to the claude process.
  *
  * ponytail: an ACP agent cannot take a second message mid-turn, so one waits for the person
- * to send it again. Mode, effort, Undo and file mentions are not offered yet.
+ * to send it again. Effort, Undo and file mentions are not offered yet.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { BgTask, Body, Caps, Todo } from "./chat";
 import { resultText } from "./chat";
 import { chatBusy, chatWaiting } from "./lib";
+import { acpDecision, acpToolName, ruleFor } from "./policy";
 
 /** The agents that speak ACP, and the command that starts each one's ACP server. */
 export const ACP_AGENTS: Record<string, string[]> = {
@@ -141,6 +142,14 @@ export interface AcpHost {
   models(list: Caps["models"], current: string | null): void;
   /** the client has stopped: the host drops it if it is still the chat's current one */
   exited(client: AcpClient): void;
+  /** the permission mode and the saved rules in force right now: read at every request, so a change needs no restart */
+  policy?(): { mode: string; rules: string[] };
+  /** a quiet line in the chat */
+  note?(text: string): void;
+  /** the model the person chose could not be used: forget it */
+  modelRefused?(): void;
+  /** a turn failed with this text: true when it is a usage limit and the host takes over (it moves the message to another account or model, or says why it cannot) */
+  limited?(raw: string): boolean;
 }
 
 export interface AcpStart {
@@ -174,7 +183,7 @@ export class AcpClient {
   tasks: BgTask[] = [];
   helpers = new Map<string, string>();
   /** unanswered permission questions, by requestId */
-  asks = new Map<string, { tool: string; input: Record<string, unknown> }>();
+  asks = new Map<string, { tool: string; input: Record<string, unknown>; always?: { rule: string; label: string } }>();
   readonly retry?: { attempt: number; max: number } = undefined;
   busySince?: number;
   model: string | null = null;
@@ -186,6 +195,11 @@ export class AcpClient {
   started = false;
   /** the session was opened new (not loaded), and no message has been sent in it yet: its first message carries the project's notes */
   freshSession = false;
+  /** a message sent with another model: the model to go back to when its turn ends */
+  restoreModel?: string;
+  private cwd = "";
+  /** models the agent turned down: not asked for again by this client */
+  private refused = new Set<string>();
   stderr = "";
   sid?: string;
   /** how this agent takes a model change, and the config option's id when it is one */
@@ -206,6 +220,7 @@ export class AcpClient {
 
   /** Starts the agent, shakes hands, and opens the session: loads the chat's conversation when the agent can, else starts a new one. */
   async start(opts: AcpStart): Promise<void> {
+    this.cwd = opts.cwd;
     this.child = spawn(opts.bin, opts.args, { cwd: opts.cwd, uid: opts.uid, gid: opts.gid, env: opts.env, stdio: ["pipe", "pipe", "pipe"] });
     this.child.stdin!.on("error", () => {}); // a dead process: its exit event reports it
     this.child.stderr!.on("data", (d) => {
@@ -240,12 +255,16 @@ export class AcpClient {
     this.started = true;
   }
 
-  /** Switches the model: session/set_model, or the model config option, whichever the agent offered. */
+  /** Switches the model: session/set_model, or the model config option, whichever the agent offered. For the config option, the agent's reply says which model it is on now; that is what is kept. */
   async setModel(value: string): Promise<void> {
-    if (this.modelHow === "model") await this.request("session/set_model", { sessionId: this.sid, modelId: value }, 60_000);
-    else if (this.modelHow === "config") await this.request("session/set_config_option", { sessionId: this.sid, configId: this.configId, value }, 60_000);
-    else throw new Error("the agent offers no model choice");
-    this.model = value;
+    if (this.modelHow === "model") {
+      await this.request("session/set_model", { sessionId: this.sid, modelId: value }, 60_000);
+      this.model = value;
+    } else if (this.modelHow === "config") {
+      const res = await this.request("session/set_config_option", { sessionId: this.sid, configId: this.configId, value }, 60_000);
+      const opt = Array.isArray(res?.configOptions) ? res.configOptions.find((o: any) => o?.id === this.configId) : undefined;
+      this.model = typeof opt?.currentValue === "string" ? opt.currentValue : value;
+    } else throw new Error("the agent offers no model choice");
   }
 
   /** Takes the models from a session reply, when it lists any. */
@@ -258,13 +277,21 @@ export class AcpClient {
     this.host.models(got.models, got.current);
   }
 
-  /** Applies the model the person chose, when the agent is on another. A refusal is logged and the chat goes on. */
+  /** Applies the model the person chose, when the agent is on another. When the agent refuses it, or says it is on another, the chat says so, the choice is forgotten and the model shown is the real one. */
   async applyModel(want: string | undefined): Promise<void> {
-    if (!want || want === this.model || this.modelHow === null) return;
+    if (!want || want === this.model || this.modelHow === null || this.refused.has(want)) return;
+    let why = "";
     try {
       await this.setModel(want);
+      if (this.model !== want) why = "stays";
     } catch (e) {
       console.warn("[acp] could not apply the chosen model:", (e as Error).message);
+      why = "refused";
+    }
+    if (why) {
+      this.refused.add(want);
+      this.host.note?.(`${ACP_NAMES[this.agent] ?? this.agent} could not switch to ${want} and stays on ${this.model ?? "its own model"}.`);
+      this.host.modelRefused?.();
     }
   }
 
@@ -291,7 +318,7 @@ export class AcpClient {
     setTimeout(() => this.endTurn(since, "cancelled"), 5000);
   }
 
-  /** Answers a permission question: the option the answer picks (or cancelled when none fits). */
+  /** Answers a permission question: the option the answer picks (or cancelled when none fits). The host stores a rule the ask offered; this only answers. */
   answer(requestId: string, allow: boolean): void {
     const perm = this.perms.get(requestId);
     if (!perm) return;
@@ -313,6 +340,18 @@ export class AcpClient {
   private endTurn(since: number, stop: string, err?: string): void {
     // a turn ends once; a late reply from an earlier turn, or one whose process already exited, changes nothing
     if (this.closed || this.busySince !== since) return;
+    if (this.restoreModel !== undefined) {
+      const back = this.restoreModel;
+      this.restoreModel = undefined;
+      this.setModel(back).catch((e) => console.warn("[acp] could not go back to the model:", (e as Error).message));
+    }
+    // a usage limit: the host moves the message on (or says why it cannot), and ends the turn itself
+    if (err !== undefined && this.host.limited?.(err)) {
+      this.busySince = undefined;
+      this.draft = "";
+      this.helpers.clear();
+      return;
+    }
     this.flush();
     if (stop === "refusal") this.host.emit({ kind: "error", text: "The agent refused to do that." });
     else if (stop === "max_tokens") this.host.emit({ kind: "error", text: "The reply got too long and was cut short. Ask for a smaller step." });
@@ -360,7 +399,7 @@ export class AcpClient {
     else p.resolve(m.result);
   }
 
-  /** A request from the agent to us: a permission question, or anything else, which we do not support. */
+  /** A request from the agent to us: a permission question, or anything else, which we do not support. The mode and the saved rules decide first: a yes is sent at once and the person is not asked. */
   private onRequest(m: any): void {
     if (m.method !== "session/request_permission") {
       this.write({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "Method not found" } });
@@ -370,15 +409,23 @@ export class AcpClient {
     const title = String(p.toolCall?.title ?? "");
     const raw = p.toolCall?.rawInput;
     const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const kind = String(p.toolCall?.kind ?? "");
     const options = Array.isArray(p.options) ? p.options.filter((o: any) => typeof o?.optionId === "string").map((o: any) => ({ optionId: o.optionId, kind: String(o.kind ?? "") })) : [];
+    const pol = this.host.policy?.() ?? { mode: "default", rules: [] };
+    if (acpDecision(pol.mode, kind, input, pol.rules, this.cwd) === "allow") {
+      const optionId = pickOption(options, true);
+      this.write({ jsonrpc: "2.0", id: m.id, result: { outcome: optionId ? { outcome: "selected", optionId } : { outcome: "cancelled" } } });
+      return;
+    }
     const requestId = `acp-${m.id}`;
+    const always = ruleFor(acpToolName(kind, input), input, this.cwd) ?? undefined;
     this.perms.set(requestId, { rpcId: m.id, options });
-    this.asks.set(requestId, { tool: title, input });
+    this.asks.set(requestId, { tool: title, input, ...(always ? { always } : {}) });
     const wasWaiting = chatWaiting.has(this.id);
     chatWaiting.add(this.id);
     const text = permissionText(this.agent, title);
     const detail = raw !== undefined ? JSON.stringify(raw).slice(0, 300) : undefined;
-    this.host.emit({ kind: "ask", requestId, text, ...(detail !== undefined ? { detail } : {}) });
+    this.host.emit({ kind: "ask", requestId, text, ...(detail !== undefined ? { detail } : {}), ...(always ? { always } : {}) });
     if (!wasWaiting) this.host.pingNeedsYou(text);
   }
 

@@ -72,9 +72,10 @@ const gone = card("gemini", "Gemini", "not_installed");
 /* ------------------------------------------------------- pickerGroups -- */
 const mixed = [codex, hermes, gone, omp, claude];
 const owner = pickerGroups(mixed, true);
-check("picker lists connected and limited AIs only, Claude first", owner.map((g) => g.id), ["claude", "hermes"]);
-check("signed-out Codex is not in the picker", owner.some((g) => g.id === "codex"), false);
-check("not-installed and error AIs are not in the picker", owner.some((g) => g.id === "gemini" || g.id === "omp"), false);
+check("picker lists connected and limited AIs only, Claude first (one group per account: id is AI:account)", owner.map((g) => g.id), ["claude:default", "hermes:default"]);
+check("a group names its AI and its account", owner.map((g) => [g.agent, g.accountId]), [["claude", "default"], ["hermes", "default"]]);
+check("signed-out Codex is not in the picker", owner.some((g) => g.agent === "codex"), false);
+check("not-installed and error AIs are not in the picker", owner.some((g) => g.agent === "gemini" || g.agent === "omp"), false);
 check("owner sees the account in the heading", owner[0].label, "Claude · you@example.com");
 check("a provider label that is not an email still names the account", owner[1].label, "Hermes · openrouter");
 const member = pickerGroups(mixed, false);
@@ -85,8 +86,8 @@ const twice = pickerGroups(
   [card("claude", "Claude", "connected", { accounts: [account({ models: [model("a", "A")] }), account({ id: "two", models: [model("a", "A"), model("b", "B")] })] })],
   true,
 );
-check("models of two accounts are listed once", twice[0].models.map((m) => m.value), ["a", "b"]);
-check("a signed-out account adds no models", pickerGroups([card("claude", "Claude", "connected", { accounts: [account({ state: "signed_out", models: [model("x", "X")] })] })], true)[0].models, []);
+check("two accounts are two groups, each with its own models", twice.map((g) => [g.id, g.models.map((m) => m.value)]), [["claude:default", ["a"]], ["claude:two", ["a", "b"]]]);
+check("a signed-out account gives no group", pickerGroups([card("claude", "Claude", "connected", { accounts: [account({ state: "signed_out", models: [model("x", "X")] })] })], true), []);
 check("accountLabel: owner gets the email", accountLabel(claude, true), "you@example.com");
 check("accountLabel: member gets none", accountLabel(claude, false), null);
 check("accountLabel: a label equal to the AI's name is no account", accountLabel(card("codex", "Codex", "connected"), true), null);

@@ -1,5 +1,5 @@
 import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, Paperclip, Stop, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowDown, ArrowUp, Browser, CaretRight, Check, CheckCircle, Circle, Copy, DotsThree, Paperclip, ShieldCheck, Stop, WarningCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api, type ChatUsage } from "../api";
 import type { ChatEvent as StoredChatEvent, HelperNode, Pick, TurnFile } from "../types";
@@ -22,12 +22,13 @@ import { MODEL_LABEL, modelOf } from "../lib/projectActions";
 import { agentName } from "../lib/agentName";
 import ConfirmDialog from "./ConfirmDialog";
 import { Composer, SaveLaterChip, SavedChip } from "./Composer";
-import ModelPicker, { ClaudeModelChoices, ModelChoices, modelName, shortModel, type ModelInfo } from "./ModelPicker";
-import RunPanel, { useRunPanel } from "./RunPanel";
+import ModelPicker, { ClaudeModelChoices, ModelChoices, PickerBody, modelName, shortModel, type ModelInfo } from "./ModelPicker";
+import RunPanel, { useRunInfo, useRunPanel } from "./RunPanel";
 import RunStrip from "./RunStrip";
-import { accountLabel, helpersWorkingText } from "../lib/aiHub";
+import { AccountChoices, EffortChoices, FULL_ACCESS_OWNER_ONLY, FullAccessDialog, ModeChoices } from "./AiMenus";
+import { EFFORT_LABEL, MODE_LABEL, accountLabel, helpersWorkingText, noteLine } from "../lib/aiHub";
 import { useProviders } from "../lib/useProviders";
-import { Button, ComposerChip, Dialog, Menu, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, Tooltip } from "./ui";
+import { Button, ComposerChip, Dialog, Menu, MenuItem, MenuLabel, MenuSeparator, MenuSub, Tooltip } from "./ui";
 
 /** An event as chat.ts writes it. `why` is the AI's one-line reason for a command (on ask events). */
 type ChatEvent = StoredChatEvent & { why?: string };
@@ -62,7 +63,7 @@ interface Props {
 
 /** The text of a note: a "note" event, or an old saved tool line that says the same (from before notes existed). Null for every other event. */
 function noteOf(e: ChatEvent): string | null {
-  if (e.kind === "note") return e.text;
+  if (e.kind === "note") return noteLine(e.text, e.until);
   if (e.kind === "tool" && (e.text.startsWith("Switched to ") || e.text.startsWith("Went back to before:"))) return e.text;
   return null;
 }
@@ -148,21 +149,6 @@ const KEPT_NOTE = "Kept this version";
 
 /** Set once the first "Ready to check" card has shown: after that, its hint line is not shown again. */
 const READY_HINT_KEY = "kohlab:ready-hint-seen";
-
-/** Permission modes in plain words: the Mode menu's choices, plus the CLI's other names for them. One table for every label. */
-const MODES: Record<string, { label: string; detail?: string }> = {
-  default: { label: "Asks first", detail: "Asks before changing files or running commands" },
-  acceptEdits: { label: "Edits allowed", detail: "Edits files without asking, asks before commands" },
-  auto: { label: "Auto", detail: "Decides for itself what needs your OK" },
-  plan: { label: "Plan first", detail: "Plans and explains before changing anything" },
-  manual: { label: "Asks first" },
-  bypassPermissions: { label: "No questions" },
-};
-
-/** The modes the Mode menu offers, in order. */
-const MODE_CHOICES = ["default", "acceptEdits", "auto", "plan"];
-
-const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
 
 /** A slash command and a model, as the chat's snapshot lists them. */
 interface CommandInfo {
@@ -1440,6 +1426,12 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [commandsEnabled, setCommandsEnabled] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  // The model the next message alone will use ("Just for the next message…"); cleared when the AI or account changes or the message is sent.
+  const [oneShot, setOneShot] = useState<{ model: string; label: string } | null>(null);
+  // Full access waits for a yes before it is applied.
+  const [fullAsk, setFullAsk] = useState(false);
+  // Bumped after any change to the AI's settings, so the run info is read again.
+  const [infoKick, setInfoKick] = useState(0);
   // The "/" menu: which command is highlighted, and whether Esc closed it for this text.
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashShut, setSlashShut] = useState(false);
@@ -1642,6 +1634,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   useEffect(() => {
     for (const e of events) {
       if (e.kind === "assistant" && e.n > announcedRef.current) announce(e.text);
+      else if (e.kind === "note" && e.until !== undefined && e.n > announcedRef.current) announce(noteLine(e.text, e.until));
     }
     announcedRef.current = Math.max(announcedRef.current, events.reduce((m, e) => Math.max(m, e.n), 0));
   }, [events]);
@@ -1796,14 +1789,15 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   };
 
   // Sends one message. Returns true when the server took it.
-  const sendText = async (text: string): Promise<boolean> => {
+  const sendText = async (text: string, withModel?: string): Promise<boolean> => {
     setSending(true);
     setSendError(null);
     // Optimistic: Stop shows at once, not after the server answers. A failed send puts it back (below) and the poll corrects it.
     const wasBusy = busy;
     setBusy(true);
     try {
-      await api.chatSend(workspaceId, text);
+      await api.chatSend(workspaceId, text, withModel);
+      if (withModel) setOneShot(null);
       stickRef.current = true;
       setFarFromEnd(false);
       return true;
@@ -1947,7 +1941,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         return;
       }
     }
-    if (await sendText(message)) {
+    if (await sendText(message, oneShot?.model)) {
       setDraft("");
       clearAttachments();
       setPoints([]);
@@ -2093,7 +2087,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
-  const answer = async (requestId: string, allow: boolean, extra?: { answers?: Record<string, string>; message?: string }) => {
+  const answer = async (requestId: string, allow: boolean, extra?: { answers?: Record<string, string>; message?: string; always?: boolean }) => {
     setAnswering(requestId);
     try {
       await api.chatAnswer(workspaceId, requestId, allow, extra);
@@ -2157,35 +2151,89 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       toast.error(failed("change that", e));
     } finally {
       repoll();
+      setInfoKick((k) => k + 1);
     }
   };
 
-  /** Switches the chat's AI. Reversible, so no confirmation: the conversation stays, and the new AI gets what it missed with the next message. */
-  const switchAgent = async (value: string) => {
+  /** A mode pick. Full access never applies on the first tap: it asks in words first. */
+  const chooseMode = (value: string) => {
+    if (value === "full" && mode !== "full") setFullAsk(true);
+    else void pick("mode", value, mode, setMode);
+  };
+  const allowFull = async () => {
+    setFullAsk(false);
+    const before = mode;
+    setMode("full");
     try {
-      await api.chatControl(workspaceId, "agent", value);
+      await api.chatControl(workspaceId, "mode", "full");
+    } catch (e) {
+      setMode(before);
+      toast.error(e instanceof Error && /owner|forbidden/i.test(e.message) ? FULL_ACCESS_OWNER_ONLY : failed("change that", e));
+    } finally {
+      repoll();
+      setInfoKick((k) => k + 1);
+    }
+  };
+
+  /** Switches the chat's AI, and its account when one is named (null: the AI's own login). Reversible, so no confirmation: the conversation stays, and the new AI gets what it missed with the next message. Resolves to whether it worked. */
+  const switchAgent = async (value: string, account?: string | null): Promise<boolean> => {
+    try {
+      await api.chatControl(workspaceId, "agent", account === undefined ? value : { agent: value, account });
       await refresh();
+      return true;
+    } catch (e) {
+      toast.error(failed("switch", e));
+      return false;
+    } finally {
+      repoll();
+      setInfoKick((k) => k + 1);
+    }
+  };
+
+  /** Another account on this AI (null: its own login). */
+  const switchAccount = async (id: string | null) => {
+    try {
+      await api.chatControl(workspaceId, "account", id);
     } catch (e) {
       toast.error(failed("switch", e));
     } finally {
       repoll();
+      setInfoKick((k) => k + 1);
     }
   };
 
-  /** Another AI's model was picked in the picker: switch to that AI, then choose the model once its snapshot lists it. */
-  const pendingModel = useRef<{ agent: string; value: string } | null>(null);
-  const pickOther = async (to: string, value: string | null) => {
-    if (value !== null) {
-      pendingModel.current = { agent: to, value };
-      window.setTimeout(() => {
-        if (pendingModel.current?.agent === to) pendingModel.current = null;
-      }, 15_000);
+  /** Back to what Settings says for one field. */
+  const resetField = async (field: string) => {
+    try {
+      await api.chatControl(workspaceId, "reset", field);
+      announce("Back to the Settings choice");
+      await refresh();
+    } catch (e) {
+      toast.error(failed("reset that", e));
+    } finally {
+      repoll();
+      setInfoKick((k) => k + 1);
     }
-    await switchAgent(to);
+  };
+
+  /** Another AI's or account's model was picked in the picker: switch there, then choose the model once the switch has landed and its snapshot lists it (or 3 s have passed, for a model the snapshot never lists). */
+  const pendingModel = useRef<{ agent: string; value: string; at: number; ready: boolean } | null>(null);
+  const pickOther = async (to: string, value: string | null, account: string | null) => {
+    const mine = value === null ? null : { agent: to, value, at: Date.now(), ready: false };
+    pendingModel.current = mine;
+    window.setTimeout(() => {
+      if (pendingModel.current === mine) pendingModel.current = null;
+    }, 15_000);
+    const ok = await switchAgent(to, account);
+    if (pendingModel.current !== mine) return;
+    if (ok && mine) {
+      mine.ready = true;
+      repoll();
+    } else pendingModel.current = null;
   };
   useEffect(() => {
     const p = pendingModel.current;
-    if (!p || p.agent !== agent || !models.some((m) => m.value === p.value)) return;
+    if (!p || !p.ready || p.agent !== agent || !(models.some((m) => m.value === p.value) || Date.now() - p.at > 3000)) return;
     pendingModel.current = null;
     void pick("model", p.value, model, setModel);
   }, [agent, models]);
@@ -2209,6 +2257,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
 
   // Keep / Undo only while the AI's changes are waiting to be kept or undone.
   const ws = findWorkspace(workspaces, workspaceId);
+  // What the AI is set to for this project and where each setting comes from; read again when a turn or note lands or a setting changes.
+  const runKey = `${agent}|${ws?.notes ?? ""}|${events.reduce((m, e) => (e.kind === "done" || e.kind === "note" ? e.n : m), 0)}|${infoKick}`;
+  const { info: runInfo, failed: runFailed, reload: reloadRun } = useRunInfo(workspaceId, runKey, !compact);
+  const accountId = runInfo?.account?.id ?? "default";
+  useEffect(() => setOneShot(null), [agent, accountId]);
   const hasChanges = !terminalProject && ws !== null && workspaceStatus(ws) === "needs-review";
   // The commit message is the user's last request: its first line, cut to 72 characters.
   const lastRequest = [...events].reverse().find((e) => e.kind === "user")?.text ?? "";
@@ -2399,7 +2452,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                 </ul>
               ) : null}
             </div>
-            {queuedBehind ? <p className="-mt-0.5 text-xs text-text-muted">Waiting to send</p> : null}
+            {queuedBehind || e.with ? (
+              <p className="-mt-0.5 text-xs text-text-muted">
+                {[queuedBehind ? "Waiting to send" : "", e.with ? `${queuedBehind ? "sent" : "Sent"} with ${modelName(e.with)}` : ""].filter(Boolean).join(" · ")}
+              </p>
+            ) : null}
             <MessageMenu
               onCopy={() => void copyMessage(body)}
               onEdit={newest ? () => startEdit(e.n, body, e.tree !== undefined) : undefined}
@@ -2439,6 +2496,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                     <Button variant="secondary" className={ASK_BUTTON} disabled={askBusy} onClick={() => void answer(e.requestId, false)}>
                       {"Don't allow"}
                     </Button>
+                    {e.always ? (
+                      <Button variant="quiet" className="text-text-secondary [@media(pointer:coarse)]:min-h-11" disabled={askBusy} onClick={() => void answer(e.requestId, true, { always: true })}>
+                        {`Always allow: ${e.always.label}`}
+                      </Button>
+                    ) : null}
                   </>
                 ) : dead ? null : (
                   <p className="text-small text-text-muted">Waiting for an answer.</p>
@@ -2490,24 +2552,25 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   const modelText = !isClaude ? (model ? shortModel(model) : "Default") : (modelInfo?.displayName ?? (model ? modelName(model) : storedModel === "default" ? "Default" : MODEL_LABEL[storedModel]));
   const effortText = effort ? (EFFORT_LABEL[effort] ?? effort) : "Default";
   // Never a bare "Mode": an unknown or not-yet-known mode shows the default mode's label.
-  const modeText = (mode !== null ? MODES[mode] : undefined)?.label ?? MODES.default.label;
+  const modeText = (mode !== null ? MODE_LABEL[mode] : undefined) ?? MODE_LABEL.default;
   // The run strip: who, which account, model and mode, and what it is doing. Words only.
   const ctxPercent = isClaude && usage?.context ? usage.context.percent : null;
-  const autoFresh = autoFreshLocal ?? ws?.autoFresh !== false;
+  const autoFresh = autoFreshLocal ?? (runInfo?.ai ? runInfo.ai.autoFresh.value !== false : ws?.autoFresh !== false);
   const freshWaiting = isClaude && autoFresh && (freshPending || (ctxPercent !== null && ctxPercent >= 85 && (busy || waiting !== null || background > 0)));
   const runningHelpers = helperTree.length > 0 ? helperTree.filter((h) => h.status === "running").length : helpers.length;
   const stripState = waiting !== null ? "Waiting for you" : busy ? "Working" : freshWaiting && background > 0 ? "Will continue fresh when the background work finishes" : background > 0 || runningHelpers > 0 ? "In the background" : "Ready";
   const stripExtra = [helpersWorkingText(runningHelpers), freshWaiting && (busy || waiting !== null) ? "Will continue fresh after this reply" : ""].filter(Boolean).join(" · ") || null;
-  const stripAccount = accountLabel(providerCards?.find((c) => c.id === agent) ?? { id: agent, name: who, kind: "cli", installed: true, version: null, state: "connected", checkedAt: 0, stale: false, accounts: [], actions: [] }, owner);
+  const stripAccount = runInfo?.account?.label ?? accountLabel(providerCards?.find((c) => c.id === agent) ?? { id: agent, name: who, kind: "cli", installed: true, version: null, state: "connected", checkedAt: 0, stale: false, accounts: [], actions: [] }, owner);
   const strip = compact ? null : (
     <RunStrip
       ai={who}
       account={stripAccount}
       model={modelText}
-      mode={isClaude ? modeText : null}
+      mode={modeText}
       state={stripState}
       since={working ? busySince : null}
       extra={stripExtra}
+      next={oneShot ? { label: oneShot.label, onClear: () => setOneShot(null) } : null}
       expanded={run.open}
       onToggle={run.toggle}
     />
@@ -2525,9 +2588,23 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       setAutoFreshLocal(null);
     }
   };
+  // "Just for the next message…": one reply on another model. Not while the AI works, and not for an AI that has listed no models.
+  const canOneShot = can && !terminalProject && !!ws?.chat;
+  const oneShotItem = !canOneShot ? null : !busy && models.length > 0 ? (
+    <MenuSub label="Just for the next message…">
+      <ModelChoices autoFocus={false} models={models} value={oneShot?.model ?? ""} onPick={(v) => setOneShot({ model: v, label: models.find((m) => m.value === v)?.displayName ?? modelName(v) })} />
+    </MenuSub>
+  ) : (
+    <MenuItem disabled>
+      <span className="block">Just for the next message…</span>
+      <span className="block text-xs text-text-muted">{busy ? "Wait until the reply finishes" : "Not available for this AI yet"}</span>
+    </MenuItem>
+  );
   // The model menu's body, shared by the desktop model chip and the phone's combined chip.
   const modelMenu = (
     <>
+      {oneShotItem}
+      {oneShotItem ? <MenuSeparator /> : null}
       {isClaude ? (
         <ClaudeModelChoices models={models} value={modelInfo?.value ?? ""} onPick={(v) => void pick("model", v, model, setModel)} />
       ) : (
@@ -2537,15 +2614,20 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         <>
           <MenuSeparator />
           <MenuLabel>{`Effort: ${effortText}`}</MenuLabel>
-          <MenuRadioGroup value={effort ?? ""} onValueChange={(v) => void pick("effort", v, effort, setEffort)}>
-            {levels.map((l) => (
-              <MenuRadioItem key={l} value={l}>
-                {EFFORT_LABEL[l] ?? l}
-              </MenuRadioItem>
-            ))}
-          </MenuRadioGroup>
+          <EffortChoices value={effort} levels={levels} onPick={(v) => void pick("effort", v, effort, setEffort)} />
         </>
       ) : null}
+    </>
+  );
+  const pickerBody = (
+    <PickerBody agent={agent} accountId={accountId} currentMenu={modelMenu} canSwitch={!terminalProject && !!ws?.chat} busy={busy} onPickOther={(a, m, acc) => void pickOther(a, m, acc)} />
+  );
+  const modeBody = <ModeChoices value={mode} isClaude={isClaude} onPick={chooseMode} />;
+  const accountChoices = (providerCards?.find((c) => c.id === agent)?.accounts ?? []).filter((a) => a.state !== "signed_out" && a.state !== "error");
+  const accountMenu = (
+    <>
+      <MenuLabel>{`${who} account`}</MenuLabel>
+      <AccountChoices accounts={accountChoices} value={accountId} busy={busy} onPick={(id) => void switchAccount(id === "default" ? null : id)} />
     </>
   );
 
@@ -2998,30 +3080,26 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       ) : null}
                       <ModelPicker
                         agent={agent}
+                        accountId={accountId}
                         modelText={modelText}
                         currentMenu={modelMenu}
                         canSwitch={!terminalProject && !!ws?.chat}
                         busy={busy}
                         noModels={models.length === 0}
-                        onPickOther={(a, m) => void pickOther(a, m)}
+                        onPickOther={(a, m, acc) => void pickOther(a, m, acc)}
                       />
-                      {isClaude ? (
-                        <Menu
-                          side="top"
-                          align="start"
-                          label={`Mode: ${modeText}`}
-                          trigger={<ComposerChip className="max-w-48 shrink-0" label={modeText} menu />}
-                        >
-                          <MenuRadioGroup value={mode ?? ""} onValueChange={(v) => void pick("mode", v, mode, setMode)}>
-                            {MODE_CHOICES.map((value) => (
-                              <MenuRadioItem key={value} value={value}>
-                                <span className="block">{MODES[value].label}</span>
-                                <span className="block text-xs text-text-muted">{MODES[value].detail}</span>
-                              </MenuRadioItem>
-                            ))}
-                          </MenuRadioGroup>
-                        </Menu>
-                      ) : null}
+                      <Menu side="top" align="start" label={`Mode: ${modeText}`} trigger={<ComposerChip className="max-w-48 shrink-0 max-md:hidden" label={modeText} menu />}>
+                        {modeBody}
+                      </Menu>
+                      {/* Phones: a shield alone; the strip above the box says the word. */}
+                      <Menu
+                        side="top"
+                        align="start"
+                        label={`Mode: ${modeText}`}
+                        trigger={<ComposerChip iconOnly className="md:hidden" aria-label={`Mode: ${modeText}`} title={`Mode: ${modeText}`} icon={<ShieldCheck size={16} aria-hidden="true" />} />}
+                      >
+                        {modeBody}
+                      </Menu>
                     </>
                   }
                   trailing={
@@ -3091,12 +3169,21 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
             </>
           }
           events={events}
-          refetchKey={`${agent}|${ws?.notes ?? ""}|${events.reduce((m, e) => (e.kind === "done" ? e.n : m), 0)}`}
+          info={runInfo}
+          infoFailed={runFailed}
+          onReload={reloadRun}
+          canSet={can && !terminalProject && !!ws?.chat}
+          modelText={modelText}
+          models={models}
+          menus={{ ai: pickerBody, account: accountMenu, model: pickerBody, effort: levels.length > 0 ? <EffortChoices value={effort} levels={levels} onPick={(v) => void pick("effort", v, effort, setEffort)} /> : null, mode: modeBody }}
+          onReset={(field) => void resetField(field)}
           autoFresh={autoFresh}
           onAutoFresh={(on) => void setAutoFresh(on)}
           onContinueFresh={() => setFreshOpen(true)}
           ctxPercent={ctxPercent}
         />
+
+        <FullAccessDialog open={fullAsk} onOpenChange={setFullAsk} note={runInfo?.accessNote} onConfirm={() => void allowFull()} />
 
         {freshOpen ? (
           <FreshDialog

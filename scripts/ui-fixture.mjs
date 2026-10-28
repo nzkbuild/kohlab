@@ -80,8 +80,8 @@ export async function startFixture({ port, key }) {
 }
 
 /** A browser context that is already signed in and past the welcome. */
-export async function openContext(browser, { width = 1280, height = 900, key, touch = false, scheme = "dark" }) {
-  const ctx = await browser.newContext({ viewport: { width, height }, hasTouch: touch, isMobile: touch, colorScheme: scheme });
+export async function openContext(browser, { width = 1280, height = 900, key, touch = false, scheme = "dark", timezoneId }) {
+  const ctx = await browser.newContext({ viewport: { width, height }, hasTouch: touch, isMobile: touch, colorScheme: scheme, ...(timezoneId ? { timezoneId } : {}) });
   await ctx.addInitScript((k) => {
     try {
       localStorage.setItem("kohlab_key", k);

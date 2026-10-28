@@ -161,59 +161,73 @@ export function ClaudeModelChoices({ models, value, onPick }: { models: ModelInf
 /** The sentence for an AI that has listed no models yet. */
 export const NO_MODELS_YET = "Models appear after your first chat with it.";
 
-/** One provider's models as the menu's ModelInfo shape. */
+/** One group's models as the menu's ModelInfo shape. A model the owner added is marked "Custom". */
 const asModelInfo = (g: PickerGroup): ModelInfo[] =>
-  g.models.map((m) => ({ value: m.value, displayName: m.label, description: m.description ?? "", supportedEffortLevels: m.efforts ?? [] }));
+  g.models.map((m) => ({ value: m.value, displayName: m.label, description: m.custom ? "Custom" : (m.description ?? ""), supportedEffortLevels: m.efforts ?? [] }));
 
-interface PickerProps {
-  /** The AI this chat talks to, and its name. */
+interface BodyProps {
+  /** The AI this chat talks to, its name, and the account it runs on ("default" is the AI's own login). */
   agent: string;
-  /** The chip's text after the AI's name: "Sonnet 5.5". */
-  modelText: string;
+  accountId: string;
   /** Today's menu body for the current AI (curated Claude list, effort, search). Built by the chat. */
   currentMenu: ReactNode;
   /** The chat can switch AI (a chat project, not a terminal one). */
   canSwitch: boolean;
   /** The AI is mid-reply: switching waits. */
   busy: boolean;
-  /** The menu has nothing to pick from yet (the current AI has not listed its models). */
-  noModels: boolean;
-  /** Another AI's model was picked: switch to that AI, then choose the model. */
-  onPickOther: (agent: string, model: string | null) => void;
+  /** Another AI's or account's model was picked: switch to it, then choose the model. `account` is null for the AI's own login. */
+  onPickOther: (agent: string, model: string | null, account: string | null) => void;
 }
 
-/** The composer's one picker: "Claude · Sonnet 5.5". Its menu has a heading per connected AI ("Claude · you@example.com"), with that AI's models under it. Desktop and phone differ only in the chip. */
-export default function ModelPicker({ agent, modelText, currentMenu, canSwitch, busy, noModels, onPickOther }: PickerProps) {
+/** The picker's menu body: the current account's menu under its heading, then a heading per other AI and account with its models. Shared by the composer and the Run panel. */
+export function PickerBody({ agent, accountId, currentMenu, canSwitch, busy, onPickOther }: BodyProps) {
   const { cards } = useProviders();
   const own = useCan().own;
-  const who = agentName(agent);
-  const groups = canSwitch && cards ? pickerGroups(cards, own) : [];
-  const current = pickerGroups(cards ?? [], own).find((g) => g.id === agent);
+  const all = pickerGroups(cards ?? [], own);
+  const groups = canSwitch && cards ? all : [];
+  const current = all.find((g) => g.agent === agent && g.accountId === accountId) ?? all.find((g) => g.agent === agent);
   const wait = "Wait until the reply finishes";
-
-  const body = (
+  return (
     <>
-      <MenuLabel>{current?.label ?? who}</MenuLabel>
+      <MenuLabel>{current?.label ?? agentName(agent)}</MenuLabel>
       {currentMenu}
       {groups
-        .filter((g) => g.id !== agent)
+        .filter((g) => g !== current)
         .map((g) => (
           <div key={g.id}>
             <MenuSeparator />
             <MenuLabel>{g.label}</MenuLabel>
             {g.models.length === 0 ? (
-              <MenuItem disabled={busy} onSelect={() => onPickOther(g.id, null)}>
-                <span className="block">{`Use ${g.name}`}</span>
+              <MenuItem disabled={busy} onSelect={() => onPickOther(g.agent, null, g.accountId === "default" ? null : g.accountId)}>
+                <span className="block">{`Use ${g.label}`}</span>
                 <span className="block text-xs text-text-muted">{NO_MODELS_YET}</span>
               </MenuItem>
             ) : (
-              <ModelChoices autoFocus={false} models={asModelInfo(g)} value="" onPick={(v) => !busy && onPickOther(g.id, v)} />
+              <ModelChoices autoFocus={false} models={asModelInfo(g)} value="" onPick={(v) => !busy && onPickOther(g.agent, v, g.accountId === "default" ? null : g.accountId)} />
             )}
             {busy ? <p className="px-2.5 pb-1.5 text-xs text-text-muted">{wait}</p> : null}
           </div>
         ))}
     </>
   );
+}
+
+interface PickerProps extends BodyProps {
+  /** The chip's text after the AI's name: "Sonnet 5.5". */
+  modelText: string;
+  /** The menu has nothing to pick from yet (the current AI has not listed its models). */
+  noModels: boolean;
+}
+
+/** The composer's one picker: "Claude · Sonnet 5.5". Its menu has a heading per connected AI and account ("Claude · you@example.com"), with that account's models under it. Desktop and phone differ only in the chip. */
+export default function ModelPicker({ modelText, noModels, ...body }: PickerProps) {
+  const { cards } = useProviders();
+  const own = useCan().own;
+  const { agent, busy, canSwitch } = body;
+  const who = agentName(agent);
+  const many = canSwitch && cards ? pickerGroups(cards, own).length > 1 : false;
+  const menu = <PickerBody {...body} />;
+  const title = busy && canSwitch ? "Wait until the reply finishes to switch AI" : undefined;
 
   return (
     <>
@@ -221,34 +235,18 @@ export default function ModelPicker({ agent, modelText, currentMenu, canSwitch, 
         side="top"
         align="start"
         label={`AI and model: ${who}, ${modelText}`}
-        trigger={
-          <ComposerChip
-            className="max-w-64 shrink-0 max-md:hidden"
-            label={`${who} · ${modelText}`}
-            menu
-            disabled={noModels && groups.length <= 1}
-            title={busy && canSwitch ? "Wait until the reply finishes to switch AI" : undefined}
-          />
-        }
+        trigger={<ComposerChip className="max-w-64 shrink-0 max-md:hidden" label={`${who} · ${modelText}`} menu disabled={noModels && !many} title={title} />}
       >
-        {body}
+        {menu}
       </Menu>
-      {/* Phones: the same menu behind a shorter chip. */}
+      {/* Phones: the same menu behind a shorter chip that takes the room the other controls leave. */}
       <Menu
         side="top"
         align="start"
         label={`AI and model: ${who}, ${modelText}`}
-        trigger={
-          <ComposerChip
-            className="md:hidden min-w-0 max-w-[55%] shrink"
-            label={agent === "claude" ? modelText : `${who} · ${modelText}`}
-            menu
-            disabled={noModels && groups.length <= 1}
-            title={busy && canSwitch ? "Wait until the reply finishes to switch AI" : undefined}
-          />
-        }
+        trigger={<ComposerChip className="md:hidden min-w-0 flex-1" label={agent === "claude" ? modelText : `${who} · ${modelText}`} menu disabled={noModels && !many} title={title} />}
       >
-        {body}
+        {menu}
       </Menu>
     </>
   );

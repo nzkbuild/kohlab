@@ -1,20 +1,30 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { X } from "@phosphor-icons/react";
+import { ArrowDown, ArrowUp, X } from "@phosphor-icons/react";
 import { api } from "../api";
-import type { ChatEvent, HelperNode, RunInfo } from "../types";
+import type { ChatEvent, Fallback, FallbackStep, HelperNode, RunInfo, Src } from "../types";
 import {
+  EFFORT_LABEL,
+  MODE_LABEL,
   durationText,
   helperForest,
   helperWord,
+  limitSentence,
+  moveStep,
   replyLine,
   replyRows,
+  ruleSource,
+  sourceWords,
+  stepLabel,
   stepsText,
   tokensText,
   type HelperTreeNode,
 } from "../lib/aiHub";
+import { announce } from "../lib/announce";
+import { agentName } from "../lib/agentName";
 import { useDragSize } from "../lib/useDragSize";
-import { Button, Dialog, SkeletonRows } from "./ui";
-import { modelName } from "./ModelPicker";
+import { useProviders } from "../lib/useProviders";
+import { Button, ComposerChip, Dialog, Menu, MenuItem, MenuLabel, SkeletonRows } from "./ui";
+import { modelName, type ModelInfo } from "./ModelPicker";
 
 /* ------------------------------------------------------- where it shows -- */
 
@@ -161,12 +171,48 @@ export interface RunSlice {
   /** The checklist and the background tasks, drawn by the chat (they are its own parts). */
   nowExtra: ReactNode;
   events: ChatEvent[];
-  /** Changes when the turn ends or the AI or notes change: the panel reads the run info again. */
-  refetchKey: string;
   autoFresh: boolean;
   onAutoFresh: (on: boolean) => void;
   onContinueFresh: () => void;
   ctxPercent: number | null;
+  /** The run info the chat read (null until it lands, or on an older server), and a way to read it again. */
+  info: RunInfo | null;
+  infoFailed: boolean;
+  onReload: () => void;
+  /** The person may change this project's AI settings (not a viewer, not a terminal project). */
+  canSet: boolean;
+  /** The chip texts the composer shows, so the panel names the model the same way. */
+  modelText: string;
+  models: ModelInfo[];
+  /** The composer's own menus, so each row here opens the same one. */
+  menus: { ai: ReactNode; account: ReactNode; model: ReactNode; effort: ReactNode | null; mode: ReactNode };
+  /** Back to the inherited value: "model", "effort", "mode", "autoFresh", "agent" or "account". */
+  onReset: (field: string) => void;
+}
+
+/** Reads GET .../chat/run for the chat: again when `key` changes. The chat holds it, so the strip can name the account and the panel can show it. */
+export function useRunInfo(workspaceId: string, key: string, enabled = true) {
+  const [info, setInfo] = useState<RunInfo | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => setInfo(null), [workspaceId]);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    setFailed(false);
+    api.chatRun(workspaceId).then(
+      (r) => {
+        if (alive) setInfo(r);
+      },
+      () => {
+        if (alive) setFailed(true);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [workspaceId, key, attempt, enabled]);
+  return { info, failed, reload: () => setAttempt((n) => n + 1) };
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -180,26 +226,193 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 const PRE = "mono max-h-56 overflow-auto rounded-lg bg-surface-sunken p-3 text-xs leading-5 whitespace-pre-wrap break-words text-text-secondary";
 
-function RunContent(p: RunSlice) {
-  const [info, setInfo] = useState<RunInfo | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    setFailed(false);
-    api.chatRun(p.workspaceId).then(
-      (r) => {
-        if (alive) setInfo(r);
-      },
-      () => {
-        if (alive) setFailed(true);
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [p.workspaceId, p.refetchKey, attempt]);
+/** One row of "Now": the setting, its value (a menu for someone who can change it), where it comes from, and Reset when this project set it. */
+function SettingRow({ label, value, source, menu, canSet, onReset, inheritedNote }: { label: string; value: string; source: Src | undefined; menu: ReactNode; canSet: boolean; onReset: () => void; inheritedNote?: string }) {
+  return (
+    <div className="flex flex-col">
+      <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-11">
+        <span className="w-16 shrink-0 text-xs text-text-muted">{label}</span>
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {canSet && menu ? (
+            <Menu label={`${label}: ${value}`} align="start" trigger={<ComposerChip className="-ml-2.5 max-w-full" label={value} menu />}>
+              {menu}
+            </Menu>
+          ) : (
+            <span className="min-w-0 truncate text-sm text-text-primary">{value}</span>
+          )}
+          {canSet && source === "project" ? (
+            <Button variant="quiet" size="sm" className="shrink-0 text-xs text-text-secondary" aria-label={`Reset ${label.toLowerCase()} to the Settings choice`} onClick={onReset}>
+              Reset
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {source ? <p className="pl-16 text-xs text-text-muted">{source !== "project" && inheritedNote ? `${sourceWords(source)}. ${inheritedNote}` : sourceWords(source)}</p> : null}
+    </div>
+  );
+}
 
+const FIRST_MESSAGE = "Applies until the first message.";
+
+/** "If the limit is reached": where the project is now, the order of what to try next, and whether to carry on by itself. Keyboard only: Move up, Move down, Remove. */
+function FallbackBlock({ p, info, fallback }: { p: RunSlice; info: RunInfo; fallback: Fallback }) {
+  const { cards } = useProviders();
+  const card = cards?.find((c) => c.id === (info.agent || p.agent));
+  const accounts = card?.accounts ?? [];
+  const current = info.account?.id ?? null;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const label = (s: FallbackStep) => stepLabel(s, accounts, current, modelName);
+  const save = async (body: { auto: boolean; steps: FallbackStep[] } | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.chatControl(p.workspaceId, "fallback", body);
+      announce("Saved");
+      p.onReload();
+    } catch (e) {
+      setError(`Couldn't save that. ${e instanceof Error && e.message ? e.message : "Try again."}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const keyOf = (s: FallbackStep) => `${s.account === undefined ? "same" : (s.account ?? "default")}|${s.model ?? ""}`;
+  // What can be added: another account, or another model on this one. Anything already in the list is left out.
+  const candidates: FallbackStep[] = [
+    ...accounts.filter((a) => a.state !== "signed_out" && a.state !== "error" && a.id !== (current ?? "default")).map((a): FallbackStep => ({ account: a.id === "default" ? null : a.id })),
+    ...p.models.filter((m) => m.value !== "default" && modelName(m.value) !== p.modelText).map((m): FallbackStep => ({ model: m.value })),
+  ].filter((c) => !fallback.steps.some((s) => keyOf(s) === keyOf(c)));
+  const canEdit = p.canSet;
+  const auto = (
+    <label className="flex min-h-8 cursor-pointer items-start gap-3 pointer-coarse:min-h-11" htmlFor="run-fallback-auto">
+      <input id="run-fallback-auto" type="checkbox" className="mt-0.5 size-4 shrink-0 accent-accent" checked={fallback.auto} disabled={busy || !canEdit} onChange={(e) => void save({ auto: e.target.checked, steps: fallback.steps })} />
+      <span className="text-sm text-text-primary">Continue on the next one automatically</span>
+    </label>
+  );
+  return (
+    <Section title="If the limit is reached">
+      {info.limit ? (
+        <div className="flex flex-col items-start gap-1">
+          <p className="text-sm text-text-secondary">{limitSentence(info.limit)}</p>
+          {canEdit ? (
+            <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => p.onReset("account")}>
+              Switch back now
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-xs text-text-muted">If this AI reaches its limit, Kohlab can carry on with the next one below.</p>
+      )}
+      <p className="text-xs text-text-muted">{fallback.custom ? "Your order" : "Suggested order"}</p>
+      {fallback.steps.length === 0 ? (
+        <p className="text-sm text-text-muted">Nothing to switch to yet.</p>
+      ) : (
+        <ol aria-label="If the limit is reached" className="flex flex-col gap-1">
+          {fallback.steps.map((s, i) => (
+            <li key={`${i}-${label(s)}`} className="flex min-w-0 items-center gap-1">
+              <span className="w-5 shrink-0 text-xs text-text-muted tabular-nums">{`${i + 1}.`}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{label(s)}</span>
+              {canEdit ? (
+                <>
+                  <Button variant="quiet" size="sm" iconOnly aria-label={`Move ${label(s)} up`} disabled={busy || i === 0} onClick={() => void save({ auto: fallback.auto, steps: moveStep(fallback.steps, i, -1) })}>
+                    <ArrowUp size={14} aria-hidden="true" />
+                  </Button>
+                  <Button variant="quiet" size="sm" iconOnly aria-label={`Move ${label(s)} down`} disabled={busy || i === fallback.steps.length - 1} onClick={() => void save({ auto: fallback.auto, steps: moveStep(fallback.steps, i, 1) })}>
+                    <ArrowDown size={14} aria-hidden="true" />
+                  </Button>
+                  <Button variant="quiet" size="sm" className="text-xs text-text-secondary" aria-label={`Remove ${label(s)}`} disabled={busy} onClick={() => void save({ auto: fallback.auto, steps: fallback.steps.filter((_, j) => j !== i) })}>
+                    Remove
+                  </Button>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
+      {canEdit ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Menu
+            label="Add a step"
+            align="start"
+            trigger={
+              <Button variant="quiet" size="sm" className="text-text-secondary" disabled={busy || candidates.length === 0}>
+                Add a step
+              </Button>
+            }
+          >
+            <MenuLabel>Try next</MenuLabel>
+            {candidates.map((c, i) => (
+              <MenuItem key={i} onSelect={() => void save({ auto: fallback.auto, steps: [...fallback.steps, c] })}>
+                {label(c)}
+              </MenuItem>
+            ))}
+          </Menu>
+          {fallback.custom ? (
+            <Button variant="quiet" size="sm" className="text-text-secondary" disabled={busy} onClick={() => void save(null)}>
+              Use the suggested order
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {auto}
+      {error ? <p role="status" className="text-xs text-text-muted">{error}</p> : null}
+    </Section>
+  );
+}
+
+/** "What it can do without asking": each saved rule in words, where it comes from, and Remove for the ones Kohlab keeps. */
+function RulesBlock({ p, info }: { p: RunSlice; info: RunInfo }) {
+  const [note, setNote] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const remove = async (rule: string) => {
+    setRemoving(rule);
+    setNote(null);
+    try {
+      await api.chatControl(p.workspaceId, "rule_remove", rule);
+      const text = p.busy ? "Removed. It takes effect after the current reply." : "Removed.";
+      setNote(text);
+      announce(text);
+      p.onReload();
+    } catch (e) {
+      setNote(`Couldn't remove that. ${e instanceof Error && e.message ? e.message : "Try again."}`);
+    } finally {
+      setRemoving(null);
+    }
+  };
+  const rules = info.rules ?? [];
+  return (
+    <Section title="What it can do without asking">
+      {rules.length === 0 ? (
+        <p className="text-sm text-text-muted">Nothing is allowed without asking yet.</p>
+      ) : (
+        <ul aria-label="Allowed without asking" className="flex flex-col gap-1">
+          {rules.map((r) => (
+            <li key={`${r.source}-${r.rule}`} className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 flex-1">
+                <span className="block break-words text-sm text-text-primary">{r.label}</span>
+                <span className="block text-xs text-text-muted">{ruleSource(r.source)}</span>
+              </span>
+              {r.removable && p.canSet ? (
+                <Button variant="quiet" size="sm" className="shrink-0 text-xs text-text-secondary" aria-label={`Remove: ${r.label}`} disabled={removing !== null} onClick={() => void remove(r.rule)}>
+                  Remove
+                </Button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {info.accessNote && info.ai?.mode.value === "full" ? <p className="text-xs leading-relaxed text-text-muted">{info.accessNote}</p> : null}
+      {note ? <p role="status" className="text-xs text-text-muted">{note}</p> : null}
+    </Section>
+  );
+}
+
+function RunContent(p: RunSlice) {
+  const { info, infoFailed: failed } = p;
+  const ai = info?.ai;
+  const { cards } = useProviders();
+  const usableAccounts = (cards?.find((c) => c.id === (info?.agent ?? p.agent))?.accounts ?? []).filter((a) => a.state !== "signed_out" && a.state !== "error");
+  const autoSource = ai?.autoFresh.source;
   const forest = helperForest(p.helperTree);
   const running = p.helperTree.some((h) => h.status === "running");
   const now = useNow(running || p.busy, p.skew);
@@ -213,6 +426,19 @@ function RunContent(p: RunSlice) {
           {state}
           {p.busy && p.waiting === null && p.since !== null ? ` ${durationText(now - p.since)}` : ""}
         </p>
+        {ai ? (
+          <div className="flex flex-col gap-1">
+            <SettingRow label="AI" value={agentName(ai.agent.value ?? info!.agent)} source={ai.agent.source} menu={p.menus.ai} canSet={p.canSet} onReset={() => p.onReset("agent")} inheritedNote={FIRST_MESSAGE} />
+            {usableAccounts.length > 1 ? (
+              <SettingRow label="Account" value={info!.account?.label ?? "Main account"} source={ai.account.source} menu={p.menus.account} canSet={p.canSet} onReset={() => p.onReset("account")} inheritedNote={FIRST_MESSAGE} />
+            ) : null}
+            <SettingRow label="Model" value={p.modelText} source={ai.model.source} menu={p.menus.model} canSet={p.canSet} onReset={() => p.onReset("model")} />
+            {p.menus.effort ? (
+              <SettingRow label="Effort" value={ai.effort.value ? (EFFORT_LABEL[ai.effort.value] ?? ai.effort.value) : "Default"} source={ai.effort.source} menu={p.menus.effort} canSet={p.canSet} onReset={() => p.onReset("effort")} />
+            ) : null}
+            <SettingRow label="Mode" value={MODE_LABEL[ai.mode.value ?? "default"] ?? MODE_LABEL.default} source={ai.mode.source} menu={p.menus.mode} canSet={p.canSet} onReset={() => p.onReset("mode")} />
+          </div>
+        ) : null}
         {p.nowExtra}
         {p.ctxPercent !== null ? <p className="text-xs text-text-muted">{`This chat is ${p.ctxPercent}% full.`}</p> : null}
         {p.canMutate ? (
@@ -228,14 +454,22 @@ function RunContent(p: RunSlice) {
               <span className="min-w-0">
                 <span className="block text-sm text-text-primary">Continue fresh automatically</span>
                 <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">When this chat is nearly full, Kohlab starts a fresh memory once the AI is idle. Nothing is lost.</span>
+                {autoSource ? <span className="mt-0.5 block text-xs text-text-muted">{sourceWords(autoSource)}</span> : null}
               </span>
             </label>
+            {autoSource === "project" ? (
+              <Button variant="quiet" size="sm" className="text-xs text-text-secondary" aria-label="Reset continue fresh to the Settings choice" onClick={() => p.onReset("autoFresh")}>
+                Reset
+              </Button>
+            ) : null}
             <Button variant="quiet" size="sm" className="text-text-secondary" disabled={p.busy || p.background > 0 || p.waiting !== null} onClick={p.onContinueFresh}>
               Continue fresh now
             </Button>
           </div>
         ) : null}
       </Section>
+
+      {info?.fallback ? <FallbackBlock p={p} info={info} fallback={info.fallback} /> : null}
 
       <Section title="Helpers">
         {forest.length === 0 ? (
@@ -267,7 +501,7 @@ function RunContent(p: RunSlice) {
       {failed && !info ? (
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm text-text-secondary">Couldn't read the details right now.</p>
-          <Button variant="secondary" size="sm" onClick={() => setAttempt((n) => n + 1)}>
+          <Button variant="secondary" size="sm" onClick={p.onReload}>
             Try again
           </Button>
         </div>
@@ -310,6 +544,8 @@ function RunContent(p: RunSlice) {
               </>
             )}
           </Section>
+
+          {info.rules !== undefined ? <RulesBlock p={p} info={info} /> : null}
         </>
       )}
     </div>
