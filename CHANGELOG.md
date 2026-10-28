@@ -9,6 +9,26 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.6.0] - 2026-10-28
+
+Control the AI: decide how every AI behaves, which account it uses, and what happens when an account hits its limit.
+
+### Added
+- **Defaults for new projects** in Settings → AI: which AI, account, model, effort and mode, and whether to continue fresh automatically. Each project can set its own; the Run panel shows "Set for this project" with a Reset, or that it follows Settings.
+- **More than one account per AI.** Add another Claude login (sign in from inside Kohlab), a Claude account through a router address such as your own router, or another Codex login. Pick the account per project, or from the model picker. Router keys are stored on the server, can't be shown again, and are only given to that account's AI.
+- **Automatic fallback when a limit is reached.** The chat carries on with the next account or a cheaper model, and says so: "Claude Pro hit its limit — continued on Work until 2:49 pm". You can edit the order in the Run panel, switch back yourself, or turn it off.
+- **The same four modes for every AI:** Asks first, Edits allowed, Auto, and Full access (owner only, after a confirmation). Plan first stays available for Claude.
+- **Always allow.** When the AI asks, you can allow that kind of action for this project from then on. See and remove these in the Run panel and in Settings → AI.
+- **Just for the next message…** sends one message with a different model.
+- **Custom models:** add a model by its name or rename models per account.
+
+### Changed
+- On phones the message box fits on one row: the mode is a small shield button, and the model gets the room.
+- A new project follows your Settings defaults instead of whatever model you last picked in another project.
+
+### Fixed
+- When omp can't switch to a model, the chat says so and shows the model it actually uses.
+
 ## [2.5.0] - 2026-10-27
 
 You can now see and steer the AI at all times. This is the first step toward Kohlab as an AI-native workspace.
