@@ -6,9 +6,9 @@
  * justify a router dependency.
  */
 /** "terminal" is the old name of the Claude view: it still opens the remembered Chat or Terminal view. */
-export type WorkspaceTab = "chat" | "terminal" | "files" | "review";
+export type WorkspaceTab = "chat" | "terminal" | "files" | "review" | "brain";
 
-export const WORKSPACE_TABS: readonly WorkspaceTab[] = ["chat", "terminal", "files", "review"];
+export const WORKSPACE_TABS: readonly WorkspaceTab[] = ["chat", "terminal", "files", "review", "brain"];
 
 export type SettingsSection = "account" | "appearance" | "team" | "agents" | "notifications" | "server" | "updates";
 

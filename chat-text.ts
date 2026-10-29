@@ -25,8 +25,8 @@ export type Body =
   | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string; form?: "question" | "plan"; questions?: AskQuestion[]; plan?: string; always?: { rule: string; label: string } }
   /** reply: what the person answered or asked for, when a question or plan card was answered with text. */
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
-  /** worked: how long the turn ran (ms). planDelta: the plan's five-hour window percent the turn used, for the owner only (snapshot strips it for others). */
-  | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number } }
+  /** worked: how long the turn ran (ms). planDelta: the plan's five-hour window percent the turn used, for the owner only (snapshot strips it for others). recalled: the project-memory notes this turn read (titles, at most 8). */
+  | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number }; recalled?: string[] }
   /** planDelta: the plan share of the turn that ended just before it, sent once the usage is read (owner only). The chat view merges it into that turn's done line. */
   | { kind: "plan"; planDelta: number }
   | { kind: "error"; text: string; until?: number }
@@ -65,6 +65,10 @@ export function describeTool(name: string, input: Record<string, any>, _cwd: str
     case "Agent":
     case "Task":
       return "Asked a helper to look into it";
+    case "mcp__brain__recall":
+      return "Looked in the project's memory";
+    case "mcp__brain__remember":
+      return "Saved to the project's memory";
     default:
       if (name === "mcp__browser__agent_browser_open") return `Opened ${input.url ?? "a page"} in the browser`;
       return name.startsWith("mcp__browser__") ? "Used the browser" : `Used ${name}`;

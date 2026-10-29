@@ -23,6 +23,8 @@ import { announce } from "../lib/announce";
 import { agentName } from "../lib/agentName";
 import { useDragSize } from "../lib/useDragSize";
 import { useProviders } from "../lib/useProviders";
+import { recalledParts } from "../lib/brainGraph";
+import { useApp } from "../store";
 import { Button, ComposerChip, Dialog, Menu, MenuItem, MenuLabel, SkeletonRows } from "./ui";
 import { modelName, type ModelInfo } from "./ModelPicker";
 
@@ -407,7 +409,31 @@ function RulesBlock({ p, info }: { p: RunSlice; info: RunInfo }) {
   );
 }
 
-function RunContent(p: RunSlice) {
+/** Opens a project-memory note from a reply: the Brain tab, with that note selected. */
+function openBrainNote(workspaceId: string, title: string) {
+  useApp.getState().setBrainNote(title);
+  useApp.getState().navigate({ kind: "workspace", id: workspaceId, tab: "brain" });
+}
+
+/** "Recalled 2 notes: Goal, Use SQLite", each title a small quiet button that opens it in the Brain tab. */
+function RecalledLine({ titles, onOpen }: { titles: string[]; onOpen: (title: string) => void }) {
+  const { head, shown } = recalledParts(titles);
+  return (
+    <p className="min-w-0 break-words leading-relaxed text-text-muted">
+      {head}
+      {shown.map((t, i) => (
+        <span key={`${i}-${t}`}>
+          {i > 0 ? ", " : ""}
+          <Button variant="quiet" size="sm" className="inline-flex px-1" onClick={() => onOpen(t)}>
+            {t}
+          </Button>
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function RunContent(p: RunSlice & { onPickNote?: () => void }) {
   const { info, infoFailed: failed } = p;
   const ai = info?.ai;
   const { cards } = useProviders();
@@ -489,9 +515,20 @@ function RunContent(p: RunSlice) {
         ) : (
           <ul aria-label="Replies" className="flex flex-col gap-1">
             {replies.map((r) => (
-              <li key={r.n} className="flex min-w-0 items-baseline justify-between gap-3 text-xs text-text-muted tabular-nums">
-                <span className="min-w-0 break-words text-text-secondary">{replyLine(r) || "Reply"}</span>
-                <span className="shrink-0">{new Date(r.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</span>
+              <li key={r.n} className="flex min-w-0 flex-col gap-1 text-xs text-text-muted tabular-nums">
+                <span className="flex min-w-0 items-baseline justify-between gap-3">
+                  <span className="min-w-0 break-words text-text-secondary">{replyLine(r) || "Reply"}</span>
+                  <span className="shrink-0">{new Date(r.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</span>
+                </span>
+                {r.recalled.length > 0 ? (
+                  <RecalledLine
+                    titles={r.recalled}
+                    onOpen={(title) => {
+                      openBrainNote(p.workspaceId, title);
+                      p.onPickNote?.();
+                    }}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>
@@ -523,6 +560,11 @@ function RunContent(p: RunSlice) {
               </>
             ) : null}
             {info.instructions.note ? <p className="text-xs leading-relaxed text-text-muted">{info.instructions.note}</p> : null}
+            {info.instructions.brain ? (
+              <p className="text-xs leading-relaxed text-text-muted">
+                Project brain: {info.instructions.brain.notes} {info.instructions.brain.notes === 1 ? "note" : "notes"} in memory. A short summary (about {info.instructions.brain.tokens} tokens) goes to the AI at the start.
+              </p>
+            ) : null}
           </Section>
 
           <Section title="What it can use">
@@ -580,7 +622,7 @@ function Sheet({ onClose, ...slice }: RunSlice & { onClose: () => void }) {
         <Dialog.Content aria-describedby={undefined} className="dialog-content flex max-h-[85vh] w-[90vw] max-w-[560px] flex-col gap-3 p-4">
           <Dialog.Title className="text-base font-semibold text-text-primary">Run details</Dialog.Title>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <RunContent {...slice} />
+            <RunContent {...slice} onPickNote={onClose} />
           </div>
           <div className="flex justify-end">
             <Dialog.Close asChild>

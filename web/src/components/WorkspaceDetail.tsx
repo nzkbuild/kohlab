@@ -87,6 +87,7 @@ function DiffView(props: { workspaceId: string; simple: boolean }) {
   return Loaded ? <Loaded {...props} /> : <DiffViewLazy {...props} />;
 }
 const FilesView = lazy(() => import("./FilesView"));
+const BrainView = lazy(() => import("./BrainView"));
 
 type TabId = WorkspaceTab;
 
@@ -382,6 +383,22 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const setHasWork = useApp((s) => s.setHasWork);
   useEffect(() => setHasWork(workspaceId, hasWork), [workspaceId, hasWork, setHasWork]);
   const showChanges = hasWork || routeTab === "review";
+  // The Brain tab shows once the brain holds more than its seeded Goal (peek: looking never creates the vault),
+  // or when a link or a recalled note asks for it. It is re-checked on a switch of tab, after a Keep and when the changed files change.
+  const [brainFilled, setBrainFilled] = useState(false);
+  const lastCommitAt = w?.lastCommitAt;
+  useEffect(() => {
+    setBrainFilled(false);
+  }, [workspaceId]);
+  useEffect(() => {
+    if (!chat) return;
+    let live = true;
+    api.brain(workspaceId, true).then((g) => live && g.count > 1 && setBrainFilled(true), () => {});
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, chat, routeTab, lastCommitAt, reviewCount]);
+  const showBrain = chat && (brainFilled || routeTab === "brain");
   // Hover, focus or the start of a press on the Changes tab: the diff and versions are on their way before the click lands.
   const warmChanges = { onPointerEnter: () => api.prefetchChanges(workspaceId), onFocus: () => api.prefetchChanges(workspaceId), onPointerDown: () => api.prefetchChanges(workspaceId) };
   // Changes opens on a first paint, not a download: fetch its code as soon as the tab exists.
@@ -396,7 +413,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     return () => cancel(h);
   }, []);
   const rawTab0: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat && !claudeTerminal ? "review" : "terminal");
-  const rawTab: TabId = rawTab0 === "review" && !showChanges ? "chat" : rawTab0;
+  // The Brain tab is for chat projects only: a link to it on any other project falls back to the chat.
+  const rawTab1: TabId = rawTab0 === "brain" && !showBrain ? "chat" : rawTab0;
+  const rawTab: TabId = rawTab1 === "review" && !showChanges ? "chat" : rawTab1;
   const tab: TabId =
     rawTab === "terminal" && (chat || claudeTerminal)
       ? chat
@@ -417,6 +436,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     ...(chat || claudeTerminal ? [{ id: "chat" as const, label: "Chat" }] : []),
     ...(chat ? [] : [{ id: "terminal" as const, label: "Terminal" }]),
     ...(showChanges ? [{ id: "review" as const, label: "Changes" }] : []),
+    ...(showBrain ? [{ id: "brain" as const, label: "Brain" }] : []),
     ...(powerTools ? [{ id: "files" as const, label: "Files" }] : []),
   ];
 
@@ -895,6 +915,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               </Suspense>
             </ErrorBoundary>
           </TabPanel>
+
+          {showBrain ? (
+            <TabPanel value="brain" className="h-full min-h-0" tabIndex={-1}>
+              <ErrorBoundary label="Brain">
+                <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
+                  {tab === "brain" ? <BrainView workspaceId={workspaceId} /> : null}
+                </Suspense>
+              </ErrorBoundary>
+            </TabPanel>
+          ) : null}
 
           {powerTools ? (
             <TabPanel value="files" className="h-full min-h-0" tabIndex={-1}>

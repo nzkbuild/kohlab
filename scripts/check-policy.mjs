@@ -146,7 +146,8 @@ try {
   await kit.send(id, "hello again");
   await kit.idle(id);
   const last = kit.spawns().at(-1);
-  check("Claude restarted without the rule", kit.spawns().length > rs && !last.args.includes("--allowedTools"), JSON.stringify(last.args));
+  check("Claude restarted without the rule", kit.spawns().length > rs && !(last.args[last.args.indexOf("--allowedTools") + 1] ?? "").includes("Bash(npm test:*)"), JSON.stringify(last.args));
+  check("the brain tools stay pre-allowed in a chat project", (last.args[last.args.indexOf("--allowedTools") + 1] ?? "").includes("mcp__brain__recall,mcp__brain__remember"), JSON.stringify(last.args));
   check("the conversation was resumed, not started over", last.args.includes("--resume"));
   // a rule added is passed with --allowedTools at the next start
   await kit.control(id, "mode", "default");

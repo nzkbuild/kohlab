@@ -229,6 +229,8 @@ export interface ReplyRow {
   tokens: string | null;
   /** "12% of your plan"; owner only */
   plan: string | null;
+  /** The project-memory notes the reply recalled, by title. Empty when it recalled none. */
+  recalled: string[];
 }
 
 /** The last `limit` replies, newest first: each "done" event with its model, time, tokens and (for the owner) plan share. A "plan" event that follows a done line belongs to it. */
@@ -248,6 +250,7 @@ export function replyRows(events: ChatEvent[], isOwner = false, limit = 20, name
         time: e.worked !== undefined && e.worked > 0 ? durationText(e.worked) : null,
         tokens: total !== null && total > 0 ? tokensText(total) : null,
         plan: null,
+        recalled: e.recalled ?? [],
       });
     } else if (e.kind === "plan" && last !== null) planOf.set(last, e.planDelta);
   }

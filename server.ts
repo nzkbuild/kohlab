@@ -84,7 +84,12 @@ import {
   shareExpiry,
   turnOffShareLink,
   slugify,
+  brainRoot,
+  wsDir,
+  clientView,
 } from "./lib";
+import { BODY_MAX, BrainError, NOTE_TYPES, brainTool, deleteNote, getIndex, getNote, graphOf, noteProjectNotes, openRoot, putNote, searchNotes } from "./brain";
+import { timingSafeEqual } from "crypto";
 import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
 import { resolvePreviewFile, versionFile } from "./preview";
 import { headPackage, treeIsEmpty } from "./versions";
@@ -97,7 +102,7 @@ import { ACP_AGENTS, isAcpAgent } from "./acp";
 import { AccountError, accountView, addCustomModel, createLogin, createRouter, getAccount, listAccounts, remove as removeAccount, removeCustomModel, renameAccount, renameModel, setKey, signInState, startSignIn, stopSignIns, submitCode, testRouter } from "./accounts";
 import { patchDefaults } from "./defaults";
 import { cleanRules, describeRule } from "./policy";
-import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
+import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, noteRecalled, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -231,13 +236,13 @@ async function handleClone(req: Request, actorUserId?: string): Promise<Response
       // the git work as root, then hands the tree to the member's OS user)
       const ws = await createWorkspace({ repo: "", url, task, agent: body.agent ?? "sh", inherit: body.agent === undefined, branch, payload: body.payload, limits: body.limits, ownerId: actorUserId, chat });
       if (chat && typed) await sendChat(ws.id, typed);
-      return json(ws);
+      return json(clientView(ws));
     }
     // owner/legacy path: one clone per URL under WORKS_DIR/clones, reused
     const dest = await cloneOrReuse(url);
     const ws = await createWorkspace({ repo: dest, task, agent: body.agent ?? "sh", inherit: body.agent === undefined, branch, payload: body.payload, limits: body.limits, chat });
     if (chat && typed) await sendChat(ws.id, typed);
-    return json(ws);
+    return json(clientView(ws));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -595,7 +600,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
       const repo = await newProject(body.newProject, body.location);
       const ws = await createWorkspace({ repo, task: typed || name, agent: body.agent ?? "sh", inherit: body.agent === undefined, payload: body.payload, limits: body.limits, chat });
       if (chat && typed) await sendChat(ws.id, typed);
-      return json(ws);
+      return json(clientView(ws));
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
     }
@@ -627,7 +632,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
       chat,
     });
     if (chat && typed) await sendChat(ws.id, typed);
-    return json(ws);
+    return json(clientView(ws));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -636,7 +641,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
 async function handleStart(id: string): Promise<Response> {
   try {
     const ws = await startWorkspace(id);
-    return json(ws);
+    return json(clientView(ws));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -645,7 +650,7 @@ async function handleStart(id: string): Promise<Response> {
 async function handleStop(id: string): Promise<Response> {
   try {
     const ws = await stopWorkspace(id);
-    return json(ws);
+    return json(clientView(ws));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -654,7 +659,7 @@ async function handleStop(id: string): Promise<Response> {
 async function handleRestart(id: string): Promise<Response> {
   try {
     const ws = await restartWorkspace(id);
-    return json(ws);
+    return json(clientView(ws));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -727,6 +732,17 @@ async function handleNotes(id: string, req: Request): Promise<Response> {
       if (notes) w.notes = notes;
       else delete w.notes;
     });
+    // the notes are also a Fact in the project brain (chats only); a failure is logged and never fails the save
+    try {
+      const ws = await getWorkspace(id);
+      if (ws.chat) {
+        const root = brainRoot(ws);
+        openRoot(root, ws.task);
+        noteProjectNotes(root, notes);
+      }
+    } catch (e) {
+      console.warn(`[brain] project notes not kept: ${(e as Error).message}`);
+    }
     return json({ ok: true });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -802,7 +818,7 @@ async function handleCopy(id: string, req: Request): Promise<Response> {
   try {
     const body = (await req.json().catch(() => ({}))) as { name?: unknown };
     const ws = await copyWorkspace(id, body.name);
-    return json({ ...ws, running: false, path: worktreePath(ws) });
+    return json({ ...clientView(ws), running: false, path: worktreePath(ws) });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -1618,6 +1634,122 @@ async function handleHookPost(id: string, req: Request): Promise<Response> {
   return new Response(null, { status: 204 });
 }
 
+// ---- Project brain ----
+
+const MAX_BRAIN_TOOL_BYTES = 32 * 1024;
+const MAX_BRAIN_BODY_BYTES = 64 * 1024;
+const BRAIN_CALLS = 60; // per workspace, per window: the chat's memory tools are not a loop
+const BRAIN_WINDOW_MS = 10 * 60_000;
+const brainCalls = new Map<string, number[]>();
+
+/** The brain token must be the workspace's own (chats only). Constant-time compare; a wrong length is simply a mismatch. */
+function isBrainToken(ws: Workspace, header: string): boolean {
+  if (!ws.chat || !ws.brainToken) return false;
+  const a = Buffer.from(header);
+  const b = Buffer.from(ws.brainToken);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** POST /api/brain-tool/<id>, from the chat's brain MCP server (brain-mcp.cjs). Before the auth gate, like the hook: the brain token in x-kohlab-brain is the credential, and a bad id or token gets the same 404. */
+async function handleBrainTool(id: string, req: Request): Promise<Response> {
+  const ws = await getWorkspace(id).catch(() => null);
+  if (!ws || !isBrainToken(ws, req.headers.get("x-kohlab-brain") ?? "")) return json({ error: "not found" }, 404);
+  const now = Date.now();
+  const recent = (brainCalls.get(id) ?? []).filter((t) => now - t < BRAIN_WINDOW_MS);
+  brainCalls.set(id, recent);
+  if (recent.length >= BRAIN_CALLS) return json({ error: "too many memory calls, try again in a few minutes" }, 429);
+  recent.push(now);
+  const text = await readCapped(req, MAX_BRAIN_TOOL_BYTES);
+  if (text === null) return json({ error: "body exceeds 32 KiB" }, 413);
+  let body: { tool?: unknown; args?: unknown } | null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return json({ error: "body must be JSON" }, 400);
+  }
+  if (!body || typeof body !== "object") return json({ error: "body must be a JSON object" }, 400);
+  try {
+    const root = brainRoot(ws);
+    openRoot(root, ws.task);
+    const out = brainTool(root, String(body.tool ?? ""), body.args);
+    if (body.tool === "recall") noteRecalled(id, out.titles);
+    return json({ text: out.text });
+  } catch (e) {
+    if (e instanceof BrainError) return json({ error: e.message }, e.status);
+    throw e;
+  }
+}
+
+/** The person's brain routes, after access is checked: the graph, a note, search, and the export. Writes need canMutate and are audited. Chats only. */
+async function handleBrainRoute(wsId: string, sub: string, req: Request, canMutate: boolean, actor: string): Promise<Response> {
+  const ws = await getWorkspace(wsId).catch(() => null);
+  if (!ws) return json({ error: "not found" }, 404);
+  if (!ws.chat) return json({ error: "This is not a chat project." }, 400);
+  const root = brainRoot(ws);
+  const url = new URL(req.url);
+  const method = req.method;
+  const write = method === "PUT" || method === "DELETE";
+  if (write && !canMutate) return json({ error: "forbidden, viewer cannot edit the brain" }, 403);
+  try {
+    if (sub === "/export") {
+      if (method !== "GET") return json({ error: "method not allowed" }, 405);
+      getIndex(root); // refuses an unsafe folder before tar runs
+      if (!(await stat(root).catch(() => null))) return json({ error: "nothing to download yet" }, 404);
+      // read-only: tar writes the archive to stdout and never touches the vault
+      const proc = Bun.spawn(["tar", "-czf", "-", "-C", wsDir(ws), "brain"], { stdout: "pipe", stderr: "ignore" });
+      return new Response(proc.stdout, { headers: { "content-type": "application/gzip", "content-disposition": 'attachment; filename="project-brain.tar.gz"' } });
+    }
+    if (sub === "/search") {
+      if (method !== "GET") return json({ error: "method not allowed" }, 405);
+      const q = url.searchParams.get("q") ?? "";
+      if (q.length > 200) return json({ error: "search is over 200 characters" }, 400);
+      return json({ hits: searchNotes(root, q, 20) });
+    }
+    if (sub === "") {
+      if (method !== "GET") return json({ error: "method not allowed" }, 405);
+      if (canMutate && url.searchParams.get("peek") !== "1") openRoot(root, ws.task); // the first look seeds the Goal from the task, once; ?peek=1 only looks
+      return json(graphOf(root));
+    }
+    // sub === "/note"
+    if (method === "GET") {
+      const name = url.searchParams.get("name") ?? "";
+      if (!name || name.length > 200) return json({ error: "name is needed (up to 200 characters)" }, 400);
+      const note = getNote(root, name);
+      return note ? json(note) : json({ error: "no note has that name" }, 404);
+    }
+    if (method === "PUT") {
+      const text = await readCapped(req, MAX_BRAIN_BODY_BYTES);
+      if (text === null) return json({ error: "body exceeds 64 KiB" }, 413);
+      let body: { name?: unknown; type?: unknown; body?: unknown; status?: unknown } | null;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        return json({ error: "body must be JSON" }, 400);
+      }
+      if (!body || typeof body !== "object") return json({ error: "body must be a JSON object" }, 400);
+      if (typeof body.name !== "string" || !body.name || body.name.length > 200) return json({ error: "name is needed (up to 200 characters)" }, 400);
+      if (typeof body.body !== "string") return json({ error: "body must be text" }, 400);
+      if (body.type !== undefined && !(NOTE_TYPES as readonly unknown[]).includes(body.type)) return json({ error: "type is not a note type" }, 400);
+      if (body.status !== undefined && !["open", "doing", "done"].includes(body.status as string)) return json({ error: "status must be open, doing or done" }, 400);
+      openRoot(root, ws.task);
+      const note = putNote(root, { name: body.name, type: body.type as (typeof NOTE_TYPES)[number] | undefined, body: body.body, status: body.status as "open" | "doing" | "done" | undefined, source: "person" }, { maxBody: BODY_MAX });
+      containFailure(audit(actor, "brain.write", ws.id, note.name), "audit");
+      return json(note);
+    }
+    if (method === "DELETE") {
+      const name = url.searchParams.get("name") ?? "";
+      if (!name || name.length > 200) return json({ error: "name is needed (up to 200 characters)" }, 400);
+      deleteNote(root, name);
+      containFailure(audit(actor, "brain.delete", ws.id, name), "audit");
+      return json({ ok: true });
+    }
+    return json({ error: "method not allowed" }, 405);
+  } catch (e) {
+    if (e instanceof BrainError) return json({ error: e.message }, e.status);
+    throw e;
+  }
+}
+
 /** Ensure a workspace's named PTY session exists (spawn the agent if not). */
 async function ensurePtySession(id: string, terminalId = "main") {
   const ws = await getWorkspace(id);
@@ -1672,6 +1804,12 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (hookM) {
       if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       return handleHookPost(hookM[1], req);
+    }
+    // The project brain's tool callback (chats only): the brain token is the credential, as with the hook above.
+    const brainToolM = path.match(/^\/api\/brain-tool\/([^/]+)$/);
+    if (brainToolM) {
+      if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+      return handleBrainTool(brainToolM[1], req);
     }
     const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|download|notes|fs|image|share|preview|rename|log|versions|restore|model|terminal|problems|copy|link)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
@@ -1775,6 +1913,14 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       const refused = gate(canMutate, "forbidden, viewer cannot chat");
       if (refused) return refused;
       return handleChatPost(chatId, req, actor, sub, isOwner);
+    }
+
+    // The project brain: the person's graph, notes, search and export (chats only). Share links are refused; viewers read, owners and members write.
+    const brainM = path.match(/^\/api\/workspaces\/([^/]+)\/brain(\/note|\/search|\/export)?$/);
+    if (brainM) {
+      if (denied) return json({ error: "unauthorized" }, 401);
+      if (url.searchParams.has("share") || auth?.kind === "share" || !(await mayAccessWorkspace(auth, brainM[1]))) return json({ error: "forbidden, not your workspace" }, 403);
+      return handleBrainRoute(brainM[1], brainM[2] ?? "", req, canMutate, actor);
     }
 
     // A picture for a chat frame (see picture.ts). Read access, like viewing the chat: no share links, no credentials, no entry.
@@ -2167,7 +2313,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         if (w && !(await mayAccessWorkspace(auth, w.id))) return json({ error: "forbidden, not your workspace" }, 403);
         // a share link shows the project, not the owner's private notes, hook secret, or conversation bookkeeping
         if (!w) return json([]);
-        const { notes: _n, hookToken: _h, payload: _p, agentSessions: _a, agentSeen: _s, handoffAfter: _o, branchContext: _b, restoredFrom: _r, shareLink: _l, previewToken: _t, ...pub } = w;
+        const { notes: _n, hookToken: _h, payload: _p, agentSessions: _a, agentSeen: _s, handoffAfter: _o, branchContext: _b, restoredFrom: _r, shareLink: _l, previewToken: _t, brainToken: _bt, ...pub } = w;
         return json([pub]);
       }
       if (denied) return json({ error: "unauthorized" }, 401);

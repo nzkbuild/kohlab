@@ -1,4 +1,4 @@
-import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TreeNode, TurnFile, Version, Workspace } from "./types";
+import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BrainGraph, BrainHit, BrainNote, NoteType, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
@@ -82,7 +82,12 @@ async function json<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   const res = await req(path, opts);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
+  if (!res.ok) {
+    // The status rides on the error so a view can tell a refusal (403, 404) from a failed connection.
+    const err = new Error((body as { error?: string }).error || res.statusText) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
   return body as T;
 }
 
@@ -196,6 +201,15 @@ export const api = {
     const safe = name.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "project";
     saveAs(await res.blob(), `${safe}.zip`);
   },
+  /** The project brain as a .tar.gz of Markdown notes: it opens as an Obsidian vault. */
+  downloadBrain: async (id: string): Promise<void> => {
+    const res = await req(`/api/workspaces/${encodeURIComponent(id)}/brain/export`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || res.statusText);
+    }
+    saveAs(await res.blob(), "project-brain.tar.gz");
+  },
   /** Warms the reads a project's first paint needs. Called when its sidebar row is hovered or focused. */
   prefetchProject: (id: string, chat: boolean): void => {
     if (chat) prefetch(`/api/workspaces/${encodeURIComponent(id)}/chat?after=0`);
@@ -213,6 +227,20 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ notes }),
     }),
+  /** The project brain's notes as a graph: names, types, links. Viewers can read it; the server answers 403 to a share link. */
+  /** `peek` only looks: it never creates the vault, so a brand-new project stays untouched. */
+  brain: (id: string, peek = false) => json<BrainGraph>(`/api/workspaces/${encodeURIComponent(id)}/brain${peek ? "?peek=1" : ""}`),
+  brainNote: (id: string, name: string) =>
+    json<BrainNote>(`/api/workspaces/${encodeURIComponent(id)}/brain/note?name=${encodeURIComponent(name)}`),
+  brainSearch: (id: string, q: string) => json<{ hits: BrainHit[] }>(`/api/workspaces/${encodeURIComponent(id)}/brain/search?q=${encodeURIComponent(q)}`),
+  putBrainNote: (id: string, note: { name: string; type?: NoteType; body: string; status?: TaskStatus }) =>
+    json<BrainNote>(`/api/workspaces/${encodeURIComponent(id)}/brain/note`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(note),
+    }),
+  deleteBrainNote: (id: string, name: string) =>
+    json<{ ok: true }>(`/api/workspaces/${encodeURIComponent(id)}/brain/note?name=${encodeURIComponent(name)}`, { method: "DELETE" }),
   branches: (source: string) => json<{ branches: string[] }>(`/api/branches?source=${encodeURIComponent(source)}`),
   clone: (body: { url: string; task: string; agent: string; branch?: string; payload?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),

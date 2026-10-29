@@ -61,6 +61,9 @@ export interface AppState {
   hasWork: Record<string, boolean>;
   setHasWork: (id: string, value: boolean) => void;
   setNotesFor: (value: string | null) => void;
+  /** A note the Brain view should open on (a Run panel title). The view takes it once on mount, then clears it. */
+  brainNote: string | null;
+  setBrainNote: (value: string | null) => void;
   refresh: () => Promise<void>;
   loadMe: () => Promise<void>;
   /** Push a new route onto history, or replace the current entry. */
@@ -149,6 +152,8 @@ export const useApp = create<AppState>((set, get) => ({
   hasWork: {},
   setHasWork: (id, value) => set((s) => (s.hasWork[id] === value ? s : { hasWork: { ...s.hasWork, [id]: value } })),
   setNotesFor: (value) => set({ notesFor: value }),
+  brainNote: null,
+  setBrainNote: (value) => set({ brainNote: value }),
 
   refresh: async () => {
     try {

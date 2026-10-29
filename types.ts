@@ -45,6 +45,8 @@ export interface Workspace {
   shareLink?: { token: string; expires: number | null };
   /** secret for the agent's hook callbacks (POST /api/hook/<id>), written into its Claude settings */
   hookToken?: string;
+  /** secret for the brain tools' callback (POST /api/brain-tool/<id>), written into the chat's MCP config. Never sent to share viewers. */
+  brainToken?: string;
   /** optional resource caps applied to the agent's PTY session */
   limits?: WorkspaceLimits;
   /** Claude model for this project, as Claude takes it: an alias, a model's own id, a router's id, or "default" (an explicit choice of the account's own). Undefined = inherit the server default. */

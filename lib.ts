@@ -12,6 +12,7 @@ import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { cwd } from "process";
 import { stopBrowser, writeBrowserMcp } from "./browser";
+import { noteKeep, openRoot, readHead } from "./brain";
 
 /**
  * Where state lives. An explicit `WORKS_DIR` always wins.
@@ -358,6 +359,16 @@ export function ownBase(): string {
 }
 
 const HOOK_EVENTS = ["UserPromptSubmit", "Notification", "PostToolUse", "Stop"];
+
+/** The secret the chat's brain tools call back with (POST /api/brain-tool/<id>). Made once per workspace, like the hook token. */
+export async function ensureBrainToken(id: string): Promise<string> {
+  return mutateState((st) => {
+    const w = st.workspaces.find((x) => x.id === id);
+    if (!w) throw new Error(`no workspace '${id}'`);
+    w.brainToken ??= randomBytes(24).toString("base64url");
+    return w.brainToken;
+  });
+}
 
 /**
  * Write the Claude Code hook settings for a terminal workspace, outside its
@@ -1798,6 +1809,11 @@ export function worktreePath(ws: Workspace) {
   return join(wsDir(ws), "tree");
 }
 
+/** The project brain's vault: beside the tree, never inside it, so Keep, Undo and the download never touch it. */
+export function brainRoot(ws: Workspace) {
+  return join(wsDir(ws), "brain");
+}
+
 /** Where pasted screenshots for a workspace live. Inside the private root for
  *  owned workspaces so the owning agent can read them; legacy shared store
  *  otherwise. */
@@ -1837,13 +1853,19 @@ export async function findRepoRoot(dir: string): Promise<string | null> {
 
 // --- workspace lifecycle -------------------------------------------------
 
+/** A workspace as clients see it: the hook and brain callback secrets stay on the server. */
+export function clientView<T extends object>(w: T): Omit<T, "hookToken" | "brainToken"> {
+  const { hookToken: _h, brainToken: _b, ...rest } = w as T & { hookToken?: string; brainToken?: string };
+  return rest;
+}
+
 export async function listWorkspaces(): Promise<
   (Workspace & { running: boolean; waiting: boolean; backgroundWork: boolean; path: string })[]
 > {
   const s = await loadState();
   return Promise.all(
     s.workspaces.map(async (w) => ({
-      ...w,
+      ...clientView(w),
       running: await isRunning(w),
       waiting: chatWaiting.has(w.id),
       backgroundWork: chatBackground.has(w.id),
@@ -2310,7 +2332,11 @@ export async function deleteWorkspace(id: string) {
   // isolated workspaces live entirely under ws.dir: remove the private root
   // (admin repo + worktree + images). Legacy: shared store + shared images.
   if (ws.dir) await rm(ws.dir, { recursive: true, force: true });
-  else await rm(join(WORKS_DIR, "images", id), { recursive: true, force: true });
+  else {
+    await rm(join(WORKS_DIR, "images", id), { recursive: true, force: true });
+    // legacy: the brain sits beside the shared tree (wsDir = WORKS_DIR/<id>), so it is not under ws.dir
+    await rm(brainRoot(ws), { recursive: true, force: true });
+  }
   markIntentionallyStopped(id);
   const folder = await ownProjectFolder(ws, s.workspaces.filter((w) => w.id !== id));
   const result = await mutateState(async (st) => {
@@ -2406,12 +2432,27 @@ export async function commitWorkspace(id: string, message: string) {
   } else {
     console.log(`[kohlab] ${id}: nothing to commit, accepting the workspace as-is`);
   }
-  return mutateState(async (st) => {
+  const result = await mutateState(async (st) => {
     const w = st.workspaces.find((x) => x.id === id);
     if (!w) throw new Error(`no workspace '${id}'`);
     w.lastCommitAt = Date.now();
     return { ok: true };
   });
+  // The brain's Keep: a chat's new commit becomes a Version note. Only when this call committed (no repeat history lines).
+  // Never throws: a failure is logged and the commit stands.
+  if (ws.chat && staged.trim()) {
+    try {
+      const k = await readHead(tree);
+      if (k) {
+        const root = brainRoot(ws);
+        openRoot(root, ws.task);
+        noteKeep(root, k);
+      }
+    } catch (e) {
+      console.warn("[brain] keep note skipped:", (e as Error).message);
+    }
+  }
+  return result;
 }
 
 /**

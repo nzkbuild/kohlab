@@ -252,9 +252,14 @@ export async function stopBrowser(ws: Workspace): Promise<void> {
  * and the person share one browser. Written beside the worktree, not in it.
  * Null when it cannot be written: Claude then starts without browser tools.
  */
-export function writeBrowserMcp(ws: Workspace, who: ReturnType<typeof identityOf>): string | null {
+export function writeBrowserMcp(
+  ws: Workspace,
+  who: ReturnType<typeof identityOf>,
+  extra: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {},
+): string | null {
   try {
-    const config = { mcpServers: { browser: { command: BIN, args: ["mcp"], env: browserEnv(ws) } } };
+    // extra: more MCP servers beside the browser (the project brain's, for chats).
+    const config = { mcpServers: { browser: { command: BIN, args: ["mcp"], env: browserEnv(ws) }, ...extra } };
     const file = join(wsDir(ws), "kohlab-mcp.json");
     // wsDir can be writable by the agent's user: never write through a planted symlink.
     // unlink, then O_EXCL (which also refuses a symlink) with the final mode from the start.

@@ -22,10 +22,11 @@ import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from ".
 import { devServerOrigin } from "./devserver";
 import { goBackTo, snapshotTree, turnChanges, type TurnFile } from "./checkpoints";
 import { ACP_AGENTS, AcpClient, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
-import { chatBusy, chatBackground, resumeOpen, chatKillers, chatWaiting, audit, closeMain, getWorkspace, identityOf, isAlive, loadState, markStarted, mutateState, notifyWorkspaceDone, ownBase, parseModel, worktreeIsClean, worktreePath } from "./lib";
+import { chatBusy, chatBackground, resumeOpen, chatKillers, chatWaiting, audit, closeMain, getWorkspace, identityOf, isAlive, loadState, markStarted, mutateState, notifyWorkspaceDone, ownBase, parseModel, worktreeIsClean, worktreePath, brainRoot, ensureBrainToken } from "./lib";
 import { rel, describeTool, toolFile, toolDetail, resultText, describeAsk, askForm, answerResponse, friendlyError, AGENT_NAMES, handoffText, noticeText, taskFinishedLine, clockText, MAX_TEXT } from "./chat-text";
 import type { Body, ChatEvent, Todo } from "./chat-text";
 import { chatsDir, transcriptPath, cursorPath, TAIL_BYTES, FIRST_IMPORT, transcriptFile, readCursor, writeCursor, HIDDEN_TOOLS, transcriptEvents } from "./chat-transcript";
+import { noteDecision, noteHandoff, openRoot, summaryOf } from "./brain";
 import { helperLabel, applyHelperLine, helpersNewTurn, helpersAtResult, helpersAtExit, doneFields } from "./chat-helpers";
 import type { HelperNode } from "./chat-helpers";
 import { HANDOFF_REQUEST, HANDOFF_CAP, extractHandoff, handoffHasWork, freshMessage, freshDecision } from "./chat-fresh";
@@ -58,14 +59,63 @@ export function notesOf(ws: Pick<Workspace, "chat" | "notes">): string {
   return ws.chat ? (ws.notes ?? "").trim() : "";
 }
 
-/** Claude's system prompt for a chat: the chat's rules, then the person's standing notes. Pure. */
-export function systemPromptFor(notes: string): string {
-  return notes ? `${CHAT_SYSTEM_PROMPT} The person's standing notes for this project (always follow them): ${notes}` : CHAT_SYSTEM_PROMPT;
+/** Claude's system prompt for a chat: the chat's rules, then the person's standing notes, then the project brain's summary. Pure. */
+export function systemPromptFor(notes: string, brain = ""): string {
+  const base = notes ? `${CHAT_SYSTEM_PROMPT} The person's standing notes for this project (always follow them): ${notes}` : CHAT_SYSTEM_PROMPT;
+  return brain ? `${base}\n\n${brain}` : base;
 }
 
-/** The text put before the person's first message in a new ACP session: the notes, or "" when none. Pure. */
-export function notesMessagePrefix(notes: string): string {
-  return notes ? `Project notes from the person (always follow them):\n${notes}\n\n` : "";
+/** The text put before the person's first message in a new ACP session: the notes and the brain's summary, or "" when none. Pure. */
+export function notesMessagePrefix(notes: string, brain = ""): string {
+  return [notes ? `Project notes from the person (always follow them):\n${notes}\n\n` : "", brain ? `${brain}\n\n` : ""].filter(Boolean).join("");
+}
+
+/** The brain's MCP server for a chat: node runs brain-mcp.cjs, which calls back to this server with the workspace's own token. Null when node, the server's address or the token is missing. */
+async function brainMcp(ws: Workspace): Promise<Record<string, { command: string; args: string[]; env: Record<string, string> }> | null> {
+  const node = Bun.which("node");
+  const base = ownBase();
+  if (!node || !base) return null;
+  try {
+    const token = await ensureBrainToken(ws.id);
+    return { brain: { command: node, args: [join(import.meta.dir, "brain-mcp.cjs")], env: { KOHLAB_BRAIN_URL: `${base}/api/brain-tool/${ws.id}`, KOHLAB_BRAIN_TOKEN: token } } };
+  } catch (e) {
+    console.warn(`[brain] its tools are left out of this start: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/** An approved plan, kept as a Decision in the project brain. Chats only; a failure is logged and never blocks the approval. */
+async function keepPlan(id: string, plan: string): Promise<void> {
+  try {
+    const ws = await getWorkspace(id);
+    if (!ws.chat) return;
+    const root = brainRoot(ws);
+    openRoot(root, ws.task);
+    noteDecision(root, plan);
+  } catch (e) {
+    console.warn(`[brain] plan not kept: ${(e as Error).message}`);
+  }
+}
+
+/** The brain's size for the Run panel: its note count and the summary's tokens, or null when the AI gets no summary (or not a chat). Reads only. */
+function brainStatOf(ws: Workspace): { notes: number; tokens: number } | null {
+  if (!ws.chat) return null;
+  try {
+    const s = summaryOf(brainRoot(ws));
+    return s.text ? { notes: s.notes, tokens: s.tokens } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The project brain's summary for a chat's prompt: "" for a terminal project or on any error. Reads only: never creates the vault. */
+export function brainSummaryOf(ws: Workspace): string {
+  if (!ws.chat) return "";
+  try {
+    return summaryOf(brainRoot(ws)).text;
+  } catch {
+    return "";
+  }
 }
 
 export class ChatError extends Error {
@@ -420,6 +470,14 @@ const hopped = new Set<string>();
 /** Projects whose Claude restarts at the next idle moment (a saved rule was removed; the process holds it until then). */
 const restartAtIdle = new Set<string>();
 
+/** The project-memory notes each chat's current turn has read (the brain's recall), taken into that turn's done event. */
+const recalledNow = new Map<string, Set<string>>();
+export function noteRecalled(id: string, titles: string[]): void {
+  const set = recalledNow.get(id) ?? new Set<string>();
+  for (const t of titles) set.add(t);
+  recalledNow.set(id, set);
+}
+
 function emit(id: string, body: Body): ChatEvent {
   if (body.kind === "done") hopped.delete(id);
   const cap = captures.get(id);
@@ -428,8 +486,11 @@ function emit(id: string, body: Body): ChatEvent {
     else cap.settle(body.kind === "done" ? cap.text : null);
     return { n: 0, at: Date.now(), ...body } as ChatEvent; // not kept: this turn is not part of the visible chat
   }
+  const seen = body.kind === "done" ? recalledNow.get(id) : undefined;
+  if (body.kind === "done") recalledNow.delete(id);
+  const recalled = seen?.size ? { recalled: [...seen].slice(0, 8) } : {};
   const c = load(id);
-  const ev = { n: (c.events.at(-1)?.n ?? 0) + 1, at: Date.now(), ...body } as ChatEvent;
+  const ev = { n: (c.events.at(-1)?.n ?? 0) + 1, at: Date.now(), ...body, ...recalled } as ChatEvent;
   c.events.push(ev);
   mkdirSync(chatsDir(), { recursive: true, mode: 0o700 });
   appendFileSync(transcriptPath(id), JSON.stringify(ev) + "\n", { mode: 0o600 });
@@ -937,14 +998,17 @@ async function start(ws: Workspace, id: string, opts: { model?: string } = {}): 
   const mode = term ? picked : ai.mode.value;
   const policy = mode ? claudeArgsFor(mode) : null;
   if (policy) args.push("--permission-mode", policy.permissionMode);
-  // what the person chose "Always allow" for, so it holds from this start on
+  // the project brain's MCP server, chats only; left out when node or the callback cannot be had
+  const brainExtra = term ? null : await brainMcp(ws);
+  // what the person chose "Always allow" for, so it holds from this start on; a chat's brain tools are allowed too (they only read and save this project's notes)
   const rules = cleanRules(ws.allowRules);
-  if (rules.length) args.push("--allowedTools", rules.join(","));
+  const allowed = [...rules, ...(brainExtra ? ["mcp__brain__recall", "mcp__brain__remember"] : [])];
+  if (allowed.length) args.push("--allowedTools", allowed.join(","));
   if (!term) args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
-  // strict: only our browser tools load, never the user's MCP servers
-  const mcpFile = writeBrowserMcp(ws, who);
+  // strict: only our browser tools (and the brain's) load, never the user's MCP servers
+  const mcpFile = writeBrowserMcp(ws, who, brainExtra ?? {});
   if (mcpFile) args.push("--mcp-config", mcpFile);
-  if (!term) args.push("--append-system-prompt", systemPromptFor(notesOf(ws)));
+  if (!term) args.push("--append-system-prompt", systemPromptFor(notesOf(ws), brainSummaryOf(ws)));
   if (ws.chatSession) args.push("--resume", ws.chatSession);
   const wantModel = term ? ws.model : ai.model.value;
   const useModel = opts.model ?? wantModel;
@@ -1271,7 +1335,8 @@ async function sendAcp(ws: Workspace, id: string, t: string, opts: SendOpts = {}
     const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
     // the first message of a new agent session carries the project's notes; the mark is cleared only once it is sent
     const notes = notesOf(ws);
-    acp.prompt(acp.freshSession && notes ? notesMessagePrefix(notes) + sent : sent);
+    const brain = brainSummaryOf(ws);
+    acp.prompt(acp.freshSession && (notes || brain) ? notesMessagePrefix(notes, brain) + sent : sent);
     acp.freshSession = false;
     if (hasPendingContext(ws)) await clearHandoff(id).catch(() => {}); // only once the agent has the message
   } catch (e) {
@@ -2172,6 +2237,7 @@ export async function answer(id: string, requestId: string, allow: boolean, extr
     const back = live.beforePlan && live.beforePlan !== "plan" ? live.beforePlan : "default";
     live.beforePlan = undefined;
     setting(id, "mode", back).catch((e) => console.warn(`[chat] leave plan mode: ${(e as Error).message}`));
+    keepPlan(id, String(input.plan ?? ""));
   }
   return rule && (await addRule(id, rule)) ? { rule } : {};
 }
@@ -2369,7 +2435,8 @@ async function sendHidden(id: string, text: string): Promise<void> {
       const cur = acps.get(id);
       const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
       const notes = notesOf(ws);
-      acp.prompt(acp.freshSession && notes ? notesMessagePrefix(notes) + text : text);
+      const brain = brainSummaryOf(ws);
+      acp.prompt(acp.freshSession && (notes || brain) ? notesMessagePrefix(notes, brain) + text : text);
       acp.freshSession = false;
       return;
     }
@@ -2442,6 +2509,16 @@ async function applyFresh(id: string, note: string): Promise<void> {
   usageAt.delete(id);
   lastFreshAt.set(id, Date.now());
   freshPending.delete(id);
+  // kept in the project brain before the new session starts from it; chats only, and a failure never blocks the fresh start
+  if (ws.chat) {
+    try {
+      const root = brainRoot(ws);
+      openRoot(root, ws.task);
+      noteHandoff(root, note);
+    } catch (e) {
+      console.warn(`[brain] handoff not kept: ${(e as Error).message}`);
+    }
+  }
   emit(id, { kind: "handoff", text: note });
   emit(id, { kind: "note", text: "Continued with a fresh memory" });
   if (!handoffHasWork(note)) return; // the new session waits for the person; the note goes with their first message
@@ -2674,7 +2751,8 @@ export interface RunInfo {
   agent: string;
   agentName: string;
   terminalProject: boolean;
-  instructions: { system: string | null; notes: string; note: string | null };
+  /** brain: the project memory summary the AI gets at the start (null when none, or not a chat) */
+  instructions: { system: string | null; notes: string; note: string | null; brain?: { notes: number; tokens: number } | null };
   tools: { builtin: string[]; mcp: { name: string; status: string }[] } | null;
   ready: boolean;
   /** every setting with where it comes from */
@@ -2737,8 +2815,8 @@ export async function runInfo(id: string): Promise<RunInfo> {
     agent,
     agentName: name,
     terminalProject: !ws.chat,
-    instructions,
-    tools: live?.tools ? { builtin: live.tools.filter((t) => !t.startsWith("mcp__")), mcp: live.mcp } : null,
+    instructions: { ...instructions, brain: brainStatOf(ws) },
+    tools: live?.tools ?{ builtin: live.tools.filter((t) => !t.startsWith("mcp__")), mcp: live.mcp } : null,
     ready: acp ? (acps.get(id)?.started ?? false) : live?.inited === true,
     ai,
     account: acct ? { id: acct.id, label: acct.label, kind: acct.kind } : null,

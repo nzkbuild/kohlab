@@ -71,7 +71,7 @@ export type ChatEvent = { n: number; at: number } & (
       plan?: string;
     }
   | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
-  | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number } }
+  | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number }; recalled?: string[] }
   /** the plan share of the turn that ended just before it; the chat view merges it into that turn's done line */
   | { kind: "plan"; planDelta: number }
   | { kind: "error"; text: string }
@@ -311,7 +311,7 @@ export interface RunInfo {
   agent: string;
   agentName: string;
   terminalProject: boolean;
-  instructions: { system: string | null; notes: string; note: string | null };
+  instructions: { system: string | null; notes: string; note: string | null; brain?: { notes: number; tokens: number } | null };
   tools: { builtin: string[]; mcp: { name: string; status: string }[] } | null;
   ready: boolean;
   /** What each setting is for this project and where it comes from. An older server sends none. */
@@ -396,4 +396,51 @@ export const AGENT_CATALOG: AgentInfo[] = [
 export interface TurnFile {
   path: string;
   status: "added" | "modified" | "deleted";
+}
+
+/* ------------------------------------------------------- project brain -- */
+
+export type NoteType = "Goal" | "Decision" | "Handoff" | "Task" | "Fact" | "Version" | "File";
+export type NoteSource = "seed" | "person" | "ai" | "keep" | "plan" | "handoff" | "notes";
+export type TaskStatus = "open" | "doing" | "done";
+
+export interface BrainNodeInfo {
+  name: string;
+  type: NoteType;
+  source: NoteSource;
+  status?: TaskStatus;
+  /** ms */
+  updated: number;
+  degree: number;
+}
+
+export interface BrainGraph {
+  nodes: BrainNodeInfo[];
+  /** [from, to] by name, deduped, resolved only, no self-links */
+  edges: [string, string][];
+  count: number;
+  cap: 400;
+  summary: { notes: number; tokens: number };
+}
+
+export interface BrainNote {
+  name: string;
+  type: NoteType;
+  source: NoteSource;
+  status?: TaskStatus;
+  created: number;
+  updated: number;
+  body: string;
+  outlinks: string[];
+  unresolved: string[];
+  backlinks: { name: string; type: NoteType }[];
+  path?: string;
+}
+
+export interface BrainHit {
+  name: string;
+  type: NoteType;
+  /** at most 160 characters */
+  snippet: string;
+  score: number;
 }

@@ -133,6 +133,11 @@ try {
   run("AI hub over HTTP (fake AIs, redaction, canary secrets)", "node", ["scripts/check-providers-http.mjs"]);
   run("helper tree and run info over HTTP (fake claude)", "node", ["scripts/check-chat-helpers.mjs"]);
   run("continue fresh over HTTP (fake claude)", "node", ["scripts/check-fresh-http.mjs"]);
+  // Project brain (v2.7): the vault on a throwaway folder; the routes and the MCP server over HTTP with a fake claude; the graph and the Brain tab in the browser.
+  run("project brain (vault, links, summary, recall, undo)", "bun", ["scripts/check-brain.ts"]);
+  run("project brain over HTTP and MCP (fake claude)", "node", ["scripts/check-brain-http.mjs"]);
+  run("project brain graph (layout, sizes, recalled line)", "bun", ["scripts/check-brain-graph.mjs"]);
+  run("project brain in the browser (Brain tab, Run panel)", "node", ["scripts/check-brain-ui.mjs"]);
   // AI control (v2.6): each starts its own throwaway server with a fake claude (and fake router, Codex, omp) on PATH; no model is called.
   run("AI defaults (project > default > built in, pinned by the first message, reset)", "bun", ["scripts/check-defaults.mjs"]);
   run("AI permissions (modes, Always allow, Full access, ACP decisions)", "bun", ["scripts/check-policy.mjs"]);
