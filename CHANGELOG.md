@@ -9,6 +9,18 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.7.0] - 2026-10-29
+
+### Added
+- **Project Brain.** Every chat project now has a memory of linked notes: the goal, decisions, handoffs, tasks, facts, kept versions and the files they changed. Kohlab writes notes for you when you keep a version, approve a plan, continue fresh or save your project notes, and the AI can save lasting facts and decisions itself.
+- **The AI uses its memory sparingly.** Each chat starts with a short summary (about 1,000 tokens at most) and the AI looks up the rest only when it needs it, so long projects stay fast and cheap.
+- **Brain tab:** a graph of how notes connect, each note with the notes that link to it, search, editing, and "Download vault for Obsidian". It appears once there is something in the brain.
+- The Run panel shows which notes the AI looked up for each reply ("Recalled 2 notes: Goal, Use SQLite"); click one to open it.
+
+### Changed
+- Undo and going back to an earlier version never touch the brain.
+- Private connection keys are no longer included in the project list sent to the browser.
+
 ## [2.6.1] - 2026-10-29
 
 ### Added
