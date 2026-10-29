@@ -219,17 +219,22 @@ try {
       const chat = await import(process.env.ROOT + "chat.ts");
       const fs = require("node:fs");
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-      const idle = async (id) => { for (let i = 0; i < 200; i++) { if (!(await chat.snapshot(id, 0)).busy) return; await sleep(100); } };
+      // Polling waits, never fixed sleeps: a condition, checked every 50 ms, with a 20 s ceiling. The clock is read raw (real), since Date.now is moved below.
+      const until = async (ok, ms = 20000) => { const end = real() + ms; while (real() < end) { if (await ok()) return true; await sleep(50); } return false; };
+      const settled = async (id, turns) => { const s = await chat.snapshot(id, 0); return !s.busy && s.events.filter((e) => e.kind === "done").length >= turns; };
+      const idle = (id, turns = 0) => until(() => settled(id, turns));
       const alt = acc.createLogin("claude", "Alt");
       fs.writeFileSync(acc.dirOf(alt.id) + "/signed-in", "1");
       const ws = await lib.createWorkspace({ repo: process.env.REPO_DIR, task: "t", agent: "claude", chat: true });
-      await chat.send(ws.id, "one"); await idle(ws.id);
+      await chat.send(ws.id, "one"); await idle(ws.id, 1);
       fs.writeFileSync(process.env.FAKE_DIR + "/behave-default", "limit-once");
-      await chat.send(ws.id, "two"); await sleep(1500); await idle(ws.id);
+      await chat.send(ws.id, "two");
+      await until(async () => { const w = await lib.getWorkspace(ws.id); return w.account === alt.id && !!w.limit && (await settled(ws.id, 2)); });
+      await idle(ws.id, 2);
       const mid = await lib.getWorkspace(ws.id);
       const out = { midAccount: mid.account === alt.id, midLimit: !!mid.limit };
       offset = 3 * 86400e3; // the limit has lifted
-      await chat.send(ws.id, "three"); await idle(ws.id);
+      await chat.send(ws.id, "three"); await idle(ws.id, 3);
       const end = await lib.getWorkspace(ws.id);
       out.endAccount = end.account ?? null; out.endLimit = end.limit ?? null;
       out.events = (await chat.snapshot(ws.id, 0)).events.filter((e) => e.kind === "note").map((e) => e.text);

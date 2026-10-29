@@ -9,6 +9,17 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.6.1] - 2026-10-29
+
+### Added
+- An extra AI account whose sign-in wasn't finished now has a **Sign in** button in Settings → AI.
+
+### Changed
+- Under the hood: the chat screen and the chat engine are split into smaller parts, so Kohlab is quicker to improve. Nothing you see changes.
+
+### Fixed
+- A test that sometimes failed on a slow moment now waits properly.
+
 ## [2.6.0] - 2026-10-28
 
 Control the AI: decide how every AI behaves, which account it uses, and what happens when an account hits its limit.

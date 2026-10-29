@@ -302,6 +302,34 @@ export function AddAccountDialog({ provider, name, open, onOpenChange }: { provi
   );
 }
 
+/** Sign a login account in again, for one that is not signed in yet: reopens the same sign-in as when it was added. */
+export function SignInAccountDialog({ id, label, open, onOpenChange, onDone }: { id: string; label: string; open: boolean; onOpenChange: (v: boolean) => void; onDone: () => void }) {
+  const close = () => onOpenChange(false);
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content aria-describedby={undefined} className="dialog-content flex max-h-[85vh] w-[90vw] max-w-[480px] flex-col gap-3 overflow-y-auto p-4">
+          <Dialog.Title className="text-base font-semibold text-text-primary">{`Sign in to ${label}`}</Dialog.Title>
+          <SignInView
+            id={id}
+            onDone={() => {
+              announce("Signed in");
+              onDone();
+              close();
+            }}
+          />
+          <div className="flex justify-end">
+            <Button variant="quiet" size="sm" onClick={close}>
+              Done
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 /** Replace a router's key: the new key goes to the server and is never shown again; the field is emptied at once. */
 export function ReplaceKeyDialog({ id, label, open, onOpenChange }: { id: string; label: string; open: boolean; onOpenChange: (v: boolean) => void }) {
   const keyRef = useRef<HTMLInputElement>(null);

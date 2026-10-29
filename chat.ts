@@ -11,41 +11,34 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, chownSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { AiDefaults, AiResolved, Fallback, FallbackStep, LimitState, PermissionRule, Workspace } from "./types";
 import { accountEnv, childEnv, clearLimit, configDirOf, envOfAccount, getAccount, laneKey, limitedUntil, listAccounts, markLimited, overlayOf, runAsOf, signedInOf, usableBy } from "./accounts";
 import { RESET_FIELDS, resolveAi } from "./defaults";
-import { PERSONAL_ASKS, claudeArgsFor, cleanRules, defaultSteps, describeRule, isMode, limitReached, ruleFor, ruleParts, validRule } from "./policy";
+import { PERSONAL_ASKS, claudeArgsFor, cleanRules, defaultSteps, describeRule, isMode, limitReached, ruleFor, validRule } from "./policy";
 import { notifyNeedsYou } from "./push";
 import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
 import { devServerOrigin } from "./devserver";
 import { goBackTo, snapshotTree, turnChanges, type TurnFile } from "./checkpoints";
 import { ACP_AGENTS, AcpClient, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
-import {
-  WORKS_DIR,
-  chatBusy,
-  chatBackground,
-  resumeOpen,
-  chatKillers,
-  chatWaiting,
-  audit,
-  closeMain,
-  getWorkspace,
-  identityOf,
-  isAlive,
-  loadState,
-  markStarted,
-  mutateState,
-  notifyWorkspaceDone,
-  ownBase,
-  parseModel,
-  worktreeIsClean,
-  worktreePath,
-} from "./lib";
+import { chatBusy, chatBackground, resumeOpen, chatKillers, chatWaiting, audit, closeMain, getWorkspace, identityOf, isAlive, loadState, markStarted, mutateState, notifyWorkspaceDone, ownBase, parseModel, worktreeIsClean, worktreePath } from "./lib";
+import { rel, describeTool, toolFile, toolDetail, resultText, describeAsk, askForm, answerResponse, friendlyError, AGENT_NAMES, handoffText, noticeText, taskFinishedLine, clockText, MAX_TEXT } from "./chat-text";
+import type { Body, ChatEvent, Todo } from "./chat-text";
+import { chatsDir, transcriptPath, cursorPath, TAIL_BYTES, FIRST_IMPORT, transcriptFile, readCursor, writeCursor, HIDDEN_TOOLS, transcriptEvents } from "./chat-transcript";
+import { helperLabel, applyHelperLine, helpersNewTurn, helpersAtResult, helpersAtExit, doneFields } from "./chat-helpers";
+import type { HelperNode } from "./chat-helpers";
+import { HANDOFF_REQUEST, HANDOFF_CAP, extractHandoff, handoffHasWork, freshMessage, freshDecision } from "./chat-fresh";
+export { describeTool, toolFile, toolDetail, resultText, describeAsk, askForm, answerResponse, friendlyError, handoffText, noticeText } from "./chat-text";
+export type { AskQuestion, Body, ChatEvent, Todo } from "./chat-text";
+export { transcriptEvents } from "./chat-transcript";
+export { helperLabel, applyHelperLine, helpersNewTurn, helpersAtResult, helpersAtExit, doneFields } from "./chat-helpers";
+export type { HelperNode } from "./chat-helpers";
+export { FRESH_BANNER_PERCENT, FRESH_AUTO_PERCENT, HANDOFF_REQUEST, extractHandoff, handoffHasWork, freshMessage, freshDecision } from "./chat-fresh";
 
 /** The environment a child agent gets: the allowlisted keys from the server's, its own HOME, and an account's own variables (accounts.ts). */
 export { childEnv };
+
 /** Appended to claude's system prompt: who it talks to, and the Preview / Keep / Undo buttons it can rely on. */
 const CHAT_SYSTEM_PROMPT =
   "The person you are working with is not a programmer. Use plain, friendly language and avoid jargon. Write short plain sentences; avoid Markdown headings. " +
@@ -60,8 +53,6 @@ const CHAT_SYSTEM_PROMPT =
   "Files the person attaches are saved in the uploads folder of the project; open them with your Read tool, and use pictures from there directly in the page when they ask for that. " +
   "When you run a command, always give it a short plain-English description of what it does and why. " +
   "You have a real browser that the person watches live: after you change a page, open it there and check it, using the http://127.0.0.1 address of a dev server you started, or else the project's Preview.";
-const MAX_TEXT = 20000;
-
 /** The standing notes a chat gets: trimmed, "" when none. Only chat projects get them; a terminal's Claude keeps its own settings. Pure. */
 export function notesOf(ws: Pick<Workspace, "chat" | "notes">): string {
   return ws.chat ? (ws.notes ?? "").trim() : "";
@@ -77,305 +68,12 @@ export function notesMessagePrefix(notes: string): string {
   return notes ? `Project notes from the person (always follow them):\n${notes}\n\n` : "";
 }
 
-/** One multiple-choice question from AskUserQuestion, cleaned by askForm. */
-export type AskQuestion = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] };
-
-export type Body =
-  /** uuid: the id Claude keeps for this message, which Undo names. Not set on lines imported from a terminal's transcript. */
-  /** tree: the project's files as they were just before this message (checkpoints.ts). Not set when the snapshot could not be taken. */
-  /** with: the model this one message was sent with (Send with…), when it was not the project's own. */
-  | { kind: "user"; text: string; uuid?: string; tree?: string; with?: string }
-  | { kind: "assistant"; text: string }
-  /** toolId: the tool's id, which its result refers to. detail: what it did (the command, the change), for the expandable line. file: the file an edit or a new file touched; the chat does not show it, a handoff to another AI does. */
-  | { kind: "tool"; text: string; toolId?: string; detail?: string; file?: string }
-  /** A quiet divider line for something that happened to the conversation (a switch of AI, going back, a compaction, a background task), not an AI step. */
-  /** until: when a usage limit lifts (epoch ms), for a note about one: the page writes the time in the viewer's zone. */
-  | { kind: "note"; text: string; until?: number }
-  /** result: what a tool gave back, trimmed by resultText. failed: the tool errored. */
-  | { kind: "result"; toolId: string; output: string; failed?: boolean }
-  /** form: a question card ("question", with questions) or a plan card ("plan", with plan). Neither is set for a permission question. */
-  /** always: the standing rule an "Always allow" would save for this ask (only for a permission question that is safe to remember). */
-  | { kind: "ask"; requestId: string; text: string; detail?: string; why?: string; form?: "question" | "plan"; questions?: AskQuestion[]; plan?: string; always?: { rule: string; label: string } }
-  /** reply: what the person answered or asked for, when a question or plan card was answered with text. */
-  | { kind: "answer"; requestId: string; allow: boolean; reply?: string }
-  /** worked: how long the turn ran (ms). planDelta: the plan's five-hour window percent the turn used, for the owner only (snapshot strips it for others). */
-  | { kind: "done"; worked?: number; planDelta?: number; model?: string; tokens?: { in: number; out: number } }
-  /** planDelta: the plan share of the turn that ended just before it, sent once the usage is read (owner only). The chat view merges it into that turn's done line. */
-  | { kind: "plan"; planDelta: number }
-  | { kind: "error"; text: string; until?: number }
-  /** The handoff note a fresh session starts from (see "Continue fresh"): shown as a collapsed card. */
-  | { kind: "handoff"; text: string };
-
-export type ChatEvent = { n: number; at: number } & Body;
-
 export class ChatError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
     super(message);
     this.status = status;
   }
-}
-
-/** A path inside the worktree is shown relative to it; anything else as given. */
-function rel(p: unknown, cwd: string): string {
-  const s = String(p ?? "");
-  if (isAbsolute(s) && (s === cwd || s.startsWith(cwd + "/"))) return relative(cwd, s) || ".";
-  return s;
-}
-
-/** A plain-English one-liner of an action the agent took, with no file names ("Updated your page", "Looked around").
- *  ChatView parses these prefixes to group the lines ("Updated your page", "Looked around", "Ran: ",
- *  "Searched", "Opened ", "Asked a helper"): keep them in step with its classifier (it also still reads the older "Created ", "Edited ", "Read "). */
-export function describeTool(name: string, input: Record<string, any>, _cwd: string): string {
-  switch (name) {
-    case "Write":
-    case "Edit":
-    case "MultiEdit":
-    case "NotebookEdit":
-      return "Updated your page";
-    case "Read":
-    case "Glob":
-    case "Grep":
-      return "Looked around";
-    case "Bash":
-      return `Ran: ${input.description || String(input.command ?? "").slice(0, 80)}`;
-    case "WebFetch":
-      return `Opened ${input.url ?? ""}`;
-    case "WebSearch":
-      return `Searched the web for ${input.query ?? ""}`;
-    case "Agent":
-    case "Task":
-      return "Asked a helper to look into it";
-    default:
-      if (name === "mcp__browser__agent_browser_open") return `Opened ${input.url ?? "a page"} in the browser`;
-      return name.startsWith("mcp__browser__") ? "Used the browser" : `Used ${name}`;
-  }
-}
-
-/** The file a Write or Edit touched, relative to the worktree, or undefined. The tool line names no file, so this is kept beside it. Pure. */
-export function toolFile(name: string, input: Record<string, any>, cwd: string): string | undefined {
-  if (!["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(name)) return undefined;
-  const p = input.file_path ?? input.notebook_path;
-  return typeof p === "string" && p ? rel(p, cwd) : undefined;
-}
-
-/** What a tool did, in full, for an expandable line: the command, the lines changed, the address or the search. Undefined when there is nothing to show. Pure. */
-export function toolDetail(name: string, input: Record<string, any>, cwd: string): string | undefined {
-  const cut = (s: string, cap: number) => (s.length > cap ? s.slice(0, cap - 2) + "\n…" : s);
-  const diff = (oldText: unknown, newText: unknown) => [
-    ...String(oldText ?? "").split("\n").map((l) => `- ${l}`),
-    ...String(newText ?? "").split("\n").map((l) => `+ ${l}`),
-  ];
-  switch (name) {
-    case "Bash":
-      return String(input.command ?? "").slice(0, 2000) || undefined;
-    case "Edit":
-      return cut(diff(input.old_string, input.new_string).join("\n"), 4000);
-    case "MultiEdit": {
-      const edits: any[] = Array.isArray(input.edits) ? input.edits : [];
-      return cut(edits.map((e) => diff(e?.old_string, e?.new_string).join("\n")).join("\n\n"), 4000) || undefined;
-    }
-    case "Write": {
-      const text = String(input.content ?? "");
-      return text ? cut(text.split("\n").slice(0, 40).map((l) => `+ ${l}`).join("\n"), 4000) : undefined;
-    }
-    case "WebFetch":
-      return String(input.url ?? "") || undefined;
-    case "WebSearch":
-      return String(input.query ?? "") || undefined;
-    case "Glob":
-    case "Grep": {
-      const pattern = String(input.pattern ?? "");
-      if (!pattern) return undefined;
-      return input.path ? `${pattern} in ${rel(input.path, cwd)}` : pattern;
-    }
-    default:
-      return undefined;
-  }
-}
-
-/** What a tool result says, for its expandable line: the text of its text blocks, ANSI colour codes removed, and only the last 60 lines and 4000 characters. Pure. */
-export function resultText(content: unknown): string {
-  let text = typeof content === "string" ? content : Array.isArray(content) ? content.flatMap((c: any) => (c?.type === "text" && typeof c.text === "string" ? [c.text] : [])).join("\n") : "";
-  text = text.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\n+$/, "");
-  const lines = text.split("\n");
-  let cut = lines.length > 60;
-  if (cut) text = lines.slice(-60).join("\n");
-  if (text.length > 4000) {
-    text = text.slice(-4000);
-    cut = true;
-  }
-  return cut ? `…\n${text}` : text;
-}
-
-/** The permission question for a browser tool, naming the site it acts on ("a website" when the page address is not known). */
-function describeBrowserAsk(name: string, input: Record<string, any>, currentUrl: string | null): { text: string; detail?: string } {
-  let site = "a website";
-  try {
-    site = (currentUrl && new URL(currentUrl).hostname) || site;
-  } catch {
-    /* not an address: say "a website" */
-  }
-  switch (name.replace("mcp__browser__agent_browser_", "")) {
-    case "click":
-    case "dblclick":
-      return { text: `Claude wants to click on ${site}`, ...(input.selector ? { detail: String(input.selector) } : {}) };
-    case "fill":
-    case "type":
-      return { text: `Claude wants to type into a form on ${site}`, detail: String(input.text ?? "").slice(0, 80) };
-    case "press":
-      return { text: `Claude wants to press a key on ${site}`, detail: String(input.key ?? "") };
-    case "eval":
-      return { text: `Claude wants to run a script on ${site}`, detail: String(input.script ?? "").slice(0, 300) };
-    default:
-      return { text: `Claude wants to use the browser on ${site}`, detail: JSON.stringify(input).slice(0, 300) };
-  }
-}
-
-/** The permission question for a risky action: what it asks, the detail to show under it, and why (the model's own words, for a command). */
-export function describeAsk(name: string, input: Record<string, any>, cwd: string, currentUrl: string | null = null): { text: string; detail?: string; why?: string } {
-  if (name.startsWith("mcp__browser__")) return describeBrowserAsk(name, input, currentUrl);
-  switch (name) {
-    case "Write":
-      return { text: `Claude wants to create the file ${rel(input.file_path, cwd)}` };
-    case "Edit":
-    case "MultiEdit":
-      return { text: `Claude wants to change the file ${rel(input.file_path, cwd)}` };
-    case "Bash":
-      return {
-        text: "Claude wants to run a command",
-        detail: String(input.command ?? ""),
-        ...(input.description ? { why: String(input.description) } : {}),
-      };
-    case "WebFetch":
-      return { text: `Claude wants to open ${input.url ?? ""}` };
-    default:
-      return { text: `Claude wants to use ${name}`, detail: JSON.stringify(input).slice(0, 300) };
-  }
-}
-
-/** A question card or plan card for AskUserQuestion / ExitPlanMode, or null for any other tool (and for an empty question or plan). Pure. */
-export function askForm(tool: string, input: Record<string, any>): { text: string; form: "question"; questions: AskQuestion[] } | { text: string; form: "plan"; plan: string } | null {
-  if (tool === "AskUserQuestion") {
-    const questions: AskQuestion[] = [];
-    for (const q of Array.isArray(input.questions) ? input.questions : []) {
-      const question = typeof q?.question === "string" ? q.question.slice(0, 500) : "";
-      if (!question.trim()) continue;
-      const options: AskQuestion["options"] = [];
-      for (const o of Array.isArray(q.options) ? q.options : []) {
-        const label = typeof o?.label === "string" ? o.label.slice(0, 200) : "";
-        if (!label.trim()) continue;
-        options.push({ label, ...(typeof o.description === "string" ? { description: o.description.slice(0, 500) } : {}) });
-        if (options.length === 8) break;
-      }
-      questions.push({
-        question,
-        ...(typeof q.header === "string" ? { header: q.header.slice(0, 40) } : {}),
-        ...(q.multiSelect === true ? { multiSelect: true } : {}),
-        options,
-      });
-      if (questions.length === 4) break;
-    }
-    if (questions.length === 0) return null;
-    return { text: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`, form: "question", questions };
-  }
-  if (tool === "ExitPlanMode") {
-    const plan = String(input.plan ?? "").slice(0, MAX_TEXT);
-    if (!plan.trim()) return null;
-    return { text: "Claude's plan is ready", form: "plan", plan };
-  }
-  return null;
-}
-
-/** The control_response body for a permission question, and the words the person gave (the reply, when there are any). Pure. */
-export function answerResponse(
-  tool: string,
-  input: Record<string, unknown>,
-  allow: boolean,
-  extra: { answers?: Record<string, string>; message?: string; remember?: string },
-): { response: Record<string, unknown>; reply?: string } {
-  if (tool === "AskUserQuestion") {
-    if (!allow) return { response: { behavior: "deny", message: "The user chose not to answer." } };
-    // The card shows a question cut to 500 characters, so its answer may come back under the cut text: file it under the full one.
-    const known = new Map<string, string>();
-    for (const q of Array.isArray(input.questions) ? input.questions : []) {
-      if (typeof q?.question !== "string") continue;
-      known.set(q.question, q.question);
-      known.set(q.question.slice(0, 500), q.question);
-    }
-    const answers: Record<string, string> = Object.create(null);
-    for (const [question, value] of Object.entries(extra.answers ?? {})) {
-      const full = known.get(question);
-      if (full !== undefined && typeof value === "string" && value.trim()) answers[full] = value.slice(0, 2000);
-    }
-    return { response: { behavior: "allow", updatedInput: { ...input, answers } }, reply: Object.values(answers).join("; ") };
-  }
-  if (tool === "ExitPlanMode") {
-    if (allow) return { response: { behavior: "allow", updatedInput: input } };
-    const message = String(extra.message ?? "").trim().slice(0, 2000);
-    if (!message) return { response: { behavior: "deny", message: "The user did not approve the plan." } };
-    return { response: { behavior: "deny", message: `The user wants changes to the plan: ${message}` }, reply: message };
-  }
-  if (!allow) return { response: { behavior: "deny", message: "The user said no." } };
-  // "Always allow": Claude is also told to remember the rule for this session (best effort; the rule is kept on the project and passed with --allowedTools at every start)
-  const remember = extra.remember && validRule(extra.remember) ? [{ type: "addRules", rules: [ruleParts(extra.remember)], behavior: "allow", destination: "session" }] : undefined;
-  return { response: { behavior: "allow", updatedInput: input, ...(remember ? { updatedPermissions: remember } : {}) } };
-}
-
-/** What the user reads when Claude fails. The raw CLI text goes to the server log, not the chat. */
-export function friendlyError(raw: string): string {
-  if (/overloaded|\b529\b/i.test(raw) && !limitReached(raw)) return "Claude is busy right now. Try again in a little while.";
-  if (/usage limit|rate limit|limit reached|quota/i.test(raw) || limitReached(raw)) return "Claude has reached its usage limit for now. Try again in a little while.";
-  if (/not logged in|log ?in|login|authenticat|401|invalid api key|credential/i.test(raw)) return "Claude is signed out on this server. Open Settings → Agents to check the connection.";
-  if (/is not installed on this server/i.test(raw)) return "Claude is not set up on this server yet. Open Settings → Agents.";
-  return "Something went wrong on Claude's side. Try again.";
-}
-
-/** The names the "Switched to" line shows: the same as web/src/lib/agentName.ts. */
-const AGENT_NAMES: Record<string, string> = { claude: "Claude", hermes: "Hermes", omp: "omp", codex: "Codex", gemini: "Gemini", opencode: "OpenCode", pi: "Pi", sh: "Terminal" };
-/** Lines that were notes before they had their own kind: saved conversations still hold them as tool lines. */
-const OLD_NOTE_LINE = /^(Switched to |Went back to before: |Background task finished|A background task finished|Conversation compacted)/;
-
-/** The conversation as one line per message or action, oldest first, for an AI that joins it: the first message the person sent is always kept, then the latest lines as far as the budget goes, and a line says how many were left out. "" when there is nothing. Pure.
- *  ponytail: the summary is cut by characters, not by tokens. _fromName is not used: the lines say "Assistant", so the new AI is not told which AI it replaces. */
-export function handoffText(events: ChatEvent[], _fromName: string, budget = 12000): string {
-  const oneLine = (s: string) => {
-    const t = s.replace(/\s+/g, " ").trim();
-    return t.length > 240 ? `${t.slice(0, 237)}...` : t;
-  };
-  const answered = new Set(events.flatMap((e) => (e.kind === "answer" ? [e.requestId] : [])));
-  const lines: string[] = [];
-  for (const e of events) {
-    if (e.kind === "user") lines.push(oneLine(`Person: ${e.text}`));
-    else if (e.kind === "assistant") lines.push(oneLine(`Assistant: ${e.text}`));
-    else if (e.kind === "tool" && e.text.trim() && !OLD_NOTE_LINE.test(e.text)) lines.push(oneLine(`Did: ${e.text}${e.file ? ` (${e.file})` : ""}`));
-    else if (e.kind === "ask" && answered.has(e.requestId)) lines.push(oneLine(`Assistant asked: ${e.questions?.map((q) => q.question).join(" ") || e.plan || e.text}`));
-  }
-  if (lines.length === 0) return "";
-  const omit = (n: number) => `(… ${n} earlier lines left out …)`;
-  const reserve = omit(lines.length).length + 1;
-  const first = lines.findIndex((l) => l.startsWith("Person: "));
-  const keep = new Set<number>();
-  let used = 0;
-  if (first >= 0) {
-    keep.add(first);
-    used += lines[first].length + 1;
-  }
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (keep.has(i)) continue;
-    if (used + lines[i].length + 1 + reserve > budget) break;
-    keep.add(i);
-    used += lines[i].length + 1;
-  }
-  const omitted = lines.length - keep.size;
-  const out: string[] = [];
-  if (first < 0 && omitted > 0) out.push(omit(omitted));
-  lines.forEach((l, i) => {
-    if (!keep.has(i)) return;
-    out.push(l);
-    if (i === first && omitted > 0) out.push(omit(omitted));
-  });
-  return out.join("\n");
 }
 
 interface Live {
@@ -536,34 +234,7 @@ function ask(live: Live, request: Record<string, unknown>, requestId = `ctl-${++
   });
 }
 
-const chatsDir = () => join(WORKS_DIR, "chats");
-const transcriptPath = (id: string) => join(chatsDir(), `${id}.jsonl`);
-const cursorPath = (id: string) => join(chatsDir(), `${id}.cursor.json`);
 const capsPath = (id: string) => join(chatsDir(), `${id}.caps.json`);
-/** A terminal project's first import reads at most this many bytes of Claude's transcript, and shows its last FIRST_IMPORT events. */
-const TAIL_BYTES = 8 * 1024 * 1024;
-const FIRST_IMPORT = 300;
-
-/** Claude Code's transcript for a session: under the home, in a folder named after the worktree path. */
-function transcriptFile(home: string, cwd: string, sid: string, configDir?: string): string {
-  return join(configDir ?? join(home, ".claude"), "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), `${sid}.jsonl`);
-}
-
-/** How far into a terminal project's transcript the chat has read, for one session. */
-function readCursor(id: string): { sid: string; offset: number } | null {
-  try {
-    const c = JSON.parse(readFileSync(cursorPath(id), "utf8"));
-    return typeof c.sid === "string" && Number.isSafeInteger(c.offset) && c.offset >= 0 ? c : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCursor(id: string, sid: string, offset: number) {
-  mkdirSync(chatsDir(), { recursive: true, mode: 0o700 });
-  writeFileSync(cursorPath(id), JSON.stringify({ sid, offset }), { mode: 0o600 });
-}
-
 /** A caps file's contents, or null when it is missing or corrupt. Never throws. */
 export function readCapsFile(file: string): Omit<CapsFile, "savedAt"> | null {
   try {
@@ -602,22 +273,6 @@ export function writeCapsFile(file: string, data: CapsFile): void {
   for (const f of readdirSync(dirname(file))) if (f.startsWith(`${basename(file)}.`) && f.endsWith(".tmp")) rmSync(join(dirname(file), f), { force: true });
 }
 
-/** The one-line note for a finished background task, from its <task-notification> text. */
-function taskFinishedLine(text: string): string {
-  const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1].trim().slice(0, 120);
-  return summary ? `Background task finished: ${summary}` : "A background task finished";
-}
-
-/** The quiet line for a CLI system notice (a model switch, a compaction), or null for any other notice. Pure. */
-export function noticeText(m: any): string | null {
-  if (m?.subtype === "model_fallback") {
-    const model = typeof m.fallback_model === "string" ? m.fallback_model : "another model";
-    return `Switched to ${model} because the first choice was unavailable`;
-  }
-  if (m?.subtype === "compact_boundary") return "Conversation compacted to save space";
-  return null;
-}
-
 /** The background tasks a background_tasks_changed line lists. Pure. */
 function bgTasks(x: unknown): BgTask[] {
   if (!Array.isArray(x)) return [];
@@ -625,9 +280,6 @@ function bgTasks(x: unknown): BgTask[] {
     .filter((t) => typeof t?.task_id === "string")
     .map((t) => ({ id: t.task_id, type: String(t.task_type ?? ""), description: String(t.description ?? "").slice(0, 200) }));
 }
-
-/** One item of Claude's checklist: its text and where it stands. */
-export type Todo = { text: string; status: "pending" | "active" | "done"; id?: string; subject?: string; form?: string };
 
 /** Show the active form while a task is active, the subject otherwise. */
 const shown = (t: Todo): Todo => ({ ...t, text: (t.status === "active" && t.form ? t.form : t.subject ?? t.text).slice(0, 200) });
@@ -676,189 +328,6 @@ export function todosOf(input: unknown): Todo[] {
     });
 }
 
-/** The label of a helper agent (a Task or Agent tool call): its description, else the start of its prompt. Pure. */
-export function helperLabel(input: unknown): string {
-  const i = (input ?? {}) as { description?: unknown; prompt?: unknown };
-  const flat = (x: unknown) => (typeof x === "string" ? x.replace(/\s+/g, " ").trim() : "");
-  const d = flat(i.description);
-  const p = flat(i.prompt).slice(0, 60).trim();
-  return (d || p || "a helper").slice(0, 80).trim();
-}
-
-/** One helper agent in the run view (chat snapshot helperTree). Opaque ids: parentId points at another node's id. */
-export interface HelperNode {
-  id: string;
-  taskId: string | null;
-  parentId: string | null;
-  label: string;
-  kind: string | null;
-  model: string | null;
-  status: "running" | "done" | "failed" | "stopped";
-  background: boolean;
-  startedAt: number;
-  endedAt: number | null;
-  tools: number | null;
-  tokens: number | null;
-  lastTool: string | null;
-  summary: string | null;
-  canStop: boolean;
-}
-
-const HELPER_CAP = 50;
-const oneLineText = (x: unknown, n: number): string => (typeof x === "string" ? x.replace(/\s+/g, " ").trim().slice(0, n) : "");
-const textOrNull = (x: unknown, n: number): string | null => oneLineText(x, n) || null;
-const countOrNull = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? Math.round(x) : null);
-
-/** Parents before their children (an unknown parent makes a root), otherwise in the order they came. */
-function orderNodes(nodes: HelperNode[]): HelperNode[] {
-  const ids = new Set(nodes.map((n) => n.id));
-  const out: HelperNode[] = [];
-  const seen = new Set<string>();
-  const visit = (n: HelperNode) => {
-    if (seen.has(n.id)) return;
-    seen.add(n.id);
-    out.push(n);
-    for (const c of nodes) if (c.parentId === n.id) visit(c);
-  };
-  for (const n of nodes) if (!n.parentId || !ids.has(n.parentId)) visit(n);
-  for (const n of nodes) visit(n); // a loop of parents: still shown
-  return out;
-}
-
-/** A task event's end time as epoch ms: seconds, milliseconds or an ISO string. Null when it is none of them. */
-function endTimeOf(x: unknown): number | null {
-  const t = typeof x === "string" ? Date.parse(x) : typeof x === "number" ? x : NaN;
-  if (!Number.isFinite(t) || t <= 0) return null;
-  return t < 1e12 ? Math.round(t * 1000) : Math.round(t);
-}
-
-/** The helper agents after one line of the CLI's stream. Every field is optional: a line that is not about helpers changes nothing. Pure (returns a new list). */
-export function applyHelperLine(nodes: HelperNode[], m: any, now: number): HelperNode[] {
-  if (!m || typeof m !== "object") return nodes;
-  const sub = m.type === "system" ? m.subtype : undefined;
-  const isTask = sub === "task_started" || sub === "task_progress" || sub === "task_updated" || sub === "task_notification";
-  if (!isTask && m.type !== "assistant" && m.type !== "user") return nodes;
-  const list = nodes.map((n) => ({ ...n }));
-  const find = (toolUseId: unknown, taskId: unknown) =>
-    list.find((n) => (typeof toolUseId === "string" && toolUseId !== "" && n.id === toolUseId) || (typeof taskId === "string" && taskId !== "" && n.taskId === taskId));
-  const make = (id: string, over: Partial<HelperNode> = {}): HelperNode => ({
-    id, taskId: null, parentId: null, label: "a helper", kind: null, model: null, status: "running", background: false,
-    startedAt: now, endedAt: null, tools: null, tokens: null, lastTool: null, summary: null, canStop: false, ...over,
-  });
-  const finish = (n: HelperNode, status: HelperNode["status"], at: number = now) => {
-    n.status = status;
-    n.endedAt ??= at;
-  };
-  if (m.type === "assistant") {
-    const parent = typeof m.parent_tool_use_id === "string" && m.parent_tool_use_id ? m.parent_tool_use_id : null;
-    const blocks: any[] = Array.isArray(m.message?.content) ? m.message.content : [];
-    if (parent) {
-      const n = list.find((x) => x.id === parent);
-      if (n) {
-        const model = textOrNull(m.message?.model, 100);
-        if (model) n.model = model;
-        const last = [...blocks].reverse().find((b) => b?.type === "tool_use" && typeof b.name === "string");
-        if (last) n.lastTool = oneLineText(last.name, 100);
-      }
-    }
-    for (const b of blocks) {
-      if (b?.type !== "tool_use" || (b.name !== "Agent" && b.name !== "Task") || typeof b.id !== "string" || !b.id) continue;
-      const have = find(b.id, null);
-      const kind = textOrNull(b.input?.subagent_type, 60);
-      const model = textOrNull(b.input?.model, 100);
-      if (have) {
-        have.kind ??= kind;
-        have.model ??= model;
-        continue;
-      }
-      list.push(make(b.id, { parentId: parent, label: helperLabel(b.input), kind, model, background: b.input?.run_in_background === true }));
-    }
-  } else if (m.type === "user") {
-    for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
-      if (b?.type !== "tool_result") continue;
-      const n = find(b.tool_use_id, null);
-      // a helper started in the background answers its call at once and goes on
-      if (n && n.status === "running" && !n.background) finish(n, b.is_error ? "failed" : "done");
-    }
-  } else if (sub === "task_started") {
-    const tuid = typeof m.tool_use_id === "string" && m.tool_use_id ? m.tool_use_id : null;
-    const tid = typeof m.task_id === "string" && m.task_id ? m.task_id : null;
-    if (!tuid && !tid) return nodes;
-    let n = find(tuid, tid);
-    if (!n) {
-      // a background command is a task too, but not a helper
-      if (typeof m.task_type === "string" && /bash|shell/i.test(m.task_type) && !m.subagent_type) return nodes;
-      n = make(tuid ?? `task:${tid}`, { label: oneLineText(m.description, 80) || "a helper" });
-      list.push(n);
-    } else if (n.label === "a helper") n.label = oneLineText(m.description, 80) || n.label;
-    n.taskId ??= tid;
-    n.kind ??= textOrNull(m.subagent_type, 60);
-    if (m.is_backgrounded === true) n.background = true;
-    if (!n.parentId && typeof m.parent_task_id === "string" && m.parent_task_id) n.parentId = list.find((x) => x.taskId === m.parent_task_id)?.id ?? `task:${m.parent_task_id}`;
-  } else if (sub === "task_progress") {
-    const n = find(m.tool_use_id, m.task_id);
-    if (!n) return nodes;
-    const tools = countOrNull(m.usage?.tool_uses);
-    const tokens = countOrNull(m.usage?.total_tokens);
-    if (tools !== null) n.tools = tools;
-    if (tokens !== null) n.tokens = tokens;
-    const last = textOrNull(m.last_tool_name, 100);
-    if (last) n.lastTool = last;
-    const summary = textOrNull(m.summary, 200);
-    if (summary) n.summary = summary;
-  } else if (sub === "task_updated") {
-    const n = find(null, m.task_id);
-    if (!n) return nodes;
-    const patch = m.patch ?? {};
-    const to = patch.status === "completed" ? "done" : patch.status === "failed" ? "failed" : patch.status === "killed" ? "stopped" : patch.status === "pending" || patch.status === "running" || patch.status === "paused" ? "running" : null;
-    if (to && to !== "running") {
-      n.status = to;
-      n.endedAt ??= endTimeOf(patch.end_time) ?? now;
-    } else if (to === "running" && n.status === "running") n.endedAt = null;
-    if (typeof patch.is_backgrounded === "boolean") n.background = patch.is_backgrounded;
-    const err = textOrNull(patch.error, 200);
-    if (err && n.status === "failed") n.summary = err;
-  } else if (sub === "task_notification") {
-    const n = find(m.tool_use_id, m.task_id);
-    if (!n) return nodes;
-    const to = m.status === "completed" ? "done" : m.status === "failed" ? "failed" : m.status === "stopped" ? "stopped" : null;
-    if (to) finish(n, to);
-    const summary = textOrNull(m.summary, 200);
-    if (summary) n.summary = summary;
-    const tools = countOrNull(m.usage?.tool_uses);
-    const tokens = countOrNull(m.usage?.total_tokens);
-    if (tools !== null) n.tools = tools;
-    if (tokens !== null) n.tokens = tokens;
-  }
-  while (list.length > HELPER_CAP) {
-    const old = list.findIndex((n) => n.status !== "running");
-    list.splice(old < 0 ? 0 : old, 1);
-  }
-  return orderNodes(list);
-}
-
-/** A new turn: helpers that finished are gone, the ones still running in the background stay. */
-export const helpersNewTurn = (nodes: HelperNode[]): HelperNode[] => nodes.filter((n) => n.status === "running");
-/** A turn's result: helpers working in the foreground are done, background ones go on. */
-export const helpersAtResult = (nodes: HelperNode[], now: number): HelperNode[] =>
-  nodes.map((n) => (n.status === "running" && !n.background ? { ...n, status: "done" as const, endedAt: now } : n));
-/** The process ended: nothing is running any more. */
-export const helpersAtExit = (nodes: HelperNode[], now: number): HelperNode[] =>
-  nodes.map((n) => (n.status === "running" ? { ...n, status: "stopped" as const, endedAt: now } : n));
-
-/** The model and token count a done line carries, from the turn's result line. Each is left out when unknown. Pure. */
-export function doneFields(model: unknown, usage: unknown): { model?: string; tokens?: { in: number; out: number } } {
-  const u = (usage ?? {}) as Record<string, unknown>;
-  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : null);
-  const parts = [n(u.input_tokens), n(u.cache_read_input_tokens), n(u.cache_creation_input_tokens)];
-  const out = n(u.output_tokens);
-  const known = parts.some((x) => x !== null) || out !== null;
-  return {
-    ...(typeof model === "string" && model ? { model } : {}),
-    ...(known ? { tokens: { in: parts.reduce<number>((a, x) => a + (x ?? 0), 0), out: out ?? 0 } } : {}),
-  };
-}
-
 /** The usage the footer shows, from the two replies: get_context_usage and get_usage. Pure. */
 export function usageOf(context: any, plan: any): Usage {
   const used = Number(context?.totalTokens);
@@ -872,59 +341,6 @@ export function usageOf(context: any, plan: any): Usage {
       ? { subscription: typeof plan.subscription_type === "string" ? plan.subscription_type : null, fiveHour: window(rl.five_hour), week: window(rl.seven_day) }
       : null,
   };
-}
-
-/** Bookkeeping tools whose calls are not shown as steps (the checklist already shows the tasks). */
-const HIDDEN_TOOLS = new Set(["TodoWrite", "ToolSearch", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskStop"]);
-
-/** Claude Code's transcript lines as chat events: what the person wrote and what Claude said and did. Pure. */
-export function transcriptEvents(lines: string[], cwd: string): Body[] {
-  const out: Body[] = [];
-  const shown = new Set<string>(); // tool ids whose line this call emitted: their results follow in the same lines
-  for (const line of lines) {
-    let m: any;
-    try {
-      m = JSON.parse(line);
-    } catch {
-      continue; // a torn or foreign line: skip it
-    }
-    if (!m || typeof m !== "object" || m.isSidechain || m.isMeta) continue; // a helper agent's work, or a note for Claude itself
-    // a compaction note: one quiet line. Model switches are live-only, so they are not read from the transcript.
-    if (m.type === "system" && m.subtype === "compact_boundary") out.push({ kind: "note", text: noticeText(m) ?? "" });
-    if (m.type === "user") {
-      const content = m.message?.content;
-      for (const b of Array.isArray(content) ? content : []) {
-        if (b?.type !== "tool_result" || !shown.has(b.tool_use_id)) continue;
-        shown.delete(b.tool_use_id);
-        const output = resultText(b.content);
-        if (output !== "" || b.is_error) out.push({ kind: "result", toolId: b.tool_use_id, output, ...(b.is_error ? { failed: true } : {}) });
-      }
-      let text = "";
-      if (typeof content === "string") text = content;
-      else if (Array.isArray(content)) text = content.map((b) => (b?.type === "text" && typeof b.text === "string" ? b.text : "")).join("\n");
-      text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
-      // a slash command's own bookkeeping, not a message
-      if (!text || ["<command-name>", "<local-command", "<command-message>"].some((p) => text.startsWith(p))) continue;
-      // a background task's note to Claude: one quiet line; a helper's message to Claude: not the person's
-      if (text.startsWith("<task-notification>")) {
-        out.push({ kind: "note", text: taskFinishedLine(text) });
-        continue;
-      }
-      if (text.startsWith("<agent-message")) continue;
-      out.push({ kind: "user", text });
-    } else if (m.type === "assistant") {
-      for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
-        if (b?.type === "text" && typeof b.text === "string" && b.text.trim()) out.push({ kind: "assistant", text: b.text.trim() });
-        else if (b?.type === "tool_use" && typeof b.name === "string" && !HIDDEN_TOOLS.has(b.name)) {
-          const detail = toolDetail(b.name, b.input ?? {}, cwd);
-          const file = toolFile(b.name, b.input ?? {}, cwd);
-          shown.add(b.id);
-          out.push({ kind: "tool", text: describeTool(b.name, b.input ?? {}, cwd), toolId: b.id, ...(detail !== undefined ? { detail } : {}), ...(file !== undefined ? { file } : {}) });
-        }
-      }
-    }
-  }
-  return out;
 }
 
 /** A terminal project: copy the lines the terminal's Claude wrote since the last look into the chat. Also runs once for a chat project that switched to an earlier conversation. Never throws. */
@@ -2933,88 +2349,6 @@ export async function chatBranch(id: string, n: unknown): Promise<void> {
 
 // ---- Continue fresh: a new AI session that picks up from a handoff note the old one wrote ----
 
-/** The context fullness (percent) from which the chat suggests a fresh start, and from which Kohlab does it by itself (when allowed). */
-export const FRESH_BANNER_PERCENT = 70;
-export const FRESH_AUTO_PERCENT = 85;
-
-/** The one message the old session is sent. It is not shown as the person's message. */
-export const HANDOFF_REQUEST =
-  "Before we continue in a fresh session, write a handoff note so a new session can pick up exactly where we are. " +
-  "Reply ONLY with a fenced block ```handoff containing these headings: Goal, Done, In progress, Next steps, Key decisions, Files that matter, Open questions. " +
-  "Be specific and brief (under 600 words). Do not change any files.";
-
-const HANDOFF_CAP = 8000;
-
-/** The handoff note in an AI's reply: the first closed ```handoff block, trimmed and cut to 8000 characters. Fences inside it (with a language) stay part of it; a block opened with four or more backticks holds plain three-backtick fences. Null when there is none. Pure. */
-export function extractHandoff(reply: string): string | null {
-  const lines = reply.replace(/\r/g, "").split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const open = /^\s{0,3}(`{3,})\s*handoff\s*$/i.exec(lines[i]);
-    if (!open) continue;
-    const ticks = open[1].length;
-    let depth = 0;
-    let closed = false;
-    const body: string[] = [];
-    for (let j = i + 1; j < lines.length; j++) {
-      const fence = /^\s{0,3}(`{3,})(.*)$/.exec(lines[j]);
-      if (fence) {
-        const n = fence[1].length;
-        const info = fence[2].trim();
-        if (n >= ticks && info === "" && depth === 0) {
-          closed = true;
-          break;
-        }
-        if (ticks === 3 && n === 3) {
-          if (info !== "") depth++;
-          else if (depth > 0) depth--;
-        }
-      }
-      body.push(lines[j]);
-    }
-    const text = body.join("\n").trim();
-    if (closed && text) return text.slice(0, HANDOFF_CAP);
-  }
-  return null;
-}
-
-const HANDOFF_HEADINGS = ["goal", "done", "in progress", "next steps", "key decisions", "files that matter", "open questions"];
-
-/** Whether a handoff note has anything under "In progress" or "Next steps" (so the new session can be sent on at once). Pure. */
-export function handoffHasWork(note: string): boolean {
-  const lines = note.split("\n");
-  const clean = (l: string) => l.replace(/^[\s#>*_-]+/, "").replace(/[\s*_]+$/, "");
-  const empty = (t: string) => t.replace(/^[\s*_-]+/, "").trim() === "" || /^(none|n\/a|nothing|nil|-+)\.?$/i.test(t.replace(/^[\s*_-]+/, "").trim());
-  let current: string | null = null;
-  for (const l of lines) {
-    const c = clean(l);
-    const low = c.toLowerCase();
-    const h = HANDOFF_HEADINGS.find((x) => low === x || low.startsWith(`${x}:`));
-    if (h) {
-      current = h;
-      if ((h === "in progress" || h === "next steps") && low.startsWith(`${h}:`) && !empty(c.slice(h.length + 1))) return true;
-      continue;
-    }
-    if ((current === "in progress" || current === "next steps") && !empty(c)) return true;
-  }
-  return false;
-}
-
-/** The first message of the fresh session: the handoff note, the project's notes and the open checklist. Pure. */
-export function freshMessage(note: string, notes: string, todos: Pick<Todo, "text" | "status">[]): string {
-  const open = todos.filter((t) => t.status !== "done");
-  const parts = [`We are continuing in a fresh session. Here is the handoff note from the previous session:\n${note}`];
-  if (notes) parts.push(`Project notes:\n${notes}`);
-  if (open.length) parts.push(`Open checklist:\n${open.map((t) => `- [${t.status === "active" ? "~" : " "}] ${t.text}`).join("\n")}`);
-  parts.push("Continue with the next step.");
-  return parts.join("\n\n");
-}
-
-/** Whether Kohlab should continue fresh by itself now: "now", "pending" (wait for the turn or the background work to end) or "no". Pure. */
-export function freshDecision(x: { percent: number | null; auto: boolean; busy: boolean; waiting: boolean; background: boolean; recent: boolean; running: boolean }): "now" | "pending" | "no" {
-  if (x.running || x.recent || !x.auto || x.percent === null || x.percent < FRESH_AUTO_PERCENT) return "no";
-  return x.busy || x.waiting || x.background ? "pending" : "now";
-}
-
 /** Projects where a continue-fresh is under way, and those where it waits for the turn or the background work to end. */
 const freshing = new Set<string>();
 const freshPending = new Set<string>();
@@ -3185,9 +2519,6 @@ function maybeAutoFresh(id: string): void {
 }
 
 // ---- Usage limits: move the message on to the next account or model ----
-
-/** What a clock time reads as in a sentence the server writes: UTC, because the server does not know the viewer's zone. The page writes its own in the viewer's zone. */
-const clockText = (at: number) => `${new Date(at).toISOString().slice(11, 16)} UTC`;
 
 /** A model's name for a sentence: the list's own name, else the alias capitalised. */
 function modelName(id: string, value: string): string {

@@ -47,13 +47,13 @@ check("an ACP agent's first message carries the notes", notesMessagePrefix("Use 
 check("no notes, no ACP prefix", notesMessagePrefix(""), "");
 
 // ── the worked-time line ─────────────────────────────────────────────────────
-// ChatView.tsx cannot be imported here (it needs a browser), so its two pure
+// chat/text.ts cannot be imported here (it needs a browser), so its two pure
 // functions are cut out of the source and transpiled. They are self-contained.
-const view = readFileSync(join(ROOT, "web/src/components/ChatView.tsx"), "utf8");
+const view = readFileSync(join(ROOT, "web/src/components/chat/text.ts"), "utf8");
 function grab(name) {
   const start = view.indexOf(`export function ${name}(`);
   const end = view.indexOf("\n}\n", start);
-  if (start < 0 || end < 0) throw new Error(`${name} is not in ChatView.tsx`);
+  if (start < 0 || end < 0) throw new Error(`${name} is not in chat/text.ts`);
   return view.slice(start, end + 3).replace("export function", "function");
 }
 const js = new Bun.Transpiler({ loader: "ts" }).transformSync(`${grab("formatElapsed")}\n${grab("workedLine")}\nexport { formatElapsed, workedLine };`);

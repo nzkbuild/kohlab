@@ -6,7 +6,7 @@ import { agoText, accountLabel, orderCards, stateWord, untilText } from "../lib/
 import { announce } from "../lib/announce";
 import { useProviders } from "../lib/useProviders";
 import { cn } from "../lib/utils";
-import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, checkText } from "./AccountDialogs";
+import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, SignInAccountDialog, checkText } from "./AccountDialogs";
 import AiDefaultsPanel from "./AiDefaultsPanel";
 import ConfirmDialog from "./ConfirmDialog";
 import RulesPanel from "./RulesPanel";
@@ -269,6 +269,7 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
   const [removing, setRemoving] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const test = async () => {
@@ -330,6 +331,11 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
               </Button>
             </>
           ) : null}
+          {account.kind === "login" && account.state === "signed_out" ? (
+            <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setSigningIn(true)}>
+              Sign in
+            </Button>
+          ) : null}
           <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setRenaming(true)}>
             Rename
           </Button>
@@ -352,6 +358,7 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
             onConfirm={() => void remove()}
           />
           {renaming ? <RenameAccountDialog id={account.id} label={account.label} open onOpenChange={(v) => !v && setRenaming(false)} onDone={onChanged} /> : null}
+          {signingIn ? <SignInAccountDialog id={account.id} label={account.label} open onOpenChange={(v) => !v && setSigningIn(false)} onDone={onChanged} /> : null}
           {replacing ? <ReplaceKeyDialog id={account.id} label={account.label} open onOpenChange={(v) => !v && setReplacing(false)} /> : null}
         </>
       ) : null}
