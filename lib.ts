@@ -1811,7 +1811,7 @@ export function worktreePath(ws: Workspace) {
 
 /** The project brain's vault: beside the tree, never inside it, so Keep, Undo and the download never touch it. */
 export function brainRoot(ws: Workspace) {
-  return join(wsDir(ws), "brain");
+  return ws.brainDir ?? join(wsDir(ws), "brain");
 }
 
 /** Where pasted screenshots for a workspace live. Inside the private root for

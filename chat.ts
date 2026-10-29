@@ -19,6 +19,7 @@ import { RESET_FIELDS, resolveAi } from "./defaults";
 import { PERSONAL_ASKS, claudeArgsFor, cleanRules, defaultSteps, describeRule, isMode, limitReached, ruleFor, validRule } from "./policy";
 import { notifyNeedsYou } from "./push";
 import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
+import { teamMcp } from "./team";
 import { devServerOrigin } from "./devserver";
 import { goBackTo, snapshotTree, turnChanges, type TurnFile } from "./checkpoints";
 import { ACP_AGENTS, AcpClient, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
@@ -108,9 +109,9 @@ function brainStatOf(ws: Workspace): { notes: number; tokens: number } | null {
   }
 }
 
-/** The project brain's summary for a chat's prompt: "" for a terminal project or on any error. Reads only: never creates the vault. */
+/** The project brain's summary for a chat's prompt: "" for a terminal project, a team builder, or on any error. Reads only: never creates the vault. */
 export function brainSummaryOf(ws: Workspace): string {
-  if (!ws.chat) return "";
+  if (!ws.chat || ws.team?.role.startsWith("builder")) return "";
   try {
     return summaryOf(brainRoot(ws)).text;
   } catch {
@@ -559,7 +560,7 @@ function stop(id: string) {
 /** Tell the phone that Claude is waiting on a question. A failed push must never stall the chat. */
 function pingNeedsYou(id: string, question: string) {
   getWorkspace(id)
-    .then((ws) => notifyNeedsYou(ws, question))
+    .then((ws) => (ws.team ? undefined : notifyNeedsYou(ws, question))) // a team agent's question is the team's, shown on its Team tab
     .catch((e) => console.warn(`[chat] needs-you push failed: ${(e as Error).message}`));
 }
 
@@ -998,15 +999,17 @@ async function start(ws: Workspace, id: string, opts: { model?: string } = {}): 
   const mode = term ? picked : ai.mode.value;
   const policy = mode ? claudeArgsFor(mode) : null;
   if (policy) args.push("--permission-mode", policy.permissionMode);
-  // the project brain's MCP server, chats only; left out when node or the callback cannot be had
-  const brainExtra = term ? null : await brainMcp(ws);
+  // the project brain's MCP server, chats only; left out when node or the callback cannot be had. A team agent gets it only when its role's rules name the brain's tools.
+  const brainExtra = term || (ws.team && !(ws.allowRules ?? []).some((r) => r.startsWith("mcp__brain__"))) ? null : await brainMcp(ws);
+  // a team agent's MCP server (team.ts): its tools are allowed by its role's rules, which the team keeps in allowRules
+  const teamExtra = ws.team ? await teamMcp(ws) : null;
   // what the person chose "Always allow" for, so it holds from this start on; a chat's brain tools are allowed too (they only read and save this project's notes)
   const rules = cleanRules(ws.allowRules);
-  const allowed = [...rules, ...(brainExtra ? ["mcp__brain__recall", "mcp__brain__remember"] : [])];
+  const allowed = [...rules, ...(brainExtra && !ws.team ? ["mcp__brain__recall", "mcp__brain__remember"] : [])];
   if (allowed.length) args.push("--allowedTools", allowed.join(","));
   if (!term) args.push("--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config");
-  // strict: only our browser tools (and the brain's) load, never the user's MCP servers
-  const mcpFile = writeBrowserMcp(ws, who, brainExtra ?? {});
+  // strict: only our browser tools (and the brain's, and a team's) load, never the user's MCP servers. Only a team's Tester gets the browser.
+  const mcpFile = writeBrowserMcp(ws, who, { ...(brainExtra ?? {}), ...(teamExtra ?? {}) }, { browser: !ws.team || ws.team.role === "tester" });
   if (mcpFile) args.push("--mcp-config", mcpFile);
   if (!term) args.push("--append-system-prompt", systemPromptFor(notesOf(ws), brainSummaryOf(ws)));
   if (ws.chatSession) args.push("--resume", ws.chatSession);
@@ -1074,6 +1077,11 @@ async function start(ws: Workspace, id: string, opts: { model?: string } = {}): 
   return live;
 }
 
+/** The chat's events after number `n`, as they are kept (team.ts reads a turn's done line from them). */
+export function eventsAfter(id: string, n: number): ChatEvent[] {
+  return load(id).events.filter((e) => e.n > n);
+}
+
 /** The chat transcript after event `after`, and whether a turn is in flight. */
 export async function snapshot(id: string, after: number, see: { usage: boolean; owner: boolean } = { usage: false, owner: false }) {
   const ws = await wsOf(id);
@@ -1101,7 +1109,7 @@ export async function snapshot(id: string, after: number, see: { usage: boolean;
     startAcp(ws, id).catch((e) => console.warn("[chat] warm-up:", (e as Error).message));
   }
   // a Claude project with no model list yet: its process starts quietly, once, for the list. start() sends only the initialize request, no message.
-  if (ws.chat && ws.agent === "claude" && !live && !caps.get(id)?.models.length && !agentInfo("claude").models.length && !warmed.has(id)) {
+  if (ws.chat && ws.agent === "claude" && !ws.team && !live && !caps.get(id)?.models.length && !agentInfo("claude").models.length && !warmed.has(id)) {
     warmed.add(id);
     start(ws, id).catch((e) => console.warn("[chat] warm-up:", (e as Error).message));
   }

@@ -256,10 +256,12 @@ export function writeBrowserMcp(
   ws: Workspace,
   who: ReturnType<typeof identityOf>,
   extra: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {},
+  opts: { browser?: boolean } = {},
 ): string | null {
   try {
-    // extra: more MCP servers beside the browser (the project brain's, for chats).
-    const config = { mcpServers: { browser: { command: BIN, args: ["mcp"], env: browserEnv(ws) }, ...extra } };
+    // extra: more MCP servers beside the browser (the project brain's, for chats). browser: false leaves the browser tools out (team agents other than the Tester).
+    const browser = opts.browser === false ? {} : { browser: { command: BIN, args: ["mcp"], env: browserEnv(ws) } };
+    const config = { mcpServers: { ...browser, ...extra } };
     const file = join(wsDir(ws), "kohlab-mcp.json");
     // wsDir can be writable by the agent's user: never write through a planted symlink.
     // unlink, then O_EXCL (which also refuses a symlink) with the final mode from the start.

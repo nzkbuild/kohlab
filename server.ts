@@ -103,6 +103,7 @@ import { AccountError, accountView, addCustomModel, createLogin, createRouter, g
 import { patchDefaults } from "./defaults";
 import { cleanRules, describeRule } from "./policy";
 import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, noteRecalled, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
+import { TeamError, resumeTeams, teamActive, teamCleanup, teamGet, teamPost, teamToolCall } from "./team";
 
 const PORT = Number(process.env.PORT ?? 7676);
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
@@ -168,6 +169,7 @@ function recordAuthFailure(address: string): void {
 
 // completion → push to every open dashboard + fire webhook
 onWorkspaceDone((ws) => {
+  if (ws.team) return; // a team agent finishing a turn is not news for the person; the Team tab shows it
   const msg = JSON.stringify({ type: "workspace.done", id: ws.id, task: ws.task, agent: ws.agent });
   for (const c of pushClients) {
     // `c.OPEN` does not exist on a Bun ServerWebSocket, so this comparison was
@@ -216,6 +218,7 @@ async function mayAccessWorkspace(auth: { kind?: string; id?: string; role?: str
 }
 startWatcher();
 restoreWaiting();
+void resumeTeams().catch((e) => console.warn(`[team] resume: ${(e as Error).message}`));
 
 
 
@@ -533,6 +536,8 @@ async function handleChatRun(id: string): Promise<Response> {
 }
 
 async function handleChatPost(id: string, req: Request, actor: string, sub: string | undefined, isOwner = false): Promise<Response> {
+  // a project's own chat waits while its team works on it (team.ts); the Team tab says what to do
+  if (teamActive(id)) return json({ error: "A team is working on this project. Open Team, or stop it first." }, 409);
   try {
     const body = (await req.json()) as { text?: unknown; requestId?: unknown; allow?: unknown; action?: unknown; value?: unknown; sid?: unknown; answers?: unknown; message?: unknown; n?: unknown; always?: unknown; with?: unknown };
     // a control action may answer with data (the files, the undo list): it is sent back as it is
@@ -667,6 +672,7 @@ async function handleRestart(id: string): Promise<Response> {
 
 async function handleDelete(id: string): Promise<Response> {
   try {
+    await teamCleanup(id); // a project's teams go with it: their agents, branches and folders
     const res = await deleteWorkspace(id);
     return json(res);
   } catch (e) {
@@ -1680,6 +1686,40 @@ async function handleBrainTool(id: string, req: Request): Promise<Response> {
   }
 }
 
+const MAX_TEAM_TOOL_BYTES = 32 * 1024;
+
+/** POST /api/team-tool/<team>, from a team agent's MCP server (team-mcp.cjs). Before the auth gate: the role's token in x-kohlab-team is the credential, and a wrong team or token gets the same 404. */
+async function handleTeamTool(teamId: string, req: Request): Promise<Response> {
+  const text = await readCapped(req, MAX_TEAM_TOOL_BYTES);
+  if (text === null) return json({ error: "body exceeds 32 KiB" }, 413);
+  let body: { tool?: unknown; args?: unknown };
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return json({ error: "body must be JSON" }, 400);
+  }
+  if (!body || typeof body !== "object") return json({ error: "body must be a JSON object" }, 400);
+  const out = await teamToolCall(teamId, req.headers.get("x-kohlab-team") ?? "", body);
+  return json(out.body, out.status);
+}
+
+/** The project's team routes: the Team tab reads it (GET, after=n for the events) and drives it (POST, by action). Writes need canMutate; full access is the owner's. */
+async function handleTeamPost(projectId: string, req: Request, actor: string, isOwner: boolean): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ error: "body must be JSON" }, 400);
+  }
+  if (!body || typeof body !== "object") return json({ error: "body must be a JSON object" }, 400);
+  try {
+    return json(await teamPost(projectId, body, { owner: isOwner, actor }));
+  } catch (e) {
+    if (e instanceof TeamError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
 /** The person's brain routes, after access is checked: the graph, a note, search, and the export. Writes need canMutate and are audited. Chats only. */
 async function handleBrainRoute(wsId: string, sub: string, req: Request, canMutate: boolean, actor: string): Promise<Response> {
   const ws = await getWorkspace(wsId).catch(() => null);
@@ -1811,6 +1851,12 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
       return handleBrainTool(brainToolM[1], req);
     }
+    // The team's tool callback (team.ts): the role's own token is the credential, as with the brain above.
+    const teamToolM = path.match(/^\/api\/team-tool\/([^/]+)$/);
+    if (teamToolM) {
+      if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: { allow: "POST" } });
+      return handleTeamTool(teamToolM[1], req);
+    }
     const m = path.match(/^\/api\/workspaces\/([^/]+)\/(start|stop|restart|continue|delete|diff|commit|merge|discard|files|file|raw|download|notes|fs|image|share|preview|rename|log|versions|restore|model|terminal|problems|copy|link)$/);
     const shareIdRes = m || url.searchParams.has("share") ? await shareId(req) : null;
 
@@ -1888,6 +1934,23 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       }
       const upgradeOpts = { data: { auth, canMutate, browser }, ...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
       if (server.upgrade(req, upgradeOpts)) return undefined;
+    }
+
+    // A team agent's workspace is the team's: only its chat, diff, log and pictures (raw, read-only) are reachable by its own route (team.ts). Everything else is refused.
+    const memberRouteM = path.match(/^\/api\/workspaces\/([^/]+)\/([^/?]+)/);
+    if (memberRouteM && !["chat", "diff", "log"].includes(memberRouteM[2]) && !(memberRouteM[2] === "raw" && req.method === "GET") && (await getWorkspace(memberRouteM[1]).then((w) => !!w.team, () => false))) {
+      return json({ error: "forbidden, a team agent's workspace is the team's" }, 403);
+    }
+
+    // The project's team (team.ts): the Team tab reads it and drives it. Share links are refused; viewers read, owners and members change it.
+    const teamM = path.match(/^\/api\/workspaces\/([^/]+)\/team$/);
+    if (teamM) {
+      if (url.searchParams.has("share") || auth?.kind === "share" || !(await mayAccessWorkspace(auth, teamM[1]))) return json({ error: "forbidden, not your workspace" }, 403);
+      if (req.method === "GET") return json(teamGet(teamM[1], Math.max(0, Number(url.searchParams.get("after")) || 0)));
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      const refused = gate(canMutate, "forbidden, viewer cannot change the team");
+      if (refused) return refused;
+      return handleTeamPost(teamM[1], req, actor, isOwner);
     }
 
     const chatM = path.match(/^\/api\/workspaces\/([^/]+)\/chat(\/answer|\/control|\/sessions|\/session|\/turn|\/goback|\/branch|\/run)?$/);
@@ -2317,8 +2380,8 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         return json([pub]);
       }
       if (denied) return json({ error: "unauthorized" }, 401);
-      // a named member only ever sees their own workspaces
-      const list = await listWorkspaces();
+      // a named member only ever sees their own workspaces; a team's hidden agents are never listed
+      const list = (await listWorkspaces()).filter((w) => !w.team);
       const scoped = auth?.kind === "user" && auth.role !== "owner" ? list.filter((w) => w.ownerId === auth.id) : list;
       return json(scoped);
     }

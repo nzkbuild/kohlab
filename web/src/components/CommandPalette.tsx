@@ -19,6 +19,7 @@ import {
   Plus,
   Terminal,
   TerminalWindow,
+  UsersThree,
   X,
   Copy,
 } from "@phosphor-icons/react";
@@ -63,6 +64,7 @@ function projectActionItems(
   requestPanel: (request: PanelRequest) => void,
   setNotesFor: (id: string | null) => void,
   hasWork: boolean,
+  openTeam: (id: string) => void,
 ): PaletteItem[] {
   const panel = (action: PanelAction) => () => requestPanel({ workspaceId: w.id, action });
   // A chat project's terminal is a power tool: it is listed only once power tools are on.
@@ -76,6 +78,9 @@ function projectActionItems(
       : []),
     ...(mutate && w.chat
       ? [{ id: "project-notes", label: `Notes for ${isAiAgent(w.agent) ? agentName(w.agent) : "the AI"}…`, group, icon: <NotePencil size={16} />, keywords: ["remember", "business", "colours", "tone", "brand", "instructions"], onAction: () => setNotesFor(w.id) }]
+      : []),
+    ...(mutate && w.chat
+      ? [{ id: "project-team", label: "Work as a team", group, icon: <UsersThree size={16} />, keywords: ["team", "agents", "lead", "builders", "reviewer"], onAction: () => openTeam(w.id) }]
       : []),
     ...(mutate ? [{ id: "project-copy", label: "Make a copy", group, icon: <Copy size={16} />, keywords: ["duplicate", "fork", "clone", "copy"], onAction: () => copyProject(w) }] : []),
     { id: "project-file", label: "Open file…", group, icon: <File size={16} />, keywords: ["files", "code", "browse"], onAction: panel("files") },
@@ -162,7 +167,7 @@ export default function CommandPalette() {
   const groupOrder: readonly PaletteGroup[] = projectGroup
     ? ["Views", "Projects", projectGroup, "Actions"]
     : ["Views", "Projects", "Actions"];
-  const projectItems: PaletteItem[] = openProject ? projectActionItems(openProject, projectGroup ?? "", can.mutate, powerTools, requestPanel, setNotesFor, hasWork) : [];
+  const projectItems: PaletteItem[] = openProject ? projectActionItems(openProject, projectGroup ?? "", can.mutate, powerTools, requestPanel, setNotesFor, hasWork, (id) => navigate({ kind: "workspace", id, tab: "team" })) : [];
   // The draft of the screen behind the palette (its chat, or Home). The prompt link is offered only while it has text.
   const draftScope = route.kind === "workspace" ? route.id : route.kind === "workspaces" ? "home" : null;
   const draftText = draftScope ? readDraft(draftScope) : "";

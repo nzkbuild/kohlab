@@ -17,6 +17,7 @@ import {
   Stop,
   Terminal,
   Trash,
+  UsersThree,
   X,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
@@ -88,6 +89,7 @@ function DiffView(props: { workspaceId: string; simple: boolean }) {
 }
 const FilesView = lazy(() => import("./FilesView"));
 const BrainView = lazy(() => import("./BrainView"));
+const TeamView = lazy(() => import("./TeamView"));
 
 type TabId = WorkspaceTab;
 
@@ -399,6 +401,17 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     };
   }, [workspaceId, chat, routeTab, lastCommitAt, reviewCount]);
   const showBrain = chat && (brainFilled || routeTab === "brain");
+  // The Team tab shows once the project has a team, or when "Work as a team" or a link asks for it. Team mode is for chat projects.
+  const [teamExists, setTeamExists] = useState(false);
+  useEffect(() => {
+    if (!chat) return;
+    let live = true;
+    api.team(workspaceId, 0).then((r) => live && setTeamExists(r.team !== null), () => {});
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, chat, routeTab]);
+  const showTeam = chat && (teamExists || routeTab === "team");
   // Hover, focus or the start of a press on the Changes tab: the diff and versions are on their way before the click lands.
   const warmChanges = { onPointerEnter: () => api.prefetchChanges(workspaceId), onFocus: () => api.prefetchChanges(workspaceId), onPointerDown: () => api.prefetchChanges(workspaceId) };
   // Changes opens on a first paint, not a download: fetch its code as soon as the tab exists.
@@ -413,8 +426,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     return () => cancel(h);
   }, []);
   const rawTab0: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat && !claudeTerminal ? "review" : "terminal");
-  // The Brain tab is for chat projects only: a link to it on any other project falls back to the chat.
-  const rawTab1: TabId = rawTab0 === "brain" && !showBrain ? "chat" : rawTab0;
+  // The Brain and Team tabs are for chat projects only: a link to either on any other project falls back to the chat.
+  const rawTab1: TabId = (rawTab0 === "brain" && !showBrain) || (rawTab0 === "team" && !showTeam) ? "chat" : rawTab0;
   const rawTab: TabId = rawTab1 === "review" && !showChanges ? "chat" : rawTab1;
   const tab: TabId =
     rawTab === "terminal" && (chat || claudeTerminal)
@@ -437,6 +450,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     ...(chat ? [] : [{ id: "terminal" as const, label: "Terminal" }]),
     ...(showChanges ? [{ id: "review" as const, label: "Changes" }] : []),
     ...(showBrain ? [{ id: "brain" as const, label: "Brain" }] : []),
+    ...(showTeam ? [{ id: "team" as const, label: "Team" }] : []),
     ...(powerTools ? [{ id: "files" as const, label: "Files" }] : []),
   ];
 
@@ -656,6 +670,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <MenuItem onSelect={() => setNotesFor(workspaceId)}>
           <NotePencil size={16} aria-hidden="true" />
           {`Notes for ${who ?? "the AI"}…`}
+        </MenuItem>
+      ) : null}
+      {chat && can.mutate ? (
+        <MenuItem onSelect={() => goTo("team")}>
+          <UsersThree size={16} aria-hidden="true" />
+          Work as a team
         </MenuItem>
       ) : null}
       <MenuItem onSelect={() => setRenaming(true)}>
@@ -921,6 +941,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               <ErrorBoundary label="Brain">
                 <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
                   {tab === "brain" ? <BrainView workspaceId={workspaceId} /> : null}
+                </Suspense>
+              </ErrorBoundary>
+            </TabPanel>
+          ) : null}
+
+          {showTeam ? (
+            <TabPanel value="team" className="h-full min-h-0" tabIndex={-1}>
+              <ErrorBoundary label="Team">
+                <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
+                  {tab === "team" ? <TeamView key={workspaceId} workspaceId={workspaceId} /> : null}
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>

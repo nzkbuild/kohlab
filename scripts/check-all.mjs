@@ -137,8 +137,14 @@ try {
   run("project brain (vault, links, summary, recall, undo)", "bun", ["scripts/check-brain.ts"]);
   run("project brain over HTTP and MCP (fake claude)", "node", ["scripts/check-brain-http.mjs"]);
   run("project brain graph (layout, sizes, recalled line)", "bun", ["scripts/check-brain-graph.mjs"]);
+  // Team mode (v2.8): the pure rules and the git steps (throwaway repos), and the team's text (digests, labels).
+  run("team core (areas, picks, budgets, digests, store, git on throwaway repos)", "bun", ["scripts/check-team-core.mjs"]);
+  run("team text (meters, durations, agent lines, board, event labels)", "bun", ["scripts/check-team-text.mjs"]);
   run("project brain in the browser (Brain tab, Run panel)", "node", ["scripts/check-brain-ui.mjs"]);
   // AI control (v2.6): each starts its own throwaway server with a fake claude (and fake router, Codex, omp) on PATH; no model is called.
+  // Team mode (v2.8): its own throwaway server with a scripted fake claude driving the real team MCP server; the Team tab in the browser.
+  run("team over HTTP and MCP (fake claude)", "node", ["scripts/check-team-http.mjs"]);
+  run("team tab in the browser (org chart, board, feed, phone switch)", "node", ["scripts/check-team-ui.mjs"]);
   run("AI defaults (project > default > built in, pinned by the first message, reset)", "bun", ["scripts/check-defaults.mjs"]);
   run("AI permissions (modes, Always allow, Full access, ACP decisions)", "bun", ["scripts/check-policy.mjs"]);
   run("AI accounts (second sign-in, router, canary key, custom models)", "bun", ["scripts/check-accounts.mjs"]);

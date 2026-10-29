@@ -47,6 +47,10 @@ export interface Workspace {
   hookToken?: string;
   /** secret for the brain tools' callback (POST /api/brain-tool/<id>), written into the chat's MCP config. Never sent to share viewers. */
   brainToken?: string;
+  /** a team agent's hidden workspace: its team and role (team.ts). Hidden from the project list. */
+  team?: { id: string; role: string };
+  /** the vault a team agent reads and writes: its project's brain, not its own. */
+  brainDir?: string;
   /** optional resource caps applied to the agent's PTY session */
   limits?: WorkspaceLimits;
   /** Claude model for this project, as Claude takes it: an alias, a model's own id, a router's id, or "default" (an explicit choice of the account's own). Undefined = inherit the server default. */

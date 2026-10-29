@@ -1,6 +1,20 @@
 import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BrainGraph, BrainHit, BrainNote, NoteType, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
 
+import type { Effort, Mode } from "./types";
+import type { Budget, Team, TeamEvent } from "./team-types";
+
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
+/** The project's team as the viewer may see it (no tokens), and the events after the `after` the read asked from. `team` is null when the project has none. */
+export interface TeamState { team: Team | null; events: TeamEvent[]; }
+/** One team action. Pause, resume, stop and land take an optional `role` where they act on one agent. */
+export type TeamAction =
+  | { action: "start"; goal: string; maxAgents: number; gate: "final" | "each"; builders: number; reviewer: boolean; tester: boolean }
+  | { action: "pause" | "resume" | "stop"; role?: string }
+  | { action: "land" }
+  | { action: "role"; role: string; account?: string; model?: string; effort?: Effort; mode?: Mode; budget?: Budget }
+  | { action: "say"; role: string; text: string }
+  | { action: "reassign"; task: string; role: string }
+  | { action: "budget"; budget: Budget; role?: string };
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
 /** A plan window's use in percent, and when it resets (an ISO time). */
 export interface ChatUsageWindow { percent: number; resetsAt: string | null; }
@@ -241,6 +255,15 @@ export const api = {
     }),
   deleteBrainNote: (id: string, name: string) =>
     json<{ ok: true }>(`/api/workspaces/${encodeURIComponent(id)}/brain/note?name=${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** The project's team and its events after `after`. Read-only for viewers; the Team tab polls it. */
+  team: (id: string, after = 0) => json<TeamState>(`/api/workspaces/${encodeURIComponent(id)}/team?after=${after}`),
+  /** One team action (start, pause, resume, stop, land, role, say, reassign, budget). Answers the team as it is after it. */
+  teamAction: (id: string, body: TeamAction) =>
+    json<TeamState>(`/api/workspaces/${encodeURIComponent(id)}/team`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   branches: (source: string) => json<{ branches: string[] }>(`/api/branches?source=${encodeURIComponent(source)}`),
   clone: (body: { url: string; task: string; agent: string; branch?: string; payload?: string; chat?: boolean; limits?: { timeoutSec?: number; maxMemoryMb?: number; maxProcs?: number } }) =>
     json<Workspace>("/api/clone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
