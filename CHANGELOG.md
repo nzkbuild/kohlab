@@ -9,6 +9,21 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.8.0] - 2026-10-29
+
+### Added
+- **Team mode.** Give a project a goal and a small team works on it in parallel: a Lead plans and splits the work, Builders each take a task, and a Reviewer checks every change before it's merged. Start it from the project menu ("Work as a team") or the command palette.
+- **Builders never collide.** Each task has its own area of files and its own copy of the project, so two builders never edit the same thing at once. If two pieces of work still clash, the team resolves it or asks you.
+- **Team tab:** who's on the team and what each one is doing, a task board (To do, Working, Review, Done), a live activity feed, and any member's chat on one click. On a phone it switches between Board, Team and Activity.
+- **You stay in control of every member:** its AI, model, account, effort and permission mode, plus a budget of tokens and minutes. A member that reaches its budget stops and asks you. Pause or stop one member or the whole team at any time.
+- **Nothing lands without you.** When the team finishes, its work arrives as ordinary changes you can Keep or Undo, as with any chat.
+- The team shares the project's brain, so decisions the Lead makes are remembered.
+
+### Changed
+- While a team is working on a project, that project's own chat waits until the team is stopped or finished.
+- Teams use more of your plan than one chat; by default the Lead uses Sonnet and the Builders use Haiku to keep costs down.
+- In the app, "Team" means AI agents; the people you share Kohlab with are still called members.
+
 ## [2.7.0] - 2026-10-29
 
 ### Added
