@@ -15,8 +15,19 @@ import { identityOf, worktreePath } from "./lib";
 export const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USER", "LOGNAME"];
 const DEV_WAIT_MS = 30_000;
 
+/** This server's own package name. A checkout of Kohlab must not run its own dev script. */
+const OWN_NAME: string = (() => {
+  try {
+    return JSON.parse(readFileSync(join(import.meta.dir, "package.json"), "utf8")).name ?? "kohlab";
+  } catch {
+    return "kohlab";
+  }
+})();
+
 /** The command that starts a project's dev server, or null when it has none. */
 export function detectDevCommand(pkg: any): string[] | null {
+  // running Kohlab's own dev script would start a second Kohlab on the live WORKS_DIR, PTY socket and daemon
+  if (pkg?.name === OWN_NAME) return null;
   const scripts = pkg?.scripts ?? {};
   if (typeof scripts.dev === "string" && scripts.dev.trim()) return ["npm", "run", "dev"];
   if (typeof scripts.start === "string" && scripts.start.trim()) return ["npm", "start"];

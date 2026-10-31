@@ -19,6 +19,8 @@ check("dev script wins", detectDevCommand({ scripts: { dev: "vite", start: "node
 check("start script when no dev", detectDevCommand({ scripts: { start: "node s.js" } }), ["npm", "start"]);
 check("no script is no command", detectDevCommand({ scripts: { build: "tsc" } }), null);
 check("no package.json is no command", detectDevCommand(null), null);
+check("own Kohlab checkout runs no dev command", detectDevCommand({ name: "kohlab", scripts: { dev: "bun run --watch server.ts" } }), null);
+check("other project's dev script runs", detectDevCommand({ name: "my-app", scripts: { dev: "vite" } }), ["npm", "run", "dev"]);
 
 const vite = "\x1b[32m➜\x1b[39m  Local:   \x1b[36mhttp://localhost:\x1b[1m5173\x1b[22m/\x1b[39m";
 check("vite colour codes stripped", parseDevUrl(vite), 5173);

@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.8.2] - 2026-10-31
+
+### Fixed
+- Preview on a copy of Kohlab itself no longer starts a second Kohlab in the background (which shared the live server's data and never answered). It shows the project's files instead.
+
 ## [2.8.1] - 2026-10-31
 
 ### Changed
