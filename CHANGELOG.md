@@ -9,6 +9,15 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.8.1] - 2026-10-31
+
+### Changed
+- **Calmer chat.** Each fact about the AI now shows once: the model and mode sit in the buttons under the message box, and the line above it says only which account is working and what it's doing. The full line is still read out to screen readers and shown on hover.
+- **Run details starts closed** and opens from that line. Inside, settings no longer carry a caption each, "Continue fresh" is one row ("Chat memory 10% full"), empty sections are hidden, replies show the latest 5 with "Show all", and the tool list and instructions sit under "More about this run".
+
+### Fixed
+- Run details could name a different mode from the one the message box showed (for example "Asks first" next to "Auto").
+
 ## [2.8.0] - 2026-10-29
 
 ### Added
