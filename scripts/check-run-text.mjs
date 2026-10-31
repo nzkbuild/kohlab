@@ -18,6 +18,7 @@ import {
   replyRows,
   resetsText,
   stateWord,
+  stripBrief,
   stripText,
   tokensText,
   usageText,
@@ -142,6 +143,7 @@ check("a plan share under 1% is not shown", rr[0].plan, null);
 check("a reply with nothing known has no parts", [rr[1].model, rr[1].time, rr[1].tokens, rr[1].plan], [null, null, null, null]);
 check("members see no plan share", replyRows(events, false).every((r) => r.plan === null), true);
 check("replyLine joins what is known", replyLine(rr[2]), "CLAUDE-SONNET-5-5 · 1m 12s · 12.3k tokens · 4% of your plan");
+check("a reply under a second has no time (no 0s)", replyRows([done(1, { worked: 900 })], false)[0].time, null);
 check("only the last 20 replies", replyRows(Array.from({ length: 30 }, (_, i) => done(i + 1)), false).length, 20);
 
 /* ---------------------------------------------------------- the words -- */
@@ -165,6 +167,16 @@ check("strip: extra words come after the state", stripText({ ...full, extra: "2 
 check("strip: a phone keeps AI, model and the short state", stripText(full, true), "Claude · Sonnet 5.5 · Working");
 check("strip: a phone drops extra words", stripText({ ...full, extra: "2 helpers working" }, true), "Claude · Sonnet 5.5 · Working");
 check("strip: empty parts are left out", stripText({ ai: "Claude", account: "", model: "  ", mode: null, state: "Ready" }), "Claude · Ready");
+
+/* ------------------------------------------------------- stripBrief -- */
+check("stripBrief: account and state (the composer chips say the AI, model and mode)", stripBrief(full), "you@example.com · Working 1m 12s");
+check("stripBrief: no account when unknown", stripBrief({ ...full, account: null }), "Working 1m 12s");
+check("stripBrief: extra words come after the state", stripBrief({ ...full, extra: "2 helpers working" }), "you@example.com · Working 1m 12s · 2 helpers working");
+check("stripBrief: the next-message model is named", stripBrief({ ...full, next: "Haiku 4.5" }), "you@example.com · Working 1m 12s · next message: Haiku 4.5");
+check("stripBrief: a phone keeps the account and the short state", stripBrief(full, true), "you@example.com · Working");
+check("stripBrief: a phone drops extra words", stripBrief({ ...full, extra: "2 helpers working" }, true), "you@example.com · Working");
+check("stripBrief: ready with no account is the state alone", stripBrief({ ai: "Claude", account: null, model: "Opus 5.5", mode: "Auto", state: "Ready" }), "Ready");
+check("stripBrief: the label keeps AI, model and mode", stripText({ ...full, state: "Ready", extra: null }), "Claude · you@example.com · Sonnet 5.5 · Asks first · Ready");
 
 /* ------------------------------------------------------- resetsText -- */
 const now = new Date(2026, 9, 20, 9, 0, 0);

@@ -159,6 +159,13 @@ export function stripText(p: StripParts, phone = false): string {
   return parts.filter((x): x is string => typeof x === "string" && x.trim() !== "").join(" · ");
 }
 
+/** The run strip's visible line: "nbzkri@gmail.com · Working 2m", plus extra words and the next-message model. The composer chips name the AI, model and mode, so they are left out here (stripText keeps them for the label). A phone keeps the short state and drops extra words. */
+export function stripBrief(p: StripParts, phone = false): string {
+  const next = p.next ? `next message: ${p.next}` : null;
+  const parts = phone ? [p.account, p.stateShort ?? p.state, next] : [p.account, p.state, p.extra, next];
+  return parts.filter((x): x is string => typeof x === "string" && x.trim() !== "").join(" · ");
+}
+
 /* ------------------------------------------------------------- helpers -- */
 
 export interface HelperTreeNode {
@@ -243,11 +250,12 @@ export function replyRows(events: ChatEvent[], isOwner = false, limit = 20, name
       last = e.n;
       if (e.planDelta !== undefined) planOf.set(e.n, e.planDelta);
       const total = e.tokens ? (e.tokens.in ?? 0) + (e.tokens.out ?? 0) : null;
+      const time = e.worked !== undefined && e.worked > 0 ? durationText(e.worked) : null;
       rows.push({
         n: e.n,
         at: e.at,
         model: e.model ? nameOf(e.model) : null,
-        time: e.worked !== undefined && e.worked > 0 ? durationText(e.worked) : null,
+        time: time === "0s" ? null : time,
         tokens: total !== null && total > 0 ? tokensText(total) : null,
         plan: null,
         recalled: e.recalled ?? [],

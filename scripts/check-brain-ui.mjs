@@ -221,12 +221,15 @@ async function runPanelView(found, fx) {
     }),
   );
   await page.goto(`${fx.base}/w/${fx.ready}/chat`);
+  // the Run panel is closed by default: the strip opens it
+  await page.locator('button[aria-label^="Run details"]').click();
   const dock = page.locator('aside[aria-label="Run"]');
   await dock.waitFor({ timeout: 15000 }).catch(() => {});
   const recalledLine = dock.locator("p", { hasText: "Recalled 2 notes" }).first();
   await recalledLine.waitFor({ timeout: 5000 }).catch(() => {});
   const lineText = ((await recalledLine.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
   check("a reply says what it recalled", lineText === "Recalled 2 notes: Goal, Use SQLite", lineText);
+  await dock.getByText("More about this run", { exact: true }).click();
   check("the Run panel says what the AI was given", (await dock.innerText().catch(() => "")).includes("Project brain: 5 notes in memory."));
   await dock.getByRole("button", { name: "Use SQLite", exact: true }).click();
   await page.waitForURL(/\/w\/[^/]+\/brain/, { timeout: 5000 }).catch(() => {});

@@ -232,8 +232,8 @@ try {
     const chip = page.locator('button[aria-label^="AI and model"]:visible').first();
     const chipText = (await chip.innerText()).trim();
     const modelPart = chipText.split("·").pop().trim();
-    check(`${at}: the strip names the AI and the model`, stripText.startsWith("Claude") && stripText.includes(modelPart), `${stripText} | ${chipText}`);
-    if (!touch) check(`${at}: the strip names the mode`, /Asks first/.test(stripText), stripText);
+    check(`${at}: the strip names the state, not the AI, model or mode (the composer chips do)`, /(Ready|Working|Waiting for you|In the background)/.test(stripText) && !stripText.includes(modelPart), `${stripText} | ${chipText}`);
+    if (!touch) check(`${at}: the composer names the mode`, (await page.locator("button:visible").filter({ hasText: "Asks first" }).count()) > 0);
     check(`${at}: the strip is text only`, (await strip.locator("svg, img").count()) === 0);
 
     // the picker: a heading per connected AI, with the account for the owner; a signed-out AI is absent
@@ -248,8 +248,10 @@ try {
     // the Run panel
     const aside = page.locator('aside[aria-label="Run"]');
     if (!touch) {
+      check(`${at}: the Run panel is closed by default`, (await aside.count()) === 0);
+      await strip.click();
       await aside.waitFor({ timeout: 5000 }).catch(() => {});
-      check(`${at}: the Run panel is docked and open with the Preview closed`, await aside.isVisible());
+      check(`${at}: the strip opens the Run panel docked, with the Preview closed`, await aside.isVisible());
     } else {
       check(`${at}: on a phone the Run panel is not docked`, (await aside.count()) === 0);
       await strip.click();
@@ -258,6 +260,7 @@ try {
     }
     const panel = touch ? page.getByRole("dialog", { name: "Run details" }) : aside;
     await panel.getByRole("heading", { name: "Helpers", level: 3 }).waitFor({ timeout: 5000 }).catch(() => {});
+    await panel.getByText("More about this run", { exact: true }).click();
     const heads = await panel.getByRole("heading", { level: 3 }).allInnerTexts();
     check(`${at}: the sections are there`, ["Now", "Helpers", "Replies", "What it was told", "What it can use"].every((h) => heads.includes(h)), heads.join(", "));
 
@@ -281,6 +284,7 @@ try {
     await told.locator("pre").first().waitFor({ timeout: 5000 }).catch(() => {});
     check(`${at}: what it was told is shown`, /Blue Door/.test(await told.innerText()));
     check(`${at}: what it was told cannot be edited`, (await told.locator("textarea, input, [contenteditable]").count()) === 0);
+    await panel.locator("section", { has: page.getByRole("heading", { name: "What it can use", level: 3 }) }).getByText("Show all", { exact: true }).click();
     const tools = await panel.locator("section", { has: page.getByRole("heading", { name: "What it can use", level: 3 }) }).innerText();
     check(`${at}: tools and connected tool servers are listed`, /Read, Edit, Bash/.test(tools) && /playwright/.test(tools) && /Connected/.test(tools));
     const wording = await panel.innerText();
@@ -324,7 +328,10 @@ try {
       check("member: states and models are shown, no Refresh", /Connected/.test(body) && /models/.test(body) && (await page.getByRole("button", { name: "Refresh" }).count()) === 0);
     } else {
       const aside = page.locator('aside[aria-label="Run"]');
-      check("member: the strip and the panel are there", (await aside.count()) === 1 && /Claude/.test(await page.locator('button[aria-label^="Run details"]').innerText()));
+      check("member: the strip is there", /Ready|Working|Waiting for you|In the background/.test(await page.locator('button[aria-label^="Run details"]').innerText()));
+      await page.locator('button[aria-label^="Run details"]').click();
+      await aside.waitFor({ timeout: 5000 }).catch(() => {});
+      check("member: the panel is there", (await aside.count()) === 1);
       check("member: no plan share in Replies", !/of your plan/.test(await aside.innerText()));
     }
     await ctx.close();

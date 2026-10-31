@@ -4,7 +4,6 @@ import { api } from "../api";
 import type { ChatEvent, Fallback, FallbackStep, HelperNode, RunInfo, Src } from "../types";
 import {
   EFFORT_LABEL,
-  MODE_LABEL,
   durationText,
   helperForest,
   helperWord,
@@ -13,7 +12,6 @@ import {
   replyLine,
   replyRows,
   ruleSource,
-  sourceWords,
   stepLabel,
   stepsText,
   tokensText,
@@ -35,9 +33,9 @@ const OPEN_KEY = "kohlab_run_panel";
 
 function readOpen(): boolean {
   try {
-    return localStorage.getItem(OPEN_KEY) !== "0";
+    return localStorage.getItem(OPEN_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -52,7 +50,7 @@ function writeOpen(open: boolean) {
 /**
  * Where the Run panel lives. Docked on the right of the chat when the window is 1280px or wider, the Preview is closed and the
  * chat is not in a narrow dock; otherwise the same content opens as a sheet from the run strip. The docked choice is remembered
- * (open by default); the sheet always starts closed.
+ * (closed by default, until the person opens it); the sheet always starts closed.
  */
 export function useRunPanel({ previewOpen, compact }: { previewOpen: boolean; compact: boolean }) {
   const [wide, setWide] = useState(() => window.matchMedia(WIDE).matches);
@@ -91,6 +89,14 @@ function useNow(active: boolean, skew: number): number {
 
 const TOOL_STATUS: Record<string, string> = { connected: "Connected", failed: "Not working", pending: "Starting", needs_auth: "Needs sign-in", disabled: "Off" };
 const toolStatusWord = (s: string): string => TOOL_STATUS[s] ?? (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ") : "Unknown");
+
+/** "34 built-in tools · 3 connections, 1 needs sign-in". */
+function toolsText(tools: { builtin: string[]; mcp: { status: string }[] }): string {
+  const b = tools.builtin.length;
+  const m = tools.mcp.length;
+  const k = tools.mcp.filter((x) => x.status === "needs_auth").length;
+  return `${b} built-in ${b === 1 ? "tool" : "tools"} · ${m} ${m === 1 ? "connection" : "connections"}${k > 0 ? `, ${k} ${k === 1 ? "needs" : "need"} sign-in` : ""}`;
+}
 
 function HelperRow({ t, now, canMutate, stopping, onStop }: { t: HelperTreeNode; now: number; canMutate: boolean; stopping: string | null; onStop: (taskId: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -183,8 +189,9 @@ export interface RunSlice {
   onReload: () => void;
   /** The person may change this project's AI settings (not a viewer, not a terminal project). */
   canSet: boolean;
-  /** The chip texts the composer shows, so the panel names the model the same way. */
+  /** The chip texts the composer shows, so the panel names the model and mode the same way. */
   modelText: string;
+  modeText: string;
   models: ModelInfo[];
   /** The composer's own menus, so each row here opens the same one. */
   menus: { ai: ReactNode; account: ReactNode; model: ReactNode; effort: ReactNode | null; mode: ReactNode };
@@ -228,33 +235,35 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 const PRE = "mono max-h-56 overflow-auto rounded-lg bg-surface-sunken p-3 text-xs leading-5 whitespace-pre-wrap break-words text-text-secondary";
 
-/** One row of "Now": the setting, its value (a menu for someone who can change it), where it comes from, and Reset when this project set it. */
-function SettingRow({ label, value, source, menu, canSet, onReset, inheritedNote }: { label: string; value: string; source: Src | undefined; menu: ReactNode; canSet: boolean; onReset: () => void; inheritedNote?: string }) {
+/** One row of "Now": the setting, its value (a menu for someone who can change it), and Reset when this project set it. */
+function SettingRow({ label, value, source, menu, canSet, onReset }: { label: string; value: string; source: Src | undefined; menu: ReactNode; canSet: boolean; onReset: () => void }) {
   return (
-    <div className="flex flex-col">
-      <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-11">
-        <span className="w-16 shrink-0 text-xs text-text-muted">{label}</span>
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          {canSet && menu ? (
-            <Menu label={`${label}: ${value}`} align="start" trigger={<ComposerChip className="-ml-2.5 max-w-full" label={value} menu />}>
-              {menu}
-            </Menu>
-          ) : (
-            <span className="min-w-0 truncate text-sm text-text-primary">{value}</span>
-          )}
-          {canSet && source === "project" ? (
-            <Button variant="quiet" size="sm" className="shrink-0 text-xs text-text-secondary" aria-label={`Reset ${label.toLowerCase()} to the Settings choice`} onClick={onReset}>
-              Reset
-            </Button>
-          ) : null}
-        </div>
+    <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-11">
+      <span className="w-16 shrink-0 text-xs text-text-muted">{label}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        {canSet && menu ? (
+          <Menu label={`${label}: ${value}`} align="start" trigger={<ComposerChip className="-ml-2.5 max-w-full" label={value} menu />}>
+            {menu}
+          </Menu>
+        ) : (
+          <span className="min-w-0 truncate text-sm text-text-primary">{value}</span>
+        )}
+        {canSet && source === "project" ? (
+          <Button
+            variant="quiet"
+            size="sm"
+            className="shrink-0 text-xs text-text-secondary"
+            aria-label={`Reset ${label.toLowerCase()} to the Settings choice`}
+            title="Set for this project; Reset uses your Settings choice"
+            onClick={onReset}
+          >
+            Reset
+          </Button>
+        ) : null}
       </div>
-      {source ? <p className="pl-16 text-xs text-text-muted">{source !== "project" && inheritedNote ? `${sourceWords(source)}. ${inheritedNote}` : sourceWords(source)}</p> : null}
     </div>
   );
 }
-
-const FIRST_MESSAGE = "Applies until the first message.";
 
 /** "If the limit is reached": where the project is now, the order of what to try next, and whether to carry on by itself. Keyboard only: Move up, Move down, Remove. */
 function FallbackBlock({ p, info, fallback }: { p: RunSlice; info: RunInfo; fallback: Fallback }) {
@@ -302,34 +311,34 @@ function FallbackBlock({ p, info, fallback }: { p: RunSlice; info: RunInfo; fall
             </Button>
           ) : null}
         </div>
-      ) : (
-        <p className="text-xs text-text-muted">If this AI reaches its limit, Kohlab can carry on with the next one below.</p>
-      )}
-      <p className="text-xs text-text-muted">{fallback.custom ? "Your order" : "Suggested order"}</p>
+      ) : null}
       {fallback.steps.length === 0 ? (
         <p className="text-sm text-text-muted">Nothing to switch to yet.</p>
       ) : (
-        <ol aria-label="If the limit is reached" className="flex flex-col gap-1">
-          {fallback.steps.map((s, i) => (
-            <li key={`${i}-${label(s)}`} className="flex min-w-0 items-center gap-1">
-              <span className="w-5 shrink-0 text-xs text-text-muted tabular-nums">{`${i + 1}.`}</span>
-              <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{label(s)}</span>
-              {canEdit ? (
-                <>
-                  <Button variant="quiet" size="sm" iconOnly aria-label={`Move ${label(s)} up`} disabled={busy || i === 0} onClick={() => void save({ auto: fallback.auto, steps: moveStep(fallback.steps, i, -1) })}>
-                    <ArrowUp size={14} aria-hidden="true" />
-                  </Button>
-                  <Button variant="quiet" size="sm" iconOnly aria-label={`Move ${label(s)} down`} disabled={busy || i === fallback.steps.length - 1} onClick={() => void save({ auto: fallback.auto, steps: moveStep(fallback.steps, i, 1) })}>
-                    <ArrowDown size={14} aria-hidden="true" />
-                  </Button>
-                  <Button variant="quiet" size="sm" className="text-xs text-text-secondary" aria-label={`Remove ${label(s)}`} disabled={busy} onClick={() => void save({ auto: fallback.auto, steps: fallback.steps.filter((_, j) => j !== i) })}>
-                    Remove
-                  </Button>
-                </>
-              ) : null}
-            </li>
-          ))}
-        </ol>
+        <>
+          <p className="text-xs text-text-muted">{fallback.custom ? "Your order" : "Suggested order"}</p>
+          <ol aria-label="If the limit is reached" className="flex flex-col gap-1">
+            {fallback.steps.map((s, i) => (
+              <li key={`${i}-${label(s)}`} className="flex min-w-0 items-center gap-1">
+                <span className="w-5 shrink-0 text-xs text-text-muted tabular-nums">{`${i + 1}.`}</span>
+                <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{label(s)}</span>
+                {canEdit ? (
+                  <>
+                    <Button variant="quiet" size="sm" iconOnly aria-label={`Move ${label(s)} up`} disabled={busy || i === 0} onClick={() => void save({ auto: fallback.auto, steps: moveStep(fallback.steps, i, -1) })}>
+                      <ArrowUp size={14} aria-hidden="true" />
+                    </Button>
+                    <Button variant="quiet" size="sm" iconOnly aria-label={`Move ${label(s)} down`} disabled={busy || i === fallback.steps.length - 1} onClick={() => void save({ auto: fallback.auto, steps: moveStep(fallback.steps, i, 1) })}>
+                      <ArrowDown size={14} aria-hidden="true" />
+                    </Button>
+                    <Button variant="quiet" size="sm" className="text-xs text-text-secondary" aria-label={`Remove ${label(s)}`} disabled={busy} onClick={() => void save({ auto: fallback.auto, steps: fallback.steps.filter((_, j) => j !== i) })}>
+                      Remove
+                    </Button>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </>
       )}
       {canEdit ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -382,11 +391,12 @@ function RulesBlock({ p, info }: { p: RunSlice; info: RunInfo }) {
     }
   };
   const rules = info.rules ?? [];
+  const access = info.accessNote && info.ai?.mode.value === "full" ? info.accessNote : null;
+  // Nothing is shown for "nothing allowed": the section only exists when there is a rule (or the full-access note).
+  if (rules.length === 0 && !access) return null;
   return (
     <Section title="What it can do without asking">
-      {rules.length === 0 ? (
-        <p className="text-sm text-text-muted">Nothing is allowed without asking yet.</p>
-      ) : (
+      {rules.length > 0 ? (
         <ul aria-label="Allowed without asking" className="flex flex-col gap-1">
           {rules.map((r) => (
             <li key={`${r.source}-${r.rule}`} className="flex min-w-0 items-center gap-2">
@@ -402,8 +412,8 @@ function RulesBlock({ p, info }: { p: RunSlice; info: RunInfo }) {
             </li>
           ))}
         </ul>
-      )}
-      {info.accessNote && info.ai?.mode.value === "full" ? <p className="text-xs leading-relaxed text-text-muted">{info.accessNote}</p> : null}
+      ) : null}
+      {access ? <p className="text-xs leading-relaxed text-text-muted">{access}</p> : null}
       {note ? <p role="status" className="text-xs text-text-muted">{note}</p> : null}
     </Section>
   );
@@ -443,97 +453,104 @@ function RunContent(p: RunSlice & { onPickNote?: () => void }) {
   const running = p.helperTree.some((h) => h.status === "running");
   const now = useNow(running || p.busy, p.skew);
   const replies = replyRows(p.events, p.owner, 20, modelName);
-  const state = p.waiting !== null ? `${p.who} is waiting for your answer.` : p.busy ? "Working" : p.background > 0 || running ? "Some work is still running in the background." : `${p.who} is ready.`;
+  const [allReplies, setAllReplies] = useState(false);
+  const shownReplies = allReplies ? replies : replies.slice(0, 5);
+  // The limit block shows only when there is a limit to explain or something to switch to; otherwise More says so in one line.
+  const limitShown = !!info?.limit || (info?.fallback?.steps.length ?? 0) > 0;
+  const state = p.waiting !== null ? "Waiting for you" : p.busy ? "Working" : p.background > 0 || running ? "In the background" : "Ready";
+  const timer = p.busy && p.waiting === null && p.since !== null ? ` ${durationText(now - p.since)}` : "";
+  const nowLine = state + timer;
 
   return (
     <div className="flex flex-col gap-6">
       <Section title="Now">
-        <p className="text-sm text-text-secondary tabular-nums">
-          {state}
-          {p.busy && p.waiting === null && p.since !== null ? ` ${durationText(now - p.since)}` : ""}
-        </p>
+        <p className="text-sm text-text-secondary tabular-nums">{nowLine}</p>
         {ai ? (
           <div className="flex flex-col gap-1">
-            <SettingRow label="AI" value={agentName(ai.agent.value ?? info!.agent)} source={ai.agent.source} menu={p.menus.ai} canSet={p.canSet} onReset={() => p.onReset("agent")} inheritedNote={FIRST_MESSAGE} />
+            <SettingRow label="AI" value={agentName(ai.agent.value ?? info!.agent)} source={ai.agent.source} menu={p.menus.ai} canSet={p.canSet} onReset={() => p.onReset("agent")} />
             {usableAccounts.length > 1 ? (
-              <SettingRow label="Account" value={info!.account?.label ?? "Main account"} source={ai.account.source} menu={p.menus.account} canSet={p.canSet} onReset={() => p.onReset("account")} inheritedNote={FIRST_MESSAGE} />
+              <SettingRow label="Account" value={info!.account?.label ?? "Main account"} source={ai.account.source} menu={p.menus.account} canSet={p.canSet} onReset={() => p.onReset("account")} />
             ) : null}
             <SettingRow label="Model" value={p.modelText} source={ai.model.source} menu={p.menus.model} canSet={p.canSet} onReset={() => p.onReset("model")} />
             {p.menus.effort ? (
               <SettingRow label="Effort" value={ai.effort.value ? (EFFORT_LABEL[ai.effort.value] ?? ai.effort.value) : "Default"} source={ai.effort.source} menu={p.menus.effort} canSet={p.canSet} onReset={() => p.onReset("effort")} />
             ) : null}
-            <SettingRow label="Mode" value={MODE_LABEL[ai.mode.value ?? "default"] ?? MODE_LABEL.default} source={ai.mode.source} menu={p.menus.mode} canSet={p.canSet} onReset={() => p.onReset("mode")} />
+            <SettingRow label="Mode" value={p.modeText} source={ai.mode.source} menu={p.menus.mode} canSet={p.canSet} onReset={() => p.onReset("mode")} />
           </div>
         ) : null}
         {p.nowExtra}
-        {p.ctxPercent !== null ? <p className="text-xs text-text-muted">{`This chat is ${p.ctxPercent}% full.`}</p> : null}
         {p.canMutate ? (
-          <div className="flex flex-col items-start gap-2">
-            <label className="flex min-h-8 cursor-pointer items-start gap-3 pointer-coarse:min-h-11" htmlFor="run-auto-fresh">
-              <input
-                id="run-auto-fresh"
-                type="checkbox"
-                className="mt-0.5 size-4 shrink-0 accent-accent"
-                checked={p.autoFresh}
-                onChange={(e) => p.onAutoFresh(e.target.checked)}
-              />
-              <span className="min-w-0">
-                <span className="block text-sm text-text-primary">Continue fresh automatically</span>
-                <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">When this chat is nearly full, Kohlab starts a fresh memory once the AI is idle. Nothing is lost.</span>
-                {autoSource ? <span className="mt-0.5 block text-xs text-text-muted">{sourceWords(autoSource)}</span> : null}
-              </span>
+          <div className="flex flex-col gap-1">
+            <div className="flex min-h-8 min-w-0 items-center gap-2 pointer-coarse:min-h-11">
+              <span className="min-w-0 flex-1 text-sm text-text-primary">{p.ctxPercent !== null ? `Chat memory ${p.ctxPercent}% full` : "Chat memory"}</span>
+              <Button variant="quiet" size="sm" className="shrink-0 text-xs text-text-secondary" disabled={p.busy || p.background > 0 || p.waiting !== null} onClick={p.onContinueFresh}>
+                Continue fresh now
+              </Button>
+            </div>
+            <label className="flex min-h-8 cursor-pointer items-center gap-3 pointer-coarse:min-h-11" htmlFor="run-auto-fresh">
+              <input id="run-auto-fresh" type="checkbox" className="size-4 shrink-0 accent-accent" checked={p.autoFresh} onChange={(e) => p.onAutoFresh(e.target.checked)} />
+              <span className="min-w-0 text-sm text-text-primary">Continue fresh automatically when nearly full</span>
             </label>
             {autoSource === "project" ? (
-              <Button variant="quiet" size="sm" className="text-xs text-text-secondary" aria-label="Reset continue fresh to the Settings choice" onClick={() => p.onReset("autoFresh")}>
+              <Button
+                variant="quiet"
+                size="sm"
+                className="self-start text-xs text-text-secondary"
+                aria-label="Reset continue fresh to the Settings choice"
+                title="Set for this project; Reset uses your Settings choice"
+                onClick={() => p.onReset("autoFresh")}
+              >
                 Reset
               </Button>
             ) : null}
-            <Button variant="quiet" size="sm" className="text-text-secondary" disabled={p.busy || p.background > 0 || p.waiting !== null} onClick={p.onContinueFresh}>
-              Continue fresh now
-            </Button>
           </div>
         ) : null}
       </Section>
 
-      {info?.fallback ? <FallbackBlock p={p} info={info} fallback={info.fallback} /> : null}
-
-      <Section title="Helpers">
-        {forest.length === 0 ? (
-          <p className="text-sm text-text-muted">No helpers</p>
-        ) : (
+      {forest.length > 0 ? (
+        <Section title="Helpers">
           <ul aria-label="Helpers" className="-mx-2 flex flex-col">
             {forest.map((t) => (
               <HelperRow key={t.node.id} t={t} now={now} canMutate={p.canMutate} stopping={p.stopping} onStop={p.onStopHelper} />
             ))}
           </ul>
-        )}
-      </Section>
+        </Section>
+      ) : null}
 
       <Section title="Replies">
         {replies.length === 0 ? (
           <p className="text-sm text-text-muted">No replies yet.</p>
         ) : (
-          <ul aria-label="Replies" className="flex flex-col gap-1">
-            {replies.map((r) => (
-              <li key={r.n} className="flex min-w-0 flex-col gap-1 text-xs text-text-muted tabular-nums">
-                <span className="flex min-w-0 items-baseline justify-between gap-3">
-                  <span className="min-w-0 break-words text-text-secondary">{replyLine(r) || "Reply"}</span>
-                  <span className="shrink-0">{new Date(r.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</span>
-                </span>
-                {r.recalled.length > 0 ? (
-                  <RecalledLine
-                    titles={r.recalled}
-                    onOpen={(title) => {
-                      openBrainNote(p.workspaceId, title);
-                      p.onPickNote?.();
-                    }}
-                  />
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul aria-label="Replies" className="flex flex-col gap-1">
+              {shownReplies.map((r) => (
+                <li key={r.n} className="flex min-w-0 flex-col gap-1 text-xs text-text-muted tabular-nums">
+                  <span className="flex min-w-0 items-baseline justify-between gap-3">
+                    <span className="min-w-0 break-words text-text-secondary">{replyLine({ ...r, model: r.model === p.modelText ? null : r.model }) || "Reply"}</span>
+                    <span className="shrink-0">{new Date(r.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</span>
+                  </span>
+                  {r.recalled.length > 0 ? (
+                    <RecalledLine
+                      titles={r.recalled}
+                      onOpen={(title) => {
+                        openBrainNote(p.workspaceId, title);
+                        p.onPickNote?.();
+                      }}
+                    />
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {replies.length > 5 && !allReplies ? (
+              <Button variant="quiet" size="sm" className="self-start text-text-secondary" onClick={() => setAllReplies(true)}>
+                {`Show all ${replies.length}`}
+              </Button>
+            ) : null}
+          </>
         )}
       </Section>
+
+      {info?.fallback && limitShown ? <FallbackBlock p={p} info={info} fallback={info.fallback} /> : null}
 
       {failed && !info ? (
         <div className="flex flex-col items-start gap-2">
@@ -542,53 +559,69 @@ function RunContent(p: RunSlice & { onPickNote?: () => void }) {
             Try again
           </Button>
         </div>
-      ) : info === null ? (
-        <SkeletonRows rows={3} />
       ) : (
-        <>
-          <Section title="What it was told">
-            {info.instructions.system ? (
-              <>
-                <p className="text-xs text-text-muted">From Kohlab</p>
-                <pre className={PRE}>{info.instructions.system}</pre>
-              </>
-            ) : null}
-            {info.instructions.notes.trim() ? (
-              <>
-                <p className="text-xs text-text-muted">Your notes for this project</p>
-                <pre className={PRE}>{info.instructions.notes}</pre>
-              </>
-            ) : null}
-            {info.instructions.note ? <p className="text-xs leading-relaxed text-text-muted">{info.instructions.note}</p> : null}
-            {info.instructions.brain ? (
-              <p className="text-xs leading-relaxed text-text-muted">
-                Project brain: {info.instructions.brain.notes} {info.instructions.brain.notes === 1 ? "note" : "notes"} in memory. A short summary (about {info.instructions.brain.tokens} tokens) goes to the AI at the start.
-              </p>
-            ) : null}
-          </Section>
-
-          <Section title="What it can use">
-            {info.tools === null ? (
-              <p className="text-sm text-text-muted">{p.isClaude ? "Listed once it has started." : "Not listed by this AI."}</p>
-            ) : (
-              <>
-                <p className="text-sm break-words text-text-secondary">{info.tools.builtin.length > 0 ? info.tools.builtin.join(", ") : "No built-in tools listed."}</p>
-                {info.tools.mcp.length > 0 ? (
-                  <ul aria-label="Connected tool servers" className="flex flex-col gap-1">
-                    {info.tools.mcp.map((m) => (
-                      <li key={m.name} className="flex min-w-0 items-baseline justify-between gap-3 text-sm">
-                        <span className="min-w-0 truncate text-text-secondary">{m.name}</span>
-                        <span className="shrink-0 text-xs text-text-muted">{toolStatusWord(m.status)}</span>
-                      </li>
-                    ))}
-                  </ul>
+        <details className="text-sm">
+          <summary className="flex min-h-8 cursor-pointer items-center text-sm font-medium text-text-primary pointer-coarse:min-h-11">More about this run</summary>
+          {info === null ? (
+            <div className="pt-4">
+              <SkeletonRows rows={3} />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-6 pt-4">
+              {!limitShown ? <p className="text-sm text-text-muted">If the limit is reached: nothing to switch to. Add accounts in Settings → AI.</p> : null}
+              <Section title="What it was told">
+                {info.instructions.system ? (
+                  <>
+                    <p className="text-xs text-text-muted">From Kohlab</p>
+                    <pre className={PRE}>{info.instructions.system}</pre>
+                  </>
                 ) : null}
-              </>
-            )}
-          </Section>
+                {info.instructions.notes.trim() ? (
+                  <>
+                    <p className="text-xs text-text-muted">Your notes for this project</p>
+                    <pre className={PRE}>{info.instructions.notes}</pre>
+                  </>
+                ) : null}
+                {info.instructions.note ? <p className="text-xs leading-relaxed text-text-muted">{info.instructions.note}</p> : null}
+                {info.instructions.brain ? (
+                  <p className="text-xs leading-relaxed text-text-muted">
+                    Project brain: {info.instructions.brain.notes} {info.instructions.brain.notes === 1 ? "note" : "notes"} in memory. A short summary (about {info.instructions.brain.tokens} tokens) goes to the AI at the start.
+                  </p>
+                ) : null}
+              </Section>
 
-          {info.rules !== undefined ? <RulesBlock p={p} info={info} /> : null}
-        </>
+              <Section title="What it can use">
+                {info.tools === null ? (
+                  <p className="text-sm text-text-muted">{p.isClaude ? "Listed once it has started." : "Not listed by this AI."}</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-text-secondary">{toolsText(info.tools)}</p>
+                    {info.tools.builtin.length + info.tools.mcp.length > 0 ? (
+                      <details className="text-sm">
+                        <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary hover:text-text-primary pointer-coarse:min-h-11">Show all</summary>
+                        <div className="flex flex-col gap-2 pt-2">
+                          <p className="text-sm break-words text-text-secondary">{info.tools.builtin.length > 0 ? info.tools.builtin.join(", ") : "No built-in tools listed."}</p>
+                          {info.tools.mcp.length > 0 ? (
+                            <ul aria-label="Connected tool servers" className="flex flex-col gap-1">
+                              {info.tools.mcp.map((m) => (
+                                <li key={m.name} className="flex min-w-0 items-baseline justify-between gap-3 text-sm">
+                                  <span className="min-w-0 truncate text-text-secondary">{m.name}</span>
+                                  <span className="shrink-0 text-xs text-text-muted">{toolStatusWord(m.status)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
+                  </>
+                )}
+              </Section>
+
+              {info.rules !== undefined ? <RulesBlock p={p} info={info} /> : null}
+            </div>
+          )}
+        </details>
       )}
     </div>
   );

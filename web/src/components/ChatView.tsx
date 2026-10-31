@@ -1856,6 +1856,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           onReload={reloadRun}
           canSet={can && !terminalProject && !!ws?.chat}
           modelText={modelText}
+          modeText={modeText}
           models={models}
           menus={{ ai: pickerBody, account: accountMenu, model: pickerBody, effort: levels.length > 0 ? <EffortChoices value={effort} levels={levels} onPick={(v) => void pick("effort", v, effort, setEffort)} /> : null, mode: modeBody }}
           onReset={(field) => void resetField(field)}

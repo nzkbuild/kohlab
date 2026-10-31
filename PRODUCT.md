@@ -65,9 +65,9 @@ Claude builds it and asks before risky steps, you open the preview, then press
 Keep this version or Undo. Projects that need an answer sit at the top of the
 sidebar under Needs you; finished work waits under Ready to check. Developers
 can still launch terminal agents, read diffs and merge. Above the message box a
-single line always says which AI is working, with which account, model and mode, and what
-it is doing; opening it shows the Run panel with its helpers, what it was told and what each
-reply used.
+single line always says which account is working and what it is doing. The AI, model and mode
+sit in the composer chips right below it; opening the line shows the Run panel with its helpers,
+what it was told and what each reply used.
 
 **Team.** Teammates are *invited*, not handed a secret out of band: the owner
 creates a single-use, expiring invite link (`/join#token`), Kohlab provisions
@@ -99,7 +99,7 @@ Shipped and claimed:
 - Share links, image paste, agent install/status, GitHub repository browsing.
 - A `kohlab` command for all of it, from any shell.
 - One place for your AI helpers: Settings → AI shows every AI on this computer, whether it is signed in, which account, how much of its plan is used and when that resets, and which models it offers. Model menus list only AIs that are signed in.
-- Control the AI: choose defaults for new projects; add another Claude account or a router address; set the mode per project (Asks first, Edits allowed, Auto, Full access, Plan first), save "Always allow" rules and take them back; send one message on another model; and set what happens when an AI reaches its limit (carry on with another account or a cheaper model, then come back). The AI, account, model, mode and any one-off model stay in view in the run strip.
+- Control the AI: choose defaults for new projects; add another Claude account or a router address; set the mode per project (Asks first, Edits allowed, Auto, Full access, Plan first), save "Always allow" rules and take them back; send one message on another model; and set what happens when an AI reaches its limit (carry on with another account or a cheaper model, then come back). The AI, account, model, mode and any one-off model stay in view above the message box.
 
 Constraints, stated plainly rather than discovered by a user:
 

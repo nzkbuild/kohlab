@@ -429,15 +429,20 @@ try {
     ];
     await mock(page, s, { snapshot: { events } });
     await page.goto(`${fx.base}/w/${fx.ready}/chat`);
+    // the Run panel is closed by default; the strip opens it
+    const strip = page.locator('button[aria-label^="Run details"]');
+    await strip.click();
     const aside = page.locator('aside[aria-label="Run"]');
     await aside.getByRole("heading", { name: "If the limit is reached", level: 3 }).waitFor({ timeout: 15000 }).catch(() => {});
     const heads = await aside.getByRole("heading", { level: 3 }).allInnerTexts();
-    check("Run panel: sections in order", JSON.stringify(heads) === JSON.stringify(["Now", "If the limit is reached", "Helpers", "Replies", "What it was told", "What it can use", "What it can do without asking"]), heads.join(", "));
+    check("Run panel: sections in order, More closed", JSON.stringify(heads) === JSON.stringify(["Now", "Replies", "If the limit is reached"]), heads.join(", "));
+    await aside.getByText("More about this run", { exact: true }).click();
+    const moreHeads = await aside.getByRole("heading", { level: 3 }).allInnerTexts();
+    check("Run panel: More holds what it was told, what it can use and the rules", JSON.stringify(moreHeads) === JSON.stringify(["Now", "Replies", "If the limit is reached", "What it was told", "What it can use", "What it can do without asking"]), moreHeads.join(", "));
 
     // the strip and the note
-    const strip = page.locator('button[aria-label^="Run details"]');
     const stripText = (await strip.innerText()).trim();
-    check("strip: names the AI, the new account, the model and the mode", /^Claude · Work · .+ · Asks first/.test(stripText), stripText);
+    check("strip: names the account and the state (the composer chips name the AI, model and mode)", /^Work · /.test(stripText), stripText);
     const chat = await page.locator("body").innerText();
     check("note: a limit note with `until` reads 'until <time>' in the viewer's time zone", chat.includes(`Claude Pro hit its limit — continued on Work until ${clock(SOON)}`) || new RegExp(`continued on Work until .*${clock(SOON).replace(".", "\\.")}`).test(chat), chat.match(/continued on Work[^\n]*/)?.[0]);
     check("sent-with: a message sent on another model says so", /Sent with Haiku 4\.5/.test(chat), chat.match(/Sent with[^\n]*/)?.[0]);
@@ -446,12 +451,12 @@ try {
     const now = aside.locator("section", { has: page.getByRole("heading", { name: "Now", level: 3 }) });
     const ntext = await now.innerText();
     check("Now: AI, Account, Model, Effort and Mode rows", ["AI", "Account", "Model", "Effort", "Mode"].every((w) => new RegExp(`(^|\\n)${w}\\n`).test(ntext)), ntext.replace(/\n/g, " | ").slice(0, 400));
-    check("Now: inherited values say where they come from", (ntext.match(/Inherits from Settings/g) ?? []).length >= 3 && /Set for this project/.test(ntext));
-    check("Now: AI and Account say they apply until the first message", (ntext.match(/Applies until the first message\./g) ?? []).length === 2, ntext.replace(/\n/g, " | "));
+    check("Now: no source captions or first-message notes under the rows", !/Inherits from Settings|Built-in choice|Set for this project|Applies until the first message/.test(ntext), ntext.replace(/\n/g, " | "));
     const resets = await now.getByRole("button", { name: /^Reset/ }).evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
     check("Now: Reset only on the setting this project set", JSON.stringify(resets) === JSON.stringify(["Reset model to the Settings choice"]), resets.join(", "));
+    check("Now: that Reset says where it comes from in its title", (await now.getByRole("button", { name: /^Reset model/ }).getAttribute("title")) === "Set for this project; Reset uses your Settings choice");
     await now.getByRole("button", { name: /^Reset model/ }).click();
-    await page.waitForFunction(() => !document.body.innerText.includes("Set for this project"), null, { timeout: 5000 }).catch(() => {});
+    await page.waitForFunction(() => !document.querySelector('button[aria-label^="Reset model"]'), null, { timeout: 5000 }).catch(() => {});
     check("Now: Reset asks the server and reads the run info again", s.controls.some((c) => c.action === "reset" && c.value === "model") && (await now.getByRole("button", { name: /^Reset/ }).count()) === 0);
 
     // mode menu
@@ -477,7 +482,7 @@ try {
     await page.getByRole("alertdialog").getByRole("button", { name: "Allow full access" }).click();
     await page.waitForTimeout(400);
     check("Full access: Allow sends the mode", s.controls.some((c) => c.action === "mode" && c.value === "full"));
-    check("the strip follows the mode", /Full access/.test(await strip.innerText()));
+    check("the Mode row follows the mode", /Full access/.test(await now.innerText()));
 
     // the limit block
     const limit = aside.locator("section", { has: page.getByRole("heading", { name: "If the limit is reached", level: 3 }) });
@@ -658,6 +663,7 @@ try {
     await page.locator('button[aria-label^="Run details"]').click();
     const sheet = page.getByRole("dialog", { name: "Run details" });
     await sheet.getByRole("heading", { name: "If the limit is reached", level: 3 }).waitFor({ timeout: 10000 }).catch(() => {});
+    await sheet.getByText("More about this run", { exact: true }).click();
     check(`${width}px: the Run panel sheet has the limit block and the rules`, (await sheet.getByRole("heading", { name: "What it can do without asking", level: 3 }).count()) === 1 && (await sheet.getByRole("heading", { name: "If the limit is reached", level: 3 }).count()) === 1);
     await design(page, `${width}px with the Run panel sheet`, true);
     await page.screenshot({ path: `/tmp/v26-web-${width}-run.png` });

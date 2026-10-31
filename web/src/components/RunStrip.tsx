@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "@phosphor-icons/react";
-import { durationText, stripText } from "../lib/aiHub";
+import { durationText, stripBrief, stripText } from "../lib/aiHub";
 import { cn } from "../lib/utils";
 
 interface Props {
@@ -23,8 +23,8 @@ interface Props {
 }
 
 /**
- * The one line above the composer that names the AI, its account, model and mode, and what it is doing. Text only: no fill, chip,
- * icon or animation. The whole line is a button that opens the Run panel. The timer ticks only while the AI works.
+ * The one line above the composer that names the account and what the AI is doing (the composer chips name the AI, model and mode).
+ * Text only: no fill, chip, icon or animation. The whole line is a button that opens the Run panel. The timer ticks only while the AI works.
  */
 export default function RunStrip({ ai, account, model, mode, state, since = null, extra = null, next = null, expanded, onToggle, className }: Props) {
   const [now, setNow] = useState(() => Date.now());
@@ -35,17 +35,19 @@ export default function RunStrip({ ai, account, model, mode, state, since = null
   }, [since]);
   const timed = since !== null ? `${state} ${durationText(now - since)}` : state;
   const parts = { ai, account, model, mode, state: timed, stateShort: state, extra, next: next?.label ?? null };
+  const full = stripText({ ...parts, state, extra });
   return (
     <div className={cn("mb-1 flex w-full min-w-0 items-center", className)}>
       <button
         type="button"
         aria-expanded={expanded}
-        aria-label={`Run details. ${stripText({ ...parts, state, extra })}`}
+        aria-label={`Run details. ${full}`}
+        title={full}
         onClick={onToggle}
         className="flex min-h-8 min-w-0 flex-1 items-center rounded-lg px-4 text-left text-sm text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-focus pointer-coarse:min-h-11 motion-reduce:transition-none"
       >
-        <span className="hidden truncate md:block">{stripText(parts)}</span>
-        <span className="block truncate md:hidden">{stripText(parts, true)}</span>
+        <span className="hidden truncate md:block">{stripBrief(parts)}</span>
+        <span className="block truncate md:hidden">{stripBrief(parts, true)}</span>
       </button>
       {next ? (
         <button
