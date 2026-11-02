@@ -24,6 +24,7 @@ import ModelPicker, { ClaudeModelChoices, ModelChoices, PickerBody, modelName, s
 import RunPanel, { useRunInfo, useRunPanel } from "./RunPanel";
 import RunStrip from "./RunStrip";
 import { AccountChoices, EffortChoices, FULL_ACCESS_OWNER_ONLY, FullAccessDialog, ModeChoices } from "./AiMenus";
+import { SignInDialog } from "./AccountDialogs";
 import { EFFORT_LABEL, MODE_LABEL, accountLabel, helpersWorkingText, noteLine } from "../lib/aiHub";
 import { useProviders } from "../lib/useProviders";
 import { Button, ComposerChip, Menu, MenuItem, MenuLabel, MenuSeparator, MenuSub } from "./ui";
@@ -83,6 +84,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   // The AI cards (account for the run strip, groups for the picker), and where the Run panel shows.
   const { cards: providerCards } = useProviders();
   const owner = useCan().own;
+  const [signingIn, setSigningIn] = useState(false);
   const run = useRunPanel({ previewOpen, compact });
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [busy, setBusy] = useState(false);
@@ -1224,13 +1226,25 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
       }
       case "handoff":
         return <HandoffCard text={e.text} />;
-      case "error":
+      case "error": {
+        // Claude signed out: sign it in from here, for the account this chat uses (the owner only).
+        const signedOut = /^Claude is signed out/.test(e.text);
         return (
-          <p className="flex items-center gap-2 text-sm text-text-muted">
-            <WarningCircle size={16} className="shrink-0" aria-hidden="true" />
-            {e.text}
-          </p>
+          <div className="flex flex-col items-start gap-2">
+            <p className="flex items-center gap-2 text-sm text-text-muted">
+              <WarningCircle size={16} className="shrink-0" aria-hidden="true" />
+              {e.text}
+            </p>
+            {signedOut && owner ? (
+              <Button variant="secondary" size="sm" onClick={() => setSigningIn(true)}>
+                Sign in
+              </Button>
+            ) : signedOut ? (
+              <p className="text-sm text-text-muted">Ask the owner to sign Claude in.</p>
+            ) : null}
+          </div>
         );
+      }
       default:
         return null;
     }
@@ -1867,6 +1881,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         />
 
         <FullAccessDialog open={fullAsk} onOpenChange={setFullAsk} note={runInfo?.accessNote} onConfirm={() => void allowFull()} />
+        {signingIn ? (
+          <SignInDialog
+            target={{ provider: "claude", id: accountId === "default" ? undefined : accountId }}
+            title={accountId === "default" ? "Sign in to Claude" : `Sign in to ${runInfo?.account?.label ?? "Claude"}`}
+            open
+            onOpenChange={(v) => !v && setSigningIn(false)}
+          />
+        ) : null}
 
         {freshOpen ? (
           <FreshDialog

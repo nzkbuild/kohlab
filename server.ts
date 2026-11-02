@@ -96,16 +96,17 @@ import { headPackage, treeIsEmpty } from "./versions";
 import { BrowserError, browserAction, browserProblems, browserUrl, clearBrowserProblems, ensureBrowser, openVersion, pickElement, reopenHome, startUrlFor, touchBrowser } from "./browser";
 import { appKind, detectDevCommand, devProxyPort, ensureDevServer, stopAllDevServers, stopDevServer } from "./devserver";
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
-import { codexLoginState, codexSignedIn, startCodexLogin, stopCodexLogin } from "./codex";
-import { claudeSignedIn, getProviders, invalidateProvider, PROVIDER_IDS, redactCard, refreshProviders, testAccount } from "./providers";
+import { codexLoginState, codexSignedIn, signOutCodex, startCodexLogin, stopCodexLogin } from "./codex";
+import { claudeSignedIn, forgetSignIn, getProviders, invalidateProvider, PROVIDER_IDS, redactCard, refreshProviders, testAccount } from "./providers";
 import { ACP_AGENTS, isAcpAgent } from "./acp";
-import { AccountError, accountView, addCustomModel, createLogin, createRouter, getAccount, listAccounts, remove as removeAccount, removeCustomModel, renameAccount, renameModel, setKey, signInState, startSignIn, stopSignIns, submitCode, testRouter } from "./accounts";
+import { AccountError, MAIN_CLAUDE, accountView, addCustomModel, createLogin, createRouter, getAccount, grantAccountsReach, listAccounts, remove as removeAccount, removeCustomModel, renameAccount, renameModel, setKey, signInState, signOutClaude, startSignIn, stopSignIns, submitCode, testRouter } from "./accounts";
 import { patchDefaults } from "./defaults";
 import { cleanRules, describeRule } from "./policy";
 import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, noteRecalled, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
 import { TeamError, resumeTeams, teamActive, teamCleanup, teamGet, teamPost, teamToolCall } from "./team";
 
 const PORT = Number(process.env.PORT ?? 7676);
+grantAccountsReach(); // repairs an install whose accounts root predates the agent's reach into it
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
  *  tailnet or the LAN, which is why a keyless server there generates one. */
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -1164,7 +1165,51 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
       return json({ account: accountView(a, true) });
     }
 
-    const m = path.match(/^\/api\/ai\/accounts\/([a-z0-9-]+|default)(\/key|\/test|\/signin|\/signin\/code|\/models)?$/);
+    // The AI's own login (the main account): the same sign-in and sign-out as an account's, with no directory of its own.
+    const pm = path.match(/^\/api\/ai\/providers\/([^/]+)\/(signin|signin\/code|signout)$/);
+    if (pm) {
+      const [, provider, sub] = pm;
+      if (provider !== "claude" && provider !== "codex") return json({ error: "That AI does not exist." }, 404);
+      if (sub === "signin/code") {
+        const refused = owner("sign accounts in");
+        if (refused) return refused;
+        if (req.method !== "POST" || provider !== "claude") return json({ error: "method not allowed" }, 405);
+        return json(submitCode(MAIN_CLAUDE, (await read()).code));
+      }
+      if (sub === "signout") {
+        const refused = owner("sign out");
+        if (refused) return refused;
+        if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+        containFailure(audit(c.actor, "ai.provider.signout", provider), "audit");
+        if (provider === "codex") await signOutCodex();
+        else await signOutClaude(MAIN_CLAUDE);
+        forgetSignIn(provider);
+        return json({ ok: true });
+      }
+      const refused = owner("sign accounts in");
+      if (refused) return refused;
+      if (req.method === "GET") {
+        if (provider === "codex") {
+          const st = codexLoginState();
+          if (st.state === "done") invalidateProvider("codex");
+          return json(st);
+        }
+        const st = signInState(MAIN_CLAUDE);
+        if (st.state === "done") invalidateProvider("claude");
+        return json(st);
+      }
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      containFailure(audit(c.actor, "ai.provider.signin", provider), "audit");
+      if (provider === "codex") {
+        const got = await startCodexLogin().catch((e: Error) => {
+          throw new AccountError(500, e.message);
+        });
+        return json({ state: "waiting", url: got.url, code: got.code });
+      }
+      return json(await startSignIn(MAIN_CLAUDE));
+    }
+
+    const m = path.match(/^\/api\/ai\/accounts\/([a-z0-9-]+|default)(\/key|\/test|\/signin|\/signin\/code|\/models|\/signout)?$/);
     if (!m) return json({ error: "not found" }, 404);
     const [, id, sub] = m;
     const acct = id === "default" ? undefined : getAccount(id);
@@ -1213,6 +1258,17 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
       const refused = owner("test accounts");
       if (refused) return refused;
       return json(await testAccount(id));
+    }
+    if (sub === "/signout") {
+      const refused = owner("sign accounts out");
+      if (refused) return refused;
+      if (acct.kind !== "login") return json({ error: "That account has no sign-in." }, 400);
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      containFailure(audit(c.actor, "ai.account.signout", id, acct.label), "audit");
+      if (acct.provider === "codex") await signOutCodex(id);
+      else await signOutClaude(id);
+      forgetSignIn(acct.provider, id);
+      return json({ ok: true });
     }
     if (sub === "/signin" || sub === "/signin/code") {
       const refused = owner("sign accounts in");

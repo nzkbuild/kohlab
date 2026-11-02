@@ -176,6 +176,15 @@ export const api = {
   accountSignInState: (id: string) => json<AccountSignIn>(`/api/ai/accounts/${encodeURIComponent(id)}/signin`),
   accountSignInCode: (id: string, code: string) =>
     json<AccountSignIn>(`/api/ai/accounts/${encodeURIComponent(id)}/signin/code`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }),
+  /** Owner only: sign the AI's own (main) login in. Claude: a link and a code to paste back. Codex: a link and a one-time code. */
+  providerSignIn: (provider: "claude" | "codex") => json<AccountSignIn>(`/api/ai/providers/${provider}/signin`, { method: "POST" }),
+  providerSignInState: (provider: "claude" | "codex") => json<AccountSignIn>(`/api/ai/providers/${provider}/signin`),
+  providerSignInCode: (provider: "claude" | "codex", code: string) =>
+    json<AccountSignIn>(`/api/ai/providers/${provider}/signin/code`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }),
+  /** Owner only: sign the AI's main login out. */
+  providerSignOut: (provider: "claude" | "codex") => json<{ ok: boolean }>(`/api/ai/providers/${provider}/signout`, { method: "POST" }),
+  /** Owner only: sign another login out. The account stays in the list as "Not signed in". */
+  accountSignOut: (id: string) => json<{ ok: boolean }>(`/api/ai/accounts/${encodeURIComponent(id)}/signout`, { method: "POST" }),
   /** Owner only: a model the AI doesn't list, a new name for any model, or removing a custom one. */
   addModel: (id: string, value: string, label: string) =>
     json<{ ok: boolean }>(`/api/ai/accounts/${encodeURIComponent(id)}/models`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value, label }) }),

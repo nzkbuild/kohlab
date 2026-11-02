@@ -1,106 +1,20 @@
 import { useEffect, useState } from "react";
-import { Copy } from "@phosphor-icons/react";
+import { DotsThree } from "@phosphor-icons/react";
 import { api } from "../api";
 import type { ProviderAccount, ProviderCard, ProviderModel, RouterCheck } from "../types";
-import { agoText, accountLabel, orderCards, stateWord, untilText } from "../lib/aiHub";
+import { agoText, orderCards, stateWord, untilText } from "../lib/aiHub";
 import { announce } from "../lib/announce";
 import { useProviders } from "../lib/useProviders";
 import { cn } from "../lib/utils";
-import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, SignInAccountDialog, checkText } from "./AccountDialogs";
+import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, SignInDialog, checkText, type SignInTarget } from "./AccountDialogs";
 import AiDefaultsPanel from "./AiDefaultsPanel";
 import ConfirmDialog from "./ConfirmDialog";
 import RulesPanel from "./RulesPanel";
 import { UsageRow } from "./UsageDialog";
-import { Button, Field, Panel, SkeletonRows } from "./ui";
+import { Button, Field, Menu, MenuItem, Panel, SkeletonRows } from "./ui";
 
 const NO_MODELS = "Models appear after your first chat with it.";
 const MODEL_SEARCH_AT = 12;
-
-/** Codex sign-in for the owner: shows the code and link from `codex login --device-auth`, then polls until the browser approval lands. */
-function CodexSignIn({ onConnected }: { onConnected: () => void }) {
-  const [phase, setPhase] = useState<"idle" | "starting" | "waiting" | "failed">("idle");
-  const [login, setLogin] = useState<{ url: string; code: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const start = () => {
-    setPhase("starting");
-    setError(null);
-    api.codexLogin().then(
-      (l) => {
-        setLogin(l);
-        setPhase("waiting");
-      },
-      (e: Error) => {
-        setError(e.message);
-        setPhase("failed");
-      },
-    );
-  };
-
-  // Poll every 2 s while waiting; a failed poll is retried, not shown.
-  useEffect(() => {
-    if (phase !== "waiting") return;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = () => {
-      api.codexLoginState().then(
-        (s) => {
-          if (!alive) return;
-          if (s.state === "done") onConnected();
-          else if (s.state === "failed") {
-            setError(s.error ?? "Sign-in did not finish. Try again.");
-            setPhase("failed");
-          } else timer = setTimeout(tick, 2000);
-        },
-        () => {
-          if (alive) timer = setTimeout(tick, 2000);
-        },
-      );
-    };
-    timer = setTimeout(tick, 2000);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [phase, onConnected]);
-
-  const copy = () => {
-    if (!login) return;
-    void navigator.clipboard?.writeText(login.code);
-    announce("Code copied");
-  };
-
-  if (phase === "waiting" && login) {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm text-text-secondary">Open the page, sign in with your ChatGPT account and enter this code.</p>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="mono rounded-md bg-surface-sunken px-3 py-2 text-2xl tracking-widest text-text-primary">{login.code}</span>
-          <Button variant="secondary" size="sm" onClick={copy}>
-            <Copy size={14} aria-hidden="true" />
-            Copy
-          </Button>
-        </div>
-        {/^https:\/\//i.test(login.url) ? (
-          <a className="text-sm font-medium text-accent underline underline-offset-2" href={login.url} target="_blank" rel="noopener noreferrer">
-            Open sign-in page
-          </a>
-        ) : null}
-        <p className="text-xs text-text-muted">Waiting for you to finish in your browser.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      {error ? <p className="text-sm text-status-danger">{error}</p> : null}
-      <div>
-        <Button variant="secondary" size="sm" disabled={phase === "starting"} onClick={start}>
-          {phase === "starting" ? "Starting…" : "Sign in to Codex"}
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 /** Why a model id or name can't be saved, in a sentence; null when it can. Mirrors the server's limits (id up to 200 characters with no spaces, name up to 60). */
 export function modelProblem(id: string | null, name: string): string | null {
@@ -254,23 +168,52 @@ function ModelsList({ models, accountId, owner, onChanged }: { models: ProviderM
   );
 }
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * One account of an AI as a row: its name (the main login is "Main account"), its state in words, one action when it is
+ * signed out, and a ⋯ menu for the owner: Sign in again, Sign out, Rename and Remove (Remove only for extra accounts).
+ */
 function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard; account: ProviderAccount; owner: boolean; onChanged: () => void }) {
-  const label = accountLabel(card, owner, account) ?? (owner ? account.label : null);
-  const plan = owner && account.plan ? account.plan.charAt(0).toUpperCase() + account.plan.slice(1) : null;
-  const other = account.id !== "default";
+  const provider = card.id as SignInTarget["provider"];
+  const isAi = card.id === "claude" || card.id === "codex";
+  const main = account.id === "default";
   const router = account.kind === "router";
-  const limited = account.state === "limited";
+  const signedOut = account.state === "signed_out";
+  const limitedUntil = owner && typeof account.limitedUntil === "number" ? account.limitedUntil : null;
   // Only Claude and Codex can report plan usage; for the others there is nothing to say.
   const reports = card.id === "claude" || card.id === "codex";
-  const how = !owner ? null : account.kind === "login" ? (account.state === "signed_out" ? "Not signed in yet" : `Signed in with ${card.name}`) : router ? (account.baseUrlHost ? `Router at ${account.baseUrlHost}` : "API key") : account.auth === "api_key" ? "API key" : null;
+  const title = main && isAi ? "Main account" : owner ? account.label : null;
+  const plan = owner && account.plan ? cap(account.plan) : null;
+  const how = !owner ? null : router ? (account.baseUrlHost ? `Router at ${account.baseUrlHost}` : "API key") : account.auth === "api_key" ? "API key" : !signedOut && isAi ? `Signed in with ${card.name}` : null;
+  const sub = [owner ? account.email : null, plan, how].filter(Boolean).join(" · ");
+  const stateText = signedOut
+    ? "Not signed in"
+    : account.state === "limited"
+      ? limitedUntil !== null
+        ? `Limit reached until ${untilText(limitedUntil)}`
+        : "Limit reached"
+      : account.state === "error"
+        ? "Problem"
+        : router
+          ? "Connected"
+          : "Signed in";
   const [testing, setTesting] = useState(false);
   const [check, setCheck] = useState<RouterCheck | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const target: SignInTarget = main ? { provider } : { provider, id: account.id };
+  const canSignIn = owner && isAi && !router;
+  const canSignOut = canSignIn && !signedOut && (!main || card.actions.some((a) => a.kind === "sign_out"));
+  const name = title ?? account.label;
+  // The menu only when it has something in it: Sign in again, Sign out, and Rename and Remove for another login.
+  const menu = (canSignIn && !signedOut) || canSignOut || !main;
 
   const test = async () => {
     setTesting(true);
@@ -298,12 +241,57 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
       setRemoving(false);
     }
   };
+  const signOut = async () => {
+    setSigningOut(true);
+    setProblem(null);
+    try {
+      if (main) await api.providerSignOut(provider);
+      else await api.accountSignOut(account.id);
+      announce("Signed out");
+      setConfirmOut(false);
+      onChanged();
+    } catch (e) {
+      setConfirmOut(false);
+      setProblem(`Couldn't sign out. ${e instanceof Error && e.message ? e.message : "Try again."}`);
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-3">
-      {label || plan ? <p className="text-sm text-text-primary">{[label, plan].filter(Boolean).join(" · ")}</p> : null}
-      {how ? <p className="text-xs text-text-muted">{how}</p> : null}
-      {owner && typeof account.limitedUntil === "number" ? <p className="text-sm text-text-secondary">{`Limit reached until ${untilText(account.limitedUntil)}`}</p> : null}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          {title ? <p className="text-sm font-medium text-text-primary">{title}</p> : null}
+          <p className="text-sm text-text-secondary">{stateText}</p>
+          {sub ? <p className="text-xs text-text-muted">{sub}</p> : null}
+        </div>
+        {owner ? (
+          <div className="flex shrink-0 items-center gap-1">
+            {canSignIn && signedOut ? (
+              <Button variant="secondary" size="sm" onClick={() => setSigningIn(true)}>
+                {main ? `Sign in to ${card.name}` : "Sign in"}
+              </Button>
+            ) : null}
+            {menu ? (
+              <Menu
+                label={`More actions for ${name}`}
+                trigger={
+                  <Button variant="quiet" size="sm" iconOnly aria-label={`More actions for ${name}`}>
+                    <DotsThree size={16} aria-hidden="true" />
+                  </Button>
+                }
+              >
+                {canSignIn && !signedOut ? <MenuItem onSelect={() => setSigningIn(true)}>Sign in again</MenuItem> : null}
+                {canSignOut ? <MenuItem onSelect={() => setConfirmOut(true)}>Sign out</MenuItem> : null}
+                {!main ? <MenuItem onSelect={() => setRenaming(true)}>Rename</MenuItem> : null}
+                {!main ? <MenuItem tone="danger" onSelect={() => setConfirmRemove(true)}>Remove</MenuItem> : null}
+              </Menu>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
       {owner && account.usage ? (
         <>
           {account.usage.windows.map((w) => (
@@ -315,38 +303,23 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
       ) : owner && router ? (
         <p className="text-xs text-text-muted">Usage is on the router's own dashboard.</p>
       ) : owner && reports ? (
-        <p className="text-xs text-text-muted">{limited ? "Limit reached." : "Not shown for this plan."}</p>
+        <p className="text-xs text-text-muted">{account.state === "limited" ? "Limit reached." : "Not shown for this plan."}</p>
       ) : null}
       {account.models.length > 0 || owner ? <ModelsList models={account.models} accountId={account.id} owner={owner} onChanged={onChanged} /> : <p className="text-xs text-text-muted">{NO_MODELS}</p>}
 
-      {owner && other ? (
+      {owner && router ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {router ? (
-            <>
-              <Button variant="quiet" size="sm" className="text-text-secondary" disabled={testing} onClick={() => void test()}>
-                {testing ? "Testing…" : "Test"}
-              </Button>
-              <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setReplacing(true)}>
-                Replace key
-              </Button>
-            </>
-          ) : null}
-          {account.kind === "login" && account.state === "signed_out" ? (
-            <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setSigningIn(true)}>
-              Sign in
-            </Button>
-          ) : null}
-          <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setRenaming(true)}>
-            Rename
+          <Button variant="quiet" size="sm" className="text-text-secondary" disabled={testing} onClick={() => void test()}>
+            {testing ? "Testing…" : "Test"}
           </Button>
-          <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setConfirmRemove(true)}>
-            Remove
+          <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setReplacing(true)}>
+            Replace key
           </Button>
         </div>
       ) : null}
       {check ? <p role="status" className="text-xs text-text-secondary">{checkText(check)}</p> : null}
       {problem ? <p role="status" className="text-xs text-text-secondary">{problem}</p> : null}
-      {owner && other ? (
+      {owner ? (
         <>
           <ConfirmDialog
             open={confirmRemove}
@@ -357,8 +330,18 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
             busy={removing}
             onConfirm={() => void remove()}
           />
+          <ConfirmDialog
+            open={confirmOut}
+            onOpenChange={setConfirmOut}
+            title={`Sign out of ${main ? card.name : account.label}?`}
+            description="Chats using it stop until you sign in again."
+            confirmLabel="Sign out"
+            tone="commit"
+            busy={signingOut}
+            onConfirm={() => void signOut()}
+          />
           {renaming ? <RenameAccountDialog id={account.id} label={account.label} open onOpenChange={(v) => !v && setRenaming(false)} onDone={onChanged} /> : null}
-          {signingIn ? <SignInAccountDialog id={account.id} label={account.label} open onOpenChange={(v) => !v && setSigningIn(false)} onDone={onChanged} /> : null}
+          {signingIn ? <SignInDialog target={target} title={`Sign in to ${main ? card.name : account.label}`} open onOpenChange={(v) => { if (!v) { setSigningIn(false); onChanged(); } }} /> : null}
           {replacing ? <ReplaceKeyDialog id={account.id} label={account.label} open onOpenChange={(v) => !v && setReplacing(false)} /> : null}
         </>
       ) : null}
@@ -368,11 +351,12 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
 
 function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard; owner: boolean; busy: boolean; onRefresh: () => void }) {
   const usable = card.state === "connected" || card.state === "limited";
-  const signIn = card.actions.find((a) => a.kind === "sign_in");
+  const isAi = card.id === "claude" || card.id === "codex";
   const hints = card.actions.filter((a) => a.hint && a.kind !== "refresh");
-  const codexLogin = owner && card.state === "signed_out" && signIn?.via === "device_code";
+  // Signed out: the rows still show every login, the main one included, so each can be signed in or removed.
+  const rows = usable || (owner && card.state === "signed_out") ? card.accounts : [];
   const [adding, setAdding] = useState(false);
-  const canAdd = owner && card.installed && (card.id === "claude" || card.id === "codex") && card.state !== "not_installed" && card.state !== "checking";
+  const canAdd = owner && card.installed && isAi && card.state !== "not_installed" && card.state !== "checking";
   return (
     <Panel>
       <div className="flex flex-col gap-4 p-4">
@@ -387,9 +371,10 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
           </span>
         </div>
 
-        {usable && card.accounts.length > 0
-          ? card.accounts.map((a) => <AccountBlock key={a.id} card={card} account={a} owner={owner} onChanged={onRefresh} />)
-          : null}
+        {owner && isAi && rows.length > 0 ? <p className="text-xs text-text-muted">{`${card.name} can hold several accounts. Each project uses one of them.`}</p> : null}
+        {rows.map((a) => (
+          <AccountBlock key={a.id} card={card} account={a} owner={owner} onChanged={onRefresh} />
+        ))}
 
         {card.state === "error" && owner ? (
           <p className="text-sm text-text-secondary">{card.error?.message ?? "Kohlab could not check this AI just now."}</p>
@@ -405,10 +390,9 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
                 {a.hint}
               </p>
             ))}
-            {codexLogin ? <CodexSignIn onConnected={onRefresh} /> : null}
             {canAdd ? (
               <div>
-                <Button variant="secondary" size="sm" onClick={() => setAdding(true)}>
+                <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setAdding(true)}>
                   {card.id === "codex" ? "Add another Codex login" : "Add another Claude account"}
                 </Button>
               </div>

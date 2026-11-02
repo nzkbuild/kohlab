@@ -152,6 +152,8 @@ try {
   run("omp model (the hub's pick sticks, a refusal is said plainly) and ACP permissions", "bun", ["scripts/check-omp-model.mjs"]);
   run("AI hub in the browser (Settings, picker, run strip and panel)", "node", ["scripts/check-ai-hub-ui.mjs"]);
   run("AI control in the browser (defaults, accounts, fallback, permissions, one message)", "node", ["scripts/check-ai-control-ui.mjs"]);
+  run("AI sign-in without a terminal (main and extra accounts, sign out, timeout, agent reach)", "node", ["scripts/check-signin.mjs"]);
+  run("AI sign-in in the browser (one dialog, sign out, duplicate, chat button)", "node", ["scripts/check-signin-ui.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);

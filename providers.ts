@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { agentModels, claudeProbe, forgetProbe, type Caps, type ClaudeProbe } from "./chat";
 import { clearCodexSignedIn, codexSignedIn } from "./codex";
-import { childEnv, dirOf, envOfAccount, getAccount, groupRouterModels, hasKey, limitedUntil, listAccounts, markLimited, overlayOf, runAsOf, setSignedIn, testRouter, type Account } from "./accounts";
+import { childEnv, dirOf, envOfAccount, getAccount, groupRouterModels, hasKey, limitedUntil, listAccounts, mainRunAs, markLimited, overlayOf, runAsOf, setSignedIn, testRouter, type Account } from "./accounts";
 
 export type ProviderId = "claude" | "codex" | "hermes" | "omp" | (string & {});
 
@@ -130,7 +130,8 @@ function run(cmd: string, args: string[], timeoutMs: number, maxBytes = 512 * 10
     let fail: Ran["fail"] = null;
     let done = false;
     // an account's own process: its sign-in directory, and the OS account that owns it
-    const as = account ? runAsOf(account) : { uid: undefined, gid: undefined, home: homedir() };
+    // the AI's own login runs as the agent identity when there is one (the login new projects use); claude and codex only
+    const as = account ? runAsOf(account) : cmd === "claude" || cmd === "codex" ? mainRunAs() : { uid: undefined, gid: undefined, home: homedir() };
     const extra = account?.kind === "login" ? envOfAccount(account) : undefined;
     const child = spawn(bin, args, { cwd: as.home, uid: as.uid, gid: as.gid, env: childEnv(as.home, extra), stdio: ["ignore", "pipe", "pipe"] });
     const end = (code: number | null) => {
@@ -347,6 +348,21 @@ export function parseOmpUsage(text: string, readAt: number): ProviderUsage | nul
 
 const refreshAction: ProviderAction = { kind: "refresh", label: "Refresh" };
 const serverSignIn = (hint: string): ProviderAction => ({ kind: "sign_in", label: "Sign in", via: "server", hint });
+const CLAUDE_SIGN_IN: ProviderAction = { kind: "sign_in", label: "Sign in", via: "url" };
+const SIGN_OUT: ProviderAction = { kind: "sign_out", label: "Sign out" };
+
+/** The AI's own login as a row when it is signed out, so the page always shows "Main account" with its state and Sign in. */
+function mainSignedOutRow(): ProviderAccount {
+  return { id: "default", label: "Main account", email: null, plan: null, auth: "none", state: "signed_out", isolation: {}, usage: null, models: [], modelsAt: null, kind: "default", limitedUntil: null };
+}
+
+/** A card whose own login is connected (or at a limit) gets the Sign out action. Pure. */
+function withSignOut(card: ProviderCard): ProviderCard {
+  const mainOn = card.accounts.some((a) => a.id === "default" && (a.state === "connected" || a.state === "limited"));
+  return mainOn ? { ...card, actions: [SIGN_OUT, ...card.actions] } : card;
+}
+
+
 
 function baseCard(id: ProviderId, now: number): ProviderCard {
   return { id, name: NAMES[id] ?? String(id), kind: "cli", installed: true, version: null, state: "checking", checkedAt: now, stale: false, accounts: [], actions: [refreshAction] };
@@ -436,7 +452,7 @@ export function claudeCardFrom(
   const acct = a.probe.account ?? {};
   const email = str((acct as any).email);
   const apiKey = a.method === "api_key" || (str((acct as any).apiKeySource) !== null && str((acct as any).apiKeySource) !== "none");
-  if (a.loggedIn === false || (!email && !apiKey)) return signedOutCard("claude", a.now, a.version, serverSignIn("On the server, run claude auth login."));
+  if (a.loggedIn === false || (!email && !apiKey)) return signedOutCard("claude", a.now, a.version, CLAUDE_SIGN_IN);
   const usage = apiKey ? null : parseClaudeUsage(a.probe.planRaw, a.probe.at);
   const limited = usage?.windows.some((w) => w.severity === "limit") ?? false;
   return accountCard("claude", a.now, a.version, {
@@ -624,7 +640,7 @@ async function claudeProbeCard(ctx: Ctx): Promise<ProviderCard> {
     const probe = await claudeProbe(ctx.force ? 0 : TTL_USAGE);
     const one = claudeCardFrom({ now, version, loggedIn: auth.loggedIn, method: auth.method, probe }).accounts[0];
     if (one) accounts.push({ ...tagged("claude", null, one, "default"), models: withOverlay(one.models, overlayOf("claude", "default")) });
-  }
+  } else accounts.push(mainSignedOutRow());
   // then every other sign-in, one after the other (never two Claude processes at once), and every router
   for (const a of listAccounts("claude")) {
     if (a.kind === "router") {
@@ -653,7 +669,7 @@ async function claudeProbeCard(ctx: Ctx): Promise<ProviderCard> {
     { kind: "add_account", label: "Add another Claude account", via: "url" },
     { kind: "add_account", label: "Use Claude through a router or API address", via: "api_key" },
   ];
-  return combineAccounts("claude", now, version, accounts, serverSignIn("On the server, run claude auth login."), add);
+  return withSignOut(combineAccounts("claude", now, version, accounts, CLAUDE_SIGN_IN, add));
 }
 
 /** The host of a router's address, for a card (never its path). */
@@ -669,7 +685,7 @@ function hostOf(url: string | undefined): string {
 async function codexRead(account?: Account): Promise<{ account: any; rateLimits: any }> {
   const bin = Bun.which("codex");
   if (!bin) throw new ProbeError("spawn", "");
-  const as = account ? runAsOf(account) : { uid: undefined, gid: undefined, home: homedir() };
+  const as = account ? runAsOf(account) : mainRunAs();
   const child = spawn(bin, ["app-server"], { cwd: as.home, uid: as.uid, gid: as.gid, env: childEnv(as.home, account ? { CODEX_HOME: dirOf(account.id) } : undefined), stdio: ["pipe", "pipe", "pipe"] });
   child.stderr!.on("data", () => {});
   child.stdin!.on("error", () => {});
@@ -737,7 +753,7 @@ async function codexProbeCard(ctx: Ctx): Promise<ProviderCard> {
     const read = await memo("codex:read", TTL_USAGE, () => codexRead());
     const one = codexCardFrom({ now, version, account: read.account, rateLimits: read.rateLimits, models: agentModels("codex") }).accounts[0];
     if (one) accounts.push({ ...tagged("codex", null, one, "default"), models: withOverlay(one.models, overlayOf("codex", "default")) });
-  }
+  } else accounts.push(mainSignedOutRow());
   for (const a of listAccounts("codex")) {
     const si = await codexSignedIn(a.id);
     if (si !== null) setSignedIn(a.id, si);
@@ -756,7 +772,7 @@ async function codexProbeCard(ctx: Ctx): Promise<ProviderCard> {
     }
   }
   const add: ProviderAction[] = [{ kind: "add_account", label: "Add another Codex login", via: "device_code" }];
-  return combineAccounts("codex", now, version, accounts, { kind: "sign_in", label: "Sign in with ChatGPT", via: "device_code" }, add);
+  return withSignOut(combineAccounts("codex", now, version, accounts, { kind: "sign_in", label: "Sign in with ChatGPT", via: "device_code" }, add));
 }
 
 async function hermesProbeCard(): Promise<ProviderCard> {
@@ -916,6 +932,18 @@ export async function testAccount(id: string): Promise<{ check: "ok" | "key_reje
   if (si === null) return { check: "unreachable" };
   setSignedIn(id, si);
   return { check: si ? "ok" : "signed_out" };
+}
+
+/** Forgets what was read about one sign-in (its status, its probe, its card) after it was signed in or out. */
+export function forgetSignIn(provider: string, accountId?: string): void {
+  if (provider === "claude") {
+    memos.delete(accountId ? `claude:${accountId}:auth` : "claude:auth");
+    forgetProbe(accountId);
+  } else {
+    clearCodexSignedIn(accountId);
+    memos.delete(accountId ? `codex:${accountId}:read` : "codex:read");
+  }
+  invalidateProvider(provider);
 }
 
 /** A forced refresh of Claude also reads every account again (the 5 min reading of each is dropped). */

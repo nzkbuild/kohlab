@@ -287,7 +287,8 @@ try {
   check("owner: the account says it is the AI's own login, and has no limit time", acct?.kind === "default" && acct.limitedUntil === null, JSON.stringify(acct)?.slice(0, 200));
   check("owner: the card offers both ways to add an account", claude?.actions?.filter((x) => x.kind === "add_account").length === 2);
   const codexSignedOut = card(a, "codex");
-  check("signed-out Codex: signed_out, no account, a device-code sign-in", codexSignedOut?.state === "signed_out" && codexSignedOut.accounts.length === 0 && codexSignedOut.actions.some((x) => x.kind === "sign_in" && x.via === "device_code"), JSON.stringify(codexSignedOut)?.slice(0, 300));
+  // The main row always shows: signed out, it is the one row ("Main account", Not signed in) and carries no sign-in account of its own.
+  check("signed-out Codex: signed_out, only the main row (Not signed in), a device-code sign-in", codexSignedOut?.state === "signed_out" && codexSignedOut.accounts.length === 1 && codexSignedOut.accounts[0].id === "default" && codexSignedOut.accounts[0].state === "signed_out" && codexSignedOut.actions.some((x) => x.kind === "sign_in" && x.via === "device_code"), JSON.stringify(codexSignedOut)?.slice(0, 300));
   check("signed-out Codex: nothing was asked of its app server", !existsSync(join(fakeDir, "codex-spawns")));
   const hermes = card(a, "hermes");
   check("Hermes: connected, labelled with the provider name only", hermes?.state === "connected" && hermes.accounts[0].label === "vps" && !a.text.includes("zzfakekey9"), JSON.stringify(hermes)?.slice(0, 200));

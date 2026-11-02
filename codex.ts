@@ -6,12 +6,10 @@
  * their browser. The process is kept running until it exits; the page polls for the result.
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { homedir } from "node:os";
-import { childEnv, dirOf, getAccount, runAsOf, stripAnsi } from "./accounts";
+import { AccountError, childEnv, dirOf, exitOk, getAccount, mainRunAs, runAsOf, setSignedIn, signInMs, stripAnsi } from "./accounts";
 
 export { stripAnsi };
 
-const LOGIN_MS = 15 * 60_000; // the code expires in 15 minutes; so does the wait for it
 const FIND_MS = 20_000; // the link and code should print at once; if not, something is wrong
 
 /** The sign-in link and one-time code from `codex login --device-auth` output, colour codes allowed. Null until both are in the text. Pure. */
@@ -39,7 +37,7 @@ const signedInChecks = new Map<string, { at: number; result: Promise<boolean | n
 function codexRun(accountId?: string): { env: Record<string, string>; uid?: number; gid?: number; home: string } {
   const a = accountId ? getAccount(accountId) : undefined;
   if (accountId && (!a || a.provider !== "codex" || a.kind !== "login")) throw new Error("That account does not exist");
-  const run = a ? runAsOf(a) : { uid: undefined, gid: undefined, home: homedir() };
+  const run = a ? runAsOf(a) : mainRunAs();
   return { env: childEnv(run.home, a ? { CODEX_HOME: dirOf(a.id) } : undefined), uid: run.uid, gid: run.gid, home: run.home };
 }
 
@@ -96,11 +94,11 @@ export function codexLoginState(accountId?: string): { state: LoginState | "idle
 }
 
 /** Starts a device-code sign-in, or returns the one already waiting. Resolves with the link and code once the CLI prints them.
- *  ponytail: one sign-in at a time across all accounts; a second account's waits for the first to finish. */
+ *  ponytail: one sign-in at a time across all logins; a sign-in for another login replaces a waiting one (its child is stopped). */
 export function startCodexLogin(accountId?: string): Promise<{ url: string; code: string }> {
   if (login?.state === "waiting") {
-    if (login.accountId !== accountId) return Promise.reject(new Error("Another sign-in is waiting. Finish it first."));
-    return login.ready;
+    if (login.accountId === accountId) return login.ready;
+    login.child.kill("SIGTERM"); // another login's sign-in is still waiting: it is stale now, this one replaces it
   }
   const run = codexRun(accountId);
   const child = spawn("codex", ["login", "--device-auth"], { env: run.env, uid: run.uid, gid: run.gid, cwd: run.home, stdio: ["ignore", "pipe", "pipe"] });
@@ -150,8 +148,23 @@ export function startCodexLogin(accountId?: string): Promise<{ url: string; code
   const findTimer = setTimeout(() => {
     if (!cur.url) fail("Could not read the sign-in code from Codex. Try again.");
   }, FIND_MS);
-  timer = setTimeout(() => fail("The sign-in code expired. Start again."), LOGIN_MS);
+  timer = setTimeout(() => fail("Sign-in timed out. Start again."), signInMs());
   return cur.ready;
+}
+
+/** Signs Codex out: the AI's own login (no account) or an account's own CODEX_HOME. A sign-in still waiting for it is ended. */
+export async function signOutCodex(accountId?: string): Promise<void> {
+  let run: ReturnType<typeof codexRun>;
+  try {
+    run = codexRun(accountId);
+  } catch {
+    throw new AccountError(404, "That account does not exist.");
+  }
+  if (login?.state === "waiting" && login.accountId === accountId && login.child.exitCode === null) login.child.kill("SIGTERM");
+  const bin = Bun.which("codex");
+  if (!bin || !(await exitOk(bin, ["logout"], run))) throw new AccountError(500, "Could not sign out. Try again.");
+  clearCodexSignedIn(accountId);
+  if (accountId) setSignedIn(accountId, false);
 }
 
 /** Ends a sign-in still waiting, so no `codex login` outlives the server. */

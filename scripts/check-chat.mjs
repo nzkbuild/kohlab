@@ -125,7 +125,7 @@ check("task id: none", newTaskId(null, "oops"), null);
 
 // what the user reads when Claude fails
 check("usage limit: plain sentence", friendlyError("Claude AI usage limit reached|123"), "Claude has reached its usage limit for now. Try again in a little while.");
-check("sign-in problem: plain sentence", friendlyError("Invalid API key · Please run /login"), "Claude is signed out on this server. Open Settings → Agents to check the connection.");
+check("sign-in problem: plain sentence", friendlyError("Invalid API key · Please run /login"), "Claude is signed out. Sign in to carry on.");
 check("anything else: generic sentence", friendlyError("something odd happened"), "Something went wrong on Claude's side. Try again.");
 check("not installed: set-up sentence", friendlyError("claude is not installed on this server"), "Claude is not set up on this server yet. Open Settings → Agents.");
 

@@ -56,7 +56,7 @@ const OWNER_CARDS = [
       }),
     ],
   },
-  { ...base, id: "codex", name: "Codex", state: "signed_out", accounts: [], actions: [{ kind: "refresh", label: "Refresh" }, { kind: "sign_in", label: "Sign in", via: "device_code" }] },
+  { ...base, id: "codex", name: "Codex", state: "signed_out", accounts: [account({ label: "Codex", email: null, plan: null, state: "signed_out", kind: "default", models: [] })], actions: [{ kind: "refresh", label: "Refresh" }, { kind: "sign_in", label: "Sign in", via: "device_code" }] },
   { ...base, id: "hermes", name: "Hermes", state: "connected", accounts: [account({ label: "openrouter", email: null, plan: null, models: models(14, "hermes") })] },
   { ...base, id: "omp", name: "omp", installed: false, version: null, state: "not_installed", accounts: [], actions: [{ kind: "fix", label: "Fix", hint: "Ask whoever installed Kohlab to set it up" }] },
 ];

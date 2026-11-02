@@ -13,12 +13,12 @@
  *
  * Imports only lib, so providers.ts, codex.ts and chat.ts can all use it.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, chownSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WORKS_DIR, agentIdentity, identityOf } from "./lib";
+import { WORKS_DIR, agentIdentity, grantReach, identityOf } from "./lib";
 import type { Workspace } from "./types";
 
 // ---- the environment a child gets ----
@@ -90,9 +90,30 @@ const root = () => join(WORKS_DIR, "accounts");
 const storeFile = () => join(root(), "accounts.json");
 const secretsFile = () => join(root(), "secrets.json");
 
+/** The agent identity may walk into the accounts root (search only, never list) to reach its own account's directory. */
+export function grantAccountsReach(): void {
+  const agent = agentIdentity();
+  if (!agent || agent.uid === process.getuid?.() || !existsSync(root())) return;
+  try {
+    grantReach(agent.name, root());
+  } catch (e) {
+    console.warn("[accounts] could not let the AI reach the accounts folder:", (e as Error).message);
+  }
+}
+
+/** The process settings of the AI's own login (no account): the agent identity's own home and default config dir when there is an agent identity, else the server user's. Projects that run as the agent use its login, so Settings shows that one.
+ *  ponytail: projects not run as the agent (older ones) still use the server user's login; Settings shows the agent's. */
+export function mainRunAs(): { uid?: number; gid?: number; home: string } {
+  const agent = agentIdentity();
+  return agent ? { uid: agent.uid, gid: agent.gid, home: agent.home } : { uid: undefined, gid: undefined, home: homedir() };
+}
+
+// Only created once: a chmod on every write would reset the ACL mask and cut the agent's reach again.
 function ensureRoot(): void {
+  if (existsSync(root())) return;
   mkdirSync(root(), { recursive: true, mode: 0o700 });
   chmodSync(root(), 0o700);
+  grantAccountsReach();
 }
 
 /** Writes a file atomically at 0600: a temp file beside it, then a rename. */
@@ -167,6 +188,8 @@ export function createLogin(provider: unknown, label: unknown): Account {
   const s = readStore();
   const id = newId(clean, new Set(s.accounts.map((a) => a.id)));
   const agent = agentIdentity();
+  ensureRoot();
+  grantAccountsReach(); // also repairs an install whose root was made before this grant existed
   mkdirSync(dirOf(id), { recursive: true, mode: 0o700 });
   chmodSync(dirOf(id), 0o700);
   if (agent) giveDir(dirOf(id), agent.uid, agent.gid);
@@ -519,8 +542,14 @@ export function accountView(a: Account, owner: boolean): AccountView {
 
 // ---- Claude sign-in as a managed child (spike S1) ----
 
-const SIGNIN_MS = 15 * 60_000;
+/** The key of the AI's own Claude login (no account). Not an account id, so no account can take it. */
+export const MAIN_CLAUDE = "main:claude";
 const FIND_MS = 20_000;
+/** How long a sign-in may wait for the code or the browser. KOHLAB_SIGNIN_TIMEOUT_MS overrides it (the checks). */
+export const signInMs = (): number => {
+  const n = Number(process.env.KOHLAB_SIGNIN_TIMEOUT_MS);
+  return n > 0 ? n : 10 * 60_000;
+};
 export interface SignInView {
   state: "idle" | "waiting" | "done" | "failed" | "manual";
   url?: string;
@@ -540,6 +569,49 @@ interface SignIn {
 }
 const signIns = new Map<string, SignIn>();
 
+/** The process settings of a Claude sign-in: the AI's own login (no directory, the server's home), or an account's own directory and OS account. Null when the key is neither. */
+export function signInRun(key: string): { env: Record<string, string>; uid?: number; gid?: number; home: string } | null {
+  if (key === MAIN_CLAUDE) {
+    const m = mainRunAs();
+    return { env: childEnv(m.home), uid: m.uid, gid: m.gid, home: m.home };
+  }
+  const a = getAccount(key);
+  if (!a || a.kind !== "login" || a.provider !== "claude") return null;
+  const run = runAsOf(a);
+  return { env: childEnv(run.home, { CLAUDE_CONFIG_DIR: dirOf(a.id) }), uid: run.uid, gid: run.gid, home: run.home };
+}
+
+/** Runs a command with the given process settings; true when it exits 0 within ms. Killed at ms. */
+export function exitOk(bin: string, args: string[], run: { env: Record<string, string>; uid?: number; gid?: number; home: string }, ms = 15_000): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(bin, args, { timeout: ms, killSignal: "SIGKILL", env: run.env, uid: run.uid, gid: run.gid, cwd: run.home }, (err) => resolve(!err));
+  });
+}
+
+/** Whether `claude auth status` says signed in, under the given process settings. */
+function loggedInAs(run: { env: Record<string, string>; uid?: number; gid?: number; home: string }): Promise<boolean> {
+  const bin = Bun.which("claude");
+  if (!bin) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    execFile(bin, ["auth", "status"], { timeout: 8000, killSignal: "SIGKILL", env: run.env, uid: run.uid, gid: run.gid, cwd: run.home }, (_err, stdout) => {
+      try {
+        resolve((JSON.parse(String(stdout)) as { loggedIn?: unknown } | null)?.loggedIn === true);
+      } catch {
+        resolve(false);
+      }
+    });
+  });
+}
+
+/** After the sign-in process exited 0, asks the status until it shows signed in: the CLI can exit before the status does. Ten tries, a second apart. */
+async function signedInAfterExit(run: { env: Record<string, string>; uid?: number; gid?: number; home: string }): Promise<boolean> {
+  for (let i = 0; i < 10; i++) {
+    if (await loggedInAs(run)) return true;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
 /** The sign-in link in `claude auth login` output, colour and hyperlink codes allowed. Null until it is in the text. Pure. */
 export function parseClaudeLoginUrl(text: string): string | null {
   const url = stripAnsi(text).match(/https:\/\/[^\s"'<>\x00-\x1f\x7f]+/)?.[0];
@@ -558,22 +630,26 @@ export function signInState(id: string): SignInView {
   return {
     state: s.state,
     ...(s.state === "waiting" && s.url ? { url: s.url, needsCode: s.needsCode } : {}),
-    ...(s.state === "manual" ? { command: `CLAUDE_CONFIG_DIR=${dirOf(id)} claude auth login` } : {}),
+    ...(s.state === "manual" ? { command: id === MAIN_CLAUDE ? "claude auth login --claudeai" : `CLAUDE_CONFIG_DIR=${dirOf(id)} claude auth login` } : {}),
     ...(s.error ? { error: s.error } : {}),
   };
 }
 
-/** Starts `claude auth login --claudeai` under the account's own directory, or returns the one already waiting. Resolves once the link is printed (or it could not be). */
+function stopChild(s: SignIn): void {
+  if (s.child && s.child.exitCode === null && s.child.signalCode === null) s.child.kill("SIGTERM");
+}
+
+/** Starts `claude auth login --claudeai` for the AI's own login or one account, or returns the one already waiting. Resolves once the link is printed (or it could not be). A sign-in that is no longer waiting is replaced, and its child stopped. */
 export async function startSignIn(id: string): Promise<SignInView> {
-  const a = getAccount(id);
-  if (!a || a.kind !== "login" || a.provider !== "claude") throw new AccountError(404, "That account does not exist.");
+  const run = signInRun(id);
+  if (!run) throw new AccountError(404, "That account does not exist.");
   const have = signIns.get(id);
   if (have?.state === "waiting") {
     await have.ready;
     return signInState(id);
   }
+  if (have) stopChild(have);
   const bin = Bun.which("claude");
-  const run = runAsOf(a);
   let settle!: () => void;
   const cur: SignIn = { child: undefined as unknown as ChildProcess, state: "waiting", needsCode: false, out: "", ready: new Promise<void>((r) => (settle = r)), settled: false };
   signIns.set(id, cur);
@@ -583,7 +659,7 @@ export async function startSignIn(id: string): Promise<SignInView> {
     settle();
     return signInState(id);
   }
-  const child = spawn(bin, ["auth", "login", "--claudeai"], { cwd: run.home, uid: run.uid, gid: run.gid, env: childEnv(run.home, { CLAUDE_CONFIG_DIR: dirOf(id) }), stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(bin, ["auth", "login", "--claudeai"], { cwd: run.home, uid: run.uid, gid: run.gid, env: run.env, stdio: ["pipe", "pipe", "pipe"] });
   cur.child = child;
   child.stdin!.on("error", () => {});
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -599,7 +675,7 @@ export async function startSignIn(id: string): Promise<SignInView> {
       cur.error = error;
     }
     done();
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    stopChild(cur);
   };
   const onData = (d: Buffer) => {
     cur.out = (cur.out + d).slice(-8000);
@@ -621,15 +697,20 @@ export async function startSignIn(id: string): Promise<SignInView> {
       done();
     } else fail("Could not start the sign-in. Try again.");
   });
-  child.on("exit", (code) => {
+  child.on("exit", async (code) => {
     clearTimeout(timer);
     clearTimeout(findTimer);
     if (cur.state !== "waiting") return;
     if (code === 0) {
+      // the code was accepted, or the browser approved: the status has to show it before the sign-in is done
+      const ok = await signedInAfterExit(run);
+      if (cur.state !== "waiting") return; // the time ran out meanwhile
+      if (!ok) return fail("Sign-in did not finish. Start again.");
       cur.state = "done";
-      setSignedIn(id, true);
-      done();
-    } else fail(/login failed/i.test(stripAnsi(cur.out)) ? "That code was not accepted. Start again." : cur.url ? "Sign-in did not finish. Start again." : "Could not start the sign-in. Try again.");
+      if (id !== MAIN_CLAUDE) setSignedIn(id, true);
+      return done();
+    }
+    fail(/login failed/i.test(stripAnsi(cur.out)) ? "That code was not accepted. Start again." : cur.url ? "Sign-in did not finish. Start again." : "Could not start the sign-in. Try again.");
   });
   const findTimer = setTimeout(() => {
     if (!cur.url && cur.state === "waiting") {
@@ -638,7 +719,7 @@ export async function startSignIn(id: string): Promise<SignInView> {
       child.kill("SIGTERM");
     }
   }, FIND_MS);
-  timer = setTimeout(() => fail("The sign-in expired. Start again."), SIGNIN_MS);
+  timer = setTimeout(() => fail("Sign-in timed out. Start again."), signInMs());
   await cur.ready;
   return signInState(id);
 }
@@ -653,9 +734,21 @@ export function submitCode(id: string, code: unknown): SignInView {
   return signInState(id);
 }
 
+/** Signs a Claude login out: the AI's own (`claude auth logout`) or an account's own directory. A sign-in still waiting for it is ended and forgotten. */
+export async function signOutClaude(id: string): Promise<void> {
+  const run = signInRun(id);
+  if (!run) throw new AccountError(404, "That account does not exist.");
+  const s = signIns.get(id);
+  if (s) stopChild(s);
+  signIns.delete(id);
+  const bin = Bun.which("claude");
+  if (!bin || !(await exitOk(bin, ["auth", "logout"], run))) throw new AccountError(500, "Could not sign out. Try again.");
+  if (id !== MAIN_CLAUDE) setSignedIn(id, false);
+}
+
 /** Ends sign-ins still waiting, so no `claude auth login` outlives the server. */
 export function stopSignIns(): void {
-  for (const s of signIns.values()) if (s.state === "waiting" && s.child && s.child.exitCode === null) s.child.kill("SIGTERM");
+  for (const s of signIns.values()) if (s.state === "waiting") stopChild(s);
 }
 
 /** For the checks only: forget in-memory state. */

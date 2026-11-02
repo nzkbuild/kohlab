@@ -276,6 +276,11 @@ function grantTraverse(user: string, target: string): void {
   }
 }
 
+/** Search-only access (x, never r) for `user` to `dir` and every directory above it: a directory the agent walks into but must not list. */
+export function grantReach(user: string, dir: string): void {
+  grantTraverse(user, join(dir, "_")); // ponytail: the last name is a placeholder; grantTraverse starts at dir
+}
+
 async function grantAgentAccess(user: string, repo: string, workspaceDir: string): Promise<void> {
   const gitDir = (await runOut(repo, "git", ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
   // The way to the repo AND the way to the workspace: the state directory is

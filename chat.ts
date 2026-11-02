@@ -14,7 +14,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { AiDefaults, AiResolved, Fallback, FallbackStep, LimitState, PermissionRule, Workspace } from "./types";
-import { accountEnv, childEnv, clearLimit, configDirOf, envOfAccount, getAccount, laneKey, limitedUntil, listAccounts, markLimited, overlayOf, runAsOf, signedInOf, usableBy } from "./accounts";
+import { accountEnv, childEnv, clearLimit, configDirOf, envOfAccount, getAccount, laneKey, limitedUntil, listAccounts, mainRunAs, markLimited, overlayOf, runAsOf, signedInOf, usableBy } from "./accounts";
 import { RESET_FIELDS, resolveAi } from "./defaults";
 import { PERSONAL_ASKS, claudeArgsFor, cleanRules, defaultSteps, describeRule, isMode, limitReached, ruleFor, validRule } from "./policy";
 import { notifyNeedsYou } from "./push";
@@ -1597,7 +1597,7 @@ async function headlessProbe(accountId?: string): Promise<ClaudeProbe> {
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
   const acct = accountId ? getAccount(accountId) : undefined;
   if (accountId && (!acct || acct.provider !== "claude" || acct.kind !== "login")) throw new Error("That account cannot be read this way");
-  const run = acct ? runAsOf(acct) : { uid: undefined, gid: undefined, home: homedir() };
+  const run = acct ? runAsOf(acct) : mainRunAs();
   const dir = mkdtempSync(join(tmpdir(), "kohlab-usage-"));
   if (run.uid !== undefined) chownSync(dir, run.uid, run.gid ?? run.uid);
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--setting-sources", "project,local", "--disable-slash-commands", "--strict-mcp-config"];

@@ -309,11 +309,12 @@ try {
     const ctext = await claude.innerText();
     check("accounts: kinds in words", /Signed in with Claude/.test(ctext) && /Router at 127\.0\.0\.1:20128/.test(ctext), ctext.replace(/\n/g, " | ").slice(0, 300));
     check("accounts: a limit says until when, in the viewer's time zone", ctext.includes(`Limit reached until ${clock(SOON)}`) || new RegExp(`Limit reached until .*${clock(SOON).replace(".", "\\.")}`).test(ctext), `${clock(SOON)} in ${ctext.match(/Limit reached until[^\n]*/)?.[0]}`);
-    check("accounts: Test, Replace key and Remove for another account", (await claude.getByRole("button", { name: "Test" }).count()) === 1 && (await claude.getByRole("button", { name: "Replace key" }).count()) === 1 && (await claude.getByRole("button", { name: "Remove", exact: true }).count()) === 2);
+    check("accounts: Test, Replace key and Remove for another account", (await claude.getByRole("button", { name: "Test" }).count()) === 1 && (await claude.getByRole("button", { name: "Replace key" }).count()) === 1 && (await claude.getByRole("button", { name: "More actions for Work", exact: true }).count()) === 1);
     check("accounts: 'Add another Claude account'", (await claude.getByRole("button", { name: "Add another Claude account" }).count()) === 1);
     await claude.getByRole("button", { name: "Test" }).click();
     check("accounts: Test says how it went", await waitText(page, "Connected."));
-    await claude.getByRole("button", { name: "Rename", exact: true }).first().click();
+    await claude.getByRole("button", { name: "More actions for Work", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Rename", exact: true }).click();
     const renameDlg = page.getByRole("dialog");
     await renameDlg.waitFor({ timeout: 5000 }).catch(() => {});
     await renameDlg.getByLabel("Name").fill("   ");
@@ -323,7 +324,8 @@ try {
     await renameDlg.getByRole("button", { name: "Rename" }).click();
     await page.waitForTimeout(300);
     check("accounts: Rename sends the new name", s.posts.some((p) => p.method === "PATCH" && p.url === "/api/ai/accounts/work" && p.body?.label === "Side job"), JSON.stringify(s.posts.at(-1)));
-    await claude.getByRole("button", { name: "Remove", exact: true }).first().click();
+    await claude.getByRole("button", { name: "More actions for Work", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Remove", exact: true }).click();
     const confirm = page.getByRole("alertdialog");
     await confirm.waitFor({ timeout: 5000 }).catch(() => {});
     check("accounts: Remove asks first", /Remove this account\?/.test(await confirm.innerText()) && !s.posts.some((p) => p.method === "DELETE"));

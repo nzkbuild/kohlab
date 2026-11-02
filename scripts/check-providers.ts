@@ -87,7 +87,7 @@ const apiKey = claudeCardFrom({
 check("claude: an API key is connected with no plan windows", apiKey.state === "connected" && apiKey.accounts[0].usage === null && apiKey.accounts[0].auth === "api_key" && apiKey.accounts[0].email === null);
 const signedOut = claudeCardFrom({ now: NOW, version: "2.1.305", loggedIn: false, method: "none", probe: probe(null, { tokenSource: "none" }) });
 check("claude: signed out has no accounts and no models", signedOut.state === "signed_out" && signedOut.accounts.length === 0 && JSON.stringify(signedOut).includes('"default"') === false);
-check("claude: signed out can be signed in on the server", signedOut.actions.some((a) => a.kind === "sign_in" && a.via === "server" && !!a.hint));
+check("claude: signed out can be signed in from the page", signedOut.actions.some((a) => a.kind === "sign_in" && a.via === "url" && !a.hint));
 const noAcct = claudeCardFrom({ now: NOW, version: null, loggedIn: null, method: null, probe: probe(null, { tokenSource: "none", apiProvider: "firstParty" }) });
 check("claude: no email and no key reads as signed out even when the status check was unsure", noAcct.state === "signed_out");
 
