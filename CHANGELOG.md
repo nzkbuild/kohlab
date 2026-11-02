@@ -9,6 +9,18 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.8.3] - 2026-11-02
+
+### Fixed
+- **Signing in from Settings → AI works.** Extra accounts could never finish signing in, because the AI's own computer account wasn't allowed into the folder where their logins are kept. Kohlab now grants it access and repairs existing installs when it starts.
+- **Settings and your chats now agree on the main account.** "Main account" is the login your chats actually use, and its status, Sign in and Sign out all go to that login.
+
+### Added
+- **Sign in to your main Claude or Codex login from Settings,** without a terminal. One dialog for every account: open the sign-in page, paste the code (Claude) or enter the shown code (Codex), and see "Signed in as …" when it's done. A sign-in left waiting stops after 10 minutes with a clear message.
+- **Several accounts per AI, clearly listed.** Each AI shows its Main account and every extra account with its state, a Sign in button when needed, and Sign in again, Sign out, Rename and Remove in its ⋯ menu.
+- Adding an account while another is unfinished offers to finish that one first, instead of making a copy.
+- When a reply fails because Claude is signed out, a **Sign in** button appears right under it.
+
 ## [2.8.2] - 2026-10-31
 
 ### Fixed
