@@ -189,6 +189,19 @@ export default function CommandPalette() {
       keywords: ["claude", "account", "notifications", "updates", "preferences"],
       onAction: () => navigate({ kind: "settings" }),
     },
+    // The server's own shell is the owner's alone (see the sidebar row).
+    ...(can.own
+      ? [
+          {
+            id: "view-server-terminal",
+            label: "Terminal on the server",
+            group: "Views" as const,
+            icon: <Terminal size={16} />,
+            keywords: ["shell", "console", "command line", "server"],
+            onAction: () => navigate({ kind: "terminal" }),
+          },
+        ]
+      : []),
     // One entry per project, in sidebar order, with the sidebar's dot for the two statuses that need the user.
     // The open project has its own group above, so it is not listed twice.
     ...sidebarOrder(workspaces).filter((w) => w.id !== openId).map((w) => {

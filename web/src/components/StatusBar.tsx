@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { useApp } from "../store";
+import { useApp, useCan } from "../store";
 import { isApple, isTouchOnly } from "../lib/platform";
 import { agentName, isAiAgent } from "../lib/agentName";
 import type { AgentStatus } from "../types";
@@ -13,6 +13,9 @@ import { Kbd } from "./ui";
 export default function StatusBar() {
   const route = useApp((s) => s.route);
   const workspaces = useApp((s) => s.workspaces);
+  const navigate = useApp((s) => s.navigate);
+  const requestPanel = useApp((s) => s.requestPanel);
+  const can = useCan();
   const [status, setStatus] = useState<AgentStatus | null>(null);
 
   // Read once when the bar appears: no polling. A failed read shows nothing rather than a guess.
@@ -35,6 +38,13 @@ export default function StatusBar() {
   const connected = status === null ? null : key === "claude" ? !!status.claude && status.claudeSignedIn !== false : status[key] === true && (key !== "codex" || status.codexSignedIn !== false);
   const who = agentName(key);
 
+  // In a project, the hint opens its terminal panel; anywhere else, the owner's server terminal.
+  const openTerminal = () => {
+    if (route.kind === "workspace") requestPanel({ workspaceId: route.id, action: "terminal" });
+    else if (route.kind !== "terminal") navigate({ kind: "terminal" });
+  };
+  const canTerminal = route.kind === "workspace" ? can.mutate : can.own;
+
   return (
     <footer className="hidden h-[26px] shrink-0 items-center gap-4 bg-surface-sidebar px-3 text-xs text-text-faint min-[56.25rem]:flex">
       {connected === null ? null : <span>{connected ? `${who} connected` : `${who} isn't connected`}</span>}
@@ -42,7 +52,15 @@ export default function StatusBar() {
       {isTouchOnly() ? null : (
         <span className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap">
           <span className="flex items-center gap-2">
-            <Kbd>Ctrl `</Kbd> Terminal
+            {canTerminal ? (
+              <button type="button" className="rounded-row hover:text-text-secondary" onClick={openTerminal}>
+                <Kbd>Ctrl `</Kbd> Terminal
+              </button>
+            ) : (
+              <span>
+                <Kbd>Ctrl `</Kbd> Terminal
+              </span>
+            )}
           </span>
           <span className="flex items-center gap-2">
             <Kbd>{isApple ? "⌘K" : "Ctrl K"}</Kbd> Commands

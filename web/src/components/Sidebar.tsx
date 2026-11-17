@@ -12,6 +12,7 @@ import {
   Keyboard,
   MagnifyingGlass,
   PencilSimple,
+  Terminal,
   Trash,
   X,
 } from "@phosphor-icons/react";
@@ -534,6 +535,23 @@ export default function Sidebar({ open, onClose }: Props) {
       </nav>
 
       <div className="p-2.5">
+        {/* The server's own shell is the owner's alone; members and viewers never see the row. */}
+        {can.own ? (
+          <Tooltip content="Terminal on the server" disabled={!collapsed}>
+            <button
+              type="button"
+              className="sidebar-row"
+              aria-label="Terminal on the server"
+              onClick={() => {
+                navigate({ kind: "terminal" });
+                onClose();
+              }}
+            >
+              <Terminal size={18} className="shrink-0" aria-hidden="true" />
+              <span className="sidebar-label flex-1 text-base">Terminal</span>
+            </button>
+          </Tooltip>
+        ) : null}
         <MenuRoot>
           <Tooltip content={accountName} disabled={!collapsed}>
             <MenuTrigger asChild>

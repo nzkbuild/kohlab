@@ -19,6 +19,7 @@ import { startNewProject } from "./lib/newProject";
 import UsageDialog from "./components/UsageDialog";
 import WorkspacesView, { LaunchSheet } from "./components/WorkspacesView";
 import Settings from "./components/Settings";
+import ServerTerminal from "./components/ServerTerminal";
 import Onboarding from "./components/Onboarding";
 import StatusBar from "./components/StatusBar";
 import { Announcer, Button, SkeletonRows, TooltipProvider } from "./components/ui";
@@ -179,6 +180,7 @@ export default function App() {
 
               <ErrorBoundary label={ROUTE_LABEL[route.kind]}>
                 {route.kind === "settings" ? <Settings /> : null}
+                {route.kind === "terminal" ? <ServerTerminal /> : null}
                 {route.kind === "workspaces" ? (
                   loading ? (
                     <div className="surface">

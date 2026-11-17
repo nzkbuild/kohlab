@@ -23,7 +23,9 @@ export type Route =
   | { kind: "settings"; section?: SettingsSection }
   /** Redeeming an invitation. The token is in the fragment, so it never reaches
    *  the server. This is the one route rendered before the key gate. */
-  | { kind: "join" };
+  | { kind: "join" }
+  /** The owner's shell on the server, not a project (see ServerTerminal). */
+  | { kind: "terminal" };
 
 /** Longest prompt a /new?prompt= link may pre-fill. */
 export const PROMPT_MAX = 20_000;
@@ -44,6 +46,7 @@ export function parseRoute(pathname: string, search = ""): Route {
     return { kind: "settings", ...(section ? { section } : {}) };
   }
   if (parts[0] === "join") return { kind: "join" };
+  if (parts[0] === "terminal") return { kind: "terminal" };
   // `/` and the old `/workspaces` both land on home, so existing bookmarks work.
   return { kind: "workspaces" };
 }
@@ -56,6 +59,8 @@ export function routePath(route: Route): string {
       return route.section ? `/settings/${route.section}` : "/settings";
     case "join":
       return "/join";
+    case "terminal":
+      return "/terminal";
     default:
       return route.create ? "/new" : "/";
   }
@@ -67,4 +72,5 @@ export const ROUTE_LABEL: Record<Route["kind"], string> = {
   workspace: "Workspace",
   settings: "Settings",
   join: "Join",
+  terminal: "Terminal",
 };

@@ -1377,6 +1377,12 @@ export async function ptyLog(id: string): Promise<string | null> {
   }
 }
 
+/** Whether a daemon session is one of this workspace's terminals. Exact, not a prefix: project "server" must not match the server terminal's works-server-shell-main. */
+export function ownsSession(sessId: string, workspaceId: string) {
+  const p = `works-${workspaceId}-`;
+  return sessId.startsWith(p) && /^(main|(shell|resume)-\d+)$/.test(sessId.slice(p.length));
+}
+
 /** Session id for a workspace's named terminal. */
 export function sessionId(workspaceId: string, terminalId = "main") {
   return `works-${workspaceId}-${terminalId}`;
@@ -1704,7 +1710,7 @@ export function startWatcher() {
     // so match the exact main-session id (or the legacy id-without-terminal)
     const s = loadStateSync();
     const main = s.workspaces.find((w) => msg.id === sessionId(w.id) || msg.id === `works-${w.id}`);
-    if (!main || main.chat) return; // chat workspaces have no main PTY
+    if (!main || main.chat || main.serverShell) return; // chat workspaces have no main PTY; the server terminal is not a run
     const wid = main.id;
     if (intentionallyStopped.has(wid)) return;
     void finishRun(wid);
@@ -1719,7 +1725,7 @@ export function startWatcher() {
       const running = new Set<string>();
       const finished = new Set<string>();
       for (const w of s.workspaces) {
-        if (w.chat) continue; // chat workspaces have no main PTY; chat.ts reports their turns
+        if (w.chat || w.serverShell) continue; // chat workspaces have no main PTY; chat.ts reports their turns; the server terminal is no run
         const sess = sessions.find((x) => x.id === sessionId(w.id));
         const alive = !!sess && !sess.exited;
         if (alive) {
@@ -1811,7 +1817,8 @@ export function wsDir(ws: Workspace) {
 }
 
 export function worktreePath(ws: Workspace) {
-  return join(wsDir(ws), "tree");
+  // the server terminal runs in the server user's home, not in a project tree
+  return ws.serverShell ? homedir() : join(wsDir(ws), "tree");
 }
 
 /** The project brain's vault: beside the tree, never inside it, so Keep, Undo and the download never touch it. */
@@ -1864,12 +1871,15 @@ export function clientView<T extends object>(w: T): Omit<T, "hookToken" | "brain
   return rest;
 }
 
+/** The id of the server's own terminal workspace (Workspace.serverShell): owner only, never listed as a project. */
+export const SERVER_SHELL_ID = "server-shell";
+
 export async function listWorkspaces(): Promise<
   (Workspace & { running: boolean; waiting: boolean; backgroundWork: boolean; path: string })[]
 > {
   const s = await loadState();
   return Promise.all(
-    s.workspaces.map(async (w) => ({
+    s.workspaces.filter((w) => !w.serverShell).map(async (w) => ({
       ...clientView(w),
       running: await isRunning(w),
       waiting: chatWaiting.has(w.id),
@@ -1925,7 +1935,8 @@ export async function createWorkspace(opts: {
   const stem = slugify(rootName);
   const taskSlug = opts.task.trim() ? slugify(opts.task) : "";
   const base = taskSlug && taskSlug !== stem ? `${stem}-${taskSlug}` : stem;
-  const taken = new Set((await loadState()).workspaces.map((w) => w.id));
+  // the server terminal's id is reserved: a project named server-shell becomes server-shell-2
+  const taken = new Set([SERVER_SHELL_ID, ...(await loadState()).workspaces.map((w) => w.id)]);
   let id = base;
   for (let n = 2; taken.has(id) && n < 1000; n++) id = `${base}-${n}`;
   const dir = isolated ? join(ownerUser!.home!, "works", id) : join(WORKS_DIR, id);
@@ -2293,7 +2304,7 @@ export async function stopWorkspace(id: string) {
   // close every named PTY session for this workspace (main + extra terminals)
   const sessions = (await ptyList()) ?? [];
   for (const sess of sessions ?? []) {
-    if (sess.id.startsWith(`works-${id}-`)) {
+    if (ownsSession(sess.id, id)) {
       await ptySend({ type: "close", id: sess.id });
     }
   }
@@ -2324,7 +2335,7 @@ export async function deleteWorkspace(id: string) {
   // close every named PTY session for this workspace
   const sessions = (await ptyList()) ?? [];
   for (const sess of sessions) {
-    if (sess.id.startsWith(`works-${id}-`)) {
+    if (ownsSession(sess.id, id)) {
       await ptySend({ type: "close", id: sess.id });
     }
   }

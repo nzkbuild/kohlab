@@ -87,6 +87,7 @@ import {
   brainRoot,
   wsDir,
   clientView,
+  SERVER_SHELL_ID,
 } from "./lib";
 import { BODY_MAX, BrainError, NOTE_TYPES, brainTool, deleteNote, getIndex, getNote, graphOf, noteProjectNotes, openRoot, putNote, searchNotes } from "./brain";
 import { timingSafeEqual } from "crypto";
@@ -130,7 +131,19 @@ const VERSION = (() => {
 // `data` to type-check on `upgrade()`: with `any`, bun-types' conditional
 // overload resolves to the no-`data` branch instead of the `data`-required one.
 // `browser` is set on a shared-browser stream socket: the workspace and the port of its Chrome.
-type WSData = { auth: Awaited<ReturnType<typeof authenticate>>; canMutate: boolean; browser?: { id: string; port: number } };
+type WSData = { auth: Awaited<ReturnType<typeof authenticate>>; canMutate: boolean; isOwner: boolean; browser?: { id: string; port: number } };
+
+/**
+ * Whether a terminal socket may attach to, or resize, a session. The server terminal is the owner's alone: it has no
+ * owner id, so the role is checked here rather than trusting mayAccessWorkspace to refuse it.
+ */
+async function mayUseTerminal(data: WSData | undefined, id: string, terminalId?: string): Promise<boolean> {
+  // A session id is `works-<id>-<terminalId>`, so an unchecked terminalId like "shell-main" on a project named "server"
+  // would name the server terminal's session (works-server-shell-main). Only the names the app makes are allowed.
+  if (terminalId !== undefined && !/^(main|(shell|resume)-\d+)$/.test(terminalId)) return false;
+  if (id === SERVER_SHELL_ID) return !!data?.isOwner;
+  return mayAccessWorkspace(data?.auth ?? null, id);
+}
 
 /** Browser push subscribers (dashboard pages). */
 const brotli = promisify(brotliCompress);
@@ -976,6 +989,31 @@ async function handleUsersList(): Promise<Response> {
     users: listUsers().map((u) => ({ id: u.id, name: u.name, role: u.role, pending: !u.key })),
     canInvite: canProvisionOsUsers(),
   });
+}
+
+/**
+ * The server terminal's workspace: a plain shell as the server user, in its home directory, not a project. It is made
+ * on the first open and kept; its terminals open over the WebSocket (attach with workspaceId SERVER_SHELL_ID). The
+ * caller has checked the owner. Its dir is a folder of ours, never the home directory, so no deletion can reach it.
+ */
+async function openServerShell(actor: string): Promise<Response> {
+  await mutateState(async (s) => {
+    if (s.workspaces.some((w) => w.id === SERVER_SHELL_ID)) return;
+    s.workspaces.push({
+      id: SERVER_SHELL_ID,
+      repo: "",
+      task: "Server terminal",
+      agent: "sh",
+      created: Date.now(),
+      started: null,
+      stopped: null,
+      ownerId: "",
+      dir: join(WORKS_DIR, SERVER_SHELL_ID),
+      serverShell: true,
+    });
+  });
+  containFailure(audit(actor, "server.shell.open", SERVER_SHELL_ID), "audit");
+  return json({ id: SERVER_SHELL_ID });
 }
 
 /** Create a user; the plaintext key is returned exactly once. owner-only. */
@@ -1903,7 +1941,7 @@ async function ensurePtySession(id: string, terminalId = "main") {
     // First ever spawn is a real start: record it so the exit watcher can finish the run
     // (agents without hooks). Re-attaching to a live session must not touch `started`
     // (it moved the project to the top of the sidebar).
-    if (terminalId === "main" && !ws.started) await markStarted(id);
+    if (terminalId === "main" && !ws.started && !ws.serverShell) await markStarted(id);
   } catch (error) {
     // Re-attaching to a session that is already live is the normal case for a
     // browser reload or a second tab, not a failure. The daemon reports it as
@@ -2015,6 +2053,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       let browser: { id: string; port: number } | undefined;
       if (streamM) {
         const sid = streamM[1];
+        if (sid === SERVER_SHELL_ID) return json({ error: "forbidden, the server terminal has no browser" }, 403);
         if (auth?.kind === "share" || !(await mayAccessWorkspace(auth, sid))) return json({ error: "forbidden, not your workspace" }, 403);
         try {
           const sws = await getWorkspace(sid);
@@ -2023,8 +2062,18 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
           return json({ error: (e as Error).message }, e instanceof BrowserError ? e.status : 503);
         }
       }
-      const upgradeOpts = { data: { auth, canMutate, browser }, ...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
+      const upgradeOpts = { data: { auth, canMutate, isOwner, browser },...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
       if (server.upgrade(req, upgradeOpts)) return undefined;
+    }
+
+    // The server terminal (SERVER_SHELL_ID) is the owner's alone, and of its workspace routes only closing one of its terminals is reachable.
+    // A share link is refused as a share link, before the key check; then 401 for no credentials, 403 for a member or viewer or any other route.
+    const shellM = path.match(new RegExp(`^/api/workspaces/${SERVER_SHELL_ID}(/.*)?$`));
+    if (shellM) {
+      if (url.searchParams.has("share")) return json({ error: "forbidden, a shared link cannot use the server terminal" }, 403);
+      const refused = gate(isOwner, "forbidden, only an owner can use the server terminal");
+      if (refused) return refused;
+      if (!(req.method === "POST" && shellM[1] === "/terminal")) return json({ error: "forbidden, the server terminal has no such route" }, 403);
     }
 
     // A team agent's workspace is the team's: only its chat, diff, log and pictures (raw, read-only) are reachable by its own route (team.ts). Everything else is refused.
@@ -2274,7 +2323,8 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       // daemon or starting one, exactly as `kohlab health` does.
       const sessions = await ptyList();
       const up = sessions !== null;
-      const ids = new Set(state.workspaces.map((w) => sessionId(w.id)));
+      const projects = state.workspaces.filter((w) => !w.serverShell);
+      const ids = new Set(projects.map((w) => sessionId(w.id)));
       const running = (sessions ?? []).filter((s) => !s.exited && ids.has(s.id)).length;
       return json({
         ok: true,
@@ -2284,7 +2334,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         daemon: up,
         daemonDownSince: up ? null : daemonDownAt,
         lastDaemonDeath: daemonDownAt,
-        workspaces: { total: state.workspaces.length, running },
+        workspaces: { total: projects.length, running },
         dir: WORKS_DIR,
         keyRequired: authRequired(),
       });
@@ -2506,6 +2556,13 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (refused) return refused;
       return handleCreate(req, actorUserId);
     }
+    // The server terminal: its hidden workspace is made on first use. Owner only; a share link is refused as one.
+    if (path === "/api/server-shell" && req.method === "POST") {
+      if (url.searchParams.has("share")) return json({ error: "forbidden, a shared link cannot use the server terminal" }, 403);
+      const refused = gate(isOwner, "forbidden, only an owner can open the server terminal");
+      if (refused) return refused;
+      return openServerShell(actor);
+    }
 
     // Static files - serve the React app from web/dist, fall back to legacy public/
     const webDist = join(process.cwd(), "web", "dist");
@@ -2652,7 +2709,7 @@ const socketHandlers: WebSocketHandler<WSData> = {
             const attachId = msg.id;
             const attachTerminal = msg.terminalId;
             containFailure(
-              mayAccessWorkspace(wsAuth?.auth ?? null, attachId).then((ok) => {
+              mayUseTerminal(wsAuth, attachId, attachTerminal).then((ok) => {
                 if (!ok) {
                   ws.send(JSON.stringify({ type: "error", error: "forbidden, not your workspace" }));
                   return;
@@ -2682,7 +2739,7 @@ const socketHandlers: WebSocketHandler<WSData> = {
             const resizeTerminal = msg.terminalId;
             const cols = msg.cols, rows = msg.rows;
             containFailure(
-              mayAccessWorkspace(wsAuth?.auth ?? null, resizeId).then((ok) => {
+              mayUseTerminal(wsAuth, resizeId, resizeTerminal).then((ok) => {
                 if (!ok) return;
                 const sessId = sessionId(resizeId, resizeTerminal);
                 pendingResize.set(sessId, { cols, rows });

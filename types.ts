@@ -51,6 +51,8 @@ export interface Workspace {
   brainToken?: string;
   /** a team agent's hidden workspace: its team and role (team.ts). Hidden from the project list. */
   team?: { id: string; role: string };
+  /** the server's own terminal (SERVER_SHELL_ID in lib.ts): a plain shell as the server user, not a project. Hidden from every list; owner only. */
+  serverShell?: true;
   /** the vault a team agent reads and writes: its project's brain, not its own. */
   brainDir?: string;
   /** optional resource caps applied to the agent's PTY session */

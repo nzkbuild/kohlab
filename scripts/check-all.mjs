@@ -131,6 +131,10 @@ try {
   run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);
   // Own throwaway server with a sh terminal; a DECRQM query (Claude Code's start-up) must not freeze the screen.
   run("terminal survives a DECRQM query (browser)", "node", ["scripts/check-terminal-decrqm.mjs"]);
+  // Own throwaway server: the header Terminal button, the status-bar button, the sidebar row (owner only) and the /terminal page run a real shell.
+  run("server terminal and Terminal buttons (browser)", "node", ["scripts/check-server-shell-ui.mjs"]);
+  // Own throwaway server: the server terminal is owner-only, hidden from the list, and its routes are refused but for closing a terminal.
+  run("server terminal: owner only, hidden, runs sh as the server user", "node", ["scripts/check-server-shell.mjs"]);
   // Its own throwaway server, with a fake claude on PATH: a terminal waits for the chat's background work.
   run("background work holds the terminal (fake claude)", "node", ["scripts/check-chat-background.mjs"]);
   // Own throwaway servers with fake claude, codex, hermes and omp on PATH; the hub checks create a member and a viewer and remove them again.

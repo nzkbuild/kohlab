@@ -871,6 +871,12 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
 
         <div className="col-start-2 row-start-1 flex shrink-0 items-center justify-self-end gap-2 max-md:h-13 @min-[44rem]:col-start-3">
           {/* Nothing to preview until the chat has changed a file. A pane that is already open keeps its button. */}
+          {/* The bottom terminal panel, one click away. Same condition as the menu's Open terminal. */}
+          {can.mutate && (!chat || powerTools) ? (
+            <Button variant="quiet" iconOnly aria-label="Terminal" title="Terminal" aria-pressed={panelOpen} onClick={togglePanel}>
+              <Terminal size={18} aria-hidden="true" />
+            </Button>
+          ) : null}
           {!chat || hasWork || paneOpen ? (
             <Button variant="quiet" aria-pressed={paneOpen} disabled={previewing} onClick={() => void preview()}>
               <Browser size={18} aria-hidden="true" />
@@ -911,7 +917,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                       <div className="flex shrink-0 px-5 pt-3 text-sm text-text-muted">
                         <span>{BACKGROUND_WAIT_LINE}</span>
                       </div>
-                    ) : (
+                    ) : w.stopped === null ? null : (
+                      // A terminal that has never stopped is starting (its first attach spawns it): say nothing rather than "has stopped".
                       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-3 text-sm text-text-muted">
                         <span className="min-w-0 flex-1">
                           {can.mutate ? `${who ?? "The terminal"} has stopped. This is the last thing it showed.` : "Not running, showing the last screen."}

@@ -468,6 +468,8 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model }),
     }),
+  /** The owner's shell on the server (not a project). Created on first use; returns its id for the terminal routes. */
+  serverShell: () => json<{ id: string }>("/api/server-shell", { method: "POST" }),
   closeTerminal: (id: string, terminalId: string) =>
     json<{ ok: boolean }>(`/api/workspaces/${id}/terminal`, {
       method: "POST",
