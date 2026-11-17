@@ -22,6 +22,8 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    // A lowered `||=` in xterm's minified code leaves an undeclared variable and freezes the terminal; do not lower the target.
+    target: "es2021",
     rollupOptions: {
       output: {
         // xterm is a heavy per-view dep; it is also a lazy() import. Monaco is

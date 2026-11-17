@@ -120,6 +120,8 @@ try {
   run("run text (picker groups, helper rows, strip, tokens)", "bun", ["scripts/check-run-text.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
   run("hooks stay above early returns (the cold-load crash)", "node", ["scripts/check-hooks-order.mjs"]);
+  // Reads the built web/dist: run `cd web && bun run build` first. No lowered ||= (the frozen terminal).
+  run("built bundle has no lowered ||= (the frozen terminal)", "node", ["scripts/check-bundle.mjs"]);
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
   // Against the built web/dist; skips with a reason when no Chromium is present.
   run("rendered UI (browser)", "node", ["scripts/check-browser.mjs"]);
@@ -127,6 +129,8 @@ try {
   run("hard load of a project does not crash (browser)", "node", ["scripts/check-cold-load.mjs"]);
   run("design rules: one primary, targets, one-segment switch, contrast (browser)", "node", ["scripts/check-design.mjs"]);
   run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);
+  // Own throwaway server with a sh terminal; a DECRQM query (Claude Code's start-up) must not freeze the screen.
+  run("terminal survives a DECRQM query (browser)", "node", ["scripts/check-terminal-decrqm.mjs"]);
   // Its own throwaway server, with a fake claude on PATH: a terminal waits for the chat's background work.
   run("background work holds the terminal (fake claude)", "node", ["scripts/check-chat-background.mjs"]);
   // Own throwaway servers with fake claude, codex, hermes and omp on PATH; the hub checks create a member and a viewer and remove them again.
