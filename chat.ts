@@ -23,8 +23,8 @@ import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from ".
 import { teamMcp } from "./team";
 import { devServerOrigin } from "./devserver";
 import { goBackTo, snapshotTree, turnChanges, type TurnFile } from "./checkpoints";
-import { ACP_AGENTS, AcpClient, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
-import { chatBusy, chatBackground, resumeOpen, chatKillers, chatWaiting, audit, closeMain, getWorkspace, identityOf, isAlive, loadState, markStarted, mutateState, notifyWorkspaceDone, ownBase, parseModel, worktreeIsClean, worktreePath, brainRoot, ensureBrainToken } from "./lib";
+import { ACP_AGENTS, AcpClient, acpBin, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
+import { agentIdentity, chatBusy, chatBackground, resumeOpen, chatKillers, chatWaiting, audit, closeMain, getWorkspace, identityOf, isAlive, loadState, markStarted, mutateState, notifyWorkspaceDone, ownBase, parseModel, worktreeIsClean, worktreePath, brainRoot, ensureBrainToken } from "./lib";
 import { rel, describeTool, toolFile, toolDetail, resultText, describeAsk, askForm, answerResponse, friendlyError, AGENT_NAMES, handoffText, noticeText, taskFinishedLine, clockText, MAX_TEXT } from "./chat-text";
 import type { Body, ChatEvent, Todo } from "./chat-text";
 import { chatsDir, transcriptPath, cursorPath, TAIL_BYTES, FIRST_IMPORT, transcriptFile, readCursor, writeCursor, HIDDEN_TOOLS, transcriptEvents } from "./chat-transcript";
@@ -657,7 +657,7 @@ async function wsOf(id: string): Promise<Workspace> {
   const ws = await getWorkspace(id);
   if (!ws.chat || ws.agentPinned || chatBusy.has(id)) return ws;
   const d = (await defaultsOf()) ?? {};
-  const agent = d.agent && (d.agent === "claude" || isAcpAgent(d.agent)) && Bun.which(agentBin(d.agent)) ? d.agent : ws.agent;
+  const agent = d.agent && (d.agent === "claude" || isAcpAgent(d.agent)) && (d.agent === "claude" ? Bun.which(agentBin(d.agent)) : acpBin(d.agent)) ? d.agent : ws.agent;
   const acct = d.account ? getAccount(d.account) : undefined;
   const account = acct && acct.provider === agent && usableBy(acct, ws) ? acct.id : undefined;
   if (agent === ws.agent && account === ws.account) return ws;
@@ -1248,9 +1248,11 @@ function startAcp(ws: Workspace, id: string): Promise<AcpClient> {
 }
 async function startAcpNow(ws: Workspace, id: string): Promise<AcpClient> {
   const [cmd, ...args] = ACP_AGENTS[ws.agent];
-  const bin = Bun.which(cmd);
+  const bin = acpBin(ws.agent);
   if (!bin) throw new Error(`${cmd} is not installed on this server`);
   const who = identityOf(ws);
+  // OpenCode's program is owned by the AI user: root must never run it (a planted file would run as root)
+  if (ws.agent === "opencode" && !who && agentIdentity()) throw new Error("OpenCode only runs as the AI user");
   const defaults = await defaultsOf();
   setPolicy(id, ws, defaults);
   const acp = new AcpClient(id, ws.agent, acpHost(id, ws.agent));
@@ -1951,7 +1953,7 @@ async function switchLane(id: string, to: Lane, o: LaneOptions = {}): Promise<{ 
     return { ok: true };
   }
   const bin = agent === "claude" ? ((await loadState()).agents?.claude || "claude").split(/\s+/)[0] : ACP_AGENTS[agent][0];
-  if (!Bun.which(bin)) throw new ChatError(400, `${AGENT_NAMES[agent] ?? agent} is not installed on this server.`);
+  if (!(agent === "claude" ? Bun.which(bin) : acpBin(agent))) throw new ChatError(400, `${AGENT_NAMES[agent] ?? agent} is not installed on this server.`);
   if (!o.force && chatBusy.has(id)) throw new ChatError(409, "Wait until the current reply finishes");
   // nothing awaits between this check and the stop, so no turn can start in between
   const lastN = load(id).events.at(-1)?.n ?? 0;

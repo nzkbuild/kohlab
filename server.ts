@@ -99,7 +99,8 @@ import { appKind, detectDevCommand, devProxyPort, ensureDevServer, stopAllDevSer
 import { PICTURE_MAX_BYTES, mintPicture, pictureHtml } from "./picture";
 import { codexLoginState, codexSignedIn, signOutCodex, startCodexLogin, stopCodexLogin } from "./codex";
 import { claudeSignedIn, forgetSignIn, getProviders, invalidateProvider, PROVIDER_IDS, redactCard, refreshProviders, testAccount } from "./providers";
-import { ACP_AGENTS, isAcpAgent } from "./acp";
+import { acpBin, isAcpAgent } from "./acp";
+import { addKey, connectionView, forgetOpencodeProfile, installStatus, logoutConnection, MAIN_OPENCODE, methodsOf, opencodeBin, POPULAR_INTEGRATIONS, signInStateOf, startInstall, startOpencodeSignIn, stopOpencodeSignIns, switchConnection } from "./opencode";
 import { AccountError, MAIN_CLAUDE, accountView, addCustomModel, createLogin, createRouter, getAccount, grantAccountsReach, listAccounts, remove as removeAccount, removeCustomModel, renameAccount, renameModel, setKey, signInState, signOutClaude, startSignIn, stopSignIns, submitCode, testRouter } from "./accounts";
 import { patchDefaults } from "./defaults";
 import { KohlabError, mergeRelease, newKohlabProject, openRelease, releaseState, scrub } from "./kohlab";
@@ -1161,6 +1162,7 @@ async function handleAgentsStatus(): Promise<Response> {
         }),
     ),
   );
+  status.opencode = !!opencodeBin();
   status.claudeSignedIn = status.claude ? await claudeSignedIn() : null;
   // Codex chats need the CLI (to sign in) and codex-acp (the server they talk to).
   status.codex = status.codex === true && status["codex-acp"] === true;
@@ -1173,7 +1175,7 @@ async function handleAgentsStatus(): Promise<Response> {
 
 /** Whether an AI can be started here. */
 function agentInstalled(agent: string): boolean {
-  return (agent === "claude" || isAcpAgent(agent)) && !!Bun.which(agent === "claude" ? "claude" : ACP_AGENTS[agent][0]);
+  return (agent === "claude" || isAcpAgent(agent)) && !!acpBin(agent);
 }
 
 /** An answer for something an AI-control route refused: the plain sentence, never more. */
@@ -1232,10 +1234,33 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
         return json({ account: accountView(getAccount(a.id)!, true), check: got.check, models: got.models.length });
       }
       if (b.kind !== "login") return json({ error: "Choose a sign-in or a router." }, 400);
-      const a = createLogin(b.provider, b.label);
+      const label = b.provider === "opencode" && !(typeof b.label === "string" && b.label.trim()) ? `Account ${listAccounts("opencode").length + 1}` : b.label;
+      const a = createLogin(b.provider, label);
       containFailure(audit(c.actor, "ai.account.add", a.id, a.label), "audit");
       invalidateProvider(a.provider);
       return json({ account: accountView(a, true) });
+    }
+
+    // OpenCode: its install, the services it can connect to. Owner only.
+    if (path === "/api/ai/providers/opencode/install") {
+      const refused = owner("install OpenCode");
+      if (refused) return refused;
+      if (req.method === "GET") {
+        const st = installStatus();
+        if (st.state === "done") invalidateProvider("opencode"); // the card was "not installed" until now
+        return json(st);
+      }
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      containFailure(audit(c.actor, "ai.opencode.install"), "audit");
+      return json(startInstall());
+    }
+    if (path === "/api/ai/opencode/integrations") {
+      const refused = owner("connect OpenCode");
+      if (refused) return refused;
+      if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
+      const integration = new URL(req.url).searchParams.get("integration");
+      if (integration === null) return json({ popular: POPULAR_INTEGRATIONS });
+      return json({ integration, methods: await methodsOf(integration) });
     }
 
     // The AI's own login (the main account): the same sign-in and sign-out as an account's, with no directory of its own.
@@ -1282,6 +1307,41 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
       return json(await startSignIn(MAIN_CLAUDE));
     }
 
+    // An OpenCode profile (its id, or main:opencode for the AI's own): sign-in by browser code, API key, switch, sign out.
+    const oc = path.match(/^\/api\/ai\/accounts\/([^/]+)\/opencode\/(signin|key|logout|switch)$/);
+    if (oc) {
+      const refused = owner("change OpenCode accounts");
+      if (refused) return refused;
+      const ocId = decodeURIComponent(oc[1]);
+      const ocSub = oc[2];
+      if (ocId !== MAIN_OPENCODE && getAccount(ocId)?.provider !== "opencode") return json({ error: "That account does not exist." }, 404);
+      const keyOf = ocId === MAIN_OPENCODE ? undefined : ocId;
+      if (ocSub === "signin") {
+        if (req.method === "GET") {
+          const st = signInStateOf(ocId);
+          if (st.state === "done") forgetSignIn("opencode", keyOf);
+          return json(st);
+        }
+        if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+        const b = await read();
+        const st = await startOpencodeSignIn(ocId, b.integration, b.method);
+        containFailure(audit(c.actor, "ai.opencode.signin", ocId, String(b.integration ?? "").slice(0, 64)), "audit");
+        return json(st);
+      }
+      if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+      const b = await read();
+      // the key is read here and goes straight to OpenCode on stdin: it is not logged, audited or sent back
+      const connections =
+        ocSub === "key"
+          ? await addKey(ocId, b.integration, b.key, b.label, b.useNow)
+          : ocSub === "logout"
+            ? await logoutConnection(ocId, b.integration, b.label)
+            : await switchConnection(ocId, b.integration, b.label);
+      containFailure(audit(c.actor, `ai.opencode.${ocSub}`, ocId, String(b.integration ?? "").slice(0, 64)), "audit");
+      forgetSignIn("opencode", keyOf);
+      return json({ connections: connections.map(connectionView) });
+    }
+
     const m = path.match(/^\/api\/ai\/accounts\/([a-z0-9-]+|default)(\/key|\/test|\/signin|\/signin\/code|\/models|\/signout)?$/);
     if (!m) return json({ error: "not found" }, 404);
     const [, id, sub] = m;
@@ -1301,6 +1361,7 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
       return json({ ok: true });
     }
     if (!acct) return json({ error: "That account does not exist." }, 404);
+    if (acct.provider === "opencode" && (sub === "/signin" || sub === "/signin/code" || sub === "/signout")) return json({ error: "OpenCode accounts sign in and out per connection." }, 400);
     if (!sub && req.method === "PATCH") {
       const refused = owner("rename accounts");
       if (refused) return refused;
@@ -1313,6 +1374,7 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
       const refused = owner("remove accounts");
       if (refused) return refused;
       removeAccount(id);
+      forgetOpencodeProfile(id);
       forgetProbe(id);
       await forgetAccount(id, acct.label);
       containFailure(audit(c.actor, "ai.account.remove", id, acct.label), "audit");
@@ -2829,6 +2891,7 @@ serve({
 process.once("exit", stopAllDevServers);
 process.once("exit", stopCodexLogin);
 process.once("exit", stopSignIns);
+process.once("exit", stopOpencodeSignIns);
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.once(sig, () => {
     stopAllDevServers();

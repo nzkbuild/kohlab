@@ -17,7 +17,7 @@ export function checkText(check: RouterCheck | undefined, models = 0): string | 
 }
 
 /** The sentence for a failed request, without ever repeating what the person typed (a key could be inside the server's words). */
-function safeMessage(e: unknown, secret: string, what: string): string {
+export function safeMessage(e: unknown, secret: string, what: string): string {
   const m = e instanceof Error ? e.message.trim() : "";
   if (!m || (secret && m.includes(secret))) return `${what} Try again.`;
   return `${what} ${/[.!?]$/.test(m) ? m : `${m}.`}`;
@@ -223,7 +223,7 @@ export function SignInDialog({ target, title, open, onOpenChange }: { target: Si
 type View = "pending" | "choose" | "login" | "signin" | "router" | "result";
 
 /** The first name not used yet by another account of this AI: "Account 2", "Account 3"… */
-function freeName(taken: string[]): string {
+export function freeName(taken: string[]): string {
   let n = 2;
   while (taken.includes(`Account ${n}`)) n++;
   return `Account ${n}`;

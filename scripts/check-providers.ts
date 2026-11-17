@@ -205,7 +205,7 @@ function fakeProbes(slow = false) {
     if (failing && id === "claude") throw new Error("boom");
     return claudeCardFrom({ now: t, version: null, loggedIn: true, method: null, probe: probe(usage(10, 1)) });
   };
-  providersTest.setProbes({ claude: mk("claude"), codex: mk("codex"), hermes: mk("hermes"), omp: mk("omp") });
+  providersTest.setProbes({ claude: mk("claude"), codex: mk("codex"), hermes: mk("hermes"), omp: mk("omp"), opencode: mk("opencode") });
 }
 const tick = () => new Promise<void>((r) => setImmediate(r));
 const total = () => Object.values(counts).reduce((a, b) => a + b, 0);
@@ -219,22 +219,22 @@ check("cache: nothing is probed before a call", total() === 0);
 t += 3_600_000;
 check("cache: time passing starts no probe", total() === 0);
 const first = await getProviders();
-check("cache: the first call builds every card", first.providers.length === 4 && total() === 4);
+check("cache: the first call builds every card", first.providers.length === 5 && total() === 5);
 await getProviders();
-check("cache: a second call inside 60 s uses the cache", total() === 4);
+check("cache: a second call inside 60 s uses the cache", total() === 5);
 t += 61_000;
 const swr = await getProviders();
-check("cache: after 60 s the old card comes back at once, marked stale", swr.providers.every((p) => p.stale) && total() === 8, `total ${total()}`);
+check("cache: after 60 s the old card comes back at once, marked stale", swr.providers.every((p) => p.stale) && total() === 10, `total ${total()}`);
 await tick();
 const fresh = await getProviders();
-check("cache: the background read replaced it", fresh.providers.every((p) => !p.stale) && total() === 8);
+check("cache: the background read replaced it", fresh.providers.every((p) => !p.stale) && total() === 10);
 
 providersTest.reset();
 resetCounts();
 fakeProbes(true);
 const both = [getProviders(), getProviders()];
 await tick();
-check("cache: two callers at once share one probe per AI", total() === 4, `total ${total()}`);
+check("cache: two callers at once share one probe per AI", total() === 5, `total ${total()}`);
 for (let i = 0; i < 4; i++) {
   await tick();
   release?.();

@@ -29,6 +29,10 @@ const SAFE_ENV_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USE
 const ACCOUNT_ENV_KEYS = new Set([
   "CLAUDE_CONFIG_DIR",
   "CODEX_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_STATE_HOME",
+  "XDG_CACHE_HOME",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -52,7 +56,7 @@ export function stripAnsi(s: string): string {
 
 // ---- the store ----
 
-export type Provider = "claude" | "codex";
+export type Provider = "claude" | "codex" | "opencode";
 export interface Account {
   id: string;
   provider: Provider;
@@ -181,9 +185,14 @@ function giveDir(dir: string, uid: number, gid: number): void {
   chownSync(dir, uid, gid);
 }
 
+/** An OpenCode profile's data, config, state and cache folders, inside the account's directory (XDG_* for the process). */
+export function profileEnvOf(dir: string): Record<string, string> {
+  return { XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), XDG_STATE_HOME: join(dir, "state"), XDG_CACHE_HOME: join(dir, "cache") };
+}
+
 /** A second sign-in: an empty directory, signed in later (startSignIn). */
 export function createLogin(provider: unknown, label: unknown): Account {
-  if (provider !== "claude" && provider !== "codex") throw new AccountError(400, "That AI has no accounts.");
+  if (provider !== "claude" && provider !== "codex" && provider !== "opencode") throw new AccountError(400, "That AI has no accounts.");
   const clean = cleanLabel(label);
   const s = readStore();
   const id = newId(clean, new Set(s.accounts.map((a) => a.id)));
@@ -193,6 +202,12 @@ export function createLogin(provider: unknown, label: unknown): Account {
   mkdirSync(dirOf(id), { recursive: true, mode: 0o700 });
   chmodSync(dirOf(id), 0o700);
   if (agent) giveDir(dirOf(id), agent.uid, agent.gid);
+  if (provider === "opencode") {
+    for (const d of Object.values(profileEnvOf(dirOf(id)))) {
+      mkdirSync(d, { recursive: true, mode: 0o700 });
+      if (agent) giveDir(d, agent.uid, agent.gid);
+    }
+  }
   const a: Account = { id, provider, kind: "login", label: clean, createdAt: Date.now(), ...(agent ? { uid: agent.uid, gid: agent.gid } : {}) };
   s.accounts.push(a);
   writeStore(s);
@@ -290,7 +305,10 @@ const homeOf = (a: Account): string => (a.uid !== undefined ? (agentIdentity()?.
 
 /** What a process of an account is given: its directory, or its router. Nothing else. */
 export function envOfAccount(a: Account): Record<string, string> {
-  if (a.kind === "login") return a.provider === "claude" ? { CLAUDE_CONFIG_DIR: dirOf(a.id) } : { CODEX_HOME: dirOf(a.id) };
+  if (a.kind === "login") {
+    if (a.provider === "opencode") return profileEnvOf(dirOf(a.id));
+    return a.provider === "claude" ? { CLAUDE_CONFIG_DIR: dirOf(a.id) } : { CODEX_HOME: dirOf(a.id) };
+  }
   const key = readSecrets()[a.id];
   if (!a.baseUrl || !key) return {};
   const first = a.models?.[0];

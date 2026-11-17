@@ -221,6 +221,43 @@ export interface ProviderAccount {
   hasKey?: boolean;
   /** Owner only: "127.0.0.1:20128". Never the full address. */
   baseUrlHost?: string;
+  /** OpenCode only: the services connected in this account's profile, one row each. */
+  connections?: OpenCodeConnection[];
+}
+
+/** One service connected in an OpenCode account: its friendly name, the label it was saved under, and whether it is the one in use. */
+export interface OpenCodeConnection {
+  integration: string;
+  name: string;
+  label: string;
+  method?: string;
+  active: boolean;
+}
+
+/** OpenCode's install, as GET/POST /api/ai/providers/opencode/install report it. Words only. */
+export interface OpenCodeInstall {
+  state: "idle" | "installing" | "done" | "failed";
+  error?: string;
+}
+
+/** A service OpenCode can connect, as GET /api/ai/opencode/integrations lists it. */
+export interface OpenCodeService {
+  id: string;
+  name: string;
+}
+
+/** A way to connect a service, friendly-named by the server (hidden ones are already removed). */
+export interface OpenCodeMethod {
+  id: string;
+  name: string;
+}
+
+/** An OpenCode browser-code sign-in: waiting for the person's approval (a code and a link), done, failed, or expired. */
+export interface OpenCodeSignIn {
+  state: "idle" | "waiting" | "done" | "failed" | "expired";
+  url?: string;
+  code?: string;
+  error?: string;
 }
 
 export interface ProviderAction {
@@ -288,7 +325,7 @@ export interface PermissionRule {
 /** An account as GET /api/ai/accounts and the add form report it. Never a key, a folder or a full address. */
 export interface AccountView {
   id: string;
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "opencode";
   kind: "login" | "router";
   label: string;
   baseUrlHost?: string;

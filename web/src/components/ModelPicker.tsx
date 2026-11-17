@@ -163,7 +163,7 @@ export const NO_MODELS_YET = "Models appear after your first chat with it.";
 
 /** One group's models as the menu's ModelInfo shape. A model the owner added is marked "Custom". */
 const asModelInfo = (g: PickerGroup): ModelInfo[] =>
-  g.models.map((m) => ({ value: m.value, displayName: m.label, description: m.custom ? "Custom" : (m.description ?? ""), supportedEffortLevels: m.efforts ?? [] }));
+  g.models.map((m) => ({ value: m.value, displayName: m.label, description: m.custom ? "Custom" : (m.description || m.group || ""), supportedEffortLevels: m.efforts ?? [] }));
 
 interface BodyProps {
   /** The AI this chat talks to, its name, and the account it runs on ("default" is the AI's own login). */

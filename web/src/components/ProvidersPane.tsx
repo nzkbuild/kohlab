@@ -1,20 +1,24 @@
 import { useEffect, useState } from "react";
 import { DotsThree } from "@phosphor-icons/react";
 import { api } from "../api";
-import type { ProviderAccount, ProviderCard, ProviderModel, RouterCheck } from "../types";
+import type { OpenCodeConnection, OpenCodeInstall, ProviderAccount, ProviderCard, ProviderModel, RouterCheck } from "../types";
 import { agoText, orderCards, stateWord, untilText } from "../lib/aiHub";
 import { announce } from "../lib/announce";
 import { useProviders } from "../lib/useProviders";
 import { cn } from "../lib/utils";
-import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, SignInDialog, checkText, type SignInTarget } from "./AccountDialogs";
+import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, SignInDialog, checkText, freeName, safeMessage, type SignInTarget } from "./AccountDialogs";
 import AiDefaultsPanel from "./AiDefaultsPanel";
 import ConfirmDialog from "./ConfirmDialog";
+import { OpenCodeSignInDialog } from "./OpenCodeDialogs";
 import RulesPanel from "./RulesPanel";
 import { UsageRow } from "./UsageDialog";
 import { Button, Field, Menu, MenuItem, Panel, SkeletonRows } from "./ui";
 
 const NO_MODELS = "Models appear after your first chat with it.";
 const MODEL_SEARCH_AT = 12;
+/** OpenCode's main account: the AI user's own OpenCode profile. Its routes use this id. */
+const MAIN_OPENCODE = "main:opencode";
+const OPENCODE_NO_MODELS = "Models appear once an account is connected.";
 
 /** Why a model id or name can't be saved, in a sentence; null when it can. Mirrors the server's limits (id up to 200 characters with no spaces, name up to 60). */
 export function modelProblem(id: string | null, name: string): string | null {
@@ -349,14 +353,221 @@ function AccountBlock({ card, account, owner, onChanged }: { card: ProviderCard;
   );
 }
 
+/** OpenCode's install: one button, the words while it runs (polled every 2 s), a plain failure with Try again. */
+function OpenCodeInstallRow({ onDone }: { onDone: () => void }) {
+  const [s, setS] = useState<OpenCodeInstall | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const installing = s?.state === "installing";
+  const failed = s?.state === "failed" || problem !== null;
+  const start = () => {
+    setProblem(null);
+    api.opencodeInstall().then(setS, (e) => setProblem(safeMessage(e, "", "Couldn't install OpenCode.")));
+  };
+  useEffect(() => {
+    api.opencodeInstallState().then(setS, () => undefined);
+  }, []);
+  useEffect(() => {
+    if (!installing) return;
+    let alive = true;
+    const t = window.setTimeout(() => {
+      api.opencodeInstallState().then((r) => alive && setS(r), () => undefined);
+    }, 2000);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [installing, s]);
+  useEffect(() => {
+    if (s?.state !== "done") return;
+    announce("OpenCode is installed");
+    onDone();
+  }, [s?.state]);
+
+  return (
+    <div className="flex flex-col items-start gap-2">
+      {installing ? <p role="status" className="text-sm text-text-primary">Installing… this takes a minute.</p> : null}
+      {failed ? <p role="status" className="text-sm text-text-secondary">{`Couldn't install OpenCode.${s?.error ? ` ${s.error}` : ""}`}</p> : null}
+      {!installing ? (
+        <Button variant={failed ? "secondary" : "primary"} size="sm" onClick={start}>
+          {failed ? "Try again" : "Install OpenCode"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Another OpenCode account: an empty profile named "Account N". Signing it in is the row's own Sign in. */
+function OpenCodeAddAccount({ card, onRefresh }: { card: ProviderCard; onRefresh: () => void }) {
+  const [problem, setProblem] = useState<string | null>(null);
+  const add = async () => {
+    setProblem(null);
+    try {
+      await api.addAccount({ provider: "opencode", kind: "login", label: freeName(card.accounts.map((a) => a.label)) });
+      announce("Account added");
+      onRefresh();
+    } catch (e) {
+      setProblem(safeMessage(e, "", "Couldn't add that account."));
+    }
+  };
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => void add()}>
+        Add another OpenCode account
+      </Button>
+      {problem ? <p role="status" className="text-xs text-text-secondary">{problem}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * One OpenCode account (owner): its name, Signed in or Not signed in, its connections as rows (each with Use this one and
+ * Sign out), and a ⋯ menu for Add a connection, Rename and Remove (Remove and Rename only for extra accounts).
+ */
+function OpenCodeAccountBlock({ account, onChanged }: { account: ProviderAccount; onChanged: () => void }) {
+  const main = account.id === "default" || account.id === MAIN_OPENCODE;
+  const routeId = main ? MAIN_OPENCODE : account.id;
+  const connections = account.connections ?? [];
+  const signedOut = account.state === "signed_out";
+  const title = main ? "Main account" : account.label;
+  // The dialog keeps the title it opened with: the state changes under it when a sign-in finishes.
+  const [signing, setSigning] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [confirmOut, setConfirmOut] = useState<OpenCodeConnection | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const fail = (what: string, e: unknown) => setProblem(safeMessage(e, "", what));
+  const openSignIn = () => setSigning(`${signedOut ? "Sign in to" : "Add a connection to"} ${main ? "OpenCode" : account.label}`);
+
+  const switchTo = async (c: OpenCodeConnection) => {
+    setProblem(null);
+    try {
+      await api.opencodeSwitch(routeId, c.integration, c.label);
+      announce("Switched");
+      onChanged();
+    } catch (e) {
+      fail("Couldn't switch to that one.", e);
+    }
+  };
+  const logout = async () => {
+    if (!confirmOut) return;
+    setSigningOut(true);
+    try {
+      await api.opencodeLogout(routeId, confirmOut.integration, confirmOut.label);
+      announce("Signed out");
+      setConfirmOut(null);
+      onChanged();
+    } catch (e) {
+      setConfirmOut(null);
+      fail("Couldn't sign out.", e);
+    } finally {
+      setSigningOut(false);
+    }
+  };
+  const remove = async () => {
+    setRemoving(true);
+    try {
+      await api.removeAccount(account.id);
+      announce("Account removed");
+      setConfirmRemove(false);
+      onChanged();
+    } catch (e) {
+      setConfirmRemove(false);
+      fail("Couldn't remove it.", e);
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-text-primary">{title}</p>
+          <p className="text-sm text-text-secondary">{signedOut ? "Not signed in" : "Signed in"}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {signedOut ? (
+            <Button variant="secondary" size="sm" onClick={openSignIn}>
+              Sign in
+            </Button>
+          ) : null}
+          {!signedOut || !main ? (
+            <Menu
+              label={`More actions for ${title}`}
+              trigger={
+                <Button variant="quiet" size="sm" iconOnly aria-label={`More actions for ${title}`}>
+                  <DotsThree size={16} aria-hidden="true" />
+                </Button>
+              }
+            >
+              {!signedOut ? <MenuItem onSelect={openSignIn}>Add a connection</MenuItem> : null}
+              {!main ? <MenuItem onSelect={() => setRenaming(true)}>Rename</MenuItem> : null}
+              {!main ? <MenuItem tone="danger" onSelect={() => setConfirmRemove(true)}>Remove</MenuItem> : null}
+            </Menu>
+          ) : null}
+        </div>
+      </div>
+
+      {connections.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {connections.map((c) => (
+            <li key={`${c.integration}:${c.label}`} className="flex flex-wrap items-center justify-between gap-2">
+              <p className="min-w-0 text-sm text-text-secondary">{`${c.name} — ${c.label}${c.active ? " — Active" : ""}`}</p>
+              <Menu
+                label={`More actions for ${c.name} ${c.label}`}
+                trigger={
+                  <Button variant="quiet" size="sm" iconOnly aria-label={`More actions for ${c.name} ${c.label}`}>
+                    <DotsThree size={16} aria-hidden="true" />
+                  </Button>
+                }
+              >
+                {!c.active ? <MenuItem onSelect={() => void switchTo(c)}>Use this one</MenuItem> : null}
+                <MenuItem onSelect={() => setConfirmOut(c)}>Sign out</MenuItem>
+              </Menu>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {account.models.length > 0 ? <ModelsList models={account.models} accountId={routeId} owner={false} onChanged={onChanged} /> : <p className="text-xs text-text-muted">{OPENCODE_NO_MODELS}</p>}
+      {problem ? <p role="status" className="text-xs text-text-secondary">{problem}</p> : null}
+
+      <ConfirmDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title="Remove this account?"
+        description={`Kohlab forgets ${account.label}. Projects that use it go back to the main account.`}
+        confirmLabel="Remove"
+        busy={removing}
+        onConfirm={() => void remove()}
+      />
+      <ConfirmDialog
+        open={confirmOut !== null}
+        onOpenChange={(v) => !v && setConfirmOut(null)}
+        title={`Sign out of ${confirmOut?.name ?? ""}?`}
+        description="Chats using it stop until you sign in again."
+        confirmLabel="Sign out"
+        tone="commit"
+        busy={signingOut}
+        onConfirm={() => void logout()}
+      />
+      {renaming ? <RenameAccountDialog id={account.id} label={account.label} open onOpenChange={(v) => !v && setRenaming(false)} onDone={onChanged} /> : null}
+      {signing !== null ? <OpenCodeSignInDialog accountId={routeId} title={signing} open onOpenChange={(v) => !v && setSigning(null)} onDone={onChanged} /> : null}
+    </div>
+  );
+}
+
 function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard; owner: boolean; busy: boolean; onRefresh: () => void }) {
   const usable = card.state === "connected" || card.state === "limited";
   const isAi = card.id === "claude" || card.id === "codex";
+  const isOpenCode = card.id === "opencode";
   const hints = card.actions.filter((a) => a.hint && a.kind !== "refresh");
   // Signed out: the rows still show every login, the main one included, so each can be signed in or removed.
   const rows = usable || (owner && card.state === "signed_out") ? card.accounts : [];
   const [adding, setAdding] = useState(false);
-  const canAdd = owner && card.installed && isAi && card.state !== "not_installed" && card.state !== "checking";
+  const canAdd = owner && card.installed && (isAi || isOpenCode) && card.state !== "not_installed" && card.state !== "checking";
   return (
     <Panel>
       <div className="flex flex-col gap-4 p-4">
@@ -371,10 +582,14 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
           </span>
         </div>
 
-        {owner && isAi && rows.length > 0 ? <p className="text-xs text-text-muted">{`${card.name} can hold several accounts. Each project uses one of them.`}</p> : null}
-        {rows.map((a) => (
-          <AccountBlock key={a.id} card={card} account={a} owner={owner} onChanged={onRefresh} />
-        ))}
+        {owner && (isAi || isOpenCode) && rows.length > 0 ? <p className="text-xs text-text-muted">{`${card.name} can hold several accounts. Each project uses one of them.`}</p> : null}
+        {rows.map((a) =>
+          isOpenCode && owner ? (
+            <OpenCodeAccountBlock key={a.id} account={a} onChanged={onRefresh} />
+          ) : (
+            <AccountBlock key={a.id} card={card} account={a} owner={owner} onChanged={onRefresh} />
+          ),
+        )}
 
         {card.state === "error" && owner ? (
           <p className="text-sm text-text-secondary">{card.error?.message ?? "Kohlab could not check this AI just now."}</p>
@@ -390,7 +605,9 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
                 {a.hint}
               </p>
             ))}
-            {canAdd ? (
+            {isOpenCode && card.state === "not_installed" ? <OpenCodeInstallRow onDone={onRefresh} /> : null}
+            {canAdd && isOpenCode ? <OpenCodeAddAccount card={card} onRefresh={onRefresh} /> : null}
+            {canAdd && !isOpenCode ? (
               <div>
                 <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setAdding(true)}>
                   {card.id === "codex" ? "Add another Codex login" : "Add another Claude account"}

@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import type { BgTask, Body, Caps, Todo } from "./chat";
 import { resultText } from "./chat";
 import { chatBusy, chatWaiting } from "./lib";
+import { opencodeBin } from "./opencode";
 import { acpDecision, acpToolName, ruleFor } from "./policy";
 
 /** The agents that speak ACP, and the command that starts each one's ACP server. */
@@ -27,12 +28,16 @@ const ACP_NAMES: Record<string, string> = { hermes: "Hermes", omp: "Omp", gemini
 
 export const isAcpAgent = (agent: string): boolean => Object.prototype.hasOwnProperty.call(ACP_AGENTS, agent);
 
+/** The program that starts an ACP agent: OpenCode's is the one Kohlab installs (or the server's), the others are on PATH. Null when it is not there. */
+export const acpBin = (agent: string): string | null => (agent === "opencode" ? opencodeBin() : Bun.which(ACP_AGENTS[agent]?.[0] ?? agent));
+
 /** The ACP error code for "authentication required" (the protocol's -32000). */
 const AUTH_REQUIRED = -32000;
 
 /** The chat line for an agent that could not start. A sign-in refusal says so; anything else is the generic line. Pure. */
 export function acpStartFailure(agent: string, err: unknown): string {
   if ((err as { code?: unknown } | null)?.code === AUTH_REQUIRED) {
+    if (agent === "opencode") return "OpenCode isn't signed in yet. Ask the owner to sign in from Settings → AI.";
     return agent === "codex" ? "Codex isn't signed in yet. Ask the owner to sign in from Settings → AI." : "The agent isn't signed in yet. Ask the owner to sign it in.";
   }
   return "The agent could not start. Try again.";

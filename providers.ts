@@ -15,6 +15,7 @@ import { createInterface } from "node:readline";
 import { agentModels, claudeProbe, forgetProbe, type Caps, type ClaudeProbe } from "./chat";
 import { clearCodexSignedIn, codexSignedIn } from "./codex";
 import { childEnv, dirOf, envOfAccount, getAccount, groupRouterModels, hasKey, limitedUntil, listAccounts, mainRunAs, markLimited, overlayOf, runAsOf, setSignedIn, testRouter, type Account } from "./accounts";
+import { MAIN_OPENCODE, listConnections, modelsOf, opencodeBin, opencodeVersion, type Connection } from "./opencode";
 
 export type ProviderId = "claude" | "codex" | "hermes" | "omp" | (string & {});
 
@@ -62,6 +63,15 @@ export interface ProviderAccount {
   hasKey?: boolean;
   /** a router account: its host and port, never the full address */
   baseUrlHost?: string;
+  /** an OpenCode profile: its connections, one per service sign-in or key (owner only) */
+  connections?: OpencodeConnection[];
+}
+export interface OpencodeConnection {
+  integration: string;
+  name: string;
+  label: string;
+  method: string;
+  active: boolean;
 }
 export interface ProviderAction {
   kind: "install" | "sign_in" | "add_account" | "fix" | "refresh" | "sign_out" | "open_dashboard";
@@ -84,8 +94,8 @@ export interface ProviderCard {
   actions: ProviderAction[];
 }
 
-export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "hermes", "omp"];
-const NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", hermes: "Hermes", omp: "omp" };
+export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "hermes", "omp", "opencode"];
+const NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", hermes: "Hermes", omp: "omp", opencode: "OpenCode" };
 export const NO_MODELS_YET = "Models appear after your first chat with it.";
 
 // ---- time, and the caches (in memory; a call is what starts a probe, never a timer) ----
@@ -97,6 +107,7 @@ const TTL_ERROR = 30_000;
 const TTL_USAGE = 300_000;
 const TTL_OMP_MODELS = 600_000;
 const TTL_HERMES = 300_000;
+const TTL_OPENCODE_MODELS = 60_000;
 const FORCE_GAP = 10_000;
 const FIRST_WAIT = 8_000;
 
@@ -378,6 +389,11 @@ export function notInstalledCard(id: ProviderId, now: number): ProviderCard {
   };
 }
 
+/** OpenCode's card when it is not installed here: the Install action. */
+export function opencodeNotInstalledCard(now: number): ProviderCard {
+  return { ...baseCard("opencode", now), installed: false, state: "not_installed", actions: [{ kind: "install", label: "Install OpenCode" }, refreshAction] };
+}
+
 /** A card for an AI that is installed but signed out. */
 export function signedOutCard(id: ProviderId, now: number, version: string | null, signIn: ProviderAction): ProviderCard {
   return { ...baseCard(id, now), version, state: "signed_out", actions: [signIn, refreshAction] };
@@ -491,6 +507,30 @@ export function codexCardFrom(a: { now: number; version: string | null; account:
   });
 }
 
+const VIA: Record<string, string> = { key: "API key", "chatgpt-headless": "ChatGPT", "chatgpt-browser": "ChatGPT" };
+/** One OpenCode profile as a row: its connections, and the models they give. A profile that could not be read is an error row. Pure. */
+export function opencodeRowFrom(a: { id: string; label: string; kind: "default" | "login"; now: number; conns: Connection[] | null; models: ProviderModel[] }): ProviderAccount {
+  const conns = a.conns ?? [];
+  const connections: OpencodeConnection[] = conns.map((c) => ({ integration: c.integration, name: c.name, label: c.label, method: c.method, active: c.active }));
+  const names = [...new Set(conns.map((c) => (VIA[c.method] ? `${c.name} (${VIA[c.method]})` : c.name)))];
+  const state: ProviderAccount["state"] = a.conns === null ? "error" : conns.length ? "connected" : "signed_out";
+  return {
+    id: a.id,
+    label: a.label,
+    email: null,
+    plan: names.length ? names.join(", ").slice(0, 200) : null,
+    auth: "config",
+    state,
+    isolation: {},
+    usage: null,
+    models: state === "connected" ? a.models : [],
+    modelsAt: state === "connected" ? a.now : null,
+    kind: a.kind,
+    limitedUntil: null,
+    connections,
+  };
+}
+
 /** Hermes' card from the providers `hermes auth list` named. Pure. */
 export function hermesCardFrom(a: { now: number; providers: string[]; models: Caps["models"] }): ProviderCard {
   if (a.providers.length === 0) return signedOutCard("hermes", a.now, null, serverSignIn("On the server, add a sign-in with hermes auth."));
@@ -525,6 +565,29 @@ export function ompCardFrom(a: { now: number; version: string | null; modelsText
     models,
     modelsAt: a.now,
   });
+}
+
+// ---- OpenCode (probe in opencode.ts) ----
+
+const OPENCODE_SIGN_IN: ProviderAction = { kind: "sign_in", label: "Sign in", via: "device_code" };
+const OPENCODE_ADD: ProviderAction = { kind: "add_account", label: "Add another OpenCode account" };
+
+/** OpenCode's card: the AI user's own profile (Main account) and each extra profile, one row each. */
+async function opencodeProbeCard(): Promise<ProviderCard> {
+  const now = clock();
+  if (!opencodeBin()) return opencodeNotInstalledCard(now);
+  const version = await memo("opencode:version", Number.POSITIVE_INFINITY, () => opencodeVersion());
+  const profiles: { key: string; label: string; kind: "default" | "login" }[] = [
+    { key: MAIN_OPENCODE, label: "Main account", kind: "default" },
+    ...listAccounts("opencode").map((a) => ({ key: a.id, label: a.label, kind: "login" as const })),
+  ];
+  const accounts: ProviderAccount[] = [];
+  for (const p of profiles) {
+    const conns = await listConnections(p.key).catch(() => null);
+    const models = conns?.length ? await memo(`opencode:${p.key}:models`, TTL_OPENCODE_MODELS, () => modelsOf(p.key)).catch(() => []) : [];
+    accounts.push(opencodeRowFrom({ id: p.key, label: p.label, kind: p.kind, now, conns, models }));
+  }
+  return combineAccounts("opencode", now, version, accounts, OPENCODE_SIGN_IN, [OPENCODE_ADD]);
 }
 
 // ---- who may see what ----
@@ -811,6 +874,7 @@ let probes: Record<string, Probe> = {
   codex: codexProbeCard,
   hermes: hermesProbeCard,
   omp: ompProbeCard,
+  opencode: opencodeProbeCard,
 };
 
 // ---- cards: cached, one probe at a time per AI, stale while a new one runs ----
@@ -853,7 +917,7 @@ function build(id: string, force: boolean): Promise<ProviderCard> {
 
 function checkingCard(id: string): ProviderCard {
   const c = baseCard(id, clock());
-  return { ...c, installed: !!Bun.which(id === "codex" ? "codex" : id), actions: [] };
+  return { ...c, installed: id === "opencode" ? !!opencodeBin() : !!Bun.which(id === "codex" ? "codex" : id), actions: [] };
 }
 
 function current(): { providers: ProviderCard[]; at: number } {
@@ -927,6 +991,11 @@ export async function testAccount(id: string): Promise<{ check: "ok" | "key_reje
     setSignedIn(id, au.loggedIn);
     return { check: au.loggedIn ? "ok" : "signed_out" };
   }
+  if (a.provider === "opencode") {
+    const conns = await listConnections(id).catch(() => null);
+    if (conns === null) return { check: "unreachable" };
+    return { check: conns.length ? "ok" : "signed_out" };
+  }
   clearCodexSignedIn(id);
   const si = await codexSignedIn(id);
   if (si === null) return { check: "unreachable" };
@@ -939,6 +1008,8 @@ export function forgetSignIn(provider: string, accountId?: string): void {
   if (provider === "claude") {
     memos.delete(accountId ? `claude:${accountId}:auth` : "claude:auth");
     forgetProbe(accountId);
+  } else if (provider === "opencode") {
+    dropMemos("opencode");
   } else {
     clearCodexSignedIn(accountId);
     memos.delete(accountId ? `codex:${accountId}:read` : "codex:read");
