@@ -9,6 +9,16 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.9.2] - 2026-11-17
+
+### Added
+- **A Terminal button you can find.** The project's top bar has a Terminal button next to Preview, and the "Ctrl ` Terminal" hint in the bottom bar is now a real button. Both open a plain shell in a panel, with no Claude in it.
+- **A terminal on the server itself** (owner only): a Terminal row in the sidebar, next to Settings, opens a full-page shell on the server, not tied to any project. It is also in the command palette as "Terminal on the server". It is hidden from project lists, can't be deleted, and every use is logged. Members, viewers and share links can't reach it.
+
+### Fixed
+- A terminal project that had never started showed "Claude has stopped" while it was still starting.
+- Terminal names sent by the browser are now checked, and stopping or deleting a project can no longer touch another project's terminal. This closes a way a member could have reached the server terminal by naming a project "server".
+
 ## [2.9.1] - 2026-11-17
 
 ### Fixed
