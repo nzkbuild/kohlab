@@ -9,6 +9,17 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.9.0] - 2026-11-17
+
+### Added
+- **Change Kohlab itself.** A new "Change Kohlab itself" button on Home starts a project made from Kohlab's real code, on its own branch of the latest version. The AI there can edit and test, but can't push or restart anything. Every other project now tells the AI where to send you if you ask it to change Kohlab.
+- **Release tab** in those projects (owner only): "Your change", then "Send for checking" (opens a pull request on GitHub), then "Merge and update" once GitHub's checks pass, which also updates this server. GitHub's check is now a real gate, not an afterthought.
+
+### Fixed
+- **Security: any invited member could take over the server** through the "install an AI" route, which ran `npm i -g` as the server's account. It is now owner-only.
+- Listing your private GitHub projects is now owner-only too.
+- Some messages still said "Settings → Agents"; they now say "Settings → AI".
+
 ## [2.8.3] - 2026-11-02
 
 ### Fixed
