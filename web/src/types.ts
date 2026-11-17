@@ -19,6 +19,8 @@ export interface Workspace {
   stoppedClean?: boolean;
   /** A chat workspace: the AI is driven through a chat screen, not a terminal. */
   chat?: boolean;
+  /** A "Change Kohlab itself" project: a copy of Kohlab's source with a Release tab for the owner. */
+  kohlab?: true;
   chatSession?: string;
   /** The conversation last moved on in the chat view, so the terminal's next Claude resumes it. */
   resumeInTerminal?: boolean;

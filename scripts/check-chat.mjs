@@ -127,7 +127,7 @@ check("task id: none", newTaskId(null, "oops"), null);
 check("usage limit: plain sentence", friendlyError("Claude AI usage limit reached|123"), "Claude has reached its usage limit for now. Try again in a little while.");
 check("sign-in problem: plain sentence", friendlyError("Invalid API key · Please run /login"), "Claude is signed out. Sign in to carry on.");
 check("anything else: generic sentence", friendlyError("something odd happened"), "Something went wrong on Claude's side. Try again.");
-check("not installed: set-up sentence", friendlyError("claude is not installed on this server"), "Claude is not set up on this server yet. Open Settings → Agents.");
+check("not installed: set-up sentence", friendlyError("claude is not installed on this server"), "Claude is not set up on this server yet. Open Settings → AI.");
 
 // quiet lines for what the CLI notices on its own
 check("model switch: names the model", noticeText({ subtype: "model_fallback", fallback_model: "claude-haiku-5-5" }), "Switched to claude-haiku-5-5 because the first choice was unavailable");

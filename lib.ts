@@ -1020,7 +1020,7 @@ const releaseCache = new Map<string, { at: number; value: ReleaseCheck }>();
 const UPDATE_LOG = join(WORKS_DIR, "update.log");
 
 /** The version a `## [1.2.3] - 2026-01-01` heading names, or null. */
-function headingVersion(line: string): string | null {
+export function headingVersion(line: string): string | null {
   const m = /^##\s+\[?([0-9][^\s\]]*)\]?/.exec(line);
   return m ? m[1] : null;
 }
@@ -1898,6 +1898,8 @@ export async function createWorkspace(opts: {
   chat?: boolean;
   /** The caller named no AI: a chat project starts on the server's default AI and account (until its first message). */
   inherit?: boolean;
+  /** A "Change Kohlab itself" project (kohlab.ts): its files are Kohlab's own source. */
+  kohlab?: boolean;
 }): Promise<Workspace & { running: boolean; path: string }> {
   if (opts.branch !== undefined && !(await validBranch(opts.branch))) throw new Error(`not a valid branch name: ${opts.branch}`);
   // `opts.url` reaches `git clone --bare` as root with safe.directory=*.
@@ -1953,6 +1955,7 @@ export async function createWorkspace(opts: {
       payload: opts.chat ? undefined : opts.payload,
       limits: opts.limits,
       chat: opts.chat ? true : undefined,
+      kohlab: opts.kohlab ? true : undefined,
     };
     s.workspaces.push(w);
     return w;
@@ -2660,7 +2663,7 @@ function run(cwdArg: string, cmd: string, args: string[]): Promise<void> {
   return promise;
 }
 
-function runOut(
+export function runOut(
   cwdArg: string,
   cmd: string,
   args: string[],

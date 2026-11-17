@@ -151,7 +151,7 @@ check("login status: a zero exit that says not logged in is not signed in", pars
 check("login status: a failed run is not signed in", parseCodexLoggedIn("", 2), false);
 
 // a sign-in refusal from codex-acp (-32000) becomes the sign-in line; other errors stay generic
-check("codex refused for sign-in gets the sign-in line", acpStartFailure("codex", Object.assign(new Error("Authentication required"), { code: -32000 })), "Codex isn't signed in yet. Ask the owner to sign in from Settings → Agents.");
+check("codex refused for sign-in gets the sign-in line", acpStartFailure("codex", Object.assign(new Error("Authentication required"), { code: -32000 })), "Codex isn't signed in yet. Ask the owner to sign in from Settings → AI.");
 check("another agent refused for sign-in gets its own line", acpStartFailure("hermes", Object.assign(new Error("Authentication required"), { code: -32000 })), "The agent isn't signed in yet. Ask the owner to sign it in.");
 check("any other start error is the generic line", acpStartFailure("codex", new Error("boom")), "The agent could not start. Try again.");
 

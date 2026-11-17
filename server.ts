@@ -101,6 +101,7 @@ import { claudeSignedIn, forgetSignIn, getProviders, invalidateProvider, PROVIDE
 import { ACP_AGENTS, isAcpAgent } from "./acp";
 import { AccountError, MAIN_CLAUDE, accountView, addCustomModel, createLogin, createRouter, getAccount, grantAccountsReach, listAccounts, remove as removeAccount, removeCustomModel, renameAccount, renameModel, setKey, signInState, signOutClaude, startSignIn, stopSignIns, submitCode, testRouter } from "./accounts";
 import { patchDefaults } from "./defaults";
+import { KohlabError, mergeRelease, newKohlabProject, openRelease, releaseState, scrub } from "./kohlab";
 import { cleanRules, describeRule } from "./policy";
 import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, noteRecalled, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
 import { TeamError, resumeTeams, teamActive, teamCleanup, teamGet, teamPost, teamToolCall } from "./team";
@@ -222,6 +223,40 @@ restoreWaiting();
 void resumeTeams().catch((e) => console.warn(`[team] resume: ${(e as Error).message}`));
 
 
+
+/** Change Kohlab itself: the owner's Release panel for a Kohlab project (kohlab.ts). The caller has checked the owner. */
+async function handleKohlabRelease(id: string, req: Request, actor: string): Promise<Response> {
+  let ws: Workspace;
+  try {
+    ws = await getWorkspace(id);
+  } catch {
+    return json({ error: "no such project" }, 404);
+  }
+  if (!ws.kohlab) return json({ error: "this project is not Change Kohlab itself" }, 404);
+  try {
+    if (req.method === "GET") return json(await releaseState(ws));
+    if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+    const body = (await req.json().catch(() => ({}))) as { action?: unknown };
+    if (body.action === "open") {
+      containFailure(audit(actor, "kohlab.release.open", id), "audit");
+      return json(await openRelease(ws));
+    }
+    if (body.action === "merge") {
+      containFailure(audit(actor, "kohlab.release.merge", id), "audit");
+      return json(await mergeRelease(ws));
+    }
+    return json({ error: "action must be open or merge" }, 400);
+  } catch (e) {
+    return kohlabFailure(e);
+  }
+}
+
+/** A Kohlab error keeps its plain message and status; anything else is logged (scrubbed) and answered generically. */
+function kohlabFailure(e: unknown): Response {
+  if (e instanceof KohlabError) return json({ error: e.message }, e.status);
+  console.error(`kohlab: ${scrub(String((e as Error)?.message ?? e))}`);
+  return json({ error: "Kohlab could not do that. Try again in a moment." }, 500);
+}
 
 async function handleClone(req: Request, actorUserId?: string): Promise<Response> {
   try {
@@ -2087,6 +2122,14 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       }
     }
 
+    // The Release panel of a Change Kohlab project (kohlab.ts): read the state, send the change for checking, merge it. Owner only.
+    const releaseM = path.match(/^\/api\/workspaces\/([^/]+)\/release$/);
+    if (releaseM) {
+      const refused = gate(isOwner, "forbidden, only an owner can release Kohlab");
+      if (refused) return refused;
+      return handleKohlabRelease(releaseM[1], req, actor);
+    }
+
     if (m) {
       const [, id, action] = m;
       // a share link never reaches the owner's problems, copies or link settings
@@ -2333,7 +2376,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       return handleAgents(req);
     }
     if (path === "/api/agents/install" && req.method === "POST") {
-      const refused = gate(canMutate, "forbidden, viewer cannot install agents");
+      const refused = gate(isOwner, "forbidden, only an owner can install agents");
       if (refused) return refused;
       containFailure(audit(actor, "agent.install"), "audit");
       return handleAgentInstall(req);
@@ -2381,7 +2424,9 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       return handleUsage();
     }
     if (path === "/api/gh/repos") {
-      if (denied) return json({ error: "unauthorized" }, 401);
+      // Lists the owner's private repositories through the server's GitHub login.
+      const refused = gate(isOwner, "forbidden, only an owner can list GitHub projects");
+      if (refused) return refused;
       return handleGhRepos();
     }
     // OTA: what the pushed upstream publishes, and (owner only) apply it.
@@ -2399,6 +2444,21 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if ((await updateRunState()).running) return json({ error: "an update is already running" }, 409);
       containFailure(audit(actor, "update", undefined, "OTA"), "audit");
       return handleReleaseUpdate();
+    }
+    // Change Kohlab itself (kohlab.ts): starts a project on a copy of Kohlab's source. Owner only; the AI never gets this.
+    if (path === "/api/kohlab/project" && req.method === "POST") {
+      const refused = gate(isOwner, "forbidden, only an owner can change Kohlab itself");
+      if (refused) return refused;
+      const body = (await req.json().catch(() => ({}))) as { name?: unknown };
+      if (body.name !== undefined && typeof body.name !== "string") return json({ error: "name must be text" }, 400);
+      const name = (typeof body.name === "string" ? body.name : "").trim() || "Change Kohlab";
+      if (name.length > 80) return json({ error: "name is over 80 characters" }, 400);
+      containFailure(audit(actor, "kohlab.project", undefined, name), "audit");
+      try {
+        return json(clientView(await newKohlabProject(name)));
+      } catch (e) {
+        return kohlabFailure(e);
+      }
     }
     if (path === "/api/clone" && req.method === "POST") {
       const refused = gate(canMutate, "forbidden, viewer cannot clone");

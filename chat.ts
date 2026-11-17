@@ -16,6 +16,7 @@ import { createInterface } from "node:readline";
 import type { AiDefaults, AiResolved, Fallback, FallbackStep, LimitState, PermissionRule, Workspace } from "./types";
 import { accountEnv, childEnv, clearLimit, configDirOf, envOfAccount, getAccount, laneKey, limitedUntil, listAccounts, mainRunAs, markLimited, overlayOf, runAsOf, signedInOf, usableBy } from "./accounts";
 import { RESET_FIELDS, resolveAi } from "./defaults";
+import { kohlabOrigin } from "./kohlab";
 import { PERSONAL_ASKS, claudeArgsFor, cleanRules, defaultSteps, describeRule, isMode, limitReached, ruleFor, validRule } from "./policy";
 import { notifyNeedsYou } from "./push";
 import { browserToolPolicy, browserUrl, writeBrowserMcp, type OwnPages } from "./browser";
@@ -55,20 +56,35 @@ const CHAT_SYSTEM_PROMPT =
   "Files the person attaches are saved in the uploads folder of the project; open them with your Read tool, and use pictures from there directly in the page when they ask for that. " +
   "When you run a command, always give it a short plain-English description of what it does and why. " +
   "You have a real browser that the person watches live: after you change a page, open it there and check it, using the http://127.0.0.1 address of a dev server you started, or else the project's Preview.";
+/** Every chat project, when this server can change Kohlab itself (kohlab.ts). */
+const KOHLAB_LINE = "To change Kohlab itself, the owner starts 'Change Kohlab itself' on Home; you can't update or restart Kohlab from here.";
+/** A "Change Kohlab itself" project: a copy of Kohlab's source, sent for checking only by the owner. */
+const KOHLAB_PROJECT =
+  "This project is a copy of Kohlab's own source on its own branch. Edit and test it here, and read the repo's CLAUDE.md, PRODUCT.md and DESIGN.md for its rules when you need them (never paste them). " +
+  "Never push, never touch the live Kohlab folder, never restart or update anything: the owner presses Release. " +
+  "When the owner says it's ready, release it the way the repo does: bump the version in package.json, add one new section at the top of CHANGELOG.md, and commit with the subject `release vX.Y.Z: <summary>`. " +
+  "Tell the owner in plain words what changed and what to look at.";
+/** The Kohlab line for a chat's prompt: the project block on a Kohlab project, the one line on other chats when this server has Kohlab's source, else "". */
+export function kohlabPromptOf(ws: Pick<Workspace, "chat" | "kohlab">): string {
+  if (!ws.chat) return "";
+  return ws.kohlab ? KOHLAB_PROJECT : kohlabOrigin() ? KOHLAB_LINE : "";
+}
+
 /** The standing notes a chat gets: trimmed, "" when none. Only chat projects get them; a terminal's Claude keeps its own settings. Pure. */
 export function notesOf(ws: Pick<Workspace, "chat" | "notes">): string {
   return ws.chat ? (ws.notes ?? "").trim() : "";
 }
 
 /** Claude's system prompt for a chat: the chat's rules, then the person's standing notes, then the project brain's summary. Pure. */
-export function systemPromptFor(notes: string, brain = ""): string {
-  const base = notes ? `${CHAT_SYSTEM_PROMPT} The person's standing notes for this project (always follow them): ${notes}` : CHAT_SYSTEM_PROMPT;
+export function systemPromptFor(notes: string, brain = "", kohlab = ""): string {
+  const rules = notes ? `${CHAT_SYSTEM_PROMPT} The person's standing notes for this project (always follow them): ${notes}` : CHAT_SYSTEM_PROMPT;
+  const base = kohlab ? `${rules} ${kohlab}` : rules;
   return brain ? `${base}\n\n${brain}` : base;
 }
 
 /** The text put before the person's first message in a new ACP session: the notes and the brain's summary, or "" when none. Pure. */
-export function notesMessagePrefix(notes: string, brain = ""): string {
-  return [notes ? `Project notes from the person (always follow them):\n${notes}\n\n` : "", brain ? `${brain}\n\n` : ""].filter(Boolean).join("");
+export function notesMessagePrefix(notes: string, brain = "", kohlab = ""): string {
+  return [kohlab ? `${kohlab}\n\n` : "", notes ? `Project notes from the person (always follow them):\n${notes}\n\n` : "", brain ? `${brain}\n\n` : ""].filter(Boolean).join("");
 }
 
 /** The brain's MCP server for a chat: node runs brain-mcp.cjs, which calls back to this server with the workspace's own token. Null when node, the server's address or the token is missing. */
@@ -1011,7 +1027,7 @@ async function start(ws: Workspace, id: string, opts: { model?: string } = {}): 
   // strict: only our browser tools (and the brain's, and a team's) load, never the user's MCP servers. Only a team's Tester gets the browser.
   const mcpFile = writeBrowserMcp(ws, who, { ...(brainExtra ?? {}), ...(teamExtra ?? {}) }, { browser: !ws.team || ws.team.role === "tester" });
   if (mcpFile) args.push("--mcp-config", mcpFile);
-  if (!term) args.push("--append-system-prompt", systemPromptFor(notesOf(ws), brainSummaryOf(ws)));
+  if (!term) args.push("--append-system-prompt", systemPromptFor(notesOf(ws), brainSummaryOf(ws), kohlabPromptOf(ws)));
   if (ws.chatSession) args.push("--resume", ws.chatSession);
   const wantModel = term ? ws.model : ai.model.value;
   const useModel = opts.model ?? wantModel;
@@ -1344,7 +1360,8 @@ async function sendAcp(ws: Workspace, id: string, t: string, opts: SendOpts = {}
     // the first message of a new agent session carries the project's notes; the mark is cleared only once it is sent
     const notes = notesOf(ws);
     const brain = brainSummaryOf(ws);
-    acp.prompt(acp.freshSession && (notes || brain) ? notesMessagePrefix(notes, brain) + sent : sent);
+    const kohlab = kohlabPromptOf(ws);
+    acp.prompt(acp.freshSession && (notes || brain || kohlab) ? notesMessagePrefix(notes, brain, kohlab) + sent : sent);
     acp.freshSession = false;
     if (hasPendingContext(ws)) await clearHandoff(id).catch(() => {}); // only once the agent has the message
   } catch (e) {
@@ -2444,7 +2461,8 @@ async function sendHidden(id: string, text: string): Promise<void> {
       const acp = cur && !cur.closed && !acpStarting.has(id) ? cur : await startAcp(ws, id);
       const notes = notesOf(ws);
       const brain = brainSummaryOf(ws);
-      acp.prompt(acp.freshSession && (notes || brain) ? notesMessagePrefix(notes, brain) + text : text);
+      const kohlab = kohlabPromptOf(ws);
+      acp.prompt(acp.freshSession && (notes || brain || kohlab) ? notesMessagePrefix(notes, brain, kohlab) + text : text);
       acp.freshSession = false;
       return;
     }
@@ -2809,7 +2827,7 @@ export async function runInfo(id: string): Promise<RunInfo> {
     ? { system: null, notes: notesOf(ws), note: "Kohlab adds your notes before your first message. The AI's own built-in instructions are not shown." }
     : term
       ? { system: null, notes: "", note: "This project uses your own Claude settings." }
-      : { system: CHAT_SYSTEM_PROMPT, notes: notesOf(ws), note: null };
+      : { system: kohlabPromptOf(ws) ? `${CHAT_SYSTEM_PROMPT} ${kohlabPromptOf(ws)}` : CHAT_SYSTEM_PROMPT, notes: notesOf(ws), note: null };
   const defaults = await defaultsOf();
   const ai = resolveAi(ws, defaults);
   const acct = ws.chat && ws.account ? getAccount(ws.account) : undefined;

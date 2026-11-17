@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowsClockwise,
   CheckCircle,
-  CircleNotch,
   DownloadSimple,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -143,10 +142,7 @@ export default function UpdatePanel() {
         {status?.available || failed ? (
           <Button variant="primary" size="sm" disabled={busy || status?.running} onClick={() => void apply()}>
             {status?.running ? (
-              <>
-                <CircleNotch size={14} className="animate-spin" aria-hidden="true" />
-                Updating…
-              </>
+              "Updating…"
             ) : (
               <>
                 <DownloadSimple size={14} aria-hidden="true" />

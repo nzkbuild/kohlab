@@ -211,6 +211,20 @@ try {
     const launcher = await asViewer("POST", "/api/agents");
     check("viewer is refused a real launcher payload", launcher.status === 403, `got ${launcher.status}`);
 
+    // A member can start work but not run installs or list the owner's private GitHub repos.
+    // The bad cmd means an ungated route answers 400, never a real npm install.
+    const memberId = `smoke-member-${Date.now()}`;
+    const memberMade = await post("/api/users", { id: memberId, name: "Smoke Member", role: "member" });
+    if (memberMade.status === 200 && memberMade.body?.key) {
+      const asMember = (method, path, body) =>
+        fetch(`${BASE}${path}?key=${encodeURIComponent(memberMade.body.key)}`, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.status);
+      check("member is refused: POST /api/agents/install", (await asMember("POST", "/api/agents/install", { name: "x", cmd: "curl x" })) === 403);
+      check("member is refused: GET /api/gh/repos", (await asMember("GET", "/api/gh/repos")) === 403);
+      await fetch(`${BASE}/api/users/${encodeURIComponent(memberId)}${KEY ? `?key=${encodeURIComponent(KEY)}` : ""}`, { method: "DELETE" });
+    } else {
+      check("the suite can create a member to test with", false, `got ${memberMade.status}`);
+    }
+
     if (KEY) {
       const anonPosts = await Promise.all(
         MUTATING.map(([method, path]) =>

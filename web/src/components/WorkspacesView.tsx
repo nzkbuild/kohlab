@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUp, CaretRight, ChatCircleDots, CheckCircle, GithubLogo, Image, Question, X } from "@phosphor-icons/react";
+import { ArrowUp, CaretRight, ChatCircleDots, CheckCircle, GithubLogo, Image, Question, Wrench, X } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useApp, useCan } from "../store";
 import { announce } from "../lib/announce";
@@ -287,6 +287,7 @@ export function HomeScreen() {
   // Leaving Home keeps what was typed, even inside that 300 ms.
   useEffect(() => () => writeDraft("home", ideaRef.current), []);
   const [busy, setBusy] = useState(false);
+  const [kohlabBusy, setKohlabBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const newAgent = useNewAgent();
@@ -408,6 +409,20 @@ export function HomeScreen() {
 
   const open = (id: string) => navigate({ kind: "workspace", id });
 
+  /** A chat project on its own branch of Kohlab's source. Its Release tab takes it live, once checked. */
+  const changeKohlab = async () => {
+    setKohlabBusy(true);
+    setError(null);
+    try {
+      const made = await api.kohlabProject();
+      await refresh();
+      navigate({ kind: "workspace", id: made.id });
+    } catch (e) {
+      setError(plainError(e));
+    }
+    setKohlabBusy(false);
+  };
+
   return (
     <div className="surface">
       <div className="surface-inner">
@@ -507,6 +522,14 @@ export function HomeScreen() {
                     Something else
                   </button>
                 </li>
+                {can.own ? (
+                  <li>
+                    <button type="button" onClick={() => void changeKohlab()} disabled={kohlabBusy} className={CHIP}>
+                      <Wrench size={16} aria-hidden="true" className="mr-2" />
+                      Change Kohlab itself
+                    </button>
+                  </li>
+                ) : null}
               </ul>
 
               <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">

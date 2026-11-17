@@ -250,7 +250,7 @@ export function friendlyError(raw: string): string {
   if (/overloaded|\b529\b/i.test(raw) && !limitReached(raw)) return "Claude is busy right now. Try again in a little while.";
   if (/usage limit|rate limit|limit reached|quota/i.test(raw) || limitReached(raw)) return "Claude has reached its usage limit for now. Try again in a little while.";
   if (/not logged in|log ?in|login|authenticat|401|invalid api key|credential/i.test(raw)) return "Claude is signed out. Sign in to carry on.";
-  if (/is not installed on this server/i.test(raw)) return "Claude is not set up on this server yet. Open Settings → Agents.";
+  if (/is not installed on this server/i.test(raw)) return "Claude is not set up on this server yet. Open Settings → AI.";
   return "Something went wrong on Claude's side. Try again.";
 }
 

@@ -16,6 +16,21 @@ export type TeamAction =
   | { action: "reassign"; task: string; role: string }
   | { action: "budget"; budget: Budget; role?: string };
 export interface AuditEvent { t: number; user: string; action: string; id?: string; detail?: string; }
+/** A "Change Kohlab itself" project's branch against GitHub's main, and its pull request (owner only). */
+export interface ReleaseState {
+  branch: string;
+  /** commits on the branch that main does not have */
+  ahead: number;
+  /** commits on main that the branch does not have */
+  behind: number;
+  dirty: boolean;
+  version: string;
+  base: { version: string };
+  changelogTouched: boolean;
+  pr: null | { number: number; url: string; state: "open" | "merged" | "closed"; checks: "pending" | "passing" | "failing" | "none" };
+  /** how many commits the live server's checkout is behind GitHub's main */
+  live: { behind: number };
+}
 /** A plan window's use in percent, and when it resets (an ISO time). */
 export interface ChatUsageWindow { percent: number; resetsAt: string | null; }
 /** The chat footer's usage: the context window, and the plan's limits when the CLI reports them. */
@@ -548,6 +563,14 @@ export const api = {
   usage: () => json<{ plan: NonNullable<ChatUsage["plan"]> | null; at: number }>("/api/usage"),
   release: (force = false) => json<ReleaseStatus>(`/api/release${force ? "?force=1" : ""}`),
   applyUpdate: () => json<{ started?: boolean; log?: string }>("/api/release/update", { method: "POST" }),
+  /** Owner only: a new chat project on its own branch of Kohlab's source, named `name` ("Change Kohlab" when omitted). */
+  kohlabProject: (name?: string) =>
+    json<Workspace>("/api/kohlab/project", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(name ? { name } : {}) }),
+  /** Owner only, on a "Change Kohlab itself" project: its branch against GitHub's main, and its pull request. */
+  releaseState: (id: string) => json<ReleaseState>(`/api/workspaces/${encodeURIComponent(id)}/release`),
+  /** Owner only. "open" sends the branch for checking (a pull request); "merge" merges it once GitHub's checks pass. Answers the state as it is after. */
+  releaseAction: (id: string, action: "open" | "merge") =>
+    json<ReleaseState>(`/api/workspaces/${encodeURIComponent(id)}/release`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action }) }),
   uploadImage: async (workspaceId: string, image: Blob): Promise<{ path: string; mimeType: string; bytes: number }> => {
     const res = await req(`/api/workspaces/${encodeURIComponent(workspaceId)}/image`, {
       method: "POST",

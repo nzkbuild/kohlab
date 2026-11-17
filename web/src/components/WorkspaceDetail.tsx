@@ -90,6 +90,7 @@ function DiffView(props: { workspaceId: string; simple: boolean }) {
 const FilesView = lazy(() => import("./FilesView"));
 const BrainView = lazy(() => import("./BrainView"));
 const TeamView = lazy(() => import("./TeamView"));
+const ReleasePanel = lazy(() => import("./ReleasePanel"));
 
 type TabId = WorkspaceTab;
 
@@ -412,6 +413,8 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     };
   }, [workspaceId, chat, routeTab]);
   const showTeam = chat && (teamExists || routeTab === "team");
+  // The Release tab is the owner's: a "Change Kohlab itself" project shows it, nobody else sees it.
+  const showRelease = w?.kohlab === true && can.own;
   // Hover, focus or the start of a press on the Changes tab: the diff and versions are on their way before the click lands.
   const warmChanges = { onPointerEnter: () => api.prefetchChanges(workspaceId), onFocus: () => api.prefetchChanges(workspaceId), onPointerDown: () => api.prefetchChanges(workspaceId) };
   // Changes opens on a first paint, not a download: fetch its code as soon as the tab exists.
@@ -427,7 +430,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   }, []);
   const rawTab0: TabId = (hiddenTab ? undefined : routeTab) ?? (needsReview && !chat && !claudeTerminal ? "review" : "terminal");
   // The Brain and Team tabs are for chat projects only: a link to either on any other project falls back to the chat.
-  const rawTab1: TabId = (rawTab0 === "brain" && !showBrain) || (rawTab0 === "team" && !showTeam) ? "chat" : rawTab0;
+  const rawTab1: TabId = (rawTab0 === "brain" && !showBrain) || (rawTab0 === "team" && !showTeam) || (rawTab0 === "release" && !showRelease) ? "chat" : rawTab0;
   const rawTab: TabId = rawTab1 === "review" && !showChanges ? "chat" : rawTab1;
   const tab: TabId =
     rawTab === "terminal" && (chat || claudeTerminal)
@@ -451,6 +454,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     ...(showChanges ? [{ id: "review" as const, label: "Changes" }] : []),
     ...(showBrain ? [{ id: "brain" as const, label: "Brain" }] : []),
     ...(showTeam ? [{ id: "team" as const, label: "Team" }] : []),
+    ...(showRelease ? [{ id: "release" as const, label: "Release" }] : []),
     ...(powerTools ? [{ id: "files" as const, label: "Files" }] : []),
   ];
 
@@ -501,7 +505,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // The tab list depends on power tools and on chat, so the handler is rebound when either changes.
-  }, [workspaceId, powerTools, chat, claudeTerminal, showChanges]);
+  }, [workspaceId, powerTools, chat, claudeTerminal, showChanges, showRelease]);
 
   // Ctrl+` (and Ctrl+J, as in VS Code) open and close the terminal panel. Ctrl+`
   // works from anywhere; Ctrl+J stays out of fields and terminals, where it is a newline.
@@ -951,6 +955,16 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
               <ErrorBoundary label="Team">
                 <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
                   {tab === "team" ? <TeamView key={workspaceId} workspaceId={workspaceId} /> : null}
+                </Suspense>
+              </ErrorBoundary>
+            </TabPanel>
+          ) : null}
+
+          {showRelease ? (
+            <TabPanel value="release" className="h-full min-h-0 overflow-y-auto" tabIndex={-1}>
+              <ErrorBoundary label="Release">
+                <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
+                  {tab === "release" ? <ReleasePanel key={workspaceId} workspaceId={workspaceId} /> : null}
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>

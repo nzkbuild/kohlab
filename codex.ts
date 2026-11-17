@@ -1,6 +1,6 @@
 /**
  * Codex sign-in for chat projects: whether the server's Codex is signed in, and the owner's
- * device-code sign-in (`codex login --device-auth`) that Settings → Agents drives.
+ * device-code sign-in (`codex login --device-auth`) that Settings → AI drives.
  *
  * The CLI prints a link and a one-time code, then waits until the person approves it in
  * their browser. The process is kept running until it exits; the page polls for the result.

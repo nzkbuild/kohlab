@@ -20,6 +20,8 @@ export interface Workspace {
   payload?: string;
   /** Talks through the claude CLI's chat mode (chat.ts), not a main PTY. */
   chat?: boolean;
+  /** "Change Kohlab itself" (kohlab.ts): a chat on a copy of Kohlab's source, on its own branch off origin/main. Set only by POST /api/kohlab/project. */
+  kohlab?: true;
   /** claude session id: the chat's, or the terminal Claude's as reported by its hooks. For --resume. */
   chatSession?: string;
   /** the conversation last moved on in the chat view, so the terminal's next Claude resumes it. */

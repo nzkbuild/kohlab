@@ -33,7 +33,7 @@ const AUTH_REQUIRED = -32000;
 /** The chat line for an agent that could not start. A sign-in refusal says so; anything else is the generic line. Pure. */
 export function acpStartFailure(agent: string, err: unknown): string {
   if ((err as { code?: unknown } | null)?.code === AUTH_REQUIRED) {
-    return agent === "codex" ? "Codex isn't signed in yet. Ask the owner to sign in from Settings → Agents." : "The agent isn't signed in yet. Ask the owner to sign it in.";
+    return agent === "codex" ? "Codex isn't signed in yet. Ask the owner to sign in from Settings → AI." : "The agent isn't signed in yet. Ask the owner to sign it in.";
   }
   return "The agent could not start. Try again.";
 }

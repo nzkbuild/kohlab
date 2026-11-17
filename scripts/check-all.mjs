@@ -136,6 +136,8 @@ try {
   // Project brain (v2.7): the vault on a throwaway folder; the routes and the MCP server over HTTP with a fake claude; the graph and the Brain tab in the browser.
   run("project brain (vault, links, summary, recall, undo)", "bun", ["scripts/check-brain.ts"]);
   run("project brain over HTTP and MCP (fake claude)", "node", ["scripts/check-brain-http.mjs"]);
+  // Change Kohlab itself (v2.9): a throwaway server with a local bare origin and a fake gh; nothing reaches GitHub.
+  run("change Kohlab itself (release rules over HTTP, fake gh and bare origin)", "bun", ["scripts/check-kohlab.mjs"]);
   run("project brain graph (layout, sizes, recalled line)", "bun", ["scripts/check-brain-graph.mjs"]);
   // Team mode (v2.8): the pure rules and the git steps (throwaway repos), and the team's text (digests, labels).
   run("team core (areas, picks, budgets, digests, store, git on throwaway repos)", "bun", ["scripts/check-team-core.mjs"]);
