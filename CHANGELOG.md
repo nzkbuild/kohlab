@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.9.1] - 2026-11-17
+
+### Fixed
+- **The terminal no longer freezes when Claude runs in it.** The Terminal view of a project, "Restart Claude" and "Continue in Claude's terminal" painted the start-up screen once and then never updated, so typing seemed to do nothing. A packaging setting was breaking part of the terminal's code; it is fixed, and two new checks (one reads the packaged files, one types Claude's start-up question into a real browser terminal) keep it from coming back.
+
 ## [2.9.0] - 2026-11-17
 
 ### Added
