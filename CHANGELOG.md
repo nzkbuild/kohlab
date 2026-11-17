@@ -9,6 +9,17 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.9.3] - 2026-11-17
+
+### Added
+- **OpenCode in Settings → AI, with no terminal.** Install OpenCode with one button (a pinned version, in the AI's own folder, never global or as root), then connect it from one sign-in dialog: your OpenCode account or a ChatGPT subscription with a code and a link, or any provider's API key. A key is passed to OpenCode privately and is never shown, logged or kept by Kohlab.
+- **Several OpenCode accounts.** Each account keeps its own sign-ins; every one lists its connections with "Use this one" and "Sign out". Add another account any time.
+- OpenCode's models appear in the model picker for any project or chat, grouped by the service they come from.
+
+### Notes
+- GitHub Copilot sign-in needs a form that only works in a terminal, so it says "Not available here yet" for now.
+- An OpenCode chat in a project that does not run as the AI user won't start (it would otherwise run the AI-owned program as root).
+
 ## [2.9.2] - 2026-11-17
 
 ### Added
