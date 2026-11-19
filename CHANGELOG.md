@@ -9,6 +9,22 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.12.0] - 2026-11-19
+
+### Added
+- **Backups now include your projects.** Every project's files and history, its chats, its Project Brain notes and its uploaded files are saved, not just Kohlab's own settings. AI sign-ins and keys are deliberately left out, so secrets never travel in a backup file.
+- **Every backup is checked.** Each one is opened in a scratch folder and verified (history, files, chats), and a damaged backup is reported straight away. `kohlab backup verify <file>` does the same on demand, and `kohlab restore <file> --dry-run` shows what a restore would change.
+- **Daily automatic backups,** on by default, keeping the last 7 in `backups/` inside Kohlab's data folder. A failed run (or low disk space) is reported in plain words and never stops the server.
+- **Settings → Backups** (owner only): the last backup, **Back up now**, Download and Delete for each saved backup, and a gentle note if the last good one is more than 3 days old. Downloaded and daily backups leave out your access key.
+- **Settings → Updates shows GitHub's checks for the new version** ("GitHub's checks passed", "still checking", "failed") and asks before updating onto a version that hasn't passed. `kohlab update` does the same.
+
+### Changed
+- `kohlab restore` now also restores projects. It never deletes anything: what it replaces is moved aside. Restore with the server stopped.
+- `backup-offbox.sh` only sends a backup that passed verification.
+
+### Fixed
+- Restore checks every name and folder inside a backup file before writing anything, so a damaged or hand-made backup can't write outside Kohlab's data folder.
+
 ## [2.11.0] - 2026-11-19
 
 ### Added
