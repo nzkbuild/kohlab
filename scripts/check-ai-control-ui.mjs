@@ -273,7 +273,7 @@ try {
     await defaults.waitFor({ timeout: 15000 }).catch(() => {});
     check("defaults: the panel comes first", (await page.locator("section.panel h3").first().innerText()) === "Defaults for new projects");
     const text = await defaults.innerText();
-    check("defaults: the helper line", /Projects start with these\. A project can set its own\./.test(text));
+    check("defaults: the helper line", /A project can set its own\./.test(text));
     check("defaults: AI, Account, Model, Effort, Mode and Continue fresh rows", ["AI", "Account", "Model", "Effort", "Mode", "Continue fresh automatically"].every((w) => text.includes(w)), text.replace(/\n/g, " | "));
     const clears = await defaults.getByRole("button", { name: /^Use the built-in/ }).evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
     check("defaults: 'Use built-in' only on the one that is set", JSON.stringify(clears) === JSON.stringify(["Use the built-in model"]), clears.join(", "));
@@ -367,7 +367,7 @@ try {
     await allowed.getByRole("button", { name: /^Remove/ }).click();
     await page.waitForTimeout(300);
     check("always-allowed: Remove goes to that project", s.controls.some((c) => c.action === "rule_remove" && c.value === "Bash(npm test:*)"));
-    check("always-allowed: the one explanatory line about limits", /carry on with another account or a cheaper model/.test(await page.locator("body").innerText()));
+    check("always-allowed: the one explanatory line about limits", /switch to another account or a cheaper model/.test(await page.locator("body").innerText()));
     check("Settings -> AI: no developer words", !BAD_WORDS.test(await page.locator(".settings-pane").innerText()), (await page.locator(".settings-pane").innerText()).match(BAD_WORDS)?.[0]);
     await design(page, "Settings -> AI @1440", false);
 

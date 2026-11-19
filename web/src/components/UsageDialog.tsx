@@ -119,7 +119,7 @@ export function UsageRow({ label, window: w, limited = false }: { label: string;
             aria-valuetext={`${pct}% used`}
             className="h-1.5 w-full overflow-hidden rounded-full bg-surface-raised"
           >
-            <div className="h-full rounded-full bg-text-secondary" style={{ width: `${pct}%` }} />
+            <div className="meter-fill h-full rounded-full" style={{ width: `${pct}%` }} />
           </div>
           <p className="text-xs text-text-muted tabular-nums">{usageText(w.percent, w.resetsAt, limited)}</p>
         </>

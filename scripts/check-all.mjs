@@ -126,6 +126,7 @@ try {
   run("helper tree and done line (stream lines, cap, order)", "bun", ["scripts/check-helpers.ts"]);
   run("continue fresh (handoff note, first message, auto rule)", "bun", ["scripts/check-fresh.ts"]);
   run("run text (picker groups, helper rows, strip, tokens)", "bun", ["scripts/check-run-text.mjs"]);
+  run("capability tiles (every AI, states, model outcome lines)", "bun", ["scripts/check-capabilities.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
   run("hooks stay above early returns (the cold-load crash)", "node", ["scripts/check-hooks-order.mjs"]);
   // Reads the built web/dist: run `cd web && bun run build` first. No lowered ||= (the frozen terminal).
@@ -136,6 +137,8 @@ try {
   // Own throwaway servers with two chat projects; skip with a reason when no Chromium is present.
   run("hard load of a project does not crash (browser)", "node", ["scripts/check-cold-load.mjs"]);
   run("design rules: one primary, targets, one-segment switch, contrast (browser)", "node", ["scripts/check-design.mjs"]);
+  // Own throwaway server on port 7959: Settings -> AI in Soft and Plain, the colour choice and its save, the picker's outcome lines.
+  run("calm app in the browser (AI tiles, capability tiles, Soft/Plain, picker lines)", "node", ["scripts/check-calm-ui.mjs"]);
   run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);
   // Own throwaway server with a sh terminal; a DECRQM query (Claude Code's start-up) must not freeze the screen.
   run("terminal survives a DECRQM query (browser)", "node", ["scripts/check-terminal-decrqm.mjs"]);

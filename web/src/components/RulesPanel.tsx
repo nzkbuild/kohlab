@@ -48,7 +48,6 @@ export default function RulesPanel() {
     <Panel>
       <div className="flex flex-col gap-3 p-4">
         <h3 className="text-base font-medium text-text-primary">Always-allowed actions</h3>
-        <p className="text-xs leading-relaxed text-text-muted">Things you chose to allow without being asked each time.</p>
         {shown.length === 0 ? <p className="text-sm text-text-muted">Nothing is allowed without asking yet.</p> : null}
         {shown.map((p) => (
           <div key={p.id} className="flex flex-col gap-1">

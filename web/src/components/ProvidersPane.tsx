@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { DotsThree } from "@phosphor-icons/react";
+import { CheckCircle, CircleHalf, DotsThree, MinusCircle } from "@phosphor-icons/react";
 import { api } from "../api";
 import type { AiUserStatus, OpenCodeConnection, OpenCodeInstall, ProviderAccount, ProviderCard, ProviderModel, RouterCheck } from "../types";
 import { agoText, orderCards, stateWord, untilText } from "../lib/aiHub";
 import { announce } from "../lib/announce";
 import { copyText } from "../lib/clipboard";
+import { capabilityTiles, type CapabilityState, type CapabilityTile } from "../lib/capabilities";
 import { useProviders } from "../lib/useProviders";
 import { cn } from "../lib/utils";
 import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, SignInDialog, checkText, freeName, safeMessage, type SignInTarget } from "./AccountDialogs";
@@ -560,6 +561,73 @@ function OpenCodeAccountBlock({ account, onChanged }: { account: ProviderAccount
   );
 }
 
+/** A status tile's word for an AI. Words, not colour alone (SC 1.4.1). */
+function tileWord(card: ProviderCard): string {
+  if (card.state === "not_installed") return "Not installed";
+  if (card.state === "limited") return "Limit reached";
+  if (card.state === "connected") return "Signed in";
+  if (card.state === "checking") return "Checking";
+  if (card.state === "error") return "Problem";
+  return "Not signed in";
+}
+
+/** One button per AI at the top of Settings → AI. The chosen one is shown below; the accent marks the choice. */
+function StatusTiles({ cards, selected, onSelect }: { cards: ProviderCard[]; selected: string | null; onSelect: (id: string) => void }) {
+  return (
+    <div role="group" aria-label="Your AIs" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      {cards.map((c) => {
+        const on = c.id === selected;
+        const n = c.accounts.length;
+        return (
+          <button
+            key={c.id}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onSelect(c.id)}
+            className={cn(
+              "flex min-h-11 min-w-0 flex-col items-start gap-0.5 rounded-card p-3 text-left",
+              on ? "bg-accent-soft text-on-accent-soft" : "bg-surface-raised text-text-primary hover:bg-surface-active",
+            )}
+          >
+            <span className="w-full truncate text-sm font-medium">{c.name}</span>
+            <span className="text-xs">{tileWord(c)}</span>
+            {n > 0 ? <span className="text-xs">{n === 1 ? "1 account" : `${n} accounts`}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const STATE_WORD_TILE: Record<CapabilityState, string> = { yes: "Yes", depends: "Depends", summary: "Summary only", no: "No" };
+const STATE_ICON_TILE: Record<CapabilityState, typeof CheckCircle> = { yes: CheckCircle, depends: CircleHalf, summary: CircleHalf, no: MinusCircle };
+
+/** The "What it can do" tiles: each one a state word with its icon, and the code's own plain sentence. */
+function CapabilityGrid({ tiles }: { tiles: CapabilityTile[] }) {
+  if (tiles.length === 0) return null;
+  return (
+    <section aria-label="What it can do" className="flex flex-col gap-2">
+      <h4 className="text-xs font-medium text-text-muted">What it can do</h4>
+      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {tiles.map((t) => {
+          const Icon = STATE_ICON_TILE[t.state];
+          const on = t.state === "yes";
+          return (
+            <li key={t.id} className="flex min-w-0 flex-col gap-1 rounded-card bg-surface-base p-3">
+              <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                <Icon size={16} aria-hidden="true" className={cn("shrink-0", on ? "text-accent" : "text-text-muted")} />
+                {t.title}
+              </span>
+              <span className="text-xs font-medium text-text-secondary">{STATE_WORD_TILE[t.state]}</span>
+              <span className="text-xs leading-relaxed text-text-muted">{t.detail}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard; owner: boolean; busy: boolean; onRefresh: () => void }) {
   const usable = card.state === "connected" || card.state === "limited";
   const isAi = card.id === "claude" || card.id === "codex";
@@ -568,6 +636,12 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
   // Signed out: the rows still show every login, the main one included, so each can be signed in or removed.
   const rows = usable || (owner && card.state === "signed_out") ? card.accounts : [];
   const [adding, setAdding] = useState(false);
+  const accountRow = (a: ProviderAccount) =>
+    isOpenCode && owner ? (
+      <OpenCodeAccountBlock key={a.id} account={a} onChanged={onRefresh} />
+    ) : (
+      <AccountBlock key={a.id} card={card} account={a} owner={owner} onChanged={onRefresh} />
+    );
   const canAdd = owner && card.installed && (isAi || isOpenCode) && card.state !== "not_installed" && card.state !== "checking";
   return (
     <Panel>
@@ -583,13 +657,16 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
           </span>
         </div>
 
-        {owner && (isAi || isOpenCode) && rows.length > 0 ? <p className="text-xs text-text-muted">{`${card.name} can hold several accounts. Each project uses one of them.`}</p> : null}
-        {rows.map((a) =>
-          isOpenCode && owner ? (
-            <OpenCodeAccountBlock key={a.id} account={a} onChanged={onRefresh} />
-          ) : (
-            <AccountBlock key={a.id} card={card} account={a} owner={owner} onChanged={onRefresh} />
-          ),
+        <CapabilityGrid tiles={capabilityTiles(card, card.accounts.flatMap((a) => a.models))} />
+
+        {rows.slice(0, 1).map(accountRow)}
+        {rows.length > 3 ? (
+          <details className="flex flex-col gap-4">
+            <summary className="cursor-pointer [@media(pointer:coarse)]:min-h-11 text-sm text-text-secondary [@media(pointer:coarse)]:flex [@media(pointer:coarse)]:items-center">{rows.length - 1} more accounts</summary>
+            <div className="flex flex-col gap-4">{rows.slice(1).map(accountRow)}</div>
+          </details>
+        ) : (
+          rows.slice(1).map(accountRow)
         )}
 
         {card.state === "error" && owner ? (
@@ -696,6 +773,10 @@ export default function ProvidersPane({ owner }: { owner: boolean }) {
   const { cards, failed, reload, refresh } = useProviders();
   const [busy, setBusy] = useState<string | "all" | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  const shown = cards ? orderCards(cards) : null;
+  // The AI shown below: the one picked, else the first (orderCards puts the usable ones first).
+  const current = shown?.find((c) => c.id === picked) ?? shown?.[0] ?? null;
 
   // Read again every minute while this pane is open. Nothing runs once it closes.
   useEffect(() => {
@@ -730,7 +811,8 @@ export default function ProvidersPane({ owner }: { owner: boolean }) {
           </div>
         </Panel>
       ) : null}
-      {cards ? orderCards(cards).map((c) => <ProviderCardView key={c.id} card={c} owner={owner} busy={busy === "all" || busy === c.id} onRefresh={() => void check(c.id)} />) : null}
+      {shown ? <StatusTiles cards={shown} selected={current?.id ?? null} onSelect={setPicked} /> : null}
+      {current ? <ProviderCardView key={current.id} card={current} owner={owner} busy={busy === "all" || busy === current.id} onRefresh={() => void check(current.id)} /> : null}
       {cards ? <RulesPanel /> : null}
       {note ? <p className="text-sm text-text-secondary">{note}</p> : null}
       {cards ? (
@@ -740,11 +822,11 @@ export default function ProvidersPane({ owner }: { owner: boolean }) {
           </Button>
         </div>
       ) : null}
-      <p className="text-xs leading-relaxed text-text-muted">If an AI reaches its limit, Kohlab can carry on with another account or a cheaper model. Set the order in a project's Run panel.</p>
+      <p className="text-xs leading-relaxed text-text-muted">At a limit, Kohlab can switch to another account or a cheaper model. Set the order in a project's Run panel.</p>
       <p className="text-xs leading-relaxed text-text-muted">
         {owner
-          ? "This shows the AIs signed in on the server. An AI that a member runs under their own computer account may be signed in differently."
-          : "This shows which AIs are ready and the models they offer."}
+          ? "Shows the AIs signed in on the server. A member's own computer account may differ."
+          : "Which AIs are ready, and their models."}
       </p>
     </div>
   );

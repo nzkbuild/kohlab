@@ -93,6 +93,10 @@
   --accent: var(--text-primary);
   --accent-hover: oklch(1 0 0);
   --accent-press: var(--neutral-300);
+  /* Tinted accent surface (selected option, capability tile, meter track). Plain
+     mode keeps these neutral; the soft layer below gives them the periwinkle. */
+  --accent-soft: var(--surface-active);
+  --on-accent-soft: var(--text-primary);
 
   /* --- motion ------------------------------------------------------------ */
   /* Declared here as well as in @theme: author CSS references var(--ease-*) in
@@ -235,6 +239,68 @@
   }
 }
 
+/* --- soft colour (Settings → Appearance, on by default) --------------------
+   A restrained periwinkle accent on warm neutrals. Semantic tier only: the
+   attribute comes from the account's softColour pref (web/public/colour.js sets
+   it before first paint; store.ts keeps it in step). Absent = Plain, which is
+   the :root above unchanged. Values from docs/mockups/calm/index.html. Terminal,
+   code and log surfaces (--surface-sunken, --surface-terminal) are not touched. */
+html[data-colour="soft"] {
+  --surface-base: #1e1d1c;
+  --surface-sidebar: #161514;
+  --surface-raised: #2a2927;
+  --surface-overlay: #2a2927;
+  --surface-hover: #302e2c;
+  --surface-active: #3a3835;
+  --surface-pressed: #454340;
+  --surface-bubble: #302e2c;
+
+  --text-primary: #ececea;
+  --text-secondary: #c9c7c3;
+  --text-muted: #a8a5a0;
+  --text-faint: #9a9791;
+
+  --accent: oklch(0.8 0.09 285);
+  --accent-hover: oklch(0.86 0.08 285);
+  --accent-press: oklch(0.74 0.09 285);
+  --accent-soft: oklch(0.34 0.06 285);
+  --on-accent-soft: oklch(0.9 0.05 285);
+}
+
+@media (prefers-color-scheme: light) {
+  html[data-colour="soft"] {
+    --surface-base: #fcfbf9;
+    --surface-sidebar: #f4f2ee;
+    --surface-raised: #efede8;
+    --surface-overlay: #fcfbf9;
+    --surface-hover: #e9e6e0;
+    --surface-active: #e0ddd5;
+    --surface-pressed: #d4d0c7;
+    --surface-bubble: #efede8;
+
+    --text-primary: #1a1918;
+    --text-secondary: #3b3936;
+    --text-muted: #5b5853;
+    --text-faint: #69665f;
+
+    --accent: oklch(0.5 0.14 285);
+    --accent-hover: oklch(0.44 0.14 285);
+    --accent-press: oklch(0.38 0.13 285);
+    --accent-soft: oklch(0.93 0.04 285);
+    --on-accent-soft: oklch(0.36 0.12 285);
+    /* The grey ring that clears 3:1 on dark planes is 2.95:1 on the warm light card. */
+    --focus-ring: #6e6e6e;
+  }
+}
+
+/* Plan meter fill: neutral in Plain, the accent in Soft (accent marks plan meters). */
+.meter-fill {
+  background: var(--text-secondary);
+}
+html[data-colour="soft"] .meter-fill {
+  background: var(--accent);
+}
+
 /* Bridge the semantic tier into Tailwind utilities. `inline` is REQUIRED for
    every token that references another variable, without it the utility body
    carries the alias name and resolves at the point of use, not to the token. */
@@ -271,6 +337,8 @@
   --color-status-danger: var(--status-danger);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent-soft: var(--on-accent-soft);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);

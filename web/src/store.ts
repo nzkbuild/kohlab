@@ -11,7 +11,7 @@ export interface Me {
   id: string;
   role: string;
   kind: string;
-  prefs?: { powerTools?: boolean };
+  prefs?: { powerTools?: boolean; softColour?: boolean };
 }
 
 export interface AppState {
@@ -31,6 +31,9 @@ export interface AppState {
   /** Files tab and status bar. Off until someone opens a terminal or asks for files. */
   powerTools: boolean;
   setPowerTools: (value: boolean) => void;
+  /** Soft colour (periwinkle accent, warm neutrals). On unless the account turned it off. */
+  softColour: boolean;
+  setSoftColour: (value: boolean) => void;
   /** A command-palette action for the open project, taken by WorkspaceDetail. */
   panelRequest: PanelRequest | null;
   requestPanel: (request: PanelRequest | null) => void;
@@ -84,8 +87,29 @@ export interface PanelRequest {
 
 // Set once the user changes the setting this page load, so a slow account load cannot undo it.
 let touchedPowerTools = false;
+let touchedSoftColour = false;
 
 const POWER_KEY = "kohlab.powerTools";
+const COLOUR_KEY = "kohlab.softColour";
+
+// Soft is the default: only a stored "0" (the account chose Plain) turns it off. colour.js sets the same attribute before first paint.
+function readSoftColour(): boolean {
+  try {
+    return localStorage.getItem(COLOUR_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeSoftColour(value: boolean) {
+  try {
+    localStorage.setItem(COLOUR_KEY, value ? "1" : "0");
+  } catch {
+    /* not cached */
+  }
+  if (value) document.documentElement.dataset.colour = "soft";
+  else delete document.documentElement.dataset.colour;
+}
 
 // The account's copy is the truth (see loadMe). This local copy only paints the first frame right.
 // localStorage can throw (private mode, storage disabled): the cache is then just missing.
@@ -130,6 +154,14 @@ export const useApp = create<AppState>((set, get) => ({
     writePowerTools(value);
     set({ powerTools: value });
     void api.savePrefs({ powerTools: value }).catch(() => {});
+  },
+  softColour: readSoftColour(),
+  setSoftColour: (value) => {
+    if (get().softColour === value) return;
+    touchedSoftColour = true;
+    writeSoftColour(value);
+    set({ softColour: value });
+    void api.savePrefs({ softColour: value }).catch(() => {});
   },
   panelRequest: null,
   requestPanel: (request) => set({ panelRequest: request }),
@@ -177,6 +209,13 @@ export const useApp = create<AppState>((set, get) => ({
       } else if (readPowerTools()) {
         // Turned on before accounts saved it: move that choice up once.
         void api.savePrefs({ powerTools: true }).catch(() => {});
+      }
+      const savedColour = me.prefs?.softColour;
+      if (touchedSoftColour) {
+        /* the user switched while this was loading: their choice wins and was already saved */
+      } else if (typeof savedColour === "boolean") {
+        writeSoftColour(savedColour);
+        set({ softColour: savedColour });
       }
     } catch {
       /* stays null: permissive, and the server refuses what it must */

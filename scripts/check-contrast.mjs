@@ -37,6 +37,15 @@ const LIGHT = new Map([
   ...TOKENS,
   ...readTokens(CSS, "@media (prefers-color-scheme: light) {\n  :root {", "\n  }"),
 ]);
+// Soft colour (html[data-colour="soft"], on by default) is an override layer over the two sets above.
+const SOFT_DARK = new Map([
+  ...TOKENS,
+  ...readTokens(CSS, 'html[data-colour="soft"] {', "\n}"),
+]);
+const SOFT_LIGHT = new Map([
+  ...LIGHT,
+  ...readTokens(CSS, '@media (prefers-color-scheme: light) {\n  html[data-colour="soft"] {', "\n  }"),
+]);
 /** The token set resolve() reads from; the audit loop swaps it per mode. */
 let ACTIVE = TOKENS;
 
@@ -190,6 +199,10 @@ const CHECKS = [
 
   // Accent surfaces (SC 1.4.3: button label is normal-size text)
   ["on-accent / accent", "--text-on-accent", "--accent", 4.5, "primary button label"],
+  ["on-accent / accent-hover", "--text-on-accent", "--accent-hover", 4.5, "primary button hovered"],
+  ["on-accent / accent-press", "--text-on-accent", "--accent-press", 4.5, "primary button pressed"],
+  ["on-accent-soft / accent-soft", "--on-accent-soft", "--accent-soft", 4.5, "selected option, capability tile label"],
+  ["accent / base", "--accent", "--surface-base", 3, "meter fill and selected mark on canvas (SC 1.4.11)"],
 
   // Focus ring against the surfaces it is drawn over (SC 1.4.11 -> 3:1)
   ["accent / base", "--accent", "--surface-base", 3, "focus ring on canvas"],
@@ -212,7 +225,7 @@ const CHECKS = [
 let failures = 0;
 console.log("\nkohlab token contrast audit, WCAG 2.2 AA\n");
 
-for (const [mode, set] of [["dark", TOKENS], ["light", LIGHT]]) {
+for (const [mode, set] of [["dark", TOKENS], ["light", LIGHT], ["soft dark", SOFT_DARK], ["soft light", SOFT_LIGHT]]) {
 ACTIVE = set;
 console.log(`${mode} set`);
 for (const [label, fgTok, bgTok, min, why, chipName, chipTint] of CHECKS) {
@@ -240,6 +253,6 @@ console.log("");
 console.log(
   failures
     ? `${failures} contrast failure(s). WCAG 2.2 AA is the conformance target, fix the token, not the check.\n`
-    : `all ${CHECKS.length} pairs meet WCAG 2.2 AA in both modes\n`,
+    : `all ${CHECKS.length} pairs meet WCAG 2.2 AA in every mode (dark, light, soft dark, soft light)\n`,
 );
 process.exit(failures ? 1 : 0);

@@ -8,7 +8,7 @@ import { cn } from "../lib/utils";
 import ProvidersPane from "./ProvidersPane";
 import PushToggle from "./PushToggle";
 import UpdatePanel from "./UpdatePanel";
-import { Button, PageHeader, Panel } from "./ui";
+import { Button, PageHeader, Panel, Tab, TabList, Tabs } from "./ui";
 
 const PAUSE_KEY = "kohlab_announce_paused";
 
@@ -33,7 +33,7 @@ const PERMISSION_CHIP: Record<Permission, string> = {
 const SECTIONS: { id: SettingsSection; label: string; hint: string; icon: typeof Bell }[] = [
   { id: "account", label: "Account", hint: "Who is signed in on this computer.", icon: UserCircle },
   { id: "appearance", label: "Appearance", hint: "How the project page looks.", icon: SlidersHorizontal },
-  { id: "agents", label: "AI", hint: "The AIs on this computer: who is signed in, how much is used, and which models they offer.", icon: Sparkle },
+  { id: "agents", label: "AI", hint: "Who is signed in, what is left, and what each AI can do.", icon: Sparkle },
   { id: "notifications", label: "Notifications", hint: "What reaches you when Kohlab is in the background.", icon: Bell },
   { id: "updates", label: "Updates", hint: "New versions of Kohlab.", icon: ArrowsClockwise },
 ];
@@ -62,13 +62,27 @@ function AccountPane() {
   );
 }
 
-/** Appearance: the power tools switch. Off keeps the project page to Claude and Changes. */
+/** Appearance: the colour choice, and the power tools switch. Off keeps the project page to Claude and Changes. */
 function AppearancePane() {
   const powerTools = useApp((s) => s.powerTools);
   const setPowerTools = useApp((s) => s.setPowerTools);
+  const softColour = useApp((s) => s.softColour);
+  const setSoftColour = useApp((s) => s.setSoftColour);
   return (
     <Panel>
-      <div className="p-4">
+      <div className="flex flex-col gap-4 p-4">
+        <div className="flex flex-col gap-2">
+          <span className="text-sm text-text-primary">Colour</span>
+          <Tabs value={softColour ? "soft" : "plain"} onValueChange={(v) => setSoftColour(v === "soft")}>
+            <TabList label="Colour">
+              <Tab value="soft">Soft</Tab>
+              <Tab value="plain">Plain</Tab>
+            </TabList>
+          </Tabs>
+          <p className="text-xs leading-relaxed text-text-muted">
+            Soft is a quiet blue-violet accent on warm greys. Plain is the neutral charcoal and white. Follows your account on every device.
+          </p>
+        </div>
         <label className="flex min-h-11 cursor-pointer items-start gap-3" htmlFor="power-tools">
           <input
             id="power-tools"

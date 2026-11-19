@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { pickerGroups, type PickerGroup } from "../lib/aiHub";
+import { modelOutcome } from "../lib/capabilities";
 import { useProviders } from "../lib/useProviders";
 import { useCan } from "../store";
 import { agentName } from "../lib/agentName";
@@ -15,8 +16,6 @@ export interface ModelInfo {
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** The Claude model menu's choices: the newest of each family, with a plain line about it. */
-const FAMILY_BLURB: Record<string, string> = { opus: "Best for complex work", sonnet: "Best for everyday work", haiku: "Fastest for quick answers" };
 
 /** Which Claude family a model belongs to, from its value or name ("claude-opus-5-5", "Opus 5.5"); undefined for any other. */
 function familyOf(m: ModelInfo): string | undefined {
@@ -116,13 +115,14 @@ export function ClaudeModelChoices({ models, value, onPick }: { models: ModelInf
     const have = newest.get(fam);
     if (!have || newerThan(versionOf(m), versionOf(have))) newest.set(fam, m);
   }
-  const choices: { value: string; label: string }[] = [{ value: "default", label: "Default (recommended)" }];
+  // The newest of each family, named as before; its plain outcome line is under the name (capabilities.ts).
+  const choices: { value: string; label: string; outcome: string | null }[] = [{ value: "default", label: "Default (recommended)", outcome: null }];
   for (const fam of ["opus", "sonnet", "haiku"]) {
     const m = newest.get(fam);
     if (!m) continue;
     const [major, minor] = versionOf(m);
     const name = major > 0 ? `${cap(fam)} ${major}${minor ? `.${minor}` : ""}` : cap(fam);
-    choices.push({ value: m.value, label: `${name} — ${FAMILY_BLURB[fam]}` });
+    choices.push({ value: m.value, label: name, outcome: modelOutcome(m) });
   }
   const chosen = new Set(choices.map((c) => c.value));
   const older = models.filter((m) => !chosen.has(m.value));
@@ -133,6 +133,7 @@ export function ClaudeModelChoices({ models, value, onPick }: { models: ModelInf
         {choices.map((c) => (
           <MenuRadioItem key={c.value} value={c.value}>
             <span className="block">{c.label}</span>
+            {c.outcome ? <span className="block text-xs text-text-muted">{c.outcome}</span> : null}
           </MenuRadioItem>
         ))}
       </MenuRadioGroup>

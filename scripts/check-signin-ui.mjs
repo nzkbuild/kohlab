@@ -153,6 +153,7 @@ try {
     const signIn = page.getByRole("button", { name: "Sign in to Claude", exact: true });
     await signIn.waitFor({ timeout: 15000 }).catch(() => {});
     const claude = page.locator("section.panel:has(.chip)").nth(0);
+    await claude.getByText(/more accounts$/).click(); // 6 accounts: all but the main one sit under "5 more accounts"
     const claudeText = await claude.innerText();
     check("signed-out Claude offers Sign in to Claude", (await signIn.count()) === 1);
     check("no terminal or server command in the Claude card", !/terminal|auth login|run claude|on the server/i.test(claudeText), claudeText.replace(/\n/g, " | "));
@@ -203,7 +204,6 @@ try {
     await main.waitFor({ timeout: 15000 }).catch(() => {});
     const claudeCard = page.locator("section.panel:has(.chip)").nth(0);
     check("the main login is the first row, named Main account", (await claudeCard.getByText("Main account", { exact: true }).count()) === 1);
-    check("one AI can hold several accounts, said plainly", (await page.getByText("Claude can hold several accounts. Each project uses one of them.").count()) === 1);
 
     await main.click();
     const items = await page.getByRole("menuitem").allInnerTexts();

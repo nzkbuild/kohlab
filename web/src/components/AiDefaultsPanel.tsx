@@ -86,7 +86,7 @@ export default function AiDefaultsPanel({ owner }: { owner: boolean }) {
     <Panel>
       <div className="flex flex-col gap-3 p-4">
         <h3 className="text-base font-medium text-text-primary">Defaults for new projects</h3>
-        <p className="text-xs leading-relaxed text-text-muted">Projects start with these. A project can set its own.</p>
+        <p className="text-xs leading-relaxed text-text-muted">A project can set its own.</p>
 
         <div className="flex flex-col">
           <Row

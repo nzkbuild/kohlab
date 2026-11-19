@@ -1584,7 +1584,7 @@ interface State {
   workspaces: Workspace[];
   agents: Record<string, string>;
   /** Per-account preferences, keyed by account id. */
-  prefs?: Record<string, { powerTools?: boolean }>;
+  prefs?: Record<string, AccountPrefs>;
   /** What new chat projects start with (AI control, v2.6). Additive: an older build ignores it. */
   defaults?: AiDefaults;
 }
@@ -1732,14 +1732,16 @@ export async function mutateState<T>(fn: (s: State) => T | Promise<T>): Promise<
   });
 }
 
-/** One account's preferences. Empty until it sets one. */
-export async function getPrefs(id: string): Promise<{ powerTools?: boolean }> {
+/** One account's preferences. Empty until it sets one. softColour: absent means on. */
+export type AccountPrefs = { powerTools?: boolean; softColour?: boolean };
+
+export async function getPrefs(id: string): Promise<AccountPrefs> {
   const prefs = (await loadState()).prefs;
   return prefs && Object.hasOwn(prefs, id) ? prefs[id] : {};
 }
 
 /** Merge a change into one account's preferences. */
-export async function setPrefs(id: string, patch: { powerTools?: boolean }): Promise<{ powerTools?: boolean }> {
+export async function setPrefs(id: string, patch: AccountPrefs): Promise<AccountPrefs> {
   return mutateState((s) => {
     s.prefs ??= {};
     const next = { ...(Object.hasOwn(s.prefs, id) ? s.prefs[id] : {}), ...patch };

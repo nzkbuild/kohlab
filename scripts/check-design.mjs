@@ -5,6 +5,7 @@
 //   - main controls are big enough: >= 24px with a mouse (WCAG 2.5.8), >= 44px on touch
 //   - no segmented switch with a single segment
 //   - text contrast >= 4.5:1 against the nearest opaque background (the token pairs are in check-contrast)
+// Every view runs twice: in Soft colour (the default) and in Plain (softColour pref "0").
 //
 // Throwaway server (own PORT, WORKS_DIR, PTY_SOCKET) with two chat projects, against the built web/dist.
 // Skips with a printed reason when playwright-core or Chromium is missing.
@@ -107,23 +108,32 @@ try {
   ];
   for (const [width, touch] of [[1280, false], [390, true]]) {
     for (const scheme of ["dark", "light"]) {
-      const ctx = await openContext(browser, { width, height: 844, key: KEY, touch, scheme });
-      const page = await ctx.newPage();
-      for (const [name, path] of views) {
-        await page.goto(fx.base + path);
-        await page.locator("h1").first().waitFor({ timeout: 15000 }).catch(() => {});
-        if (name === "Changes") await page.getByRole("button", { name: "Keep this version" }).waitFor({ timeout: 10000 }).catch(() => {});
-        await page.waitForTimeout(500);
-        const m = await page.evaluate(measure, touch);
-        const at = `${name} @${width} ${scheme}`;
-        check(`${at}: at most one primary button`, m.primaries.length <= 1, m.primaries.join(", "));
-        // Guards the selector: Home always shows its one primary (Start building), so 0 means the class was renamed.
-        if (name === "Home") check(`${at}: the primary is found by its class`, m.primaries.length === 1, m.primaries.join(", "));
-        check(`${at}: main controls >= ${touch ? 44 : 24}px`, m.small.length === 0, m.small.slice(0, 4).join(", "));
-        check(`${at}: no one-segment switch`, m.oneSegment.length === 0, m.oneSegment.join(", "));
-        check(`${at}: text contrast >= 4.5:1`, m.low.length === 0, m.low.slice(0, 4).join(", "));
+      for (const colour of ["soft", "plain"]) {
+        const ctx = await openContext(browser, { width, height: 844, key: KEY, touch, scheme });
+        await ctx.addInitScript((v) => {
+          try {
+            localStorage.setItem("kohlab.softColour", v);
+          } catch {
+            /* storage is off */
+          }
+        }, colour === "soft" ? "1" : "0");
+        const page = await ctx.newPage();
+        for (const [name, path] of views) {
+          await page.goto(fx.base + path);
+          await page.locator("h1").first().waitFor({ timeout: 15000 }).catch(() => {});
+          if (name === "Changes") await page.getByRole("button", { name: "Keep this version" }).waitFor({ timeout: 10000 }).catch(() => {});
+          await page.waitForTimeout(500);
+          const m = await page.evaluate(measure, touch);
+          const at = `${name} @${width} ${scheme} ${colour}`;
+          check(`${at}: at most one primary button`, m.primaries.length <= 1, m.primaries.join(", "));
+          // Guards the selector: Home always shows its one primary (Start building), so 0 means the class was renamed.
+          if (name === "Home") check(`${at}: the primary is found by its class`, m.primaries.length === 1, m.primaries.join(", "));
+          check(`${at}: main controls >= ${touch ? 44 : 24}px`, m.small.length === 0, m.small.slice(0, 4).join(", "));
+          check(`${at}: no one-segment switch`, m.oneSegment.length === 0, m.oneSegment.join(", "));
+          check(`${at}: text contrast >= 4.5:1`, m.low.length === 0, m.low.slice(0, 4).join(", "));
+        }
+        await ctx.close();
       }
-      await ctx.close();
     }
   }
 } finally {

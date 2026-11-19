@@ -102,6 +102,8 @@ try {
       await gz.arrayBuffer();
       check("a gzip-only client gets gzip", gz.headers.get("content-encoding") === "gzip");
       check("index.html is always revalidated", (await fetch(`${base}/`)).headers.get("cache-control") === "no-cache");
+      const colour = await fetch(`${base}/colour.js`);
+      check("colour.js (unhashed, public folder) is revalidated, never cached for a year", colour.status === 200 && colour.headers.get("cache-control") === "no-cache", colour.headers.get("cache-control") ?? "");
     }
   }
 

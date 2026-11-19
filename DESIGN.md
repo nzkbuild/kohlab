@@ -65,6 +65,12 @@ Defined only in `web/src/index.css`, in two tiers: primitive ramps (`--neutral-*
 
 Lime (`status-running`) survives only in Settings and update panels as a "healthy" chip; it is never used for Claude working.
 
+**Soft colour (v2.11, on by default).** An override layer on the same semantic tokens: `html[data-colour="soft"]` in `index.css`, with its light values under the OS light media query. It sets warm neutrals (base #1e1d1c / #fcfbf9, raised #2a2927 / #efede8, text #ececea / #1a1918) and a restrained periwinkle accent (`--accent` oklch(0.8 0.09 285) dark, oklch(0.5 0.14 285) light; hover and press one step on). It adds two tinted tokens, `accent-soft` and `on-accent-soft`, which Plain mode maps to the neutral active surface. Terminal, code and log surfaces are not touched.
+
+- Accent marks only: the one primary action, the selected option, plan meters and capability tiles. Everything else stays neutral. Accent is never the only signal: a selected state also has its words or its check mark.
+- **Plain** is the account's choice (Settings → Appearance → Colour). It is the neutral charcoal and white table above, unchanged. The choice is stored per account (`softColour`) and mirrored in `localStorage` as `kohlab.softColour`; `web/public/colour.js` reads the mirror before first paint and sets the attribute, so Soft does not flash to Plain on load.
+- `scripts/check-contrast.mjs` audits the pairs in all four sets (dark, light, soft dark, soft light). `scripts/check-design.mjs` runs every view in both colour modes.
+
 ## Typography
 
 Body and controls 15-16px, nothing below 12px. The type scale is tokens in `web/src/index.css`: `text-xs` 12px (meta, counts), `text-sm` 13px (controls, menu items, chips), `text-small` 14px (tool lines, the working line), `text-base` 15px (body, composer), `text-lg` 16px (a Claude reply's sub-headings), `text-xl` 20px (its headings), both semibold so they read as headings against the 15px body. There is no `text-2xs`: 12px is `text-xs`. Use the tokens, never a bracketed pixel size. Home heading `text-2xl` (28px) weight 500. Headings are sentence case, no uppercase kickers. Counters and timestamps use tabular numerals. Mono only for a whole machine value, never for labels or a word in a sentence.
@@ -100,6 +106,8 @@ Body and controls 15-16px, nothing below 12px. The type scale is tokens in `web/
 ## Components
 
 Radix primitives are styled once in `web/src/components/ui.tsx` (Button, Menu, Tabs, Dialog, Tooltip, Field, Panel, EmptyState, Skeleton, Kbd, ...); surfaces import from there, never from `@radix-ui/*`. The status icon comes only from `STATUS_ICON` in `ui.tsx`; running is a small static filled dot, never a spinner glyph.
+
+Settings → AI (v2.11): a row of status tiles (one per AI: name, "Signed in", "Not signed in" or "Not installed" in words), then the selected AI's header, plan meters and a "What it can do" tile grid. Each tile is a `capabilityTiles()` row from `web/src/lib/capabilities.ts` with a state word ("Yes", "Depends", "Summary only", "No"); a tile is only shown when the code behind it exists. The model picker shows a short plain-words outcome line for the known Claude models (`modelOutcome()` in the same file).
 
 Buttons: min-height 40px (44px on touch; `.btn` measures 40, not 41), weight 550. Primary filled, dimmed to 40% when disabled; secondary tonal (`surface-raised` fill, hover `surface-active`, pressed `surface-pressed`, no border); quiet borderless; danger red text on a red tint. Icon-only buttons are square with an `aria-label`. Focus is a 2px soft grey (focus-ring token) outline, inset on full-width rows, shown for keyboard use only.
 

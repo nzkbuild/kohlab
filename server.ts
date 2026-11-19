@@ -2490,9 +2490,18 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (path === "/api/account/prefs" && req.method === "POST") {
       if (!auth) return json({ error: "unauthorized" }, 401);
       if (auth.kind === "share") return json({ error: "a shared link cannot save preferences" }, 403);
-      const body = (await req.json().catch(() => ({}))) as { powerTools?: unknown };
-      if (typeof body.powerTools !== "boolean") return json({ error: "powerTools must be true or false" }, 400);
-      return json(await setPrefs(accountIdOf(auth), { powerTools: body.powerTools }));
+      const body = (await req.json().catch(() => ({}))) as { powerTools?: unknown; softColour?: unknown };
+      const patch: { powerTools?: boolean; softColour?: boolean } = {};
+      if (body.powerTools !== undefined) {
+        if (typeof body.powerTools !== "boolean") return json({ error: "powerTools must be true or false" }, 400);
+        patch.powerTools = body.powerTools;
+      }
+      if (body.softColour !== undefined) {
+        if (typeof body.softColour !== "boolean") return json({ error: "softColour must be true or false" }, 400);
+        patch.softColour = body.softColour;
+      }
+      if (Object.keys(patch).length === 0) return json({ error: "powerTools or softColour must be true or false" }, 400);
+      return json(await setPrefs(accountIdOf(auth), patch));
     }
     if (path === "/api/account/key" && req.method === "POST") {
       return handleAccountKey(auth);
@@ -2744,7 +2753,8 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
  * cellular. Text assets go out brotli or gzip (compressed once, kept in memory
  * until the file changes); names under /assets/ carry a content hash, so they
  * are cached for a year, and the entry points (index.html, sw.js) are always
- * revalidated so a new release is seen at once.
+ * revalidated so a new release is seen at once. Unhashed files in web/public
+ * (colour.js) are entry points too: only hashed /assets/ names are immutable.
  */
 const COMPRESSIBLE = /\.(js|css|html|svg|json|webmanifest|map|txt)$/;
 const packed = new Map<string, { mtime: number; enc: string; bytes: Uint8Array }>();
