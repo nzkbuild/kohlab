@@ -12,6 +12,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { accountsLike } from "./cleanup-kit.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const VERBOSE = process.argv.includes("--verbose");
@@ -67,6 +68,9 @@ function killDaemon(socketPath) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Accounts the checks make (per-user isolation, invitations, the agent user): the run must leave none behind.
+const TEST_ACCOUNT = /^(kohlab-chk-|koh-)/;
+const accountsAtStart = accountsLike(TEST_ACCOUNT);
 const tmp = mkdtempSync(join(tmpdir(), "kohlab-checkall-"));
 const works = join(tmp, "works");
 let server = null;
@@ -173,6 +177,10 @@ try {
   run("agent claude config sync", "bun", ["scripts/check-agent-config-sync.ts"]);
   run("agent PTY env (alt screen off, no secrets)", "bun", ["scripts/check-agent-env.ts"]);
   run("invitations (root)", "node", ["scripts/check-invite.mjs"]);
+  run("AI user: status rules, the owner refusal, CLI and installer dry runs", "bun", ["scripts/check-ai-user.ts"]);
+  run("AI user notice in Settings -> AI (browser)", "node", ["scripts/check-ai-user-notice.mjs"]);
+  run("pairing claim throttle (same refusal, a clean source still works)", "node", ["scripts/check-pair-throttle.mjs"]);
+  run("leftovers tool (listing, then apply in a throwaway dir)", "node", ["scripts/check-leftovers.mjs"]);
   run("backend types", join(ROOT, "node_modules/.bin/tsc"), ["--noEmit"]);
   run("frontend types", join(ROOT, "web/node_modules/.bin/tsc"), ["--noEmit"], join(ROOT, "web"));
 
@@ -229,6 +237,11 @@ try {
   } catch {
     /* gone */
   }
+
+  // Hygiene, last: any test account that was not there at the start is a FAIL, by name.
+  const left = accountsLike(TEST_ACCOUNT).filter((n) => !accountsAtStart.includes(n));
+  results.push({ name: "no test accounts left behind (kohlab-chk-*, koh-*)", ok: left.length === 0, ms: 0 });
+  console.log(left.length ? `  \x1b[31mFAIL\x1b[0m no test accounts left behind: ${left.join(", ")}` : "  \x1b[32mok  \x1b[0m no test accounts left behind");
 
   const failed = results.filter((r) => !r.ok);
   banner(failed.length ? `${results.length - failed.length}/${results.length} passed` : `all ${results.length} checks passed`);

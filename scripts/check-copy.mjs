@@ -88,7 +88,7 @@ try {
   check("an empty name is refused", empty !== null, String(empty));
 
   // Gate: a viewer and a keyless request are refused; the owner gets the copy.
-  const viewer = await addUser({ id: "viewer-check", name: "Viewer", role: "viewer" });
+  const viewer = await addUser({ id: "viewer-check", name: "Viewer", role: "viewer", actor: "owner" });
   const port = PORT;
   const env = { ...process.env, PORT: String(port), KOHLAB_KEY: OWNER_KEY, WORKS_DIR: works, PTY_SOCKET: join(tmp, "pty.sock") };
   const srv = spawn("bun", ["run", "server.ts"], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });

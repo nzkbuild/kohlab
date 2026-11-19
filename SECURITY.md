@@ -58,6 +58,11 @@ Behaviour worth knowing, each asserted by a check:
   is checked before the throttle is consulted, so a correct key still works after a
   run of wrong ones. A dead key reports 429 rather than 401 while the window is
   open: the throttle cannot tell a revoked key from a guessed one.
+- **The pairing code is throttled the same way.** `/api/pair/claim` counts each
+  failed claim against its source (the same window as a wrong key) and against a
+  server-wide ceiling of 1000 failures per 10 minutes (a flood can pause pairing for one window; the key still works). A throttled claim gets the same
+  answer as a wrong, spent or expired one. The code is 10 characters from a 20-letter
+  alphabet (about 43 bits), valid for ten minutes.
 - **Keys travel in a header**, never in a URL. The sockets carry theirs in a
   WebSocket subprotocol, because a browser cannot set a header on an upgrade. The
   `?key=` form still works for bookmarks and curl, and is never used by the
@@ -159,7 +164,11 @@ file.
   computer account ("Full access is only for the owner." otherwise, 403); turning it on is
   audited (`ai.fullaccess`), and the page asks for confirmation. On a project that runs as
   the server's own account it means commands run as that account; set `KOHLAB_AGENT_USER`
-  to use a smaller one.
+  to use a smaller one (`kohlab ai-user setup`). A root install does this at install time.
+  If `KOHLAB_AGENT_USER` names an account that does not exist, owner chats and terminals
+  refuse to start (409), rather than falling back to root.
+- **The owner is told when the AI runs as root.** Settings → AI shows a notice, and
+  `/api/health` and `/api/agents-status` report `aiUser`. Members never see it.
 - **"Always allow" saves a rule only when it is narrow:** one plain command (no `;`, `&`,
   `|`, backticks, `$`, redirections, newlines), never `sudo`, `rm`, `dd`, `curl`, `wget`,
   a shell or `git push`; file changes only inside the project and never `.git`, `.env` or

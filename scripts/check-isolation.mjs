@@ -139,6 +139,9 @@ try {
   const madeA = await post("/api/users", { id: A, name: "Isolation A", role: "member" });
   const madeB = await post("/api/users", { id: B, name: "Isolation B", role: "member" });
   check("two members are provisioned", madeA.status === 200 && madeB.status === 200, `${madeA.status}/${madeB.status} ${JSON.stringify(madeB.body)}`);
+  // Adding a member is attributed to the owner who added them, not to "system" (v2.9.4).
+  const added = (await api("/api/audit?limit=500")).body.events ?? [];
+  check("member creation is in the trail as the owner who did it", added.some((e) => e.action === "user.add" && e.id === A && e.user === "legacy") && added.some((e) => e.action === "user.add" && e.id === B && e.user === "legacy"), JSON.stringify(added.filter((e) => e.action === "user.add")).slice(0, 200));
 
   const accA = account(osA);
   const accB = account(osB);
@@ -203,7 +206,8 @@ try {
   console.log("per-user isolation intact\n");
 } catch (err) {
   console.error(`\n  FAIL unexpected error: ${err.message}`);
-  process.exit(1);
+  // not process.exit here: that would skip the finally block below, which removes what this check made
+  process.exitCode = 1;
 } finally {
   // never leave accounts behind, whatever happened above
   for (const id of [A, B]) {

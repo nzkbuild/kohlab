@@ -8,6 +8,8 @@
 #   --key <secret>    access key for the dashboard (generated when omitted)
 #   --no-systemd      install and build, but do not create or start a service
 #   --no-command      do not put `kohlab` on the PATH
+#   --no-ai-user      do not create the AI's own account (a root install
+#                     creates kohlab-agent by default, so the AI never runs as root)
 #   --uninstall       stop the service and remove the unit, keeping your data
 #   -h, --help        this text
 #
@@ -32,6 +34,7 @@ PORT="${KOHLAB_PORT:-7676}"
 KEY="${KOHLAB_KEY:-}"
 WITH_SYSTEMD=1
 WITH_COMMAND=1
+WITH_AI_USER=1
 UNINSTALL=0
 UNIT=kohlab.service
 # The key lives here, 0600, not in the unit: unit files are world-readable, and
@@ -49,12 +52,41 @@ as_root() {
   if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
 }
 
+# The AI's own account (v2.9.4). A root install gets one by default, so the AI
+# never runs as root unless someone chose that with --no-ai-user. Idempotent: the
+# CLI creates the account only when missing and sets KOHLAB_AGENT_USER only when
+# it is not already set. KOHLAB_AI_USER_DRY_RUN=1 prints the plan and changes nothing.
+setup_ai_user() {
+  if [ "$WITH_AI_USER" -eq 0 ]; then
+    warn "AI account skipped (--no-ai-user): the AI will run as the server's own account (root)"
+    return 0
+  fi
+  local -a cli=("$BUN" run "$KOHLAB_HOME/cli.ts")
+  if [ "$WITH_COMMAND" -eq 1 ] && [ -x "$KOHLAB_BIN_DIR/kohlab" ]; then cli=("$KOHLAB_BIN_DIR/kohlab"); fi
+  if [ -n "${KOHLAB_AI_USER_DRY_RUN:-}" ]; then
+    "${cli[@]}" ai-user setup --dry-run || true
+    return 0
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    warn "not root: the AI account was not created, run: sudo kohlab ai-user setup"
+    return 0
+  fi
+  # A unit written a moment ago is not loaded yet, and the CLI reads its EnvironmentFile from systemd.
+  if command -v systemctl >/dev/null 2>&1; then as_root systemctl daemon-reload 2>/dev/null || true; fi
+  if as_root "${cli[@]}" ai-user setup; then
+    log "the AI has its own account (kohlab ai-user status shows which)"
+  else
+    warn "could not set up the AI account, run: sudo kohlab ai-user setup"
+  fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --key) KEY="${2:-}"; [ -n "$KEY" ] || die "--key needs a value"; shift 2 ;;
     --no-systemd) WITH_SYSTEMD=0; shift ;;
     --no-command) WITH_COMMAND=0; shift ;;
-    -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | cut -c3-; exit 0 ;;
+    --no-ai-user) WITH_AI_USER=0; shift ;;
+    -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | cut -c3-; exit 0 ;;
     --uninstall) UNINSTALL=1; shift ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -245,6 +277,9 @@ EOF
   Save it now. The dashboard asks for it the first time you open it.
 EOF
   fi
+
+  # Before the service starts: the server reads KOHLAB_AGENT_USER once, at start.
+  setup_ai_user
 
   if [ "$KOHLAB_UNIT_DIR" = "/etc/systemd/system" ] && command -v systemctl >/dev/null 2>&1; then
     as_root systemctl daemon-reload

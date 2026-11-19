@@ -35,6 +35,9 @@ import {
   sessionId,
   checkRelease,
   ensureAgentUser,
+  aiUserStatus,
+  grantReach,
+  upsertEnvLine,
 } from "./lib";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -216,7 +219,8 @@ async function main() {
         if (!id) usage("user add <id> [--name 'Name'] [--role owner|member|viewer]");
         if (!["owner", "member", "viewer"].includes(role)) usage("role must be owner|member|viewer");
         try {
-          const { key } = await addUser({ id, name, role: role as "owner" | "member" | "viewer" });
+          // The operator on the box is the owner: the audit trail says so.
+          const { key } = await addUser({ id, name, role: role as "owner" | "member" | "viewer", actor: "owner" });
           console.log(`created user '${id}' (${role})`);
           console.log(`key (shown once, store it now): ${key}`);
         } catch (e) {
@@ -227,7 +231,7 @@ async function main() {
       }
       if (args[0] === "rm") {
         if (!args[1]) usage("user rm <id>");
-        await removeUser(args[1]);
+        await removeUser(args[1], "owner");
         console.log(`removed user '${args[1]}'`);
         break;
       }
@@ -247,6 +251,64 @@ async function main() {
         console.log(`  2. sudo systemctl edit ${UNIT}   and add:  [Service]  Environment=KOHLAB_AGENT_USER=${name}`);
         console.log(`  3. sudo systemctl restart ${UNIT}`);
         console.log("New workspaces then run as that account; existing ones keep running as they do now.");
+      } catch (e) {
+        console.error((e as Error).message);
+        process.exit(1);
+      }
+      break;
+    }
+    case "ai-user": {
+      const sub = args[0];
+      if (sub === "status") {
+        const s = aiUserStatus();
+        const what = {
+          agent: `runs as '${s.name}'`,
+          root: "runs as the server's own account (root)",
+          missing: `is set to '${s.name}', which does not exist`,
+          "not-root": "the server is not root, so there is nothing to drop",
+        }[s.mode];
+        console.log(`AI user: ${s.mode}, ${what}`);
+        break;
+      }
+      if (sub !== "setup") usage("ai-user setup [--name kohlab-agent] [--dry-run] | ai-user status");
+      const dry = args.includes("--dry-run");
+      const envFile = systemctl(["show", UNIT, "-p", "EnvironmentFiles"]).out.match(/EnvironmentFiles=(\S+)/)?.[1];
+      // a name already chosen is kept (re-running the installer must not swap a custom account for kohlab-agent)
+      let chosen: string | undefined;
+      try {
+        chosen = envFile ? readFileSync(envFile, "utf8").match(/^\s*KOHLAB_AGENT_USER=(\S+)/m)?.[1] : undefined;
+      } catch {
+        /* no file yet */
+      }
+      const name = flag(args, "--name") ?? chosen ?? "kohlab-agent";
+      if (dry) {
+        console.log(`would create the account '${name}' if missing: no password, no sudo, shell /bin/bash, home /home/${name}`);
+        console.log(`would let '${name}' reach ${WORKS_DIR} (search only, nothing listed)`);
+        console.log(`would set KOHLAB_AGENT_USER=${name} in ${envFile ?? `(no EnvironmentFile found for ${UNIT}: set it by hand)`}`);
+        console.log(`then: Restart Kohlab to apply: sudo systemctl restart ${UNIT}`);
+        break;
+      }
+      if (process.getuid?.() !== 0) {
+        console.error("run this as root: sudo kohlab ai-user setup");
+        process.exit(1);
+      }
+      if (!envFile) {
+        console.error(`no EnvironmentFile found for ${UNIT}; add KOHLAB_AGENT_USER=${name} to its environment by hand`);
+        process.exit(1);
+      }
+      try {
+        await ensureAgentUser(name);
+        grantReach(name, WORKS_DIR);
+        let before = "";
+        try {
+          before = readFileSync(envFile, "utf8");
+        } catch {
+          /* no file yet: it is created below */
+        }
+        const after = upsertEnvLine(before, "KOHLAB_AGENT_USER", name);
+        if (after !== before) writeFileSync(envFile, after, { mode: 0o600 });
+        console.log(`the AI runs as '${name}' (KOHLAB_AGENT_USER is set in ${envFile})`);
+        console.log(`Restart Kohlab to apply: sudo systemctl restart ${UNIT}`);
       } catch (e) {
         console.error((e as Error).message);
         process.exit(1);
@@ -584,6 +646,8 @@ access
   user add <id> [--name 'N'] [--role R]      add one (owner|member|viewer)
   user rm <id>                               revoke one
   agent-user [name]                          set up the unprivileged account agents run as (root)
+  ai-user setup [--name N] [--dry-run]       create the AI's account and point Kohlab at it (root)
+  ai-user status                             which account the AI runs as, and whether it exists
   audit                                      the mutation audit trail
   backup [file.tar.gz]                       state, users, audit trail -> one archive
   restore <file.tar.gz>                      put an archive back (previous files are kept)

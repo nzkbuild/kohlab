@@ -130,7 +130,10 @@ export interface LinkInfo {
   kind: "static" | "app" | "unsupported";
 }
 
-export type AgentStatus = Record<string, boolean> & { claudeSignedIn?: boolean | null; codexSignedIn?: boolean | null };
+/** Which account the AI runs as on this server (lib.ts aiUserStatus). */
+export type AiUserStatus = { mode: "agent" | "root" | "missing" | "not-root"; name?: string };
+
+export type AgentStatus = Record<string, boolean | AiUserStatus | null | undefined> & { claudeSignedIn?: boolean | null; codexSignedIn?: boolean | null; aiUser?: AiUserStatus };
 
 /** Codex's sign-in as the server reports it: idle, waiting on the owner's approval (with the link and code), done, or failed. */
 export interface CodexLogin {

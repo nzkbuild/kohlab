@@ -43,8 +43,9 @@ valid 10 minutes, one use, 5 attempts.
 
 Spec, straight from RFC 8628:
 
-- **Code:** 8 chars from the base-20 alphabet `BCDFGHJKLMNPQRSTVWXZ` (§6.1),
-  displayed as `XXXX-XXXX`. ~34.5 bits. No digits, one case, mobile-keyboard
+- **Code:** 10 chars from the base-20 alphabet `BCDFGHJKLMNPQRSTVWXZ` (§6.1),
+  displayed as `XXXXX-XXXXX`. ~43 bits (v2.9.4: was 8 chars, ~34.5 bits). Claims are
+  throttled per source and server-wide, so guessing is bounded regardless of length. No digits, one case, mobile-keyboard
   safe (fixes A1 for the bootstrap case).
 - **Lifetime:** 10 minutes, single-use, consumed on success.
 - **Attempts:** hard cap 5 per code; the code dies on the 5th failure. With the

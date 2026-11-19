@@ -75,6 +75,8 @@ const PORT = await freePort();
 const j = async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) });
 const call = (path, key, opts = {}) =>
   fetch(`http://127.0.0.1:${PORT}${path}${path.includes("?") ? "&" : "?"}key=${encodeURIComponent(key)}`, opts).then(j);
+// The audit trail as the owner reads it. Member changes are attributed to who made them (v2.9.4).
+const trail = async () => (await call("/api/audit?limit=500", KEY)).body.events ?? [];
 const post = (path, key, body) => call(path, key, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
 
 const id = `invitee-${Date.now()}`;
@@ -147,6 +149,9 @@ try {
   const afterAccept = await call("/api/users", KEY);
   const joined = (afterAccept.body.users ?? []).find((u) => u.id === id);
   check("they are no longer pending", joined?.pending === false, JSON.stringify(joined));
+  const afterJoin = await trail();
+  check("the invitation is attributed to the owner who sent it", afterJoin.some((e) => e.action === "invite" && e.id === id && e.user === "legacy"), JSON.stringify(afterJoin.filter((e) => e.id === id)));
+  check("accepting is attributed to the new member, not the system", afterJoin.some((e) => e.action === "invite.accept" && e.id === id && e.user === id), JSON.stringify(afterJoin.filter((e) => e.id === id)));
 
   // ── re-inviting, expiring, and the last owner ─────────────────────────────
   const again = await post("/api/invites", KEY, { id, name: "Invited Person", role: "member" });
@@ -159,7 +164,11 @@ try {
   check("the replaced link no longer works", stale.status === 400, `got ${stale.status}`);
   const fresh = await redeem((replaced.body.path ?? "").split("#")[1]);
   check("the newest link works", fresh.status === 200, `got ${fresh.status}`);
-  if (fresh.body.key) await call(`/api/users/${id}-2`, KEY, { method: "DELETE" });
+  if (fresh.body.key) {
+    await call(`/api/users/${id}-2`, KEY, { method: "DELETE" });
+    const afterRemove = await trail();
+    check("a removal is attributed to the owner who removed them", afterRemove.some((e) => e.action === "user.rm" && e.id === `${id}-2` && e.user === "legacy"), JSON.stringify(afterRemove.filter((e) => e.id === `${id}-2`)));
+  }
 
   const roleChange = await call(`/api/users/${id}`, KEY, {
     method: "PATCH",
@@ -167,6 +176,8 @@ try {
     body: JSON.stringify({ role: "viewer" }),
   });
   check("an owner can change a role", roleChange.status === 200 && roleChange.body.user?.role === "viewer", `${roleChange.status} ${JSON.stringify(roleChange.body)}`);
+  const afterRole = await trail();
+  check("a role change is attributed to the owner who made it", afterRole.some((e) => e.action === "user.role" && e.id === id && e.user === "legacy"), JSON.stringify(afterRole.filter((e) => e.id === id)));
 
   // The legacy key is an owner here, so demoting a named owner is recoverable and
   // allowed: the lockout rule only bites with no key configured. Assert what is
@@ -179,7 +190,8 @@ try {
   check("promoting to owner works", demoteSelf.status === 200, `${demoteSelf.status}`);
 } catch (err) {
   console.error(`\n  FAIL unexpected error: ${err.message}`);
-  process.exit(1);
+  // not process.exit here: that would skip the finally block below, which removes what this check made
+  process.exitCode = 1;
 } finally {
   for (const uid of [id, `${id}-2`]) {
     await call(`/api/users/${uid}`, KEY, { method: "DELETE" }).catch(() => {});

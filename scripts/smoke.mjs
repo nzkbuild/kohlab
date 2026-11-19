@@ -504,7 +504,7 @@ try {
 
       const mintRes = await post("/api/pair");
       const mint = typeof mintRes.body === "string" ? JSON.parse(mintRes.body) : mintRes.body;
-      check("pair minting returns a KWDJ-MJHT shape code", /^[A-Z]{4}-[A-Z]{4}$/.test(mint.code || ""), mint.code);
+      check("pair minting returns a KWDJM-JHTQZ shape code", /^[A-Z]{5}-[A-Z]{5}$/.test(mint.code || ""), mint.code);
 
       const claim = await fetch(`${BASE}/api/pair/claim`, {
         method: "POST",

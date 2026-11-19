@@ -62,9 +62,13 @@ kohlab open         # the dashboard URL for this machine
 kohlab doctor       # dependencies, service, and the two things that break them
 ```
 
-Options: `--no-systemd`, `--no-command`, `--key <secret>`, and the environment
+Options: `--no-systemd`, `--no-command`, `--no-ai-user`, `--key <secret>`, and the environment
 variables listed by `bash install.sh --help`. Re-running it updates the checkout
 and leaves your service, key and unit file alone.
+
+A root install also creates `kohlab-agent`, the account the AI runs as, so the AI
+never runs as root by default (`--no-ai-user` skips it). `kohlab ai-user status` shows
+which account is in use; see [docs/isolation.md](docs/isolation.md).
 
 ## Daily use
 

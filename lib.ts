@@ -178,6 +178,65 @@ export function agentIdentity(): { name: string; uid: number; gid: number; home:
   return u ? { name: AGENT_USER, ...u } : null;
 }
 
+export type AiUserStatus = { mode: "agent" | "root" | "missing" | "not-root"; name?: string };
+
+/**
+ * What the AI's account means for this server. "root": the server is root and
+ * nothing is configured (legacy default, allowed but shown). "missing": a name
+ * is configured but no such account (an error: owner work refuses to run).
+ * "not-root": the server is not root, so there is nothing to drop.
+ */
+export function decideAiUser(input: { configured: string; root: boolean; exists: boolean }): AiUserStatus {
+  if (!input.root) return { mode: "not-root" };
+  if (!input.configured) return { mode: "root" };
+  return input.exists ? { mode: "agent", name: input.configured } : { mode: "missing", name: input.configured };
+}
+
+export function aiUserStatus(): AiUserStatus {
+  return decideAiUser({ configured: AGENT_USER, root: isRoot(), exists: !!AGENT_USER && !!lookupUser(AGENT_USER) });
+}
+
+/**
+ * Set KEY=value in an EnvironmentFile body: replaces an existing KEY line
+ * (dropping any duplicates), appends one when absent. Pure, so the CLI and the
+ * check share it.
+ */
+export function upsertEnvLine(text: string, key: string, value: string): string {
+  const line = `${key}=${value}`;
+  const pattern = new RegExp(`^\\s*${key}=`);
+  const out: string[] = [];
+  let found = false;
+  for (const l of text.split("\n")) {
+    if (pattern.test(l)) {
+      if (!found) out.push(line);
+      found = true;
+      continue;
+    }
+    out.push(l);
+  }
+  if (!found) {
+    while (out.length && out[out.length - 1] === "") out.pop();
+    out.push(line);
+  }
+  return out.join("\n").replace(/\n*$/, "\n");
+}
+
+/** Refused by owner spawn paths: the HTTP answer is 409. */
+export class AiUserError extends Error {
+  readonly status = 409;
+}
+
+/**
+ * The one sentence every owner spawn path refuses with when KOHLAB_AGENT_USER
+ * names an account that does not exist, so owner work never silently runs as
+ * root. Members (ownerId) and the server terminal never use the AI account.
+ */
+export function aiUserRefusal(ws: { ownerId?: string; serverShell?: boolean }): string | null {
+  if (ws.ownerId || ws.serverShell) return null;
+  const s = aiUserStatus();
+  return s.mode === "missing" ? `The AI user '${s.name}' doesn't exist on this server. Create it with: kohlab ai-user setup` : null;
+}
+
 /**
  * Mirror the operator's Claude Code config into an agent account's ~/.claude, so
  * the agent sees the same CLAUDE.md, settings, statusline, agents, skills and
@@ -415,6 +474,8 @@ async function writeHookSettings(ws: Workspace, who: ReturnType<typeof identityO
 export async function spawnAgentSession(ws: Workspace, terminalId = "main", cols = 120, rows = 36): Promise<string> {
   const s = await loadState();
   if (!/^[\w.-]+$/.test(terminalId)) throw new Error("invalid terminal id");
+  const refusal = aiUserRefusal(ws);
+  if (refusal) throw new AiUserError(refusal);
   // "+" menu terminals: shell-<n> is a plain login shell, agent-<name>-<n> any
   // configured agent. resume-<n> is Claude's own terminal on a chat's conversation.
   // Everything else (main) is the workspace's own agent.
@@ -539,12 +600,16 @@ export const PAIR_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const PAIR_TTL_MS = Number(process.env.KOHLAB_PAIR_TTL_MS ?? 10 * 60 * 1000);
 const PAIR_FILE = join(WORKS_DIR, "pair");
 
-/** A fresh pairing code: XXXX-XXXX for reading, hashed into PAIR_FILE for checking. */
+/**
+ * A fresh pairing code: XXXXX-XXXXX for reading, hashed into PAIR_FILE for checking.
+ * 10 characters of the 20-letter alphabet is ~43 bits (it was 8, ~34.5). Typing it is
+ * still free text; the per-source and server-wide throttle is what bounds guessing.
+ */
 export async function createPair(): Promise<string> {
-  const bytes = randomBytes(8);
+  const bytes = randomBytes(10);
   let core = "";
-  for (let i = 0; i < 8; i++) core += PAIR_ALPHABET[bytes[i] % PAIR_ALPHABET.length];
-  const code = `${core.slice(0, 4)}-${core.slice(4)}`;
+  for (let i = 0; i < 10; i++) core += PAIR_ALPHABET[bytes[i] % PAIR_ALPHABET.length];
+  const code = `${core.slice(0, 5)}-${core.slice(5)}`;
   const record = { hash: await hashKey(code.toUpperCase().replace(/[^A-Z]/g, "")), expires: Date.now() + PAIR_TTL_MS };
   mkdirSync(WORKS_DIR, { recursive: true, mode: 0o700 });
   // One live code at a time: a new `kohlab pair` replaces the old one, so a
@@ -561,7 +626,7 @@ export async function createPair(): Promise<string> {
  */
 export async function claimPair(code: string): Promise<string | undefined> {
   const candidate = code.toUpperCase().replace(/[^A-Z]/g, "");
-  if (candidate.length !== 8) return undefined;
+  if (candidate.length !== 10) return undefined;
   let record: { hash: string; expires: number };
   try {
     record = JSON.parse(readFileSync(PAIR_FILE, "utf8"));
@@ -643,7 +708,8 @@ export function listUsers(): User[] {
 }
 
 /** Create a user, provision its OS account, and return the key once. */
-export async function addUser(opts: { id: string; name: string; role: Role }): Promise<{ user: User; key: string }> {
+/** `actor` is who did it (the caller's user id, or "owner" / "legacy"), recorded in the audit trail. */
+export async function addUser(opts: { id: string; name: string; role: Role; actor: string }): Promise<{ user: User; key: string }> {
   const keyBytes = crypto.getRandomValues(new Uint8Array(24));
   const key = [...keyBytes].map((b) => b.toString(16).padStart(2, "0")).join("");
   const users = readUsers();
@@ -671,7 +737,7 @@ export async function addUser(opts: { id: string; name: string; role: Role }): P
     await writeUsers(users.filter((u) => u.id !== opts.id));
     throw new Error(`could not provision OS account for '${opts.id}': ${(e as Error).message}`);
   }
-  await audit("system", "user.add", opts.id, osDetail);
+  await audit(opts.actor, "user.add", opts.id, osDetail);
   return { user, key };
 }
 
@@ -735,7 +801,7 @@ export async function createInvite(opts: { id: string; name: string; role: Role;
     users.push({ id, name: opts.name, role: opts.role, invite });
   }
   await writeUsers(users);
-  await audit("system", "invite", id, `${opts.role}, expires ${new Date(expires).toISOString()}`);
+  await audit(opts.invitedBy ?? "owner", "invite", id, `${opts.role}, expires ${new Date(expires).toISOString()}`);
   return { token, expires };
 }
 
@@ -759,19 +825,20 @@ export async function acceptInvite(token: string): Promise<{ id: string; name: s
   found.key = await hashKey(key);
   delete found.invite;
   await writeUsers(users);
-  await audit("system", "invite.accept", found.id, found.osUser ? "os-user provisioned" : "no OS account");
+  // The new member is the actor: they did this themselves, with the invitation.
+  await audit(found.id, "invite.accept", found.id, found.osUser ? "os-user provisioned" : "no OS account");
   return { id: found.id, name: found.name, role: found.role, key };
 }
 
 /** Change a role, refusing the one change that locks everyone out. */
-export async function setUserRole(id: string, role: Role): Promise<User> {
+export async function setUserRole(id: string, role: Role, actor: string): Promise<User> {
   const users = readUsers();
   const user = users.find((u) => u.id === id);
   if (!user) throw new Error(`no user '${id}'`);
   assertNotLastOwner(users, id, role, "demote");
   user.role = role;
   await writeUsers(users);
-  await audit("system", "user.role", id, role);
+  await audit(actor, "user.role", id, role);
   return user;
 }
 
@@ -794,7 +861,7 @@ export async function rotateOwnKey(id: string): Promise<{ key: string }> {
 }
 
 /** Remove a user (revoke): drop the record and its OS account + home. */
-export async function removeUser(id: string): Promise<{ removed: boolean; warning?: string }> {
+export async function removeUser(id: string, actor: string): Promise<{ removed: boolean; warning?: string }> {
   const target = readUsers().find((u) => u.id === id);
   const users = readUsers().filter((u) => u.id !== id);
   assertNotLastOwner(users.concat(target ? [target] : []), id, undefined, "remove");
@@ -809,7 +876,7 @@ export async function removeUser(id: string): Promise<{ removed: boolean; warnin
       outcome = { removed: false, warning: `the kohlab user is gone, but the OS account ${target.osUser} remains (${os.detail ?? "unknown reason"})` };
     }
   }
-  await audit("system", "user.rm", id, outcome.warning ? `incomplete: ${outcome.warning}` : "os-user removed");
+  await audit(actor, "user.rm", id, outcome.warning ? `incomplete: ${outcome.warning}` : "os-user removed");
   return outcome;
 }
 
@@ -1925,6 +1992,8 @@ export async function createWorkspace(opts: {
   const isolated = !!ownerUser?.uid && !!ownerUser?.gid && !!ownerUser.home && !!ownerUser.osUser;
   if (opts.url && !isolated) throw new Error("URL workspaces require a provisioned OS owner");
   if (isolated && !opts.url) throw new Error("isolated members must create from a git URL, not a host path");
+  const refusal = aiUserRefusal({ ownerId });
+  if (refusal) throw new AiUserError(refusal);
 
   const repo = opts.url ? "" : await findRepoRoot(opts.repo);
   if (!opts.url && !repo) throw new Error(`not a git repo: ${opts.repo}`);

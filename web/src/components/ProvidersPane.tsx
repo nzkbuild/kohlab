@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { DotsThree } from "@phosphor-icons/react";
 import { api } from "../api";
-import type { OpenCodeConnection, OpenCodeInstall, ProviderAccount, ProviderCard, ProviderModel, RouterCheck } from "../types";
+import type { AiUserStatus, OpenCodeConnection, OpenCodeInstall, ProviderAccount, ProviderCard, ProviderModel, RouterCheck } from "../types";
 import { agoText, orderCards, stateWord, untilText } from "../lib/aiHub";
 import { announce } from "../lib/announce";
+import { copyText } from "../lib/clipboard";
 import { useProviders } from "../lib/useProviders";
 import { cn } from "../lib/utils";
 import { AddAccountDialog, RenameAccountDialog, ReplaceKeyDialog, SignInDialog, checkText, freeName, safeMessage, type SignInTarget } from "./AccountDialogs";
@@ -643,6 +644,53 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
   );
 }
 
+/** Owner only: says plainly when the AI runs as the server's own account (root), or its account is missing. */
+function AiUserNotice({ owner }: { owner: boolean }) {
+  const [aiUser, setAiUser] = useState<AiUserStatus | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!owner) return;
+    let alive = true;
+    api
+      .agentsStatus()
+      .then((s) => {
+        if (alive) setAiUser(s.aiUser ?? null);
+      })
+      .catch(() => {
+        /* no notice when the status cannot be read */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [owner]);
+  if (!owner || !aiUser || (aiUser.mode !== "root" && aiUser.mode !== "missing")) return null;
+  const command = "kohlab ai-user setup";
+  const text =
+    aiUser.mode === "missing"
+      ? `The AI user '${aiUser.name}' is missing.`
+      : "Your AI runs as the server's own account (root), so it can change anything on this computer.";
+  const copy = () => {
+    copyText(command).then(
+      () => setCopied(true),
+      () => setCopied(false),
+    );
+  };
+  return (
+    <Panel>
+      <div className="flex flex-col items-start gap-3 p-4" role="status">
+        <p className="text-sm text-text-secondary">{text}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-text-secondary">Fix it:</span>
+          <Button size="sm" variant="secondary" onClick={copy} aria-label={`Copy the command ${command}`}>
+            <code>{command}</code>
+            {copied ? " (copied)" : " Copy"}
+          </Button>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 /** Settings → AI: every AI on this computer as a card — signed in or not, which account, how much of the plan is used, and its models. Owners can refresh and sign in; others read. */
 export default function ProvidersPane({ owner }: { owner: boolean }) {
   const { cards, failed, reload, refresh } = useProviders();
@@ -665,6 +713,7 @@ export default function ProvidersPane({ owner }: { owner: boolean }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <AiUserNotice owner={owner} />
       <AiDefaultsPanel owner={owner} />
       {cards === null && !failed ? (
         <Panel>

@@ -88,6 +88,8 @@ import {
   wsDir,
   clientView,
   SERVER_SHELL_ID,
+  AiUserError,
+  aiUserStatus,
 } from "./lib";
 import { BODY_MAX, BrainError, NOTE_TYPES, brainTool, deleteNote, getIndex, getNote, graphOf, noteProjectNotes, openRoot, putNote, searchNotes } from "./brain";
 import { timingSafeEqual } from "crypto";
@@ -110,6 +112,11 @@ import { TeamError, resumeTeams, teamActive, teamCleanup, teamGet, teamPost, tea
 
 const PORT = Number(process.env.PORT ?? 7676);
 grantAccountsReach(); // repairs an install whose accounts root predates the agent's reach into it
+{
+  const aiUser = aiUserStatus();
+  if (aiUser.mode === "missing")
+    console.error(`[kohlab] KOHLAB_AGENT_USER is '${aiUser.name}', but that account doesn't exist. Owner projects will refuse to start until you run: kohlab ai-user setup`);
+}
 /** Where to bind. `HOST=127.0.0.1` keeps it to this box; the default serves the
  *  tailnet or the LAN, which is why a keyless server there generates one. */
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -181,6 +188,30 @@ function recordAuthFailure(address: string): void {
   if (authFailures.size > 4096) {
     for (const [k, v] of authFailures) if (now > v.until) authFailures.delete(k);
   }
+}
+
+/**
+ * The pairing code is ~43 bits, but a guess is still a guess: every failed claim
+ * counts against its source (the same window as a wrong key) AND against a
+ * server-wide ceiling, so a search cannot simply run from many addresses. A
+ * throttled claim gets the same answer as a wrong one, so nothing says which it was.
+ */
+const PAIR_TOTAL_WINDOW_MS = 10 * 60_000;
+// Generous on purpose: a fixed 10-minute window, so an anonymous flood can pause pairing (the key still works) for at most one window, and
+// 1000 guesses against a 43-bit code that lives 10 minutes is ~1e-10. ponytail: pairing is unavailable while the flood continues.
+const PAIR_TOTAL_MAX_FAILURES = 1000;
+let pairTotal = { count: 0, until: 0 };
+
+function pairThrottled(address: string): boolean {
+  const total = Date.now() < pairTotal.until && pairTotal.count >= PAIR_TOTAL_MAX_FAILURES;
+  return total || authThrottle(address) > 0;
+}
+
+function recordPairFailure(address: string): void {
+  recordAuthFailure(address);
+  const now = Date.now();
+  if (now >= pairTotal.until) pairTotal = { count: 0, until: now + PAIR_TOTAL_WINDOW_MS };
+  pairTotal.count += 1;
 }
 
 // completion → push to every open dashboard + fire webhook
@@ -297,7 +328,7 @@ async function handleClone(req: Request, actorUserId?: string): Promise<Response
     if (chat && typed) await sendChat(ws.id, typed);
     return json(clientView(ws));
   } catch (e) {
-    return json({ error: (e as Error).message }, 400);
+    return json({ error: (e as Error).message }, e instanceof AiUserError ? 409 : 400);
   }
 }
 
@@ -657,7 +688,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
       if (chat && typed) await sendChat(ws.id, typed);
       return json(clientView(ws));
     } catch (e) {
-      return json({ error: (e as Error).message }, 400);
+      return json({ error: (e as Error).message }, e instanceof AiUserError ? 409 : 400);
     }
   }
   // `cwd()` was never imported here, so creating a workspace without an
@@ -689,7 +720,7 @@ async function handleCreate(req: Request, actorUserId?: string): Promise<Respons
     if (chat && typed) await sendChat(ws.id, typed);
     return json(clientView(ws));
   } catch (e) {
-    return json({ error: (e as Error).message }, 400);
+    return json({ error: (e as Error).message }, e instanceof AiUserError ? 409 : 400);
   }
 }
 
@@ -698,7 +729,7 @@ async function handleStart(id: string): Promise<Response> {
     const ws = await startWorkspace(id);
     return json(clientView(ws));
   } catch (e) {
-    return json({ error: (e as Error).message }, 400);
+    return json({ error: (e as Error).message }, e instanceof AiUserError ? 409 : 400);
   }
 }
 
@@ -1018,7 +1049,7 @@ async function openServerShell(actor: string): Promise<Response> {
 }
 
 /** Create a user; the plaintext key is returned exactly once. owner-only. */
-async function handleUserAdd(req: Request): Promise<Response> {
+async function handleUserAdd(req: Request, actor: string): Promise<Response> {
   const body = (await req.json()) as { id?: string; name?: string; role?: string };
   const id = (body.id ?? "").trim();
   const name = (body.name ?? "").trim();
@@ -1026,7 +1057,7 @@ async function handleUserAdd(req: Request): Promise<Response> {
   if (!id || !name) return json({ error: "id and name are required" }, 400);
   if (!["owner", "member", "viewer"].includes(role)) return json({ error: "role must be owner|member|viewer" }, 400);
   try {
-    const { user, key } = await addUser({ id, name, role: role as "owner" | "member" | "viewer" });
+    const { user, key } = await addUser({ id, name, role: role as "owner" | "member" | "viewer", actor });
     return json({ user: { id: user.id, name: user.name, role: user.role }, key });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -1068,12 +1099,12 @@ async function handleJoin(req: Request): Promise<Response> {
   }
 }
 
-async function handleUserRole(id: string, req: Request): Promise<Response> {
+async function handleUserRole(id: string, req: Request, actor: string): Promise<Response> {
   const body = (await req.json()) as { role?: string };
   const role = body.role as "owner" | "member" | "viewer";
   if (!["owner", "member", "viewer"].includes(role)) return json({ error: "role must be owner|member|viewer" }, 400);
   try {
-    const user = await setUserRole(id, role);
+    const user = await setUserRole(id, role, actor);
     return json({ user: { id: user.id, name: user.name, role: user.role } });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
@@ -1100,12 +1131,23 @@ async function handlePairCreate(): Promise<Response> {
  * wrong, expired, spent, and throttled all read as one failure, so nothing
  * helps a guesser narrow the search.
  */
-async function handlePairClaim(req: Request): Promise<Response> {
+async function handlePairClaim(req: Request, address: string): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as { code?: string };
   const code = typeof body.code === "string" ? body.code : "";
-  if (!code) return json({ error: "that code was not accepted" }, 400);
+  // One answer for every refusal: malformed, wrong, spent, expired and throttled.
+  const refused = () => json({ error: "that code was not accepted" }, 400);
+  if (!code) return refused();
+  if (pairThrottled(address)) {
+    // The same digest work as a real check, so a throttled answer is not quicker than a wrong code's.
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
+    recordPairFailure(address);
+    return refused();
+  }
   const key = await claimPair(code);
-  if (!key) return json({ error: "that code was not accepted" }, 400);
+  if (!key) {
+    recordPairFailure(address);
+    return refused();
+  }
   return json({ key });
 }
 
@@ -1128,9 +1170,9 @@ async function handleAccountKey(auth: Auth): Promise<Response> {
   }
 }
 
-async function handleUserRemove(id: string): Promise<Response> {
+async function handleUserRemove(id: string, actor: string): Promise<Response> {
   try {
-    const { warning } = await removeUser(id);
+    const { warning } = await removeUser(id, actor);
     // The revoke succeeded as far as the API goes, but if their OS account
     // survived, the caller has to hear it rather than assume they are gone.
     return json(warning ? { ok: true, warning } : { ok: true });
@@ -1147,7 +1189,8 @@ async function handleAudit(req: Request): Promise<Response> {
 }
 
 /** Check which agent CLIs are installed on the host. */
-async function handleAgentsStatus(): Promise<Response> {
+async function handleAgentsStatus(isOwner: boolean): Promise<Response> {
+  const aiUser = aiUserStatus();
   const names = ["omp", "hermes", "claude", "codex", "codex-acp", "opencode", "pi", "gemini"];
   const { execFile } = await import("child_process");
   const status: Record<string, boolean | null> = {};
@@ -1167,7 +1210,7 @@ async function handleAgentsStatus(): Promise<Response> {
   // Codex chats need the CLI (to sign in) and codex-acp (the server they talk to).
   status.codex = status.codex === true && status["codex-acp"] === true;
   status.codexSignedIn = status.codex ? await codexSignedIn() : null;
-  return json(status);
+  return json(isOwner ? { ...status, aiUser } : status);
 }
 
 /** Owner only: starts Codex's device-code sign-in and answers with the link and code to show. */
@@ -1300,7 +1343,7 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
       containFailure(audit(c.actor, "ai.provider.signin", provider), "audit");
       if (provider === "codex") {
         const got = await startCodexLogin().catch((e: Error) => {
-          throw new AccountError(500, e.message);
+          throw e instanceof AccountError ? e : new AccountError(500, e.message);
         });
         return json({ state: "waiting", url: got.url, code: got.code });
       }
@@ -1438,7 +1481,7 @@ async function handleAi(req: Request, path: string, c: { isOwner: boolean; actor
 }
 
 async function handleCodexLoginStart(): Promise<Response> {
-  return startCodexLogin().then(json, (e: Error) => json({ error: e.message }, 500));
+  return startCodexLogin().then(json, (e: Error) => json({ error: e.message }, e instanceof AccountError ? e.status : 500));
 }
 
 /** A package name: `thing` or `@scope/thing`. Nothing else, no flags, no
@@ -2392,6 +2435,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
         ok: true,
         version: VERSION,
         schemaVersion: SCHEMA_VERSION,
+        ...(isOwner ? { aiUser: aiUserStatus() } : {}),
         uptimeSec: Math.round(process.uptime()),
         daemon: up,
         daemonDownSince: up ? null : daemonDownAt,
@@ -2431,7 +2475,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       // owner is the whole box, and it provisions an OS account while it does it.
       const refused = gate(isOwner, "forbidden, only an owner can add members");
       if (refused) return refused;
-      return handleUserAdd(req);
+      return handleUserAdd(req, actor);
     }
     // Inviting, and redeeming an invitation. `/api/join` is the one route that
     // must work without credentials: the token *is* the credential, it is
@@ -2453,19 +2497,19 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       return handlePairCreate();
     }
     if (path === "/api/pair/claim" && req.method === "POST") {
-      return handlePairClaim(req);
+      return handlePairClaim(req, address);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "PATCH") {
       const refused = gate(isOwner, "forbidden, only an owner can change roles");
       if (refused) return refused;
       const uid = decodeURIComponent(path.split("/").pop() ?? "");
-      return handleUserRole(uid, req);
+      return handleUserRole(uid, req, actor);
     }
     if (path.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
       const refused = gate(isOwner, "forbidden, only an owner can remove members");
       if (refused) return refused;
       const uid = decodeURIComponent(path.split("/").pop() ?? "");
-      return handleUserRemove(uid);
+      return handleUserRemove(uid, actor);
     }
     if (path === "/api/audit") {
       if (denied || (!(role === "owner" || role === "member") && auth?.kind !== "anonymous")) {
@@ -2503,7 +2547,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     }
     if (path === "/api/agents-status") {
       if (denied) return json({ error: "unauthorized" }, 401);
-      return handleAgentsStatus();
+      return handleAgentsStatus(isOwner);
     }
     // AI control: the defaults for new projects, other accounts, always-allowed actions.
     if (path.startsWith("/api/ai/")) {

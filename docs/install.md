@@ -40,7 +40,15 @@ bash install.sh
 | `--key <secret>` | use this access key instead of generating one |
 | `--no-systemd` | install and build, but create no service |
 | `--no-command` | do not put `kohlab` on the PATH |
+| `--no-ai-user` | do not create the AI's own account (see below) |
 | `-h`, `--help` | the list above, plus the environment variables |
+
+A root install also creates the account the AI runs as, `kohlab-agent` (no password,
+no sudo), and sets `KOHLAB_AGENT_USER` in the unit's env file, before the service
+starts. So the AI never runs as the server's own account by default. Pass
+`--no-ai-user` to skip that; the AI then runs as root and Settings → AI says so. Later:
+`sudo kohlab ai-user setup` does the same, and `kohlab ai-user status` shows which
+account the AI runs as. See [isolation](isolation.md).
 
 `KOHLAB_HOME` (checkout), `KOHLAB_REPO`, `KOHLAB_BIN_DIR`, `KOHLAB_UNIT_DIR` and
 `KOHLAB_PORT` override the defaults. Setting `KOHLAB_UNIT_DIR` to anything other

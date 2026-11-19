@@ -85,15 +85,31 @@ as the server user. Only provisioned members get isolation.
 ## Running your own agents unprivileged (v1.22)
 
 Members are isolated; the owner's agents used to run as the server user, which
-on most installs is root. Set `KOHLAB_AGENT_USER` and workspaces created from
-then on run their agent as that account instead.
+on most installs is root. A root install now creates the AI's own account during
+`install.sh` (`kohlab-agent`), unless you pass `--no-ai-user`. On an existing install:
 
 ```
-sudo kohlab agent-user                 # creates `kohlab-agent` (idempotent)
+sudo kohlab ai-user setup              # creates `kohlab-agent` and sets KOHLAB_AGENT_USER (idempotent)
+sudo kohlab ai-user setup --dry-run    # what it would do, changes nothing (no root needed)
+kohlab ai-user status                  # which account the AI runs as, and whether it exists
 sudo -u kohlab-agent -i claude         # sign the agent in as that account, once
-sudo systemctl edit kohlab             # [Service]  Environment=KOHLAB_AGENT_USER=kohlab-agent
-sudo systemctl restart kohlab
+sudo systemctl restart kohlab          # the server reads the setting at start
 ```
+
+`ai-user setup` writes `KOHLAB_AGENT_USER` into the unit's EnvironmentFile (a
+line is never duplicated, and no secret is printed). It does not restart anything.
+
+What the owner sees (the server reports this as `aiUser` in `/api/health` and
+`/api/agents-status`; Settings → AI shows a notice for the owner):
+
+- **agent**: no notice. The AI runs as its own account.
+- **root**: "Your AI runs as the server's own account (root), so it can change
+  anything on this computer." Allowed, but shown, with the `kohlab ai-user setup` command to copy.
+- **missing**: `KOHLAB_AGENT_USER` names an account that does not exist. This is an
+  error: starting or creating an owner chat or terminal refuses with "The AI user
+  'x' doesn't exist on this server. Create it with: kohlab ai-user setup" (HTTP 409).
+  Projects that already exist are not changed; the fix is the same command.
+- **not-root**: the server is not root, so there is nothing to drop. No notice.
 
 - **New workspaces only.** Existing ones keep running as they do now; the flag is
   stored on each workspace when it is created.

@@ -119,6 +119,7 @@ const runInfo = (s) => ({
 /** Answers the routes on a page. `member` makes the app think this person is a member. */
 async function mock(page, s, { member = false, snapshot = {} } = {}) {
   const json = (route, body, status = 200) => route.fulfill({ status, json: body });
+  await page.route(/\/api\/agents-status$/, (route) => json(route, { aiUser: { mode: "agent", name: "kohlab-agent" } })); // the machine's own AI account must not change this page
   await page.route(/\/api\/providers$/, (route) => json(route, { providers: member ? memberCards(s) : cardsFor(s), at: Date.now() }));
   await page.route(/\/api\/providers\/refresh$/, (route) => json(route, { providers: member ? memberCards(s) : cardsFor(s), at: Date.now() }));
   if (member) await page.route(/\/api\/account$/, (route) => json(route, { id: "sam", role: "member", kind: "user" }));

@@ -157,8 +157,8 @@ export async function signOutCodex(accountId?: string): Promise<void> {
   let run: ReturnType<typeof codexRun>;
   try {
     run = codexRun(accountId);
-  } catch {
-    throw new AccountError(404, "That account does not exist.");
+  } catch (e) {
+    throw e instanceof AccountError ? e : new AccountError(404, "That account does not exist.");
   }
   if (login?.state === "waiting" && login.accountId === accountId && login.child.exitCode === null) login.child.kill("SIGTERM");
   const bin = Bun.which("codex");

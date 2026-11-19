@@ -9,8 +9,9 @@
  * and merge what it wrote.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { agentBinaryPaths, aclLeft, ancestors, dropAcl, removeTemp } from "./cleanup-kit.mjs";
 
 const sh = (cmd: string, args: string[], env: Record<string, string> = {}) =>
   spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, ...env } });
@@ -37,6 +38,7 @@ process.env.WORKS_DIR = works;
 process.env.KOHLAB_AGENT_USER = name;
 
 let failed = 0;
+let uid: number | undefined; // the account's number, kept for the ACL cleanup after userdel
 const check = (label: string, ok: boolean, detail = "") => {
   console.log(`  ${ok ? "ok  " : "FAIL"} ${label}${ok ? "" : ` ${detail}`}`);
   if (!ok) failed++;
@@ -49,6 +51,7 @@ try {
   git(repo, "commit", "-q", "--allow-empty", "-m", "start");
 
   const acct = await lib.ensureAgentUser(name);
+  uid = acct.uid;
   const ws = await lib.createWorkspace({ repo, task: "chk", agent: "sh" });
   const saved = await lib.getWorkspace(ws.id);
   check("workspace is flagged to run as the agent", saved.asAgent === true);
@@ -69,7 +72,13 @@ try {
   console.log(`  FAIL unexpected: ${(e as Error).message}`);
   failed++;
 } finally {
+  // The traverse entries sit on the directories above the temp root (/root) and above the agent CLIs.
+  const dirs = [root, ...agentBinaryPaths()];
+  dropAcl(dirs, { name });
   sh("userdel", ["-r", name]);
-  rmSync(root, { recursive: true, force: true });
+  if (uid !== undefined) dropAcl(dirs, { uid }); // userdel leaves the numeric entry
+  removeTemp(root);
+  const left = [...new Set(dirs.flatMap((d) => ancestors(d)))].filter((d) => aclLeft(d, { name, uid }));
+  check("no ACL entry for the account is left on the machine", left.length === 0, left.join(", "));
 }
 process.exit(failed ? 1 : 0);

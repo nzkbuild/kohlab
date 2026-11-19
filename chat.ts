@@ -24,7 +24,7 @@ import { teamMcp } from "./team";
 import { devServerOrigin } from "./devserver";
 import { goBackTo, snapshotTree, turnChanges, type TurnFile } from "./checkpoints";
 import { ACP_AGENTS, AcpClient, acpBin, acpStartFailure, isAcpAgent, type AcpHost } from "./acp";
-import { agentIdentity, chatBusy, chatBackground, resumeOpen, chatKillers, chatWaiting, audit, closeMain, getWorkspace, identityOf, isAlive, loadState, markStarted, mutateState, notifyWorkspaceDone, ownBase, parseModel, worktreeIsClean, worktreePath, brainRoot, ensureBrainToken } from "./lib";
+import { agentIdentity, aiUserRefusal, chatBusy,chatBackground, resumeOpen, chatKillers, chatWaiting, audit, closeMain, getWorkspace, identityOf, isAlive, loadState, markStarted, mutateState, notifyWorkspaceDone, ownBase, parseModel, worktreeIsClean, worktreePath, brainRoot, ensureBrainToken } from "./lib";
 import { rel, describeTool, toolFile, toolDetail, resultText, describeAsk, askForm, answerResponse, friendlyError, AGENT_NAMES, handoffText, noticeText, taskFinishedLine, clockText, MAX_TEXT } from "./chat-text";
 import type { Body, ChatEvent, Todo } from "./chat-text";
 import { chatsDir, transcriptPath, cursorPath, TAIL_BYTES, FIRST_IMPORT, transcriptFile, readCursor, writeCursor, HIDDEN_TOOLS, transcriptEvents } from "./chat-transcript";
@@ -995,6 +995,8 @@ async function retryFresh(id: string, msg: string) {
 }
 
 async function start(ws: Workspace, id: string, opts: { model?: string } = {}): Promise<Live> {
+  const refusal = aiUserRefusal(ws);
+  if (refusal) throw new ChatError(409, refusal);
   loadCaps(id); // before the new process can save over the file
   const s = await loadState();
   const ai = resolveAi(ws, s.defaults);
@@ -1247,6 +1249,8 @@ function startAcp(ws: Workspace, id: string): Promise<AcpClient> {
   return p;
 }
 async function startAcpNow(ws: Workspace, id: string): Promise<AcpClient> {
+  const refusal = aiUserRefusal(ws);
+  if (refusal) throw new ChatError(409, refusal);
   const [cmd, ...args] = ACP_AGENTS[ws.agent];
   const bin = acpBin(ws.agent);
   if (!bin) throw new Error(`${cmd} is not installed on this server`);

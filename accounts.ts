@@ -18,7 +18,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, chownSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WORKS_DIR, agentIdentity, grantReach, identityOf } from "./lib";
+import { WORKS_DIR, agentIdentity, aiUserRefusal, grantReach, identityOf } from "./lib";
 import type { Workspace } from "./types";
 
 // ---- the environment a child gets ----
@@ -108,6 +108,9 @@ export function grantAccountsReach(): void {
 /** The process settings of the AI's own login (no account): the agent identity's own home and default config dir when there is an agent identity, else the server user's. Projects that run as the agent use its login, so Settings shows that one.
  *  ponytail: projects not run as the agent (older ones) still use the server user's login; Settings shows the agent's. */
 export function mainRunAs(): { uid?: number; gid?: number; home: string } {
+  // a configured AI user that doesn't exist: never fall back to root (owner actions and probes alike; probes catch it as "can't check")
+  const refusal = aiUserRefusal({});
+  if (refusal) throw new AccountError(409, refusal);
   const agent = agentIdentity();
   return agent ? { uid: agent.uid, gid: agent.gid, home: agent.home } : { uid: undefined, gid: undefined, home: homedir() };
 }
@@ -193,6 +196,8 @@ export function profileEnvOf(dir: string): Record<string, string> {
 /** A second sign-in: an empty directory, signed in later (startSignIn). */
 export function createLogin(provider: unknown, label: unknown): Account {
   if (provider !== "claude" && provider !== "codex" && provider !== "opencode") throw new AccountError(400, "That AI has no accounts.");
+  const refusal = aiUserRefusal({}); // a sign-in made now would run as root
+  if (refusal) throw new AccountError(409, refusal);
   const clean = cleanLabel(label);
   const s = readStore();
   const id = newId(clean, new Set(s.accounts.map((a) => a.id)));

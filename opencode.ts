@@ -14,7 +14,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { AccountError, childEnv, envOfAccount, getAccount, mainRunAs, runAsOf, signInMs, stripAnsi } from "./accounts";
-import { WORKS_DIR, agentIdentity } from "./lib";
+import { WORKS_DIR, agentIdentity, aiUserRefusal } from "./lib";
 
 export const OPENCODE_PACKAGE = "@opencode/cli";
 /** Pinned: bump on purpose, after a check. */
@@ -257,7 +257,13 @@ export async function modelsOf(key: string): Promise<{ value: string; label: str
 
 /** The version the installed opencode reports, or null. */
 export async function opencodeVersion(): Promise<string | null> {
-  const r = await exec(runOf(MAIN_OPENCODE), ["--version"], { ms: 8000 });
+  let run: Run;
+  try {
+    run = runOf(MAIN_OPENCODE);
+  } catch {
+    return null; // no AI user to run as: the card says "can't check", not an error
+  }
+  const r = await exec(run, ["--version"], { ms: 8000 });
   return /\d+\.\d+\.\d+[\w.+-]*/.exec(r.out)?.[0] ?? null;
 }
 
@@ -479,6 +485,8 @@ export function installStatus(): { state: InstallState; error?: string } {
 /** Starts the install in the background, or returns the one running. Runs npm as the AI user, with a minimal environment. */
 export function startInstall(): { state: InstallState; error?: string } {
   if (install.state === "installing") return install;
+  const refusal = aiUserRefusal({});
+  if (refusal) throw new AccountError(409, refusal);
   if (opencodeBin()) return { state: "done" };
   const npm = Bun.which("npm");
   if (!npm) return (install = { state: "failed", error: "npm isn't installed on this server." });

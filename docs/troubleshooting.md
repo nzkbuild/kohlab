@@ -74,6 +74,32 @@ Wait a minute. Twenty refused attempts from one address in a minute trip the
 throttle, and it clears itself. A correct key still works during the window,
 that is deliberate, so one address behind a shared NAT cannot lock out the others.
 
+Pairing codes (`kohlab pair`) are throttled the same way: a wrong, spent or expired
+code, and a refused one, all read "that code was not accepted". Make a new code and
+try again.
+
+## Owner chats refuse: "The AI user 'kohlab-agent' doesn't exist"
+
+`KOHLAB_AGENT_USER` names an account that is not on this machine, so the AI would
+have run as root. Create it and restart:
+
+```bash
+sudo kohlab ai-user setup
+sudo systemctl restart kohlab
+```
+
+Settings → AI shows the same fix. If the AI is meant to run as the server's own
+account, say so by leaving `KOHLAB_AGENT_USER` unset (Settings → AI keeps a notice).
+
+## Test leftovers on this machine
+
+The checks clean up after themselves, but a run that was killed can leave folders in
+the state directory, stray `pty-daemon.cjs` processes, ACL entries for deleted users,
+or test accounts. `node scripts/leftovers.mjs` lists them and changes nothing.
+`node scripts/leftovers.mjs --apply` removes exactly what it listed, one at a time,
+printing each. It never removes a folder that `state.json` references, never follows a
+symlink, and never touches an account that `users.json` owns.
+
 ## "written by a newer kohlab"
 
 The state file carries a schema version. A server told to read a file from a newer
