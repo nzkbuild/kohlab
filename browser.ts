@@ -6,6 +6,7 @@
  * session's socket.
  */
 import { chownSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Pick as Picked, Problem, Workspace } from "./types";
@@ -152,12 +153,65 @@ async function prepare(ws: Workspace) {
   if (who) chownSync(profile, who.uid, who.gid);
 }
 
+/**
+ * Whether a page is left on a dead local address (an old dev server's, restored with the profile).
+ * Only loopback http(s) that nothing listens on, and never this server's, the workspace's own or its dev server's.
+ */
+export function isStaleLocalUrl(
+  current: string | null,
+  own: { ownOrigin: string; devOrigin: string | null; previewPrefix: string | null },
+  alive: boolean,
+): boolean {
+  if (alive) return false;
+  try {
+    const u = new URL(current ?? "");
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    if (!LOOPBACK_HOSTS.includes(u.hostname)) return false;
+    if (u.origin === originOf(own.ownOrigin)) return false;
+    if (isOwnPage(current, { previewPrefix: own.previewPrefix, devOrigin: own.devOrigin })) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether something accepts a TCP connection there. Sends no bytes (never an HTTP request); any error or timeout is "not alive". */
+export function tcpAlive(host: string, port: number, ms = 1500): Promise<boolean> {
+  return new Promise((resolve) => {
+    let sock: ReturnType<typeof createConnection> | undefined;
+    const finish = (ok: boolean) => {
+      clearTimeout(timer);
+      sock?.destroy();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), ms);
+    try {
+      sock = createConnection({ host, port });
+      sock.once("connect", () => finish(true));
+      sock.once("error", () => finish(false));
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+/** The page is stale: a dead local address, probed with a bare TCP connect (see isStaleLocalUrl). */
+async function isStalePage(ws: Workspace, current: string | null): Promise<boolean> {
+  const own = { ownOrigin: ownBase(), ...ownPagesFor(ws) };
+  // the cheap rules first: a page that is not a candidate is never probed
+  if (!isStaleLocalUrl(current, own, false)) return false;
+  const u = new URL(current!);
+  const port = u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80;
+  return isStaleLocalUrl(current, own, await tcpAlive(u.hostname.replace(/^\[|\]$/g, ""), port));
+}
+
 /** The stream port of a running browser, starting one on `startUrl` when none runs. */
 export async function ensureBrowser(ws: Workspace, startUrl: string): Promise<{ port: number }> {
   await prepare(ws);
   let port = await streamPort(ws);
-  // a blank Chrome (from a probe, or a deliberate about:blank) gets the start page too
-  if (!port || (await browserUrl(ws)) === "about:blank") {
+  // a blank Chrome (from a probe, or a deliberate about:blank) gets the start page too, and so does a page left on a dead local port
+  const current = port ? await currentUrl(ws) : null;
+  if (!port || current === "about:blank" || (await isStalePage(ws, current))) {
     await cli(ws, ["open", startUrl], 30_000);
     port = await streamPort(ws);
   }
@@ -289,6 +343,15 @@ const BROWSER_INTERACTION = new Set([
 export type OwnPages = { previewPrefix: string | null; devOrigin: string | null };
 
 const LOOPBACK_NAMES = ["127.0.0.1", "localhost"];
+const LOOPBACK_HOSTS = [...LOOPBACK_NAMES, "[::1]", "0.0.0.0"];
+/** The origin of an address, or null when it is not one (an unset server base, for one). */
+const originOf = (s: string): string | null => {
+  try {
+    return new URL(s).origin;
+  } catch {
+    return null;
+  }
+};
 
 /** Whether a page is one of the workspace's own. Compares parsed origins and paths, never raw strings. */
 function isOwnPage(url: string | null, own: OwnPages): boolean {

@@ -9,6 +9,11 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.12.1] - 2026-11-19
+
+### Fixed
+- **Preview no longer gets stuck on a dead local address.** If a project's built-in browser came back on an old page from a local server that is no longer running ("got no answer"), Preview now notices and opens the project's real start page instead. A local app that really is running, and any page you opened yourself, are left alone.
+
 ## [2.12.0] - 2026-11-19
 
 ### Added

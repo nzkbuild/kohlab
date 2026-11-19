@@ -6,7 +6,7 @@
  * Run:  bun scripts/check-browser-unit.mjs
  */
 import { detectDevCommand, parseDevUrl } from "../devserver.ts";
-import { browserToolPolicy, normalizeBrowserUrl } from "../browser.ts";
+import { browserToolPolicy, isStaleLocalUrl, normalizeBrowserUrl, tcpAlive } from "../browser.ts";
 
 let failures = 0;
 function check(name, got, want) {
@@ -91,6 +91,64 @@ check("dev port 80, https: ask", browserToolPolicy(CLICK, "https://127.0.0.1/", 
 check("no preview token, 'undefined' path: ask", browserToolPolicy(CLICK, "http://127.0.0.1:7676/p/undefined/", NONE), "ask");
 check("garbage own pages do not allow or throw", browserToolPolicy(CLICK, P, { previewPrefix: "not a url", devOrigin: null }), "ask");
 check("a non-browser tool is not handled", browserToolPolicy("Bash", "https://example.com/", OWN), null);
+
+// A page left on a dead local port is stale; a live one, our own, or a non-loopback one is not
+const STALE_OWN = { ownOrigin: "http://127.0.0.1:7676", devOrigin: "http://127.0.0.1:5173", previewPrefix: "http://127.0.0.1:7676/p/tok/" };
+const DEAD = "http://127.0.0.1:40489/";
+check("stale dead loopback port: stale", isStaleLocalUrl(DEAD, STALE_OWN, false), true);
+check("same URL but alive: not stale", isStaleLocalUrl(DEAD, STALE_OWN, true), false);
+check("own server origin: not stale", isStaleLocalUrl("http://127.0.0.1:7676/", STALE_OWN, false), false);
+check("own server origin, other path: not stale", isStaleLocalUrl("http://127.0.0.1:7676/w/x", STALE_OWN, false), false);
+check("dev server origin: not stale", isStaleLocalUrl("http://127.0.0.1:5173/", STALE_OWN, false), false);
+check("dev server on localhost: not stale", isStaleLocalUrl("http://localhost:5173/", STALE_OWN, false), false);
+check("preview prefix: not stale", isStaleLocalUrl("http://127.0.0.1:7676/p/tok/x.html", STALE_OWN, false), false);
+check("example.com dead: not stale", isStaleLocalUrl("https://example.com/", STALE_OWN, false), false);
+check("10.0.0.5 dead: not stale", isStaleLocalUrl("http://10.0.0.5:40489/", STALE_OWN, false), false);
+check("192.168 dead: not stale", isStaleLocalUrl("http://192.168.1.20:40489/", STALE_OWN, false), false);
+check("https localhost dead: stale", isStaleLocalUrl("https://localhost:40489/", STALE_OWN, false), true);
+check("ipv6 loopback dead: stale", isStaleLocalUrl("http://[::1]:40489/", STALE_OWN, false), true);
+check("0.0.0.0 dead: stale", isStaleLocalUrl("http://0.0.0.0:40489/", STALE_OWN, false), true);
+check("default port dead: stale", isStaleLocalUrl("http://localhost/", STALE_OWN, false), true);
+check("garbage: not stale", isStaleLocalUrl("not a url", STALE_OWN, false), false);
+check("null: not stale", isStaleLocalUrl(null, STALE_OWN, false), false);
+check("about:blank: not stale", isStaleLocalUrl("about:blank", STALE_OWN, false), false);
+check("chrome://: not stale", isStaleLocalUrl("chrome://settings/", STALE_OWN, false), false);
+check("file: not stale", isStaleLocalUrl("file:///etc/passwd", STALE_OWN, false), false);
+check("userinfo is not loopback: not stale", isStaleLocalUrl("http://127.0.0.1:1@evil.com:80/", STALE_OWN, false), false);
+check("unset server base: loopback still stale", isStaleLocalUrl(DEAD, { ownOrigin: "", devOrigin: null, previewPrefix: null }, false), true);
+
+// tcpAlive: a bare connect. Closed port: false. Listener: true, and it receives no bytes.
+{
+  const { createServer } = await import("node:net");
+  const probe = createServer();
+  await new Promise((r) => probe.listen(0, "127.0.0.1", r));
+  const closedPort = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  check("tcpAlive: closed port is not alive", await tcpAlive("127.0.0.1", closedPort, 1500), false);
+
+  let received = 0;
+  let closedSeen;
+  const closed = new Promise((r) => (closedSeen = r));
+  const listener = createServer((s) => {
+    s.on("data", (d) => (received += d.length));
+    s.on("close", closedSeen);
+    s.on("error", () => {});
+  });
+  await new Promise((r) => listener.listen(0, "127.0.0.1", r));
+  const livePort = listener.address().port;
+  check("tcpAlive: listening port is alive", await tcpAlive("127.0.0.1", livePort, 1500), true);
+  await Promise.race([closed, new Promise((r) => setTimeout(r, 1000))]);
+  check("tcpAlive: sends no bytes", received, 0);
+  await new Promise((r) => listener.close(r));
+
+  // a blackholed address (TEST-NET-style, not routed here): must resolve false quickly, never throw
+  const t0 = Date.now();
+  const blackhole = await tcpAlive("10.255.255.1", 9, 300).catch(() => "threw");
+  const took = Date.now() - t0;
+  check("tcpAlive: blackhole resolves false", blackhole, false);
+  check(`tcpAlive: blackhole resolves within 2 s (${took} ms)`, took < 2000, true);
+  check("tcpAlive: invalid port resolves false, no throw", await tcpAlive("127.0.0.1", 70000, 300).catch(() => "threw"), false);
+}
 
 if (failures) {
   console.log(`\n${failures} failed`);
