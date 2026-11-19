@@ -33,6 +33,7 @@ import { agentName, isAiAgent } from "../lib/agentName";
 import { isTouchOnly } from "../lib/platform";
 import { cn } from "../lib/utils";
 import { useDragSize } from "../lib/useDragSize";
+import { readRememberedPage, rememberPage } from "../lib/previewPages";
 import ConfirmDialog from "./ConfirmDialog";
 /** Shown while a terminal project's chat still runs background work: the server refuses to start the terminal then. */
 const BACKGROUND_WAIT_LINE = "Claude is still finishing work in the background. The terminal opens when it's done.";
@@ -93,6 +94,9 @@ const TeamView = lazy(() => import("./TeamView"));
 const ReleasePanel = lazy(() => import("./ReleasePanel"));
 
 type TabId = WorkspaceTab;
+
+/** Where the pane's browser goes when it opens: a page of the project, or its home (null). */
+type PageNav = { page: string | null };
 
 /** The shell breakpoint: the preview opens beside the project from here, as a sheet below it. */
 const WIDE_QUERY = "(min-width: 56.25rem)";
@@ -204,7 +208,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const [focusTick, setFocusTick] = useState(0);
   const [reviewCount, setReviewCount] = useState(0);
   // The preview of a terminal project: the same pane the chat opens, beside the project when wide.
-  const [pane, setPane] = useState<{ url: string; t: number } | null>(null);
+  const [pane, setPane] = useState<{ url: string; t: number; nav?: PageNav } | null>(null);
   // An earlier version the preview should open on (from Changes, Look). A new object opens it again.
   const [openVersion, setOpenVersion] = useState<{ sha: string } | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -239,11 +243,13 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   // their outcome before the server confirms it. Deleting and committing never do.
   const [optimisticRunning, setOptimisticRunning] = useOptimistic(w?.running ?? false);
 
-  const preview = async () => {
+  // Opens the pane. `nav` sends the browser to a page of the project, or to its home (null). Without it the browser stays where it is.
+  const preview = async (nav?: PageNav) => {
     setPreviewing(true);
     try {
       const { url } = await api.preview(workspaceId);
-      setPane({ url, t: Date.now() });
+      if (nav?.page) rememberPage(workspaceId, nav.page);
+      setPane({ url, t: Date.now(), nav });
       // The ready card in a chat listens for this, so it can point at the preview the person just opened.
       window.dispatchEvent(new CustomEvent("kohlab:preview-opened", { detail: { id: workspaceId } }));
     } catch (e) {
@@ -254,13 +260,32 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   };
   const reloadPane = () => setPane((p) => (p ? { ...p, t: Date.now() } : p));
 
+  // The Preview button: an open pane is only reloaded. Otherwise it opens the page Preview last showed, if the project still
+  // lists it, and the home page when not.
+  const previewFromButton = async () => {
+    if (pane) return preview();
+    const remembered = readRememberedPage(workspaceId);
+    let page: string | null = null;
+    if (remembered) {
+      try {
+        const { pages } = await api.pages(workspaceId);
+        if (pages.some((p) => p.path === remembered)) page = remembered;
+      } catch {
+        /* the home page */
+      }
+    }
+    return preview({ page });
+  };
+
   // Look at an earlier version (Changes): the preview opens, then shows that version in the shared browser.
+  // A page (Files, Changes "View as page") opens that page instead.
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const d = (e as CustomEvent<{ id?: string; version?: string }>).detail;
+      const d = (e as CustomEvent<{ id?: string; version?: string; page?: string }>).detail;
       if (!d || d.id !== workspaceId) return;
       if (d.version) setOpenVersion({ sha: d.version });
-      void preview();
+      if (d.page) void preview({ page: d.page });
+      else void preview();
     };
     window.addEventListener("kohlab:open-preview", onOpen);
     return () => window.removeEventListener("kohlab:open-preview", onOpen);
@@ -542,7 +567,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         setTab("review");
         break;
       case "preview":
-        void preview();
+        void previewFromButton();
         break;
     }
   }, [panelRequest, workspaceId]);
@@ -878,7 +903,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             </Button>
           ) : null}
           {!chat || hasWork || paneOpen ? (
-            <Button variant="quiet" aria-pressed={paneOpen} disabled={previewing} onClick={() => void preview()}>
+            <Button variant="quiet" aria-pressed={paneOpen} disabled={previewing} onClick={() => void previewFromButton()}>
               <Browser size={18} aria-hidden="true" />
               Preview
             </Button>
@@ -897,7 +922,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             <TabPanel value="chat" className="flex h-full min-h-0 flex-col" tabIndex={-1}>
               <ErrorBoundary label="Chat">
                 <Suspense fallback={<SkeletonRows rows={4} className="p-4" />}>
-                  <ChatView key={`${workspaceId}:${w?.chatReset ?? 0}`} workspaceId={workspaceId} onPreview={() => void preview()} previewing={previewing} previewOpen={paneOpen} onTurnEnd={() => { reloadPane(); setTurnTick((t) => t + 1); }} terminalProject={claudeTerminal} />
+                  <ChatView key={`${workspaceId}:${w?.chatReset ?? 0}`} workspaceId={workspaceId} onPreview={(page) => void preview({ page })} previewing={previewing} previewOpen={paneOpen} onTurnEnd={() => { reloadPane(); setTurnTick((t) => t + 1); }} terminalProject={claudeTerminal} />
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>
@@ -981,7 +1006,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
             <TabPanel value="files" className="h-full min-h-0" tabIndex={-1}>
               <ErrorBoundary label="Files">
                 <Suspense fallback={<SkeletonRows rows={6} className="p-4" />}>
-                  {tab === "files" ? <FilesView workspaceId={workspaceId} /> : null}
+                  {tab === "files" ? <FilesView workspaceId={workspaceId} previewOpen={paneOpen} /> : null}
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>
@@ -993,11 +1018,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       {paneOpen && pane ? (
         <aside aria-label="Preview" className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-line-subtle bg-surface-raised" style={{ width: paneSize }}>
           <div {...paneHandle} aria-label="Resize preview" className="resize-handle resize-handle-x" />
-          <PreviewPanel url={pane.url} t={pane.t} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} version={openVersion} onShowChat={() => goTo("chat")} />
+          <PreviewPanel url={pane.url} t={pane.t} nav={pane.nav} variant="pane" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} version={openVersion} onShowChat={() => goTo("chat")} />
         </aside>
       ) : null}
       {sheetOpen && pane ? (
-        <PreviewPanel url={pane.url} t={pane.t} variant="sheet" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} version={openVersion} onShowChat={() => goTo("chat")} />
+        <PreviewPanel url={pane.url} t={pane.t} nav={pane.nav} variant="sheet" onReload={reloadPane} onClose={closePreview} onNewLink={(url) => setPane({ url, t: Date.now() })} version={openVersion} onShowChat={() => goTo("chat")} />
       ) : null}
       </Tabs>
 

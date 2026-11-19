@@ -44,6 +44,7 @@ import { MessageMenu } from "./chat/message-menu";
 import { ChangesDialog } from "./chat/changes-dialog";
 import { FreshDialog, HandoffCard } from "./chat/fresh-dialog";
 import { CHECK_TEXT, READY_HINT_KEY, ReadyCard } from "./chat/ready";
+import { isPagePath, pickChangedPage } from "../lib/previewPages";
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -59,7 +60,8 @@ interface Attachment {
 
 interface Props {
   workspaceId: string;
-  onPreview?: () => void;
+  /** Opens the Preview on a page of the project, or on its home (null). */
+  onPreview?: (page: string | null) => void;
   previewing?: boolean;
   previewOpen?: boolean;
   /** Narrow dock (the Files view): full-width column, and no Keep/Preview/Undo row. */
@@ -969,13 +971,17 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
 
   // How many files the AI changed, for "Changed N files" under the reply.
   const [changed, setChanged] = useState<number | null>(null);
+  // The changed files' paths, so Look can open the page that changed.
+  const [changedNames, setChangedNames] = useState<string[]>([]);
   useEffect(() => {
     if (!hasChanges || busy) return;
     let alive = true;
     api
       .diff(workspaceId)
       .then((files) => {
-        if (alive) setChanged(files.length);
+        if (!alive) return;
+        setChanged(files.length);
+        setChangedNames(files.map((f) => f.name));
       })
       .catch(() => {
         if (alive) setChanged(null);
@@ -1023,10 +1029,21 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     }
   };
 
-  /** Opens the Preview from the ready card: that counts as having looked at it. */
+  /** The page the change touched (the newest if several), or null for the home page. */
+  const changedPage = async (): Promise<string | null> => {
+    if (!changedNames.some(isPagePath)) return null;
+    try {
+      const { pages } = await api.pages(workspaceId);
+      return pickChangedPage(changedNames, pages);
+    } catch {
+      return null;
+    }
+  };
+
+  /** Opens the Preview from the ready card (Look): that counts as having looked at it. It opens the page that changed. */
   const openPreview = () => {
     setPreviewSeen(true);
-    onPreview?.();
+    void changedPage().then((page) => onPreview?.(page));
   };
 
   const undo = async () => {

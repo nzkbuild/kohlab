@@ -94,7 +94,7 @@ import {
 import { BODY_MAX, BrainError, NOTE_TYPES, brainTool, deleteNote, getIndex, getNote, graphOf, noteProjectNotes, openRoot, putNote, searchNotes } from "./brain";
 import { timingSafeEqual } from "crypto";
 import { findSub, notifyDone, notifyNeedsYou, sendPush, subscribe, unsubscribe, vapidKey } from "./push";
-import { resolvePreviewFile, versionFile } from "./preview";
+import { listPreviewPages, pagesHtml, previewRelPath, resolvePreviewFile, versionFile } from "./preview";
 import { headPackage, treeIsEmpty } from "./versions";
 import { BrowserError, browserAction, browserProblems, browserUrl, clearBrowserProblems, ensureBrowser, openVersion, pickElement, reopenHome, startUrlFor, touchBrowser } from "./browser";
 import { appKind, detectDevCommand, devProxyPort, ensureDevServer, stopAllDevServers, stopDevServer } from "./devserver";
@@ -377,11 +377,23 @@ async function handlePreview(token: string, rest: string, req: Request): Promise
   const file = await resolvePreviewFile(worktreePath(ws), rest);
   if (!file) {
     if (rest === "" || rest.endsWith("/")) {
+      // No index.html here: list the project's pages instead. An invalid path (".." and friends) keeps its 404.
+      const listed = previewRelPath(rest) === null ? null : await pagesPage(ws, token, req, headers);
+      if (listed) return listed;
       return notFound('<!doctype html><meta charset="utf-8"><title>Nothing to preview yet</title><p style="font-family:sans-serif;padding:2rem">Nothing to preview yet. Ask Claude to build a web page, then press Preview again.</p>');
     }
     return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
   }
   return new Response(req.method === "HEAD" ? null : Bun.file(file), { headers });
+}
+
+/** The project's pages as a listing at `/p/<token>/`, or null when there are none. Both the owner's and a share link's folder fallback use it. */
+async function pagesPage(ws: Workspace, token: string, req: Request, headers: Record<string, string>): Promise<Response | null> {
+  const { pages, more } = await listPreviewPages(worktreePath(ws));
+  if (!pages.length) return null;
+  return new Response(req.method === "HEAD" ? null : pagesHtml(`/p/${token}/`, pages, more), {
+    headers: { ...headers, "content-type": "text/html; charset=utf-8" },
+  });
 }
 
 /**
@@ -401,7 +413,14 @@ async function sharedPreview(ws: Workspace, token: string, rest: string, req: Re
   if (kind === "static") {
     if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405, headers: { ...headers, allow: "GET, HEAD" } });
     const file = await resolvePreviewFile(worktreePath(ws), rest);
-    if (!file) return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+    if (!file) {
+      // A folder with no index.html: the share link lists the pages it can serve (none: 404 as before).
+      if ((rest === "" || rest.endsWith("/")) && previewRelPath(rest) !== null) {
+        const listed = await pagesPage(ws, token, req, headers);
+        if (listed) return listed;
+      }
+      return new Response("Not found", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } });
+    }
     return new Response(req.method === "HEAD" ? null : Bun.file(file), { headers });
   }
   let port = devProxyPort(ws);
@@ -2169,6 +2188,21 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       }
       const upgradeOpts = { data: { auth, canMutate, isOwner, browser },...(offered ? { headers: { "sec-websocket-protocol": offered } } : {}) };
       if (server.upgrade(req, upgradeOpts)) return undefined;
+    }
+
+    // A project's pages (preview.ts): what the Preview menu and the Look button open. Read-only, so a viewer may read it.
+    // Before the server-terminal and team gates below, so the server terminal and a team agent's workspace answer 404 here.
+    const pagesM = path.match(/^\/api\/workspaces\/([^/]+)\/pages$/);
+    if (pagesM) {
+      const pid = pagesM[1];
+      if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
+      if (auth?.kind === "share" || url.searchParams.has("share")) return json({ error: "forbidden, a shared link cannot do this" }, 403);
+      if (denied) return json({ error: "unauthorized" }, 401);
+      const pws = pid === SERVER_SHELL_ID ? null : await getWorkspace(pid).catch(() => null);
+      if (!pws || pws.serverShell || pws.team) return json({ error: "no such project" }, 404);
+      if (!(await mayAccessWorkspace(auth, pid))) return json({ error: "forbidden, not your workspace" }, 403);
+      const { pages } = await listPreviewPages(worktreePath(pws));
+      return json({ pages });
     }
 
     // The server terminal (SERVER_SHELL_ID) is the owner's alone, and of its workspace routes only closing one of its terminals is reachable.

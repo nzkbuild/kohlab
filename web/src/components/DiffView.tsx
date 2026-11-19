@@ -25,6 +25,7 @@ import { cn } from "../lib/utils";
 import type { DiffFile, Version } from "../types";
 import { agentName } from "../lib/agentName";
 import { changeWord } from "./files/tree";
+import { isPagePath, openPageInPreview } from "../lib/previewPages";
 import { Button, EmptyState, Kbd, Skeleton, SkeletonRows } from "./ui";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -464,13 +465,13 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                     const isCurrent = current?.name === file.name;
                     const word = changeWord(file.diff);
                     return (
-                      <li key={file.name}>
+                      <li key={file.name} className="flex items-center">
                         <button
                           type="button"
                           aria-current={isCurrent ? "true" : undefined}
                           onClick={() => setSelected(file.name)}
                           className={cn(
-                            "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left hover:bg-surface-hover max-md:min-h-13",
+                            "flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-left hover:bg-surface-hover max-md:min-h-13",
                             isCurrent && "bg-surface-active",
                           )}
                         >
@@ -480,6 +481,11 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                           </span>
                           <span className="shrink-0 text-sm text-text-muted">{word}</span>
                         </button>
+                        {isPagePath(file.name) ? (
+                          <Button variant="quiet" size="sm" className="shrink-0 text-text-secondary" onClick={() => openPageInPreview(workspaceId, file.name)}>
+                            View as page
+                          </Button>
+                        ) : null}
                       </li>
                     );
                   })}
@@ -751,6 +757,11 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                       >
                         {file.name}
                       </button>
+                      {isPagePath(file.name) ? (
+                        <Button variant="quiet" size="sm" className="shrink-0 text-text-secondary" onClick={() => openPageInPreview(workspaceId, file.name)}>
+                          View as page
+                        </Button>
+                      ) : null}
                       {stats ? (
                         <span className="tnum shrink-0 text-xs">
                           <span className="text-status-running">+{stats.added}</span>{" "}

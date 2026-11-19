@@ -87,6 +87,10 @@ try {
   run("terminal transcript lines (what the chat view shows)", "bun", ["scripts/check-transcript.mjs"]);
   run("project names (rename rules, notification titles)", "bun", ["scripts/check-rename.mjs"]);
   run("web preview paths (no escape from the worktree)", "bun", ["scripts/check-preview.mjs"]);
+  // Own throwaway server (sh projects, no AI): a folder with no index.html lists its pages; the pages route; share links.
+  run("web preview pages (listing, escaping, JSON route, share links)", "bun", ["scripts/check-preview-pages.mjs"]);
+  // Needs web/dist and Chromium (skips without); mocks the pages, preview and shared-browser calls.
+  run("web preview pages in the browser (Page | Code, Look, Pages menu)", "node", ["scripts/check-preview-pages-ui.mjs"]);
   run("shared browser rules (dev command, dev URL, allowed URLs)", "bun", ["scripts/check-browser-unit.mjs"]);
   run("shared browser coordinates (letterbox, clamp)", "bun", ["scripts/check-browser-coords.mjs"]);
   run("chat markdown (code, links, lists, headings)", "bun", ["scripts/check-markdown.mjs"]);

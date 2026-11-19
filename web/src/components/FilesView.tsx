@@ -6,10 +6,11 @@ import type { DiffFile, TreeNode } from "../types";
 import { announce } from "../lib/announce";
 import { findWorkspace, useApp, useCan } from "../store";
 import { cn } from "../lib/utils";
-import { Button, Dialog, Field, SkeletonRows } from "./ui";
+import { Button, Dialog, Field, SkeletonRows, Tab as SegmentTab, TabList, Tabs } from "./ui";
 import TreeList from "./files/TreeList";
 import QuickOpen from "./files/QuickOpen";
 import { changeMap, filePaths, imageType, isTextContent, sortTree, type Change } from "./files/tree";
+import { isPagePath, openPageInPreview } from "../lib/previewPages";
 
 // Monaco and the chat are heavy: neither is in the bundle of the page that mounts this view.
 const CodeEditor = lazy(() => import("./files/CodeEditor"));
@@ -17,6 +18,8 @@ const ChatView = lazy(() => import("./ChatView"));
 
 interface Props {
   workspaceId: string;
+  /** The Preview pane is open beside the project: it takes room from the editor. */
+  previewOpen?: boolean;
 }
 
 interface Tab {
@@ -27,6 +30,8 @@ interface Tab {
   /** Bumped when the open file changes on disk, so the editor remounts with the new text. */
   rev: number;
   imageUrl?: string;
+  /** An HTML file shows as a page (Preview) by default; Code is the editor. Only set on HTML text files. */
+  view?: "page" | "code";
 }
 
 const WIDE_QUERY = "(min-width: 900px)";
@@ -62,6 +67,8 @@ function useMedia(query_: string): boolean {
 
 /** Claude is docked only where the editor keeps at least 480px beside the tree and the dock. */
 const DOCK_QUERY = "(min-width: 1280px)";
+/** With the Preview pane open too, the dock waits for a wider screen: the editor header (Changed, Page | Code) stays visible. */
+const DOCK_WITH_PREVIEW_QUERY = "(min-width: 1600px)";
 
 const baseName = (path: string) => path.split("/").pop() ?? path;
 
@@ -69,15 +76,16 @@ const baseName = (path: string) => path.split("/").pop() ?? path;
  * Project files: a tree, an editor with tabs, and Claude docked on the right.
  * The inner component is keyed by project, so one project's tabs never show in another.
  */
-export default function FilesView({ workspaceId }: Props) {
-  return <Files key={workspaceId} workspaceId={workspaceId} />;
+export default function FilesView({ workspaceId, previewOpen }: Props) {
+  return <Files key={workspaceId} workspaceId={workspaceId} previewOpen={previewOpen} />;
 }
 
-function Files({ workspaceId }: Props) {
+function Files({ workspaceId, previewOpen }: Props) {
   const workspace = useApp((s) => findWorkspace(s.workspaces, workspaceId));
   const can = useCan().mutate;
   const wide = useMedia(WIDE_QUERY);
   const room = useMedia(DOCK_QUERY);
+  const roomWithPreview = useMedia(DOCK_WITH_PREVIEW_QUERY);
   const chat = !!workspace?.chat;
   // Anything that changes when Claude works or a run ends: a reason to re-read the tree and the diff.
   const signature = workspace
@@ -190,18 +198,25 @@ function Files({ workspaceId }: Props) {
         const { content } = await api.file(workspaceId, path);
         if (isTextContent(content)) {
           buffers.current.set(path, content);
-          tab = { path, kind: "text", original: content, rev: 0 };
+          tab = { path, kind: "text", original: content, rev: 0, view: isPagePath(path) ? "page" : undefined };
         } else {
           tab = { path, kind: "blocked", original: "", rev: 0 };
         }
       }
       setTabs((prev) => [...prev, tab]);
       setActive(path);
+      if (tab.view === "page") openPageInPreview(workspaceId, path);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       setOpening(null);
     }
+  };
+
+  /** Page or Code for an HTML file. Page opens it in Preview (the pane), it is not drawn here. */
+  const setTabView = (path: string, view: "page" | "code") => {
+    setTabs((prev) => prev.map((t) => (t.path === path ? { ...t, view } : t)));
+    if (view === "page") openPageInPreview(workspaceId, path);
   };
 
   const onEdit = (tab: Tab, value: string) => {
@@ -302,7 +317,7 @@ function Files({ workspaceId }: Props) {
 
   const activeTab = tabs.find((t) => t.path === active) ?? null;
   const status = activeTab?.kind === "text" ? (dirty.has(activeTab.path) ? "Unsaved" : "Saved") : null;
-  const showDock = wide && room && chat && !claudeHidden;
+  const showDock = wide && room && (!previewOpen || roomWithPreview) && chat && !claudeHidden;
 
   return (
     <div onKeyDownCapture={onKeyDown} className="flex h-full min-h-0 min-w-0">
@@ -417,10 +432,27 @@ function Files({ workspaceId }: Props) {
               </Button>
             ) : null}
           </div>
+          {activeTab?.kind === "text" && activeTab.view ? (
+            <div className="flex shrink-0 items-center px-3 pb-2">
+              <Tabs value={activeTab.view} onValueChange={(v) => setTabView(activeTab.path, v as "page" | "code")}>
+                <TabList label="Show the file as">
+                  <SegmentTab value="page">Page</SegmentTab>
+                  <SegmentTab value="code">Code</SegmentTab>
+                </TabList>
+              </Tabs>
+            </div>
+          ) : null}
 
           <div className="relative min-h-0 flex-1">
             <div className="absolute inset-0 flex flex-col">
-              {activeTab?.kind === "text" ? (
+              {activeTab?.kind === "text" && activeTab.view === "page" ? (
+                <div className="flex flex-col items-start gap-3 p-6">
+                  <p className="text-base text-text-secondary">This page is open in Preview.</p>
+                  <Button variant="secondary" className="rounded-full" onClick={() => openPageInPreview(workspaceId, activeTab.path)}>
+                    Open in Preview
+                  </Button>
+                </div>
+              ) : activeTab?.kind === "text" ? (
                 <Suspense fallback={<p className="p-4 text-small text-text-muted">Opening the editor…</p>}>
                   <div className="min-h-0 flex-1">
                     <CodeEditor

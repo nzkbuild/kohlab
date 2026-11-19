@@ -94,6 +94,13 @@ export interface DiffFile {
   diff: string;
 }
 
+/** A page the project can show in Preview: its path under the project, its title, and when it last changed (ms). */
+export interface PreviewPage {
+  path: string;
+  title: string;
+  changed: number;
+}
+
 /** One kept version of a project: the commit's full sha, its time in ms, and its subject. */
 export interface Version {
   id: string;

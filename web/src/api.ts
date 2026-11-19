@@ -1,6 +1,6 @@
 import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BrainGraph, BrainHit, BrainNote, NoteType, OpenCodeConnection, OpenCodeInstall, OpenCodeMethod, OpenCodeService, OpenCodeSignIn, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
 
-import type { Effort, Mode } from "./types";
+import type { Effort, Mode, PreviewPage } from "./types";
 import type { Budget, Team, TeamEvent } from "./team-types";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
@@ -427,6 +427,8 @@ export const api = {
     }),
   /** `fresh` makes a new link and stops the old one working. */
   preview: (id: string, fresh = false) => json<{ url: string }>(`/api/workspaces/${id}/preview${fresh ? "?new=1" : ""}`, { method: "POST" }),
+  /** The HTML pages the project can show in Preview, most recently changed first. Read-only. */
+  pages: (id: string) => json<{ pages: PreviewPage[] }>(`/api/workspaces/${encodeURIComponent(id)}/pages`),
   /** Keep a chat picture's page on the server; returns the URL an iframe can load (a capability URL, no key needed). */
   picture: (id: string, html: string) =>
     json<{ url: string }>(`/api/workspaces/${encodeURIComponent(id)}/picture`, {

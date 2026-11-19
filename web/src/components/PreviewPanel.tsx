@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { toChat } from "../lib/toChat";
-import { ArrowClockwise, ArrowLeft, ArrowRight, ArrowSquareOut, Camera, CaretLeft, ChatCircle, Desktop, DeviceMobile, DeviceTablet, DotsThree, Globe, HandPointing, ShareNetwork, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowLeft, ArrowRight, ArrowSquareOut, Camera, CaretLeft, ChatCircle, Desktop, DeviceMobile, DeviceTablet, DotsThree, FileHtml, Globe, HandPointing, ShareNetwork, WarningCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { agentName } from "../lib/agentName";
@@ -14,13 +14,17 @@ import BrowserView, { type BrowserHandle } from "./BrowserView";
 import ConfirmDialog from "./ConfirmDialog";
 import MarkupDialog from "./MarkupDialog";
 import ShareDialog from "./ShareDialog";
-import { Button, Menu, MenuItem, MenuLabel, MenuSeparator } from "./ui";
+import { Button, Menu, MenuItem, MenuLabel, MenuSeparator, MenuSub } from "./ui";
+import { pageAddress, rememberPage } from "../lib/previewPages";
+import type { PreviewPage } from "../types";
 
 interface Props {
   /** The project's own static page. Its address is used for "Open in a new tab". */
   url: string;
   /** Changes when the pane opens and when a turn ends: each change reloads the browser, if it is on the project's own page. */
   t: number;
+  /** Where the browser goes when the pane opens: a page of the project, or its home (null). A new object goes again. */
+  nav?: { page: string | null } | null;
   /** "pane" sits beside the chat on desktop; "sheet" covers the whole phone screen. */
   variant: "pane" | "sheet";
   /** No longer used: Reload asks the shared browser to reload. Kept so WorkspaceDetail needs no change. */
@@ -72,7 +76,44 @@ function writeDevice(id: string, device: DeviceId) {
  * the project's page, a share link and a picture of the page. Problems, pointing
  * and earlier versions have their own controls in the bar.
  */
-export default function PreviewPanel({ url, t, variant, onClose, onNewLink, version, onShowChat }: Props) {
+/** The project's pages, read when the Pages submenu opens. Picking one opens it in the shared browser. */
+function PagesItems({ workspaceId, onPick }: { workspaceId: string; onPick: (path: string) => void }) {
+  const [list, setList] = useState<PreviewPage[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api
+      .pages(workspaceId)
+      .then((r) => {
+        if (live) setList(r.pages);
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [workspaceId]);
+
+  if (failed) return <MenuItem disabled>Couldn't load the pages.</MenuItem>;
+  if (!list) return <MenuItem disabled>Loading…</MenuItem>;
+  if (list.length === 0) return <MenuItem disabled>No pages yet</MenuItem>;
+  return (
+    <>
+      {list.map((page) => {
+        const folder = page.path.includes("/") ? page.path.slice(0, page.path.lastIndexOf("/")) : "";
+        return (
+          <MenuItem key={page.path} onSelect={() => onPick(page.path)}>
+            <span className="min-w-0 flex-1 truncate">{page.title}</span>
+            {folder ? <span className="min-w-0 max-w-40 truncate text-xs text-text-muted">{folder}</span> : null}
+          </MenuItem>
+        );
+      })}
+    </>
+  );
+}
+
+export default function PreviewPanel({ url, t, nav, variant, onClose, onNewLink, version, onShowChat }: Props) {
   const sheet = variant === "sheet";
   // The project this preview belongs to: the panel only ever opens inside a workspace.
   const workspaceId = useApp((s) => (s.route.kind === "workspace" ? s.route.id : null));
@@ -217,6 +258,33 @@ export default function PreviewPanel({ url, t, variant, onClose, onNewLink, vers
       alive = false;
     };
   }, [t, workspaceId]);
+
+  // A page of the project, or its home, asked for by the parent. The browser is started first, since it may not be running yet.
+  useEffect(() => {
+    if (!nav || !workspaceId) return;
+    let alive = true;
+    void (async () => {
+      try {
+        await api.browser(workspaceId);
+        const { url: next } = nav.page
+          ? await api.browserAct(workspaceId, "open", new URL(pageAddress(url, nav.page), location.origin).href)
+          : await api.browserAct(workspaceId, "home");
+        if (alive) setBrowserUrl(next);
+      } catch (e) {
+        if (alive) toast.error(`Couldn't open that page. ${(e as Error).message}`);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [nav, url, workspaceId]);
+
+  /** A page picked from the Pages menu: it is remembered, and the browser goes there. */
+  const openPage = (path: string) => {
+    if (!workspaceId) return;
+    rememberPage(workspaceId, path);
+    void browserAct("open", new URL(pageAddress(url, path), location.origin).href);
+  };
 
   // An earlier version opens in the same browser. The browser is started first, since it may not be running yet.
   useEffect(() => {
@@ -464,6 +532,9 @@ export default function PreviewPanel({ url, t, variant, onClose, onNewLink, vers
         <ArrowSquareOut size={16} aria-hidden="true" />
         Open in a new tab
       </MenuItem>
+      <MenuSub label="Pages" icon={<FileHtml size={16} aria-hidden="true" />}>
+        <PagesItems workspaceId={workspaceId} onPick={openPage} />
+      </MenuSub>
       {can.mutate ? (
         <>
           <MenuSeparator />
