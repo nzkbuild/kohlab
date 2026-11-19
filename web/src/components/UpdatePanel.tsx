@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowsClockwise,
   CheckCircle,
+  Clock,
   DownloadSimple,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -9,7 +10,15 @@ import { api } from "../api";
 import { announce } from "../lib/announce";
 import { relativeTime } from "../lib/format";
 import type { ReleaseStatus } from "../types";
+import ConfirmDialog from "./ConfirmDialog";
 import { Button, SkeletonRows } from "./ui";
+
+/** What GitHub's checks say about this version, in the owner's words. Same wording as `kohlab update`. */
+const CHECK_WORDS = {
+  passed: { text: "GitHub's checks passed", Icon: CheckCircle },
+  pending: { text: "GitHub is still checking this version", Icon: Clock },
+  failed: { text: "GitHub's checks failed for this version", Icon: WarningCircle },
+} as const;
 
 /**
  * Settings → Updates.
@@ -28,6 +37,7 @@ export default function UpdatePanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [askFirst, setAskFirst] = useState(false);
   const wasRunning = useRef(false);
 
   const load = useCallback(async (force = false) => {
@@ -87,6 +97,11 @@ export default function UpdatePanel() {
     );
   }
 
+  const checkState = status?.checks?.state;
+  // Pending or failed checks ask first; passed and unknown go straight through.
+  const gated = checkState === "pending" || checkState === "failed";
+  const checkWords = checkState && checkState !== "unknown" ? CHECK_WORDS[checkState] : null;
+
   const failed =
     status?.unfinished === true || (status?.exit !== null && status?.exit !== undefined && status.exit !== 0);
   const lastRun = status?.unfinished
@@ -122,6 +137,18 @@ export default function UpdatePanel() {
 
       {status?.available ? <p className="text-sm text-text-primary">A new version of Kohlab is ready.</p> : null}
 
+      {status?.available && checkWords ? (
+        <p className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
+          <checkWords.Icon size={14} aria-hidden="true" />
+          {checkWords.text}
+          {checkState === "failed" && status.checks?.url ? (
+            <a className="underline underline-offset-2 hover:text-text-primary" href={status.checks.url} target="_blank" rel="noopener noreferrer">
+              See why
+            </a>
+          ) : null}
+        </p>
+      ) : null}
+
       {error ? (
         <p className="flex items-start gap-2 text-sm text-status-danger">
           <WarningCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -140,7 +167,7 @@ export default function UpdatePanel() {
 
       <div className="flex flex-wrap items-center gap-2">
         {status?.available || failed ? (
-          <Button variant="primary" size="sm" disabled={busy || status?.running} onClick={() => void apply()}>
+          <Button variant="primary" size="sm" disabled={busy || status?.running} onClick={() => (gated ? setAskFirst(true) : void apply())}>
             {status?.running ? (
               "Updating…"
             ) : (
@@ -162,6 +189,19 @@ export default function UpdatePanel() {
           </Button>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={askFirst}
+        onOpenChange={setAskFirst}
+        title="Update Kohlab?"
+        description="GitHub hasn't passed this version yet. Update anyway?"
+        confirmLabel="Update anyway"
+        tone="commit"
+        onConfirm={() => {
+          setAskFirst(false);
+          void apply();
+        }}
+      />
 
       <p className="text-sm leading-relaxed text-text-muted">
         Your projects keep running during the update. Kohlab restarts for a moment, and goes back to the old version by itself if the new one does not start.

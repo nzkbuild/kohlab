@@ -12,6 +12,7 @@ import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { cwd } from "process";
 import { stopBrowser, writeBrowserMcp } from "./browser";
+import { upstreamChecks, type GhRunner, type UpstreamChecks } from "./release-checks";
 import { noteKeep, openRoot, readHead } from "./brain";
 
 /**
@@ -340,7 +341,7 @@ export function grantReach(user: string, dir: string): void {
   grantTraverse(user, join(dir, "_")); // ponytail: the last name is a placeholder; grantTraverse starts at dir
 }
 
-async function grantAgentAccess(user: string, repo: string, workspaceDir: string): Promise<void> {
+export async function grantAgentAccess(user: string, repo: string, workspaceDir: string): Promise<void> {
   const gitDir = (await runOut(repo, "git", ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
   // The way to the repo AND the way to the workspace: the state directory is
   // often 0700, and the workspace is the one place the agent must be able to enter.
@@ -980,60 +981,17 @@ async function rotateAuditIfNeeded(): Promise<void> {
   }
 }
 
-/** Run tar in the state directory. Relative paths only, see restoreFrom. */
-function tar(args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const res = spawnSync("tar", args, { cwd: WORKS_DIR, encoding: "utf8" });
-  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+/**
+ * Back up everything Kohlab keeps (backup.ts). Kept here so existing callers
+ * keep working; the module is loaded on use, so lib.ts does not depend on it.
+ */
+export async function backupTo(target: string, opts?: { projects?: boolean; logins?: boolean }) {
+  return (await import("./backup")).backupTo(target, opts);
 }
 
-/**
- * Everything worth keeping in one archive: the state file, the member records,
- * the audit log, and every workspace's metadata (but not its work: that is git's
- * job, and it is in the repo the workspace was cloned from).
- *
- * Written with tar, and only the paths that exist, so a fresh install still
- * produces a valid archive.
- */
-export async function backupTo(target: string): Promise<{ path: string; bytes: number; entries: string[] }> {
-  await mkdir(WORKS_DIR, { recursive: true });
-  const entries = [STATE_FILE, USERS_FILE, AUDIT_FILE, KEY_FILE, join(WORKS_DIR, "vapid.json"), join(WORKS_DIR, "push.json")].filter((f) => existsSync(f));
-  if (!entries.length) throw new Error(`nothing to back up in ${WORKS_DIR}`);
-  const res = tar(["czf", target, "--", ...entries.map((f) => f.slice(WORKS_DIR.length + 1))]);
-  if (res.status !== 0) throw new Error(`tar failed: ${res.stderr.trim() || res.status}`);
-  const { size } = await stat(target);
-  await audit("cli", "backup", undefined, `${target} (${entries.length} files, ${Math.round(size / 1024)} KiB)`);
-  return { path: target, bytes: size, entries };
-}
-
-/**
- * Restore an archive over the current state directory.
- *
- * The current files are moved aside rather than deleted, so a wrong archive is
- * recoverable. There is no merge: a restore is a replacement, which is what the
- * word means.
- */
-export async function restoreFrom(archive: string): Promise<{ restored: string[]; movedAside: string[] }> {
-  if (!existsSync(archive)) throw new Error(`no such archive: ${archive}`);
-  const listing = tar(["tzf", archive]);
-  if (listing.status !== 0) throw new Error(`not a readable archive: ${listing.stderr.trim() || listing.status}`);
-  const members = listing.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
-
-  await mkdir(WORKS_DIR, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const movedAside: string[] = [];
-  for (const name of members) {
-    // Only flat names ever go in; refuse anything with a path in it.
-    if (name.includes("/") || name === "..") throw new Error(`refusing an archive with a path in it: ${name}`);
-    const target = join(WORKS_DIR, name);
-    if (existsSync(target)) {
-      await rename(target, `${target}.before-restore-${stamp}`);
-      movedAside.push(`${name}.before-restore-${stamp}`);
-    }
-  }
-  const res = tar(["xzf", archive]);
-  if (res.status !== 0) throw new Error(`extract failed: ${res.stderr.trim() || res.status}`);
-  await audit("cli", "restore", undefined, `${archive} (replaced ${movedAside.length} files)`);
-  return { restored: members, movedAside };
+/** Restore an archive over the state directory (backup.ts). */
+export async function restoreFrom(archive: string, opts?: { projects?: boolean; dryRun?: boolean }) {
+  return (await import("./backup")).restoreFrom(archive, opts);
 }
 
 /** Read the audit log (newest first, capped). */
@@ -1062,6 +1020,8 @@ export type ReleaseCheck = {
   head: string;
   checkedAt: number;
   error: string | null;
+  /** GitHub's checks for the upstream commit, only when an update is available; owner-only in the route. */
+  checks: UpstreamChecks | null;
 };
 
 export type UpdateRun = {
@@ -1119,7 +1079,7 @@ export function releaseNotes(changelog: string, version: string): string {
  * release" visible here: so it is cached (RELEASE_CHECK_TTL, default 5 min)
  * rather than run on every dashboard poll. `force` skips the cache.
  */
-export async function checkRelease(repo: string = REPO_ROOT, opts: { force?: boolean } = {}): Promise<ReleaseCheck> {
+export async function checkRelease(repo: string = REPO_ROOT, opts: { force?: boolean; checksRunner?: GhRunner } = {}): Promise<ReleaseCheck> {
   const cached = releaseCache.get(repo);
   if (!opts.force && cached && Date.now() - cached.at < RELEASE_TTL) return cached.value;
 
@@ -1133,6 +1093,7 @@ export async function checkRelease(repo: string = REPO_ROOT, opts: { force?: boo
     head: "",
     checkedAt: Date.now(),
     error: null,
+    checks: null,
   };
   try {
     value.head = (await runOut(repo, "git", ["rev-parse", "--short", "HEAD"])).stdout.trim();
@@ -1152,6 +1113,9 @@ export async function checkRelease(repo: string = REPO_ROOT, opts: { force?: boo
         value.commits = (await runOut(repo, "git", ["log", "--oneline", `HEAD..${up}`])).stdout.trim().split("\n").filter(Boolean);
         const changelog = (await runOut(repo, "git", ["show", `${up}:CHANGELOG.md`], [1, 128])).stdout;
         value.notes = releaseNotes(changelog, value.current);
+        const sha = (await runOut(repo, "git", ["rev-parse", up])).stdout.trim();
+        const origin = (await runOut(repo, "git", ["remote", "get-url", "origin"], [2, 128])).stdout.trim();
+        value.checks = await upstreamChecks(origin, sha, opts.checksRunner);
       }
     }
   } catch (e) {

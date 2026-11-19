@@ -112,11 +112,13 @@ try {
   run("corruption handling", "node", ["scripts/check-corruption.mjs"]);
   run("safe update (save → install → reload)", "node", ["scripts/check-update.mjs"]);
   run("release checking (OTA)", "bun", ["scripts/check-release.ts"]);
+  run("GitHub checks for an update (parser, gh gate, fail-soft)", "bun", ["scripts/check-release-checks.ts"]);
   run("cli surface", "node", ["scripts/check-cli.mjs"]);
   run("access bootstrap", "node", ["scripts/check-access.mjs"]);
   run("auth hardening (gate, throttle, rotation, socket key)", "node", ["scripts/check-auth-hardening.mjs"]);
   run("chat pictures (own sandbox route, auth, size cap)", "node", ["scripts/check-picture.mjs"]);
   run("durability (schema, backup, rotation, daemon health)", "node", ["scripts/check-durability.mjs"]);
+  run("backup drill (verify, corrupt, restore elsewhere, hostile archives, daily job, routes)", "node", ["scripts/check-backup.mjs"]);
   run("push encryption (RFC 8291 vector)", "bun", ["scripts/check-push-crypto.ts"]);
   run("push delivery (fake push service)", "node", ["scripts/check-push-delivery.mjs"]);
   run("push stays out of terminals", "node", ["scripts/check-push.mjs"]);
@@ -177,6 +179,8 @@ try {
   run("AI OpenCode (install, browser-code sign-in, keys, profiles, card, chat lane)", "bun", ["scripts/check-opencode.mjs"]);
   run("AI sign-in in the browser (one dialog, sign out, duplicate, chat button)", "node", ["scripts/check-signin-ui.mjs"]);
   run("AI OpenCode in the browser (install, connect, keys, switch, sign out, member view)", "node", ["scripts/check-opencode-ui.mjs"]);
+  run("update gate in the browser (passed, pending, failed, unknown; confirm first)", "node", ["scripts/check-update-gate-ui.mjs"]);
+  run("Settings → Backups in the browser (owner view, download, delete, failure, members)", "node", ["scripts/check-backups-ui.mjs"]);
   // Needs root, and creates two throwaway OS accounts that it removes again: it
   // skips itself with a printed reason when it cannot provision.
   run("per-user isolation (root)", "node", ["scripts/check-isolation.mjs"]);

@@ -6,11 +6,11 @@ import { accessSync, constants, readFileSync, writeFileSync } from "fs";
 import { hostname, networkInterfaces, userInfo } from "os";
 import { randomBytes } from "crypto";
 import { join } from "path";
+import { createInterface } from "readline";
+import { checksSentence } from "./release-checks";
 import {
   mergeWorkspace,
-  backupTo,
   ptyList,
-  restoreFrom,
   SCHEMA_VERSION,
   createWorkspace,
   deleteWorkspace,
@@ -39,6 +39,7 @@ import {
   grantReach,
   upsertEnvLine,
 } from "./lib";
+import { backupTo, restoreFrom, verifyArchive, type VerifyResult } from "./backup";
 
 const [cmd, ...args] = process.argv.slice(2);
 
@@ -124,8 +125,25 @@ async function main() {
       break;
     }
     case "update": {
+      // GitHub's checks first: a failed check asks (y/N) unless --yes. update.sh has no such flag, so --yes is stripped here.
+      const yes = args.includes("--yes");
+      const updateArgs = args.filter((a) => a !== "--yes");
+      if (!updateArgs.includes("--check")) {
+        const release = await checkRelease(undefined, { force: true }).catch(() => null);
+        const sentence = checksSentence(release?.checks);
+        if (release?.available && sentence) {
+          console.log(`${release.checks?.state === "passed" ? TICK : NOTE} ${sentence}${release.checks?.url ? dim(release.checks.url) : ""}`);
+        }
+        if (release?.available && release.checks?.state === "failed" && !yes) {
+          const answer = await askLine("Update anyway? [y/N] ");
+          if (!/^y(es)?$/i.test(answer.trim())) {
+            console.log("Not updated. Run kohlab update --yes to update anyway.");
+            process.exit(1);
+          }
+        }
+      }
       // save → check → download → install → build → reload, with rollback.
-      const p = spawn("bash", [`${import.meta.dir}/scripts/update.sh`, ...args], { stdio: "inherit", cwd: import.meta.dir });
+      const p = spawn("bash", [`${import.meta.dir}/scripts/update.sh`, ...updateArgs], { stdio: "inherit", cwd: import.meta.dir });
       p.on("exit", (code) => process.exit(code ?? 1));
       break;
     }
@@ -333,11 +351,24 @@ async function main() {
       break;
     }
     case "backup": {
-      const target = args[0] ?? `kohlab-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+      if (args[0] === "verify") {
+        if (!args[1]) usage("backup verify <archive.tar.gz>");
+        const v = await verifyArchive(args[1]);
+        printVerify(v);
+        if (!v.ok) process.exit(1);
+        break;
+      }
+      const target = args.find((a) => !a.startsWith("--")) ?? `kohlab-${new Date().toISOString().slice(0, 10)}.tar.gz`;
       try {
-        const r = await backupTo(target);
-        console.log(`backed up ${r.entries.length} files to ${r.path} (${Math.round(r.bytes / 1024)} KiB)`);
+        const r = await backupTo(target, { projects: !args.includes("--no-projects"), logins: args.includes("--with-logins") });
+        console.log(`backed up ${r.entries.length} entries to ${r.path} (${Math.round(r.bytes / 1024)} KiB)`);
+        console.log(`  ${r.counts.projects} projects, ${r.counts.chats} chats, ${r.counts.brains} brains`);
         for (const e of r.entries) console.log(`  ${e}`);
+        if (args.includes("--verify")) {
+          const v = await verifyArchive(target);
+          printVerify(v);
+          if (!v.ok) process.exit(1);
+        }
       } catch (e) {
         console.error(`backup failed: ${(e as Error).message}`);
         process.exit(1);
@@ -345,13 +376,23 @@ async function main() {
       break;
     }
     case "restore": {
-      if (!args[0]) usage("restore <archive.tar.gz>");
+      const file = args.find((a) => !a.startsWith("--"));
+      if (!file) {
+        usage("restore <archive.tar.gz> [--projects] [--dry-run]");
+        return;
+      }
+      const dryRun = args.includes("--dry-run");
       try {
-        const r = await restoreFrom(args[0]);
-        console.log(`restored ${r.restored.length} files from ${args[0]}`);
-        for (const m of r.movedAside) console.log(`  replaced: ${m}`);
-        if (r.movedAside.length) console.log("the previous files are still there, with a .before-restore-<time> suffix");
-        console.log("restart the server for a restored state.json to take effect");
+        const r = await restoreFrom(file, { projects: args.includes("--projects"), dryRun });
+        if (dryRun) console.log("dry run: nothing was changed. Would do:");
+        else console.log(`restored ${r.restored.length} items from ${file}`);
+        for (const n of r.restored) console.log(`  ${dryRun ? "restore" : "restored"}: ${n}`);
+        for (const m of r.movedAside) console.log(`  ${dryRun ? "replace" : "replaced"}: ${m}`);
+        for (const k of r.kept) console.log(`  kept: ws/${k} (its folder exists; --projects replaces it)`);
+        if (r.movedAside.length && !dryRun) console.log("the previous files are still there, with a .before-restore-<time> suffix");
+        for (const p of r.problems) console.error(`  problem: ${p}`);
+        if (!dryRun) console.log("restart the server for a restored state.json to take effect");
+        if (r.problems.length) process.exit(1);
       } catch (e) {
         console.error(`restore failed: ${(e as Error).message}`);
         process.exit(1);
@@ -611,6 +652,28 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
+/** One line from the terminal. Resolves "" when stdin is not a terminal or closes first, so nothing waits forever. */
+function askLine(question: string): Promise<string> {
+  if (!process.stdin.isTTY) return Promise.resolve("");
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.on("close", () => resolve(""));
+    rl.question(question, (answer) => {
+      resolve(answer);
+      rl.close();
+    });
+  });
+}
+
+function printVerify(v: VerifyResult) {
+  if (v.ok) {
+    console.log(`${v.counts.projects} projects, ${v.counts.chats} chats, all verified`);
+    return;
+  }
+  for (const p of v.problems) console.error(`  problem: ${p}`);
+  console.error(`verify failed: ${v.problems.length} problem${v.problems.length === 1 ? "" : "s"}`);
+}
+
 function usage(extra?: string, code = extra ? 1 : 0) {
   if (extra) console.error(`usage: kohlab ${extra}\n`);
   console.log(`kohlab, run AI coding agents in parallel, persistently, from any device
@@ -639,7 +702,7 @@ workspaces
 server
   serve                                      run the dashboard server (foreground)
   open                                       print the dashboard URLs
-  update [--check] [--force]                 update kohlab; running agents keep running
+  update [--check] [--force] [--yes]         update kohlab; running agents keep running
 
 access
   users                                      list team members
@@ -649,8 +712,11 @@ access
   ai-user setup [--name N] [--dry-run]       create the AI's account and point Kohlab at it (root)
   ai-user status                             which account the AI runs as, and whether it exists
   audit                                      the mutation audit trail
-  backup [file.tar.gz]                       state, users, audit trail -> one archive
+  backup [file.tar.gz]                       state, every project (repo, tree, brain, chats) -> one archive
+         [--no-projects] [--with-logins] [--verify]
+  backup verify <file.tar.gz>                check an archive without changing anything
   restore <file.tar.gz>                      put an archive back (previous files are kept)
+         [--projects] [--dry-run]
   health                                     is the daemon up? (answers locally)
   key                                        print the access key (from this box)
   key rotate                                 issue a new one and say how to apply it

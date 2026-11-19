@@ -4,7 +4,7 @@
 #   KOHLAB_BACKUP_DEST=user@host:backups/kohlab/ bash scripts/backup-offbox.sh
 #   KOHLAB_BACKUP_VIA=rclone KOHLAB_BACKUP_DEST=remote:kohlab bash scripts/backup-offbox.sh
 #
-# Uploads only; the destination keeps every archive until you prune it there.
+# Uploads only, and only an archive that verifies. The destination keeps every archive until you prune it there.
 set -euo pipefail
 
 DEST="${KOHLAB_BACKUP_DEST:?set KOHLAB_BACKUP_DEST, e.g. user@host:backups/kohlab/ (rsync) or remote:path (rclone)}"
@@ -16,7 +16,7 @@ trap 'rm -rf "$tmp"' EXIT
 file="$tmp/kohlab-$(date +%Y%m%d-%H%M%S).tar.gz"
 
 # shellcheck disable=SC2086  # KOHLAB_BIN may be a command with arguments
-$KOHLAB backup "$file" >/dev/null
+$KOHLAB backup "$file" --verify >/dev/null   # a copy that does not verify is never sent
 case "$VIA" in
   rsync)  rsync -a --chmod=F600 "$file" "$DEST" ;;
   rclone) rclone copy "$file" "$DEST" ;;

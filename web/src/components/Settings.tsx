@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowsClockwise, Bell, BellRinging, SignOut, Sparkle, SlidersHorizontal, UserCircle, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, FloppyDisk, SignOut, Sparkle, SlidersHorizontal, UserCircle, WarningCircle } from "@phosphor-icons/react";
 import type { SettingsSection } from "../lib/route";
 import { useApp, useCan } from "../store";
 import { clearKey } from "../api";
@@ -8,6 +8,7 @@ import { cn } from "../lib/utils";
 import ProvidersPane from "./ProvidersPane";
 import PushToggle from "./PushToggle";
 import UpdatePanel from "./UpdatePanel";
+import BackupsPanel from "./BackupsPanel";
 import { Button, PageHeader, Panel, Tab, TabList, Tabs } from "./ui";
 
 const PAUSE_KEY = "kohlab_announce_paused";
@@ -29,14 +30,17 @@ const PERMISSION_CHIP: Record<Permission, string> = {
   denied: "chip-danger",
 };
 
-/** Only the sections a non-technical person needs. Updates is owner-only. */
+/** Only the sections a non-technical person needs. Updates and Backups are owner-only. */
 const SECTIONS: { id: SettingsSection; label: string; hint: string; icon: typeof Bell }[] = [
   { id: "account", label: "Account", hint: "Who is signed in on this computer.", icon: UserCircle },
   { id: "appearance", label: "Appearance", hint: "How the project page looks.", icon: SlidersHorizontal },
   { id: "agents", label: "AI", hint: "Who is signed in, what is left, and what each AI can do.", icon: Sparkle },
   { id: "notifications", label: "Notifications", hint: "What reaches you when Kohlab is in the background.", icon: Bell },
   { id: "updates", label: "Updates", hint: "New versions of Kohlab.", icon: ArrowsClockwise },
+  { id: "backups", label: "Backups", hint: "Copies of your projects, chats and notes.", icon: FloppyDisk },
 ];
+
+const OWNER_ONLY: SettingsSection[] = ["updates", "backups"];
 
 /** Account: sign out is the only thing here. Keys are not something people manage by hand. */
 function AccountPane() {
@@ -123,8 +127,9 @@ export default function Settings() {
 
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
-  // Updates are owner-only: nobody else is shown a page the server would refuse.
-  const sections = SECTIONS.filter((x) => x.id !== "updates" || can.own);
+  // Updates and Backups are owner-only: nobody else is shown a page the server would refuse.
+  const me = useApp((s) => s.me);
+  const sections = SECTIONS.filter((x) => !OWNER_ONLY.includes(x.id) || can.own);
   const wanted = route.kind === "settings" ? route.section : undefined;
   const active = sections.find((x) => x.id === wanted) ?? sections[0];
   // A link to a section that is not here (or not for this person) shows the first one, and the address says so too.
@@ -195,6 +200,12 @@ export default function Settings() {
         <UpdatePanel />
       </Panel>
     ),
+    // Mounted only once the account says "owner": before it loads, can.own is optimistic and a member must not fetch the list.
+    backups: me?.role === "owner" ? (
+      <Panel>
+        <BackupsPanel />
+      </Panel>
+    ) : null,
   };
 
   return (

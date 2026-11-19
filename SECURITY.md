@@ -150,10 +150,17 @@ file.
 - **Residual risk (measured, spike S4):** Claude's Bash tool sees the process environment,
   so the AI can read, and could be tricked into printing, its router key. Use a revocable
   router key made for Kohlab, and rotate it if a chat may have leaked it.
-- **Backups:** `kohlab backup` archives a fixed list of files (state, members, audit log,
-  key, push files). `accounts/` is not in it, so `scripts/backup-offbox.sh` never sends
-  router keys or sign-in folders off the machine. To keep them, back up
-  `<works>/accounts/` yourself, to a place only you can read.
+- **Backups:** an archive holds the state files, every project (repository bundle, working
+  tree, brain, chats) and `meta.json`. Never in it: `accounts/secrets.json` (router keys) and
+  the AI sign-in folders under `accounts/`, so `scripts/backup-offbox.sh` never sends them off
+  the machine; `--with-logins` adds only the account list. `kohlab backup` includes the owner's
+  access key (`key`); the daily archives in `<works>/backups/` (folder 0700, files 0600, owner-only
+  routes, `no-store`) leave it out, because they can be downloaded. Restore treats the archive
+  as untrusted: it validates every member name, link, size and workspace id, extracts into a
+  private staging folder without owners or permissions, builds repositories only by fetching
+  the bundle (no hooks, no `.git` from the archive) and recomputes every path in `state.json`.
+  Restore with the server stopped. To keep logins, back up `<works>/accounts/` yourself, to a
+  place only you can read.
 
 ## Full access and "Always allow"
 

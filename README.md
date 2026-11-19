@@ -86,6 +86,7 @@ kohlab commit <id> "message"
 kohlab remove <id>
 kohlab open                                     # the dashboard URL
 kohlab update                                   # update kohlab, agents keep running
+kohlab backup --verify                          # every project, chats and notes in one checked archive (docs/backup.md)
 ```
 
 Names are standard, and the old ones still work as aliases:

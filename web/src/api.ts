@@ -1,4 +1,4 @@
-import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BrainGraph, BrainHit, BrainNote, NoteType, OpenCodeConnection, OpenCodeInstall, OpenCodeMethod, OpenCodeService, OpenCodeSignIn, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
+import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BackupList, BrainGraph, BrainHit, BrainNote, NoteType, OpenCodeConnection, OpenCodeInstall, OpenCodeMethod, OpenCodeService, OpenCodeSignIn, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
 
 import type { Effort, Mode, PreviewPage } from "./types";
 import type { Budget, Team, TeamEvent } from "./team-types";
@@ -268,6 +268,24 @@ export const api = {
       throw new Error((body as { error?: string }).error || res.statusText);
     }
     saveAs(await res.blob(), "project-brain.tar.gz");
+  },
+  /** Settings → Backups (owner only). The list, a run now (409 while one runs), a download, a delete. */
+  backups: () => json<BackupList>("/api/backups"),
+  backupNow: () => json<BackupList>("/api/backups", { method: "POST" }),
+  downloadBackup: async (name: string): Promise<void> => {
+    const res = await req(`/api/backups/${encodeURIComponent(name)}/download`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || res.statusText);
+    }
+    saveAs(await res.blob(), name);
+  },
+  deleteBackup: async (name: string): Promise<void> => {
+    const res = await req(`/api/backups/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || res.statusText);
+    }
   },
   /** Warms the reads a project's first paint needs. Called when its sidebar row is hovered or focused. */
   prefetchProject: (id: string, chat: boolean): void => {

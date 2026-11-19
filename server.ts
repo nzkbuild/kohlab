@@ -105,6 +105,7 @@ import { acpBin, isAcpAgent } from "./acp";
 import { addKey, connectionView, forgetOpencodeProfile, installStatus, logoutConnection, MAIN_OPENCODE, methodsOf, opencodeBin, POPULAR_INTEGRATIONS, signInStateOf, startInstall, startOpencodeSignIn, stopOpencodeSignIns, switchConnection } from "./opencode";
 import { AccountError, MAIN_CLAUDE, accountView, addCustomModel, createLogin, createRouter, getAccount, grantAccountsReach, listAccounts, remove as removeAccount, removeCustomModel, renameAccount, renameModel, setKey, signInState, signOutClaude, startSignIn, stopSignIns, submitCode, testRouter } from "./accounts";
 import { patchDefaults } from "./defaults";
+import { backupFilePath, backupStatus, deleteBackup, isBackupRunning, runBackup, startDailyBackups } from "./backup";
 import { KohlabError, mergeRelease, newKohlabProject, openRelease, releaseState, scrub } from "./kohlab";
 import { cleanRules, describeRule } from "./policy";
 import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, noteRecalled, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
@@ -265,9 +266,40 @@ async function mayAccessWorkspace(auth: { kind?: string; id?: string; role?: str
 }
 startWatcher();
 restoreWaiting();
+startDailyBackups();
 void resumeTeams().catch((e) => console.warn(`[team] resume: ${(e as Error).message}`));
 
 
+
+/** The backups API. The caller has checked the owner. Names are matched, never joined into a path. */
+async function handleBackups(req: Request, path: string, actor: string): Promise<Response> {
+  const download = /^\/api\/backups\/([^/]+)\/download$/.exec(path);
+  if (download && req.method === "GET") {
+    const file = backupFilePath(download[1]);
+    if (!file || !(await Bun.file(file).exists())) return json({ error: "no such backup" }, 404);
+    return new Response(Bun.file(file), {
+      headers: {
+        "content-type": "application/gzip",
+        "content-disposition": `attachment; filename="${download[1]}"`,
+        "cache-control": "no-store",
+      },
+    });
+  }
+  const one = /^\/api\/backups\/([^/]+)$/.exec(path);
+  if (one && req.method === "DELETE") {
+    if (!(await deleteBackup(one[1]))) return json({ error: "no such backup" }, 404);
+    containFailure(audit(actor, "backup.delete", undefined, one[1]), "audit");
+    return json(await backupStatus());
+  }
+  if (path === "/api/backups" && req.method === "GET") return json(await backupStatus());
+  if (path === "/api/backups" && req.method === "POST") {
+    if (isBackupRunning()) return json({ error: "a backup is already running" }, 409);
+    // Not awaited: a backup of a big install outlasts the connection. The panel polls GET for the result.
+    void runBackup({ actor, reason: "manual" });
+    return json(await backupStatus());
+  }
+  return json({ error: "not found" }, 404);
+}
 
 /** Change Kohlab itself: the owner's Release panel for a Kohlab project (kohlab.ts). The caller has checked the owner. */
 async function handleKohlabRelease(id: string, req: Request, actor: string): Promise<Response> {
@@ -2628,11 +2660,20 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       if (refused) return refused;
       return handleGhRepos();
     }
+    // Backups (backup.ts): owner only, and a share token is refused like any other non-owner.
+    if (path === "/api/backups" || path.startsWith("/api/backups/")) {
+      if (shareIdRes || auth?.kind === "share") return json({ error: "forbidden, share links cannot see backups" }, 403);
+      const refused = gate(isOwner, "forbidden, only an owner can manage backups");
+      if (refused) return refused;
+      return handleBackups(req, path, actor);
+    }
     // OTA: what the pushed upstream publishes, and (owner only) apply it.
     if (path === "/api/release") {
       if (denied) return json({ error: "unauthorized" }, 401);
       const force = url.searchParams.get("force") === "1";
-      return json({ ...(await checkRelease(undefined, { force })), ...(await updateRunState()) });
+      // GitHub's checks for the upstream commit are owner-only; everyone else gets the rest of the status.
+      const { checks, ...release } = await checkRelease(undefined, { force });
+      return json({ ...release, ...(isOwner ? { checks } : {}), ...(await updateRunState()) });
     }
     if (path === "/api/release/update" && req.method === "POST") {
       // Updating rewrites the checkout and restarts the service, so it is an

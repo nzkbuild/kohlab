@@ -27,6 +27,32 @@ the same thing from a terminal.
   in `$WORKS_DIR/update.log` and the panel reads the outcome back from there.
   A run that stops without finishing is shown as unfinished, with its log.
 
+### GitHub's checks on the new version
+
+The server also asks GitHub what its checks say about the upstream commit
+(`gh api repos/<owner>/<name>/commits/<sha>/check-runs`, 8 seconds, cached about a
+minute). The owner sees one of these in Settings → Updates and in `kohlab update`:
+
+- **GitHub's checks passed**: "Update now" goes straight through.
+- **GitHub is still checking this version**: "Update now" asks first.
+- **GitHub's checks failed for this version**: "See why" links to the GitHub page,
+  and "Update now" asks first. `kohlab update` asks `y/N` (`--yes` skips it).
+- Nothing is said when GitHub cannot be asked (no `gh`, not signed in, offline, or
+  an origin that is not on GitHub). Then the update is not gated.
+
+This is a warning, not a lock: `scripts/update.sh` itself is not gated, because
+the rollback is the safety net. Nothing about GitHub's settings is changed.
+
+If you want GitHub to refuse merges until the check passes, that is a setting on
+the repository's `main` branch, not something Kohlab does for you. Branch
+protection must already be on for `main`; then, as an option, the GitHub CLI can
+require a check by its name (replace the owner, name and check name):
+
+```bash
+gh api -X PATCH repos/<owner>/<name>/branches/main/protection/required_status_checks \
+  -F strict=true -f 'contexts[]=<check name>'
+```
+
 ```bash
 kohlab update           # or: bash scripts/update.sh
 kohlab update --check   # say what would happen, change nothing

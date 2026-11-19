@@ -168,6 +168,27 @@ export interface ReleaseStatus {
   /** stopped without writing its finish marker: killed, or it never started */
   unfinished: boolean;
   log: string;
+  /** GitHub's checks for the upstream commit. Owner-only: absent for everyone else. */
+  checks?: { state: "passed" | "pending" | "failed" | "unknown"; url?: string; sha: string } | null;
+}
+
+/** Settings → Backups: GET /api/backups (owner only). */
+export interface BackupLast {
+  at: number;
+  name: string;
+  bytes: number;
+  ok: boolean;
+  verified: boolean;
+  counts: { projects: number; chats: number; brains: number };
+  error?: string;
+}
+
+export interface BackupList {
+  last: BackupLast | null;
+  keep: number;
+  daily: boolean;
+  items: { name: string; at: number; bytes: number }[];
+  running: boolean;
 }
 
 /* ------------------------------------------------------------- AI hub -- */
