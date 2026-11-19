@@ -9,6 +9,18 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.9.4] - 2026-11-19
+
+### Fixed
+- **The AI no longer quietly runs as root.** If the AI user named in the settings doesn't exist, Kohlab now refuses to start an AI or sign one in, with a plain message and the fix. If it was simply never set up, Settings → AI shows a clear notice with the exact command to copy.
+- **The one-time pairing code now has a guess limit,** like your key. Wrong, spent, expired and blocked attempts all look the same. Codes are 10 characters (about 43 bits) instead of 8.
+- **Member changes are logged as who made them** (adding, inviting, changing a role, removing), instead of "system".
+- Test runs no longer leave permission entries and test accounts behind.
+
+### Added
+- `kohlab ai-user setup` creates the AI user and sets it as the AI's account in one step (`--dry-run` shows what it would do, `kohlab ai-user status` shows the current state). New installs do this by default (`--no-ai-user` skips it).
+- `scripts/leftovers.mjs` lists leftover test accounts, folders, permission entries and stray helper processes on a machine. It only lists unless you add `--apply`, and it never removes a folder that a project uses.
+
 ## [2.9.3] - 2026-11-17
 
 ### Added
