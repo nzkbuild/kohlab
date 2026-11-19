@@ -9,6 +9,18 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.10.0] - 2026-11-19
+
+### Added
+- **Preview lists a project's pages instead of "not found".** When a project has no front page, opening Preview shows "Pages in this project", newest first, one click each.
+- **A web page file opens as a page.** In Files, an `.html` file has a **Page | Code** switch (Page first), and "View as page" appears on changed `.html` files in Changes. Code is one click away.
+- **Look opens the page that changed,** not just the front page.
+- **Preview remembers your last page** for each project, and a new **Pages** entry in its menu jumps to any page.
+
+### Fixed
+- With Preview open at narrower window sizes, the chat panel no longer covers the editor's Code tab in Files.
+- Page titles with `&amp;` and similar now read correctly.
+
 ## [2.9.4] - 2026-11-19
 
 ### Fixed
