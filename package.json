@@ -1,6 +1,6 @@
 {
   "name": "kohlab",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "description": "Run your AI coding agents in parallel, persistently, from any device.",
   "license": "MIT",
   "type": "module",

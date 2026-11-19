@@ -9,6 +9,16 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.11.0] - 2026-11-19
+
+### Added
+- **A softer look, on by default.** A restrained periwinkle accent and warm neutrals. Settings → Appearance → **Colour** switches between **Soft** and **Plain**; Plain is exactly the old look. The choice follows your account on every device, and the page loads in the right colour with no flash.
+- **Settings → AI shows who can do what.** A status tile for each AI (Signed in, Not signed in, Not installed, Limit reached, with its account count), the plan meters, and a **What it can do** grid: Sees pictures, Uses the web, Runs code, Connected apps, Thinks longer, Remembers this project, Works in a team, Plans first. Every tile is backed by something Kohlab really does for that AI, and says "depends" or "summary only" where that is the honest answer.
+- **The model menu says what each model is for** ("Strongest · for big or tricky work", "Everyday · a good default for building", "Quickest · for small edits and questions"). The model names stay.
+
+### Changed
+- Settings → AI shows one AI at a time (pick it from the tiles on top), and folds away extra accounts beyond three. Sentences that repeated their headings are gone; every control and every error message stays.
+
 ## [2.10.0] - 2026-11-19
 
 ### Added
