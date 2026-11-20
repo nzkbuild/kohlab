@@ -9,6 +9,13 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.13.0] - 2026-11-20
+
+### Added
+- **Recently deleted.** Deleting a project now moves it to Recently deleted for 30 days instead of erasing it. Its files, chats and notes stay put, and its preview and share links stop working until you restore it. An **Undo** appears right after deleting; Settings → Recently deleted lists everything with **Restore** and **Delete forever**. Projects are erased for good only after 30 days (`KOHLAB_TRASH_DAYS`, 0 keeps them for ever) or when you choose Delete forever.
+- `kohlab rm <id>` moves to Recently deleted (`--forever` erases), `kohlab trash` lists, `kohlab restore-project <id>` restores.
+- Backups include Recently deleted projects.
+
 ## [2.12.1] - 2026-11-19
 
 ### Fixed
