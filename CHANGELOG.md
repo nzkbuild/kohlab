@@ -9,6 +9,16 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.14.0] - 2026-11-20
+
+### Added
+- **A "new version is ready" bar.** Kohlab now announces its version on every reply. If you're running an older copy of the app after an update, a slim bar says "A new version of Kohlab is ready" with a **Reload** button. It never reloads by itself while you have an unsent message or an upload running. A part of the app that fails to load after an update shows the same bar instead of a dead pane.
+- Old app files are kept for 14 days after an update (and anything the current version still uses is always kept), so a tab that hasn't reloaded keeps working until you press Reload.
+
+### Changed
+- The test suite now fails by name when the built app is older than its code, and fails if the build target changes, so what is tested is what ships.
+- The old built-in dashboard fallback is replaced by a short static "Kohlab is updating" page.
+
 ## [2.13.0] - 2026-11-20
 
 ### Added
