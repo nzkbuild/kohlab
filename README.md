@@ -83,7 +83,10 @@ kohlab start | stop | restart <id>
 kohlab logs <id>                                # what the agent printed
 kohlab diff <id>                                # review before you merge
 kohlab commit <id> "message"
-kohlab remove <id>
+kohlab remove <id>                        # moves it to Recently deleted (30 days)
+kohlab trash                              # what is in Recently deleted
+kohlab restore-project <id>               # bring it back, stopped
+kohlab remove <id> --forever              # delete it for good
 kohlab open                                     # the dashboard URL
 kohlab update                                   # update kohlab, agents keep running
 kohlab backup --verify                          # every project, chats and notes in one checked archive (docs/backup.md)

@@ -119,6 +119,8 @@ try {
   run("chat pictures (own sandbox route, auth, size cap)", "node", ["scripts/check-picture.mjs"]);
   run("durability (schema, backup, rotation, daemon health)", "node", ["scripts/check-durability.mjs"]);
   run("backup drill (verify, corrupt, restore elsewhere, hostile archives, daily job, routes)", "node", ["scripts/check-backup.mjs"]);
+  run("Recently deleted (trash, restore, forever, purge, ownership, CLI, auto purge)", "node", ["scripts/check-trash.mjs"]);
+  run("Recently deleted screen (Settings list, Undo toast, confirm copy)", "node", ["scripts/check-trash-ui.mjs"]);
   run("push encryption (RFC 8291 vector)", "bun", ["scripts/check-push-crypto.ts"]);
   run("push delivery (fake push service)", "node", ["scripts/check-push-delivery.mjs"]);
   run("push stays out of terminals", "node", ["scripts/check-push.mjs"]);

@@ -12,6 +12,12 @@ import { basename, isAbsolute, join, relative, resolve } from "path";
 import {
   createWorkspace,
   deleteWorkspace,
+  trashWorkspace,
+  restoreWorkspace,
+  purgeWorkspace,
+  trashItem,
+  trashDays,
+  startTrashPurge,
   getDiff,
   getWorkspace,
   listWorkspaces,
@@ -109,7 +115,7 @@ import { backupFilePath, backupStatus, deleteBackup, isBackupRunning, runBackup,
 import { KohlabError, mergeRelease, newKohlabProject, openRelease, releaseState, scrub } from "./kohlab";
 import { cleanRules, describeRule } from "./policy";
 import { ChatError, answer as answerChat, chatBranch, chatControl, chatGoBack, chatTurn, forgetAccount, forgetProbe, noteChat, noteRecalled, restoreWaiting, send as sendChat, sessions as chatSessions, snapshot as chatSnapshot, switchSession, ownerPlanUsage, runInfo } from "./chat";
-import { TeamError, resumeTeams, teamActive, teamCleanup, teamGet, teamPost, teamToolCall } from "./team";
+import { TeamError, resumeTeams, teamActive, teamCleanup, teamGet, teamHaltForTrash, teamPost, teamToolCall } from "./team";
 
 const PORT = Number(process.env.PORT ?? 7676);
 grantAccountsReach(); // repairs an install whose accounts root predates the agent's reach into it
@@ -267,6 +273,7 @@ async function mayAccessWorkspace(auth: { kind?: string; id?: string; role?: str
 startWatcher();
 restoreWaiting();
 startDailyBackups();
+startTrashPurge();
 void resumeTeams().catch((e) => console.warn(`[team] resume: ${(e as Error).message}`));
 
 
@@ -810,6 +817,34 @@ async function handleDelete(id: string): Promise<Response> {
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
+}
+
+/**
+ * DELETE /api/workspaces/:id. A project moves to Recently deleted; `forever` deletes it for good, as POST .../delete
+ * always did. A hidden or system workspace has no Recently deleted and takes the hard path.
+ */
+async function handleRemove(id: string, forever: boolean, actor: string): Promise<Response> {
+  try {
+    const ws = (await loadState()).workspaces.find((w) => w.id === id);
+    if (!ws) return json({ error: "no such project" }, 404);
+    if (forever || ws.team || ws.serverShell) {
+      containFailure(audit(actor, "workspace.delete", id), "audit");
+      return handleDelete(id);
+    }
+    await teamHaltForTrash(id);
+    const moved = await trashWorkspace(id, actor);
+    containFailure(audit(actor, "workspace.trash", id), "audit");
+    return json({ ok: true, item: trashItem(moved) });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+}
+
+/** Whether a caller may see or act on one Recently deleted record: the same rule as mayAccessWorkspace, on the record. */
+function mayTouchRecord(auth: { kind?: string; id?: string; role?: string | null } | null, ws: Workspace): boolean {
+  if (!auth || auth.kind !== "user") return true;
+  if (auth.role === "owner") return true;
+  return !!ws.ownerId && ws.ownerId === auth.id;
 }
 
 async function handleDiff(id: string): Promise<Response> {
@@ -2745,6 +2780,48 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       const refused = gate(canMutate, "forbidden, viewer cannot create workspaces");
       if (refused) return refused;
       return handleCreate(req, actorUserId);
+    }
+    // Recently deleted (lib.ts trashWorkspace). A share link is refused on every route here. Same gates as the other project routes.
+    const projectM = path.match(/^\/api\/workspaces\/([^/]+)$/);
+    if (projectM && req.method === "DELETE") {
+      if (auth?.kind === "share" || url.searchParams.has("share")) return json({ error: "forbidden, a shared link cannot delete a project" }, 403);
+      if (!(await mayAccessWorkspace(auth, projectM[1]))) return json({ error: "forbidden, not your workspace" }, 403);
+      const refused = gate(canMutate, "forbidden, viewer cannot delete");
+      if (refused) return refused;
+      return handleRemove(projectM[1], url.searchParams.get("forever") === "1", actor);
+    }
+    if (path === "/api/trash" || path.startsWith("/api/trash/")) {
+      if (auth?.kind === "share" || url.searchParams.has("share")) return json({ error: "forbidden, a shared link cannot see Recently deleted" }, 403);
+      const trashM = path.match(/^\/api\/trash\/([^/]+)(\/restore)?$/);
+      if (path === "/api/trash" && req.method === "GET") {
+        if (denied) return json({ error: "unauthorized" }, 401);
+        const days = trashDays();
+        const visible = ((await loadState()).trashed ?? []).filter((w) => mayTouchRecord(auth, w));
+        return json({ items: visible.map((w) => trashItem(w, days)), days });
+      }
+      if (trashM && (trashM[2] ? req.method === "POST" : req.method === "DELETE")) {
+        const tid = trashM[1];
+        const rec = ((await loadState()).trashed ?? []).find((w) => w.id === tid);
+        if (!rec) return json({ error: "no such project in Recently deleted" }, 404);
+        if (!mayTouchRecord(auth, rec)) return json({ error: "forbidden, not your workspace" }, 403);
+        const refused = gate(canMutate, "forbidden, viewer cannot restore or delete");
+        if (refused) return refused;
+        if (trashM[2]) {
+          try {
+            const back = await restoreWorkspace(tid);
+            containFailure(audit(actor, "workspace.restore", tid), "audit");
+            return json(clientView(back));
+          } catch (e) {
+            return json({ error: (e as Error).message }, 409);
+          }
+        }
+        containFailure(audit(actor, "workspace.delete", tid), "audit");
+        try {
+          return json(await purgeWorkspace(tid));
+        } catch (e) {
+          return json({ error: (e as Error).message }, 400);
+        }
+      }
     }
     // The server terminal: its hidden workspace is made on first use. Owner only; a share link is refused as one.
     if (path === "/api/server-shell" && req.method === "POST") {

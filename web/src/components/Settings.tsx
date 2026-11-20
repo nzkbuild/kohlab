@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowsClockwise, Bell, BellRinging, FloppyDisk, SignOut, Sparkle, SlidersHorizontal, UserCircle, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, FloppyDisk, SignOut, Sparkle, SlidersHorizontal, Trash, UserCircle, WarningCircle } from "@phosphor-icons/react";
 import type { SettingsSection } from "../lib/route";
 import { useApp, useCan } from "../store";
 import { clearKey } from "../api";
@@ -9,6 +9,7 @@ import ProvidersPane from "./ProvidersPane";
 import PushToggle from "./PushToggle";
 import UpdatePanel from "./UpdatePanel";
 import BackupsPanel from "./BackupsPanel";
+import TrashPane from "./TrashPane";
 import { Button, PageHeader, Panel, Tab, TabList, Tabs } from "./ui";
 
 const PAUSE_KEY = "kohlab_announce_paused";
@@ -36,6 +37,7 @@ const SECTIONS: { id: SettingsSection; label: string; hint: string; icon: typeof
   { id: "appearance", label: "Appearance", hint: "How the project page looks.", icon: SlidersHorizontal },
   { id: "agents", label: "AI", hint: "Who is signed in, what is left, and what each AI can do.", icon: Sparkle },
   { id: "notifications", label: "Notifications", hint: "What reaches you when Kohlab is in the background.", icon: Bell },
+  { id: "trash", label: "Recently deleted", hint: "Deleted projects wait here before they are removed for good.", icon: Trash },
   { id: "updates", label: "Updates", hint: "New versions of Kohlab.", icon: ArrowsClockwise },
   { id: "backups", label: "Backups", hint: "Copies of your projects, chats and notes.", icon: FloppyDisk },
 ];
@@ -195,6 +197,11 @@ export default function Settings() {
     appearance: <AppearancePane />,
     agents: <ProvidersPane owner={can.own} />,
     notifications,
+    trash: (
+      <Panel>
+        <TrashPane />
+      </Panel>
+    ),
     updates: (
       <Panel>
         <UpdatePanel />

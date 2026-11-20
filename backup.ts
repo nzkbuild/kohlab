@@ -88,6 +88,8 @@ export type WsMeta = {
   images: Part | null;
   chats: string[];
   skipped: Skipped;
+  /** Recently deleted when the archive was made: its files are archived like a live project's, and restore puts it back in the trash. */
+  trashed?: true;
 };
 type Meta = { format: number; kohlabVersion: string; createdAt: string; worksDir: string; includes: Record<string, unknown>; workspaces: WsMeta[] };
 
@@ -346,9 +348,15 @@ async function writeArchiveLocked(target: string, opts: BackupOptions = {}): Pro
 
     const workspaces: WsMeta[] = [];
     if (projects) {
-      for (const ws of state.workspaces) {
+      const live: [Workspace, true | undefined][] = [
+        ...state.workspaces.map((ws): [Workspace, true | undefined] => [ws, undefined]),
+        ...(state.trashed ?? []).map((ws): [Workspace, true | undefined] => [ws, true]),
+      ];
+      for (const [ws, trashed] of live) {
         if (ws.serverShell || ws.id === SERVER_SHELL_ID) continue;
-        workspaces.push(await archiveWorkspace(ws, staging));
+        const meta = await archiveWorkspace(ws, staging);
+        if (trashed) meta.trashed = trashed;
+        workspaces.push(meta);
       }
       if (workspaces.length) names.push("ws");
     }
@@ -559,10 +567,14 @@ async function checkWorkspace(w: WsMeta, dir: string, gitDir: string, counts: Co
 }
 
 /** Everything in an extracted archive: state, meta, and each workspace's parts. */
-async function checkStaged(dir: string): Promise<{ state: { workspaces: Workspace[] } | null; meta: Meta | null; problems: string[]; counts: Counts }> {
+/** The part of state.json a backup reads: live projects and Recently deleted ones. */
+type StateLike = { workspaces: Workspace[]; trashed?: Workspace[] };
+const allRecords = (s: StateLike): Workspace[] => [...s.workspaces, ...(s.trashed ?? [])];
+
+async function checkStaged(dir: string): Promise<{ state: StateLike | null; meta: Meta | null; problems: string[]; counts: Counts }> {
   const problems: string[] = [];
   const counts = zero();
-  let state: { workspaces: Workspace[] } | null = null;
+  let state: StateLike | null = null;
   const sp = join(dir, "state.json");
   if (!existsSync(sp)) problems.push("no state.json in the archive");
   else {
@@ -592,7 +604,7 @@ async function checkStaged(dir: string): Promise<{ state: { workspaces: Workspac
       for (const w of meta.workspaces) problems.push(...(await checkWorkspace(w, dir, gitDir, counts)));
       if (meta.includes?.projects && state) {
         const have = new Set(meta.workspaces.map((w) => w.id));
-        for (const ws of state.workspaces) {
+        for (const ws of allRecords(state)) {
           if (ws.serverShell || ws.id === SERVER_SHELL_ID) continue;
           if (!have.has(ws.id)) problems.push(`the state lists ${ws.id} but the archive has no data for it`);
         }
@@ -682,13 +694,13 @@ function realIsolatedUser(u: { id: string; uid?: number; gid?: number; home?: st
  * state directory, or the member's own /home/<osUser>/works), and a brain folder
  * only counts when it sits below one of those.
  */
-function sanitizeState(state: { workspaces: Workspace[] }, usersFile: string): void {
+function sanitizeState(state: StateLike, usersFile: string): void {
   let users: { id: string; uid?: number; gid?: number; home?: string; osUser?: string }[] = [];
   try {
     users = JSON.parse(readFileSync(usersFile, "utf8")).users ?? [];
   } catch {}
   const roots = [resolve(WORKS_DIR), ...users.map((u) => realIsolatedUser(u)).filter(Boolean).map((u) => join(u!.home!, "works"))];
-  for (const ws of state.workspaces) {
+  for (const ws of allRecords(state)) {
     if (typeof ws?.id !== "string" || !ID_RE.test(ws.id)) throw new Error(`refusing the archive, nothing was changed: a workspace has a bad id`);
     if (ws.serverShell) continue;
     if (ws.dir !== undefined) {
@@ -751,7 +763,7 @@ export async function restoreFrom(archive: string, opts: RestoreOptions = {}): P
     const stateFiles = [...STATE_NAMES, "accounts/accounts.json"].filter((n) => existsSync(join(scratch, n)));
 
     const jobs: { ws: Workspace; m: WsMeta; D: string; replaces: boolean }[] = [];
-    for (const ws of state.workspaces) {
+    for (const ws of allRecords(state)) {
       if (ws.serverShell || ws.id === SERVER_SHELL_ID) continue;
       const m = metaWs.get(ws.id);
       if (!m) continue;

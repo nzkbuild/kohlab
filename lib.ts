@@ -12,6 +12,7 @@ import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { cwd } from "process";
 import { stopBrowser, writeBrowserMcp } from "./browser";
+import { stopDevServer } from "./devserver";
 import { upstreamChecks, type GhRunner, type UpstreamChecks } from "./release-checks";
 import { noteKeep, openRoot, readHead } from "./brain";
 
@@ -1546,6 +1547,8 @@ interface State {
    */
   schemaVersion?: number;
   workspaces: Workspace[];
+  /** Recently deleted projects (trashWorkspace). Their files stay on disk until purged. Additive: an older build ignores it. */
+  trashed?: Workspace[];
   agents: Record<string, string>;
   /** Per-account preferences, keyed by account id. */
   prefs?: Record<string, AccountPrefs>;
@@ -1572,7 +1575,7 @@ async function loadState(): Promise<State> {
   if (!existsSync(STATE_FILE)) {
     // Stamped from the first write, so a fresh install does not need the
     // migrate-and-save pass below on its very next read.
-    const s: State = { schemaVersion: SCHEMA_VERSION, workspaces: [], agents: { ...DEFAULT_AGENTS } };
+    const s: State = { schemaVersion: SCHEMA_VERSION, workspaces: [], trashed: [], agents: { ...DEFAULT_AGENTS } };
     await saveState(s);
     return s;
   }
@@ -1619,6 +1622,7 @@ async function migrateState(s: State, file: string): Promise<State> {
     throw error;
   }
   s.agents = { ...DEFAULT_AGENTS, ...s.agents }; // new built-ins reach old state files
+  s.trashed ??= []; // state from before Recently deleted has no trash: it loads empty, and the next save writes the list
   if (found < SCHEMA_VERSION) {
     s.schemaVersion = SCHEMA_VERSION;
     // Awaited, deliberately. This is a read that writes, and an unawaited write
@@ -1971,14 +1975,16 @@ export async function createWorkspace(opts: {
   const taskSlug = opts.task.trim() ? slugify(opts.task) : "";
   const base = taskSlug && taskSlug !== stem ? `${stem}-${taskSlug}` : stem;
   // the server terminal's id is reserved: a project named server-shell becomes server-shell-2
-  const taken = new Set([SERVER_SHELL_ID, ...(await loadState()).workspaces.map((w) => w.id)]);
+  // Recently deleted projects keep their ids and folders on disk, so their ids are taken too.
+  const st0 = await loadState();
+  const taken = new Set([SERVER_SHELL_ID, ...st0.workspaces.map((w) => w.id), ...(st0.trashed ?? []).map((w) => w.id)]);
   let id = base;
   for (let n = 2; taken.has(id) && n < 1000; n++) id = `${base}-${n}`;
   const dir = isolated ? join(ownerUser!.home!, "works", id) : join(WORKS_DIR, id);
   const tree = join(dir, "tree");
   const admin = join(dir, "admin");
   const ws = await mutateState(async (s) => {
-    if (s.workspaces.some((w) => w.id === id)) {
+    if (s.workspaces.some((w) => w.id === id) || (s.trashed ?? []).some((w) => w.id === id)) {
       throw new Error(`workspace '${id}' already exists (delete or reuse it)`);
     }
     const d = s.defaults;
@@ -2355,23 +2361,31 @@ export async function stopWorkspace(id: string) {
 }
 
 
-export async function deleteWorkspace(id: string) {
-  const s = await loadState();
-  const ws = s.workspaces.find((w) => w.id === id);
-  if (!ws) throw new Error(`no workspace '${id}'`);
+/**
+ * Every file and process of one project record: what "Delete forever" has always removed. Shared by
+ * deleteWorkspace (a live record) and the purge of a Recently deleted one. Returns the project folder
+ * Kohlab made for it, which the caller removes once the record is gone.
+ */
+async function removeWorkspaceData(ws: Workspace, others: Workspace[], wasLive: boolean): Promise<string | null> {
+  const id = ws.id;
   chatKillers.get(id)?.();
-  // best-effort: the browser may already be gone (idle timeout), and it must not block the delete
-  await stopBrowser(ws).catch(() => {});
+  stopDevServer(ws);
+  // best-effort: the browser may already be gone (idle timeout), and it must not block the delete.
+  // A trashed project's browser was stopped when it was trashed, so its purge does not run the browser CLI again.
+  if (wasLive) await stopBrowser(ws).catch(() => {});
   // a terminal project's chat view keeps an imported copy too, so both files go
   await rm(join(WORKS_DIR, "chats", `${id}.jsonl`), { force: true });
   await rm(join(WORKS_DIR, "chats", `${id}.cursor.json`), { force: true });
   await rm(join(WORKS_DIR, "chats", `${id}.caps.json`), { force: true });
   await rm(join(WORKS_DIR, "chats", `${id}.jsonl.prev`), { force: true });
-  // close every named PTY session for this workspace
-  const sessions = (await ptyList()) ?? [];
-  for (const sess of sessions) {
-    if (ownsSession(sess.id, id)) {
-      await ptySend({ type: "close", id: sess.id });
+  // close every named PTY session for this workspace. A trashed project has none (trashWorkspace closed them, and no
+  // route starts one), so its purge does not touch the daemon at all.
+  if (wasLive) {
+    const sessions = (await ptyList()) ?? [];
+    for (const sess of sessions) {
+      if (ownsSession(sess.id, id)) {
+        await ptySend({ type: "close", id: sess.id });
+      }
     }
   }
   // isolated workspaces have no worktree linkage (they are plain clones under
@@ -2392,14 +2406,133 @@ export async function deleteWorkspace(id: string) {
     await rm(brainRoot(ws), { recursive: true, force: true });
   }
   markIntentionallyStopped(id);
-  const folder = await ownProjectFolder(ws, s.workspaces.filter((w) => w.id !== id));
+  return ownProjectFolder(ws, others);
+}
+
+/** Remove a record from the live list or from Recently deleted, with its files. Idempotent on missing files. */
+async function eraseRecord(id: string, where: "workspaces" | "trashed"): Promise<{ ok: boolean }> {
+  const s = await loadState();
+  const ws = (where === "trashed" ? s.trashed ?? [] : s.workspaces).find((w) => w.id === id);
+  if (!ws) throw new Error(where === "trashed" ? `no trashed project '${id}'` : `no workspace '${id}'`);
+  const folder = await removeWorkspaceData(ws, [...s.workspaces, ...(s.trashed ?? [])].filter((w) => w.id !== id), where === "workspaces");
   const result = await mutateState(async (st) => {
-    st.workspaces = st.workspaces.filter((w) => w.id !== id);
+    if (where === "trashed") st.trashed = (st.trashed ?? []).filter((w) => w.id !== id);
+    else st.workspaces = st.workspaces.filter((w) => w.id !== id);
     return { ok: true };
   });
   // the project folder Kohlab created (so the name can be used again); root removes agent-owned files too
   if (folder) await rm(folder, { recursive: true, force: true }).catch((e) => console.warn(`project folder remove failed: ${(e as Error).message}`));
   return result;
+}
+
+/** "Delete forever" for a live project: the files, the folder and the record, all gone. */
+export async function deleteWorkspace(id: string) {
+  return eraseRecord(id, "workspaces");
+}
+
+/**
+ * Recently deleted: the project stops (sessions, browser, dev server, chats) and leaves the project list,
+ * but its folders, files, brain and chats stay on disk. Every list, watcher and link reads state.workspaces,
+ * so a trashed project drops out of all of them (its preview and share links answer 404) until it is restored.
+ */
+export async function trashWorkspace(id: string, actor: string): Promise<Workspace> {
+  const ws = (await loadState()).workspaces.find((w) => w.id === id);
+  if (!ws) throw new Error(`no workspace '${id}'`);
+  if (ws.team || ws.serverShell || id === SERVER_SHELL_ID) throw new Error(`'${id}' is not a project and cannot be moved to Recently deleted`);
+  await stopWorkspace(id); // closes its terminals, and records it as stopped
+  await stopBrowser(ws).catch(() => {});
+  stopDevServer(ws);
+  return mutateState(async (st) => {
+    const i = st.workspaces.findIndex((w) => w.id === id);
+    if (i < 0) throw new Error(`no workspace '${id}'`);
+    const [moved] = st.workspaces.splice(i, 1);
+    moved.trashedAt = Date.now();
+    moved.trashedBy = actor;
+    st.trashed = [...(st.trashed ?? []), moved];
+    return moved;
+  });
+}
+
+/** Bring a Recently deleted project back. It comes back stopped, with its chats, brain and notes as they were. */
+export async function restoreWorkspace(id: string): Promise<Workspace> {
+  const s = await loadState();
+  const ws = (s.trashed ?? []).find((w) => w.id === id);
+  if (!ws) throw new Error(`no trashed project '${id}'`);
+  if (s.workspaces.some((w) => w.id === id)) throw new Error(`a project with the id '${id}' already exists`);
+  if (!existsSync(worktreePath(ws))) throw new Error("Its files are no longer on this server, so it cannot come back.");
+  return mutateState(async (st) => {
+    const i = (st.trashed ?? []).findIndex((w) => w.id === id);
+    if (i < 0) throw new Error(`no trashed project '${id}'`);
+    if (st.workspaces.some((w) => w.id === id)) throw new Error(`a project with the id '${id}' already exists`);
+    const [back] = st.trashed!.splice(i, 1);
+    delete back.trashedAt;
+    delete back.trashedBy;
+    st.workspaces.push(back);
+    return back;
+  });
+}
+
+/** Delete a Recently deleted project for good: deleteWorkspace's removal, applied to the trashed record. */
+export function purgeWorkspace(id: string) {
+  return eraseRecord(id, "trashed");
+}
+
+const TRASH_DAY_MS = 24 * 60 * 60_000;
+/** At most this many projects are purged per run, so a backlog cannot stall the server. */
+const TRASH_PURGE_CAP = 20;
+
+/** Days a Recently deleted project waits before the purge (KOHLAB_TRASH_DAYS). 0 keeps it until someone deletes it forever. */
+export function trashDays(): number {
+  const raw = process.env.KOHLAB_TRASH_DAYS;
+  if (raw === undefined || raw.trim() === "") return 30;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 30;
+  if (n === 0) return 0;
+  return Math.max(1, Math.floor(n));
+}
+
+/** What the Recently deleted list shows for one record: no paths, tokens or secrets. */
+export function trashItem(ws: Workspace, days = trashDays()) {
+  const trashedAt = ws.trashedAt ?? 0;
+  return {
+    id: ws.id,
+    name: ws.task?.trim() || ws.id,
+    ...(ws.task ? { task: ws.task } : {}),
+    agent: ws.agent,
+    kind: ws.chat ? ("chat" as const) : ("project" as const),
+    trashedAt,
+    trashedBy: ws.trashedBy ?? "",
+    purgeAt: days > 0 ? trashedAt + days * TRASH_DAY_MS : null,
+  };
+}
+
+/** The purge: a record trashed more than trashDays() before `now` is deleted for good. Returns how many went. */
+export async function purgeExpiredTrash(now = Date.now()): Promise<number> {
+  const days = trashDays();
+  if (days === 0) return 0;
+  const due = ((await loadState()).trashed ?? [])
+    .filter((w) => typeof w.trashedAt === "number" && w.trashedAt + days * TRASH_DAY_MS <= now)
+    .slice(0, TRASH_PURGE_CAP);
+  let purged = 0;
+  for (const ws of due) {
+    try {
+      await purgeWorkspace(ws.id);
+      purged++;
+      await audit("system", "trash.purge", ws.id, `trashed ${new Date(ws.trashedAt ?? 0).toISOString()}`).catch(() => {});
+    } catch (e) {
+      console.warn(`[trash] purge of ${ws.id} failed: ${(e as Error).message}`);
+    }
+  }
+  return purged;
+}
+
+/** The purge's timer: first look five minutes after start, then hourly. Never blocks, never throws. */
+export function startTrashPurge(): void {
+  const tick = () => {
+    purgeExpiredTrash().catch((e) => console.warn(`[trash] ${(e as Error).message}`));
+  };
+  setTimeout(tick, 5 * 60_000).unref?.();
+  setInterval(tick, 60 * 60_000).unref?.();
 }
 
 /**

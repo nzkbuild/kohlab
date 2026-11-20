@@ -10,9 +10,9 @@ export type WorkspaceTab = "chat" | "terminal" | "files" | "review" | "brain" | 
 
 export const WORKSPACE_TABS: readonly WorkspaceTab[] = ["chat", "terminal", "files", "review", "brain", "team", "release"];
 
-export type SettingsSection = "account" | "appearance" | "team" | "agents" | "notifications" | "server" | "updates" | "backups";
+export type SettingsSection = "account" | "appearance" | "team" | "agents" | "notifications" | "trash" | "server" | "updates" | "backups";
 
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ["account", "appearance", "team", "agents", "notifications", "server", "updates", "backups"];
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ["account", "appearance", "team", "agents", "notifications", "trash", "server", "updates", "backups"];
 
 export type Route =
   /** Home: the review queue, then every workspace. `create` opens the form; `prompt` (from /new?prompt=) pre-fills the message box, never sends. */

@@ -196,3 +196,7 @@ file.
 Kohlab has no formal audit or certification, and the checks in `scripts/` are the
 only evidence behind the statements above. A finding that a check does not cover is
 a valid report.
+
+## Recently deleted
+
+A deleted project keeps its files on disk until it is purged. Its preview and share links stop working while it is there, and a share link cannot see or delete anything (see docs/backup.md).

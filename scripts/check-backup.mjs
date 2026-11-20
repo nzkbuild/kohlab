@@ -390,6 +390,43 @@ console.log(JSON.stringify({ a: r1.ran, aOk: r1.last?.ok, aVerified: r1.last?.ve
   } finally {
     await kit.stop();
   }
+  // ── 11. a Recently deleted project rides along: archived, marked, restored into the trash ──
+  const works4 = join(base, "works4");
+  const works5 = join(base, "works5");
+  const idT = "trash-t";
+  const srcT = join(base, "src-trash");
+  mkdirSync(srcT, { recursive: true });
+  git(srcT, ["init", "-q", "-b", "main"]);
+  git(srcT, ["commit", "-q", "--allow-empty", "-m", "First version"]);
+  mkdirSync(join(works4, idT), { recursive: true });
+  git(srcT, ["worktree", "add", "-q", "-b", `kohlab/${idT}`, join(works4, idT, "tree")]);
+  writeFileSync(join(works4, idT, "tree", "draft.md"), "trashed, not committed\n");
+  mkdirSync(join(works4, idT, "brain"), { recursive: true });
+  writeFileSync(join(works4, idT, "brain", "Goal.md"), "# Goal\nkeep it\n");
+  mkdirSync(join(works4, "chats"), { recursive: true });
+  writeFileSync(join(works4, "chats", `${idT}.jsonl`), `${JSON.stringify({ role: "user", text: "still here" })}\n`);
+  writeFileSync(
+    join(works4, "state.json"),
+    JSON.stringify({ schemaVersion: 1, workspaces: [], trashed: [{ ...ws(idT, srcT), trashedAt: 1700000000000, trashedBy: "owner" }], agents: { sh: "sh" } }, null, 2),
+  );
+  writeFileSync(join(works4, "users.json"), JSON.stringify({ users: [] }));
+  const archive4 = join(base, "trash.tar.gz");
+  const b4 = cli(works4, ["backup", archive4]);
+  check("a backup with a trashed project succeeds", b4.status === 0, b4.out);
+  const names4 = tarList(archive4);
+  const meta4 = JSON.parse(spawnSync("tar", ["-xzOf", archive4, "meta.json"], { encoding: "utf8" }).stdout || "{}");
+  const w4 = (meta4.workspaces ?? []).find((w) => w.id === idT);
+  check("the trashed project's tree, brain and chat are archived and marked trashed",
+    w4?.trashed === true && names4.includes(`ws/${idT}/tree.tar`) && names4.includes(`ws/${idT}/brain.tar`) && names4.includes(`ws/${idT}/chats/${idT}.jsonl`), names4.join(" "));
+  check("the trashed project's archive verifies", cli(works4, ["backup", "verify", archive4]).status === 0);
+  const r4 = cli(works5, ["restore", archive4]);
+  check("restore into an empty WORKS_DIR succeeds", r4.status === 0, r4.out);
+  const st5 = JSON.parse(readFileSync(join(works5, "state.json"), "utf8"));
+  check("the project is back in Recently deleted, not in the live list",
+    (st5.trashed ?? []).some((w) => w.id === idT && w.trashedAt === 1700000000000) && !st5.workspaces.some((w) => w.id === idT), JSON.stringify(st5.trashed));
+  check("the trashed project's uncommitted file and brain note are identical",
+    sha(join(works4, idT, "tree", "draft.md")) === sha(join(works5, idT, "tree", "draft.md")) && sha(join(works4, idT, "brain", "Goal.md")) === sha(join(works5, idT, "brain", "Goal.md")));
+  check("its chat file is restored", existsSync(join(works5, "chats", `${idT}.jsonl`)));
 } finally {
   rmSync(base, { recursive: true, force: true });
 }

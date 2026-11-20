@@ -1,4 +1,4 @@
-import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BackupList, BrainGraph, BrainHit, BrainNote, NoteType, OpenCodeConnection, OpenCodeInstall, OpenCodeMethod, OpenCodeService, OpenCodeSignIn, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TreeNode, TurnFile, Version, Workspace } from "./types";
+import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BackupList, BrainGraph, BrainHit, BrainNote, NoteType, OpenCodeConnection, OpenCodeInstall, OpenCodeMethod, OpenCodeService, OpenCodeSignIn, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TrashList, TreeNode, TurnFile, Version, Workspace } from "./types";
 
 import type { Effort, Mode, PreviewPage } from "./types";
 import type { Budget, Team, TeamEvent } from "./team-types";
@@ -335,6 +335,13 @@ export const api = {
     json<Workspace>(`/api/workspaces/${id}/continue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task }) }),
   action: (id: string, action: string) =>
     json<Workspace>(`/api/workspaces/${id}/${action}`, { method: "POST" }),
+  /** Moves a project to Recently deleted. Its files stay on the server for 30 days. */
+  deleteWorkspace: (id: string) => json<{ ok: true }>(`/api/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Recently deleted: what the viewer may see, and the days a deleted project waits. */
+  trash: () => json<TrashList>("/api/trash"),
+  restoreTrashed: (id: string) => json<{ ok: true }>(`/api/trash/${encodeURIComponent(id)}/restore`, { method: "POST" }),
+  /** Deletes a trashed project for good: its files, chat and notes. */
+  deleteForever: (id: string) => json<{ ok: true }>(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" }),
   /** Chat events after sequence number `after`, plus whether the AI is working and which question it waits on. */
   chat: (id: string, after: number) =>
     json<{

@@ -14,6 +14,11 @@ import {
   SCHEMA_VERSION,
   createWorkspace,
   deleteWorkspace,
+  trashWorkspace,
+  restoreWorkspace,
+  trashDays,
+  trashItem,
+  audit,
   getDiff,
   listWorkspaces,
   restartWorkspace,
@@ -40,6 +45,7 @@ import {
   upsertEnvLine,
 } from "./lib";
 import { backupTo, restoreFrom, verifyArchive, type VerifyResult } from "./backup";
+import { teamHaltForTrash } from "./team";
 
 const [cmd, ...args] = process.argv.slice(2);
 
@@ -92,9 +98,39 @@ async function main() {
     case "remove":
     case "rm":
     case "delete": {
-      if (!args[0]) usage("remove <id>");
-      await deleteWorkspace(args[0]);
-      console.log(`deleted ${args[0]}`);
+      if (!args[0]) usage("remove <id> [--forever]");
+      if (args.includes("--forever")) {
+        await deleteWorkspace(args[0]);
+        await audit("cli", "workspace.delete", args[0]);
+        console.log(`deleted ${args[0]} for good`);
+        break;
+      }
+      await teamHaltForTrash(args[0]);
+      const moved = await trashWorkspace(args[0], "cli");
+      await audit("cli", "workspace.trash", args[0]);
+      const days = trashDays();
+      console.log(`${args[0]} moved to Recently deleted${days ? `, kept ${days} days` : " (kept until you delete it for good)"}.`);
+      console.log(`bring it back: kohlab restore-project ${moved.id}`);
+      break;
+    }
+    case "trash": {
+      const items = (await loadState()).trashed ?? [];
+      if (items.length === 0) {
+        console.log("Recently deleted is empty.");
+        break;
+      }
+      const days = trashDays();
+      for (const it of items.map((w) => trashItem(w, days))) {
+        const left = it.purgeAt === null ? "kept" : `${Math.max(0, Math.ceil((it.purgeAt - Date.now()) / 86_400_000))} days left`;
+        console.log(`${it.id.padEnd(38)} ${it.kind.padEnd(8)} deleted ${new Date(it.trashedAt).toISOString().slice(0, 10)}  ${left}  ${it.name}`);
+      }
+      break;
+    }
+    case "restore-project": {
+      if (!args[0]) usage("restore-project <id>");
+      const back = await restoreWorkspace(args[0]);
+      await audit("cli", "workspace.restore", args[0]);
+      console.log(`restored ${back.id}, stopped. start it: kohlab start ${back.id}`);
       break;
     }
     case "diff": {
@@ -697,7 +733,9 @@ workspaces
   diff <id>                                  uncommitted changes
   commit <id> [message]                      commit them in the workspace
   merge <id> [--into <checkout>]             bring the accepted branch into yours
-  remove <id>                                delete the workspace and its worktree
+  remove <id> [--forever]                    move to Recently deleted (30 days); --forever deletes it for good
+  trash                                      what is in Recently deleted, and how long it stays
+  restore-project <id>                       bring a Recently deleted project back (comes back stopped)
 
 server
   serve                                      run the dashboard server (foreground)

@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { api } from "../api";
 import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
+import { moveToTrash, trashConfirmText, useTrashDays } from "../lib/trash";
 import { useApp, useCan } from "../store";
 import type { WorkspaceTab } from "../lib/route";
 import { workspaceStatus } from "../lib/status";
@@ -203,6 +204,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
   const routeTab = route.kind === "workspace" ? route.tab : undefined;
   const setTab = (next: TabId) => navigate({ kind: "workspace", id: workspaceId, tab: next }, { replace: true });
   const [confirming, setConfirming] = useState(false);
+  const trashDays = useTrashDays(confirming);
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [focusTick, setFocusTick] = useState(0);
@@ -383,9 +385,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       // Cached xterm buffers outlive their pane, so they are dropped explicitly
       //: the cache module is xterm-free, which is why this stays a static import.
       disposeWorkspaceTerminals(workspaceId);
-      await toastAction(workspaceId, "delete");
-      await refresh();
-      announce("Project deleted");
+      await moveToTrash(workspaceId, w ? projectTitle(w) : workspaceId);
       setConfirming(false);
       navigate({ kind: "workspaces" });
     } catch (e) {
@@ -755,9 +755,9 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         </>
       )}
       <MenuSeparator />
-      <MenuItem tone="danger" onSelect={() => setConfirming(true)}>
+      <MenuItem onSelect={() => setConfirming(true)}>
         <Trash size={16} aria-hidden="true" />
-        Delete project…
+        Move to Recently deleted…
       </MenuItem>
     </Menu>
   );
@@ -1030,9 +1030,10 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title="Delete this project?"
-        description="Its files and chat are removed from the server."
-        confirmLabel="Delete project"
+        title="Move this project to Recently deleted?"
+        description={trashConfirmText(projectTitle(w), trashDays, !!w.running && !w.chat)}
+        confirmLabel="Move to Recently deleted"
+        tone="commit"
         busy={deleting}
         onConfirm={() => void onDelete()}
       />

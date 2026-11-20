@@ -195,3 +195,7 @@ event into the new log, so a gap in the file is explained rather than mysterious
 
 Archives from earlier versions (the four state files only) still restore. They
 hold no projects, so restoring one brings back the state, not the work.
+
+## Recently deleted projects
+
+A deleted project moves to Recently deleted and stays there for `KOHLAB_TRASH_DAYS` days (30 by default; `0` keeps it until someone deletes it for good). Its files stay on disk, so a backup includes it, marked as trashed. A restore puts it back in Recently deleted, not in the project list.

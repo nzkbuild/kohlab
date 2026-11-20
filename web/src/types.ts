@@ -183,6 +183,26 @@ export interface BackupLast {
   error?: string;
 }
 
+/** One project in Recently deleted. No paths, tokens or secrets: the server sends only what the viewer may see. */
+export interface TrashItem {
+  id: string;
+  name: string;
+  task?: string;
+  agent: string;
+  trashedAt: number;
+  trashedBy: string;
+  /** When it is purged for good; null when trash is kept until someone deletes it. */
+  purgeAt: number | null;
+  kind: "chat" | "project";
+  bytes?: number;
+}
+
+/** GET /api/trash: what the viewer may see, and how many days a deleted project waits. */
+export interface TrashList {
+  items: TrashItem[];
+  days: number;
+}
+
 export interface BackupList {
   last: BackupLast | null;
   keep: number;

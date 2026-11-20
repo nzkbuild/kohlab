@@ -957,6 +957,15 @@ async function removeTeamTrees(f: TeamFile): Promise<void> {
   t.needsYou = [];
 }
 
+/**
+ * A project moves to Recently deleted: a live team stops (its agents are closed, the same as the Stop button),
+ * but its worktrees, branches and team folder stay, so a restore brings the team back stopped.
+ */
+export async function teamHaltForTrash(projectId: string): Promise<void> {
+  if (!teamActive(projectId)) return;
+  await teamPost(projectId, { action: "stop" }, { owner: true, actor: "system" }).catch((e) => console.warn(`[team] halt for trash: ${(e as Error).message}`));
+}
+
 /** A project is being deleted: its teams' agents, branches and folders go with it. */
 export async function teamCleanup(projectId: string): Promise<void> {
   for (const id of teamIdsOf(projectId)) {

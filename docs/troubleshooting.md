@@ -135,3 +135,7 @@ In order of how often it is the answer: workspace trees under a member's home
 `kohlab doctor` checks the environment rather than Kohlab itself: bun, node, git,
 permissions, whether OS-user provisioning is possible. Include its output with any
 bug report, along with `kohlab status` and the version.
+
+## I deleted a project by mistake
+
+Deleting moves the project to Recently deleted for 30 days (`KOHLAB_TRASH_DAYS`). Its files, chats and notes are untouched. Open Settings → Recently deleted and press Restore, or run `kohlab trash` then `kohlab restore-project <id>`. It comes back stopped. Only "Delete forever" (or `kohlab remove <id> --forever`), or the purge after the 30 days, removes it for good.

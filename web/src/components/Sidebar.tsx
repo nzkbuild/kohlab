@@ -21,8 +21,8 @@ import { useApp, useCan } from "../store";
 import { STATUS_LABEL, workspaceStatus } from "../lib/status";
 import { sidebarOrder } from "../lib/sidebarOrder";
 import { projectTitle } from "../lib/format";
-import { toastAction } from "../lib/actions";
 import { announce } from "../lib/announce";
+import { moveToTrash, trashConfirmText, useTrashDays } from "../lib/trash";
 import { restoreFocusAfterClose } from "../lib/inputModality";
 import { startNewProject } from "../lib/newProject";
 import { cn } from "../lib/utils";
@@ -186,7 +186,6 @@ export default function Sidebar({ open, onClose }: Props) {
   // Back needs an earlier entry in this app's history; Forward needs one we already left.
   const canBack = navIndex > 0;
   const canForward = navIndex < navMax;
-  const refresh = useApp((s) => s.refresh);
   const can = useCan();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "true");
   const [installEvent, setInstallEvent] = useState<InstallEvent | null>(null);
@@ -250,14 +249,15 @@ export default function Sidebar({ open, onClose }: Props) {
     setInstallEvent(null);
   };
 
-  // Same path as the project header's delete: drop the open terminals, delete, refresh.
-  const removeProject = async (id: string) => {
+  const trashing = workspaces.find((w) => w.id === confirmDelete) ?? null;
+  const trashDays = useTrashDays(confirmDelete !== null);
+
+  // Same path as the project header's delete: drop the open terminals, move it to Recently deleted, refresh.
+  const removeProject = async (id: string, name: string) => {
     setDeleting(true);
     try {
       disposeWorkspaceTerminals(id);
-      await toastAction(id, "delete");
-      await refresh();
-      announce("Project deleted");
+      await moveToTrash(id, name);
       setConfirmDelete(null);
       if (route.kind === "workspace" && route.id === id) navigate({ kind: "workspaces" });
     } catch (e) {
@@ -520,9 +520,9 @@ export default function Sidebar({ open, onClose }: Props) {
                           <PencilSimple size={16} aria-hidden="true" />
                           Rename
                         </MenuItem>
-                        <MenuItem tone="danger" onSelect={() => setConfirmDelete(workspace.id)}>
+                        <MenuItem onSelect={() => setConfirmDelete(workspace.id)}>
                           <Trash size={16} aria-hidden="true" />
-                          Delete project…
+                          Move to Recently deleted…
                         </MenuItem>
                       </MenuContent>
                     </MenuPortal>
@@ -611,12 +611,13 @@ export default function Sidebar({ open, onClose }: Props) {
         onOpenChange={(next) => {
           if (!next) setConfirmDelete(null);
         }}
-        title="Delete this project?"
-        description="Its files and chat are removed from the server."
-        confirmLabel="Delete project"
+        title="Move this project to Recently deleted?"
+        description={trashConfirmText(trashing ? projectTitle(trashing) : "This project", trashDays, !!trashing?.running && !trashing.chat)}
+        confirmLabel="Move to Recently deleted"
+        tone="commit"
         busy={deleting}
         onConfirm={() => {
-          if (confirmDelete) void removeProject(confirmDelete);
+          if (trashing) void removeProject(trashing.id, projectTitle(trashing));
         }}
       />
     </aside>

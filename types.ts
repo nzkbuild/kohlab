@@ -53,6 +53,9 @@ export interface Workspace {
   team?: { id: string; role: string };
   /** the server's own terminal (SERVER_SHELL_ID in lib.ts): a plain shell as the server user, not a project. Hidden from every list; owner only. */
   serverShell?: true;
+  /** Recently deleted (lib.ts trashWorkspace): when the project was moved there, and by whom. Set only on records in state.trashed. */
+  trashedAt?: number;
+  trashedBy?: string;
   /** the vault a team agent reads and writes: its project's brain, not its own. */
   brainDir?: string;
   /** optional resource caps applied to the agent's PTY session */
