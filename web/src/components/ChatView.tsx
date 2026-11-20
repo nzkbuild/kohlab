@@ -9,7 +9,7 @@ import { chatShown, takeWaiting } from "../lib/toChat";
 import { MAX_POINTS, composeSent, pointChipText, pointLine, splitPointed } from "../lib/point";
 import { problemSummary } from "../lib/problemText";
 import { askToFix, useProblems } from "../lib/problems";
-import { BIG_PASTE, DRAFT_SAVE_MS, addSaved, readDraft, writeDraft } from "../lib/drafts";
+import { BIG_PASTE, DRAFT_SAVE_MS, addSaved, readDraft, uploadStarted, watchLiveText, writeDraft } from "../lib/drafts";
 import { isApple } from "../lib/platform";
 import { copyText } from "../lib/clipboard";
 import { findWorkspace, useApp, useCan } from "../store";
@@ -158,6 +158,8 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   }, [draft, workspaceId]);
   // Leaving the chat keeps what was typed, even inside that 300 ms.
   useEffect(() => () => writeDraft(workspaceId, draftRef.current), [workspaceId]);
+  // The page must not reload while the box holds text that the 300 ms save has not reached yet.
+  useEffect(() => watchLiveText(() => draftRef.current), []);
   // Set by Ctrl/Cmd+Shift+V: the next paste is text, however big.
   const plainPaste = useRef(false);
   const [sending, setSending] = useState(false);
@@ -623,12 +625,14 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     if (attachments.length > 0) {
       setUploading(true);
       setSendError(null);
+      const endUpload = uploadStarted();
       try {
         paths = await uploadAll();
       } catch (e) {
         setSendError(friendly(e));
         return;
       } finally {
+        endUpload();
         setUploading(false);
       }
     }

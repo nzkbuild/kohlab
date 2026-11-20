@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import { ArrowLeft, List, PencilSimple } from "@phosphor-icons/react";
 import { useApp, useCan } from "./store";
 import { useSync } from "./lib/useSync";
+import { UPDATE_READY, reloadOnceForChunk } from "./lib/build";
 import { ROUTE_LABEL } from "./lib/route";
 import { workspaceStatus } from "./lib/status";
 import { api } from "./api";
@@ -36,6 +37,8 @@ export default function App() {
   const loading = useApp((s) => s.loading);
   const error = useApp((s) => s.error);
   const connection = useApp((s) => s.connection);
+  const updateReady = useApp((s) => s.updateReady);
+  const setUpdateReady = useApp((s) => s.setUpdateReady);
   const unreachable = useApp((s) => s.refreshFailures >= 2);
   const loadMe = useApp((s) => s.loadMe);
   const newOpen = useApp((s) => s.newOpen);
@@ -51,6 +54,21 @@ export default function App() {
   useDrawerSwipe(navOpen, setNavOpen);
 
   useSync();
+
+  // The new-version bar. A failed lazy chunk lands here too (vite:preloadError): the page cannot load its code any more.
+  useEffect(() => {
+    const onReady = () => setUpdateReady(true);
+    const onPreloadError = () => {
+      setUpdateReady(true);
+      reloadOnceForChunk();
+    };
+    window.addEventListener(UPDATE_READY, onReady);
+    window.addEventListener("vite:preloadError", onPreloadError);
+    return () => {
+      window.removeEventListener(UPDATE_READY, onReady);
+      window.removeEventListener("vite:preloadError", onPreloadError);
+    };
+  }, [setUpdateReady]);
 
   // Role decides which controls render, so it is read once per sign-in.
   useEffect(() => {
@@ -166,6 +184,15 @@ export default function App() {
                 {connection === "reconnecting"
                   ? "Reconnecting to the server… your projects keep running."
                   : "Can't reach the server. Your projects keep running there; this page catches up when it reconnects."}
+              </div>
+            ) : null}
+            {/* A newer build is serving. Only Reload reloads: unsent text and running uploads are never lost to it. */}
+            {updateReady ? (
+              <div role="status" className="update-bar">
+                <span>A new version of Kohlab is ready</span>
+                <Button variant="primary" onClick={() => location.reload()}>
+                  Reload
+                </Button>
               </div>
             ) : null}
 

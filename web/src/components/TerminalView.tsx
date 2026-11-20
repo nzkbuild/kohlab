@@ -363,6 +363,8 @@ export default function TerminalView({ workspaceId, terminalId, onExit, autoFocu
       // drag the frame budget down with it.
       ws.onmessage = (ev) => {
         const data = ev.data as string;
+        // The server's hello (build handshake) reaches every socket on "/" before attach: it is not terminal output.
+        if (data.startsWith('{"type":"hello"')) return;
         // A refused attach comes back as one JSON frame: show its words, not the braces.
         if (data.startsWith('{"type":"error"')) {
           try {

@@ -44,6 +44,44 @@ export function writeDraft(scope: string, text: string): void {
   }
 }
 
+let uploadsRunning = 0;
+/** Composers still holding text that may not have reached storage yet (the 300 ms debounce). */
+const liveText = new Set<() => string>();
+
+/** A composer reports its live text; call the returned function when it unmounts. */
+export function watchLiveText(read: () => string): () => void {
+  liveText.add(read);
+  return () => {
+    liveText.delete(read);
+  };
+}
+
+/** An upload has started; call the returned function when it ends, success or not. */
+export function uploadStarted(): () => void {
+  uploadsRunning += 1;
+  return () => {
+    uploadsRunning -= 1;
+  };
+}
+
+/**
+ * Unsent text or a running upload: the page must not be reloaded out from under it. A storage that cannot be
+ * read counts as unsent, because the draft may live only in this tab.
+ */
+export function hasUnsent(): boolean {
+  if (uploadsRunning > 0) return true;
+  for (const read of liveText) if (read().trim() !== "") return true;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("kohlab.draft.") && localStorage.getItem(key)) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export function readSaved(): SavedPrompt[] {
   try {
     const list: unknown = JSON.parse(localStorage.getItem(SAVED_KEY) ?? "[]");

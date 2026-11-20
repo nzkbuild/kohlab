@@ -133,6 +133,8 @@ try {
   run("capability tiles (every AI, states, model outcome lines)", "bun", ["scripts/check-capabilities.mjs"]);
   run("static accessibility scan", "node", ["scripts/check-a11y-static.mjs"]);
   run("hooks stay above early returns (the cold-load crash)", "node", ["scripts/check-hooks-order.mjs"]);
+  // Every browser check below reads web/dist: it must be built from the current web/src (F4).
+  run("built web/dist is not older than web/src", "node", ["scripts/check-dist-fresh.mjs"]);
   // Reads the built web/dist: run `cd web && bun run build` first. No lowered ||= (the frozen terminal).
   run("built bundle has no lowered ||= (the frozen terminal)", "node", ["scripts/check-bundle.mjs"]);
   run("performance budgets", "node", ["scripts/check-load.mjs"]);
@@ -141,6 +143,8 @@ try {
   // Own throwaway servers with two chat projects; skip with a reason when no Chromium is present.
   run("hard load of a project does not crash (browser)", "node", ["scripts/check-cold-load.mjs"]);
   run("design rules: one primary, targets, one-segment switch, contrast (browser)", "node", ["scripts/check-design.mjs"]);
+  // Own throwaway server on port 7969, two builds of web/dist: the new-version bar, Reload, drafts, a deleted chunk (browser).
+  run("version handshake: new-version bar, Reload, drafts block reloads, deleted chunk (browser)", "node", ["scripts/check-version-handshake.mjs"]);
   // Own throwaway server on port 7959: Settings -> AI in Soft and Plain, the colour choice and its save, the picker's outcome lines.
   run("calm app in the browser (AI tiles, capability tiles, Soft/Plain, picker lines)", "node", ["scripts/check-calm-ui.mjs"]);
   run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);

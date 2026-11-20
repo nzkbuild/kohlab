@@ -308,6 +308,10 @@ if ! health_ok; then
 fi
 log "$UNIT is serving v$AFTER_V on port $UNIT_PORT"
 
+# Old hashed assets stay until the new build answers: an open tab's lazy chunks must still resolve. Only now is anything deleted.
+# Only files the current index.html cannot reach (an unchanged vendor chunk keeps its old hash and mtime).
+bun "$REPO/scripts/prune-assets.mjs" "$REPO/web/dist" 14 2>/dev/null || true
+
 step "done, v$LOCAL_V → v$AFTER_V"
 git --no-pager log --oneline "$PRE..$AFTER" | sed 's/^/      /'
 log "agents were not interrupted, verify with:  cd $REPO && bun run cli.ts ls"

@@ -9,6 +9,7 @@ import { brotliCompress, constants as zlibConstants, gzip as gzipCb } from "zlib
 import { chown, mkdir, open, readdir, readFile, realpath, stat, writeFile } from "fs/promises";
 import { dirname } from "path";
 import { basename, isAbsolute, join, relative, resolve } from "path";
+import { API_LEVEL } from "./web/src/lib/apiLevel";
 import {
   createWorkspace,
   deleteWorkspace,
@@ -137,6 +138,20 @@ const VERSION = (() => {
     return JSON.parse(require("fs").readFileSync(join(import.meta.dir, "package.json"), "utf8")).version as string;
   } catch {
     return "unknown";
+  }
+})();
+
+/** The built dashboard. KOHLAB_WEB_DIST points a throwaway server at another build (the handshake check). */
+const WEB_DIST = process.env.KOHLAB_WEB_DIST ?? join(process.cwd(), "web", "dist");
+/**
+ * The build id this server announces: the one vite wrote into the dist it serves (web/dist/build-id.txt), so the
+ * page and the server agree by construction. KOHLAB_BUILD overrides it (the handshake check uses that).
+ */
+const BUILD = process.env.KOHLAB_BUILD ?? (() => {
+  try {
+    return require("fs").readFileSync(join(WEB_DIST, "build-id.txt"), "utf8").trim() || `${VERSION}+unbuilt`;
+  } catch {
+    return `${VERSION}+unbuilt`;
   }
 })();
 
@@ -2535,6 +2550,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
       return json({
         ok: true,
         version: VERSION,
+        build: BUILD,
         schemaVersion: SCHEMA_VERSION,
         ...(isOwner ? { aiUser: aiUserStatus() } : {}),
         uptimeSec: Math.round(process.uptime()),
@@ -2832,7 +2848,7 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     }
 
     // Static files - serve the React app from web/dist, fall back to legacy public/
-    const webDist = join(process.cwd(), "web", "dist");
+    const webDist = WEB_DIST;
     const legacy = join(import.meta.dir, "public");
     const roots = [webDist, legacy];
     if (path === "/" || path === "/index.html") {
@@ -2954,6 +2970,8 @@ const socketHandlers: WebSocketHandler<WSData> = {
         return;
       }
       // every dashboard page is a push subscriber
+      // The build handshake: the page compares this with its own build and shows the "new version" bar on a difference.
+      ws.send(JSON.stringify({ type: "hello", build: BUILD, apiLevel: API_LEVEL }));
       pushClients.add(ws);
     },
     message(ws, raw) {
@@ -3063,6 +3081,20 @@ const SECURITY_HEADERS: Record<string, string> = {
     "font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
 };
 
+/** Every /api answer names the build that served it, so a page can tell it is out of date (see the hello message). */
+function withBuild(res: Response | undefined): Response | undefined {
+  if (!res || res.status === 101) return res;
+  try {
+    res.headers.set("x-kohlab-build", BUILD);
+    return res;
+  } catch {
+    // immutable headers (a proxied/fetched response): copy once
+    const copy = new Response(res.body, res);
+    copy.headers.set("x-kohlab-build", BUILD);
+    return copy;
+  }
+}
+
 function secured(res: Response | undefined): Response | undefined {
   if (!res || res.status === 101) return res; // socket upgrade: nothing to decorate
   try {
@@ -3087,7 +3119,9 @@ serve({
   fetch: async (req, server) => {
     const res = await handle(req, server);
     const own = new URL(req.url).pathname;
-    return own.startsWith("/p/") || own.startsWith("/pic/") ? res : secured(res);
+    if (own.startsWith("/p/") || own.startsWith("/pic/")) return res;
+    const out = secured(res);
+    return own.startsWith("/api") ? withBuild(out) : out;
   },
   websocket: socketHandlers,
 });

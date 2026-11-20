@@ -3,6 +3,7 @@ import { socketProtocol } from "../api";
 import { useApp } from "../store";
 import { announce } from "./announce";
 import { parseRoute } from "./route";
+import { noteServerBuild } from "./build";
 import { projectTitle } from "./format";
 
 const POLL_MS = 6000;
@@ -15,6 +16,8 @@ interface DoneMessage {
   type?: string;
   id?: string;
   task?: string;
+  build?: string;
+  apiLevel?: number;
 }
 
 /**
@@ -77,6 +80,10 @@ export function useSync(): void {
           message = JSON.parse(event.data) as DoneMessage;
         } catch {
           return; // terminal bytes on a shared socket
+        }
+        if (message.type === "hello") {
+          noteServerBuild(message.build, message.apiLevel);
+          return;
         }
         if (message.type !== "workspace.done" || !message.id) return;
         if (seen.has(message.id)) return;

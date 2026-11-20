@@ -1,7 +1,6 @@
 {
   "name": "kohlab-web",
   "private": true,
-  "version": "1.25.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

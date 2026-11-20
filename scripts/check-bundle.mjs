@@ -16,7 +16,10 @@ import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const assets = join(ROOT, "web/dist/assets");
-const BROKEN = /\(void 0\|\|\([A-Za-z_$][\w$]*=\{\}\)\)/;
+// Any lowered logical assignment (||=, &&=, ??=) leaves `(void 0||(x=...` style code with x undeclared.
+const BROKEN = /\(void 0(?:\|\||&&|\?\?)\(?[A-Za-z_$][\w$]*=/;
+// The target that keeps those operators unlowered. Pinned here, and the config must say the same.
+const PINNED_TARGET = "es2021";
 
 if (!existsSync(assets)) {
   console.log("FAIL  web/dist is missing: build the web first (cd web && bun run build)");
@@ -30,6 +33,13 @@ if (files.length === 0) {
 }
 
 let failures = 0;
+const config = readFileSync(join(ROOT, "web/vite.config.ts"), "utf8");
+const target = config.match(/build:\s*\{[\s\S]*?target:\s*"([^"]+)"/)?.[1];
+if (target !== PINNED_TARGET) {
+  failures++;
+  console.log(`FAIL  web/vite.config.ts build.target is ${target ?? "missing"}, pinned to "${PINNED_TARGET}" (a lower target lowers ||=)`);
+}
+
 for (const file of files) {
   const m = readFileSync(join(assets, file), "utf8").match(BROKEN);
   if (m) {

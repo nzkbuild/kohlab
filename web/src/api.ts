@@ -2,6 +2,7 @@ import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BackupList, B
 
 import type { Effort, Mode, PreviewPage } from "./types";
 import type { Budget, Team, TeamEvent } from "./team-types";
+import { noteServerBuild } from "./lib/build";
 
 export interface TeamUser { id: string; name: string; role: string; pending?: boolean; }
 /** The project's team as the viewer may see it (no tokens), and the events after the `after` the read asked from. `team` is null when the project has none. */
@@ -87,10 +88,12 @@ const prefetched = new Map<string, { at: number; value: Promise<unknown> }>();
 async function req(path: string, opts: RequestInit = {}): Promise<Response> {
   if (opts.method && opts.method !== "GET") prefetched.clear();
   try {
-    return await fetch(path, {
+    const res = await fetch(path, {
       ...opts,
       headers: key ? { ...(opts.headers || {}), authorization: `Bearer ${key}` } : { ...(opts.headers || {}) },
     });
+    noteServerBuild(res.headers.get("x-kohlab-build"));
+    return res;
   } catch (e) {
     // fetch rejects with a TypeError ("Failed to fetch", "NetworkError…", "Load failed") when no answer comes back.
     if (e instanceof TypeError) throw new Error(UNREACHABLE_MESSAGE);
