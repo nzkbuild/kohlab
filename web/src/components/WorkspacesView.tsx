@@ -258,8 +258,8 @@ export function LaunchSheet({ open, onClose }: { open: boolean; onClose: () => v
 
 /** Starter ideas: each one fills the composer. "Something else" just puts the cursor there. */
 const STARTERS = ["A page for my shop", "An RSVP form", "A price calculator", "A booking page", "A menu for my café", "A portfolio"];
-const CHIP = "inline-flex min-h-9 items-center rounded-full bg-surface-raised px-3.5 text-small text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none pointer-coarse:min-h-11";
-/** A project in the Home list: a full-width tonal row, 44px and up. */
+const CHIP = "inline-flex min-h-9 items-center rounded-full bg-surface-raised px-3.5 text-small text-text-secondary transition-colors hover:bg-surface-active hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none pointer-coarse:min-h-12";
+/** A project in the Home list: a full-width tonal row, 56px and up (40px compact). */
 const ROW = "flex min-h-11 w-full items-center gap-3 rounded-card bg-surface-raised px-4 text-left text-base text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 /** The text the "Ask me a few questions first" link puts in the box. It is not sent. */
 const QUESTIONS_FIRST = "Before you build anything, ask me a few short questions about what I want.";
@@ -433,34 +433,6 @@ export function HomeScreen() {
 
           {can.mutate ? (
             <>
-              {claudeNeedsSetup ? (
-                <Panel className="mt-8 w-full">
-                  <div className="flex flex-wrap items-center gap-3 p-4">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-text-primary">Claude isn't connected yet</p>
-                      <p className="mt-0.5 text-sm text-text-secondary">
-                        Kohlab needs Claude to build things. Open Settings to see how to connect it.
-                      </p>
-                    </div>
-                    <Button variant="secondary" size="sm" onClick={() => navigate({ kind: "settings", section: "agents" })}>
-                      Open settings
-                    </Button>
-                  </div>
-                </Panel>
-              ) : null}
-              {newAgent.agent === "codex" && newAgent.codexNeedsSignIn ? (
-                <Panel className="mt-8 w-full">
-                  <div className="flex flex-wrap items-center gap-3 p-4">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-text-primary">Codex needs you to sign in first</p>
-                      <p className="mt-0.5 text-sm text-text-secondary">Open Settings to sign in with your ChatGPT account.</p>
-                    </div>
-                    <Button variant="secondary" size="sm" onClick={() => navigate({ kind: "settings", section: "agents" })}>
-                      Open settings
-                    </Button>
-                  </div>
-                </Panel>
-              ) : null}
               <Composer
                 className="mt-8 w-full"
                 id="home-idea"
@@ -584,6 +556,35 @@ export function HomeScreen() {
                     </li>
                   ) : null}
                 </ul>
+              ) : null}
+              {/* Below everything else: when the AI check answers, the notices appear without moving the composer or the starters. */}
+              {claudeNeedsSetup ? (
+                <Panel className="mt-8 w-full">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-text-primary">Claude isn't connected yet</p>
+                      <p className="mt-0.5 text-sm text-text-secondary">
+                        Kohlab needs Claude to build things. Open Settings to see how to connect it.
+                      </p>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => navigate({ kind: "settings", section: "agents" })}>
+                      Open settings
+                    </Button>
+                  </div>
+                </Panel>
+              ) : null}
+              {newAgent.agent === "codex" && newAgent.codexNeedsSignIn ? (
+                <Panel className="mt-8 w-full">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-text-primary">Codex needs you to sign in first</p>
+                      <p className="mt-0.5 text-sm text-text-secondary">Open Settings to sign in with your ChatGPT account.</p>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => navigate({ kind: "settings", section: "agents" })}>
+                      Open settings
+                    </Button>
+                  </div>
+                </Panel>
               ) : null}
             </>
           ) : (

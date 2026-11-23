@@ -143,7 +143,12 @@ try {
   check("a code with nothing waiting -> 409", (await post(`/api/ai/accounts/${wid}/signin/code`, { code: "GOODCODE" })).status === 409);
 
   // ---- the AI hub lists them; probes use each account's own directory ----
-  const prov = await kit.req("GET", "/api/providers?x=1");
+  // The hub never waits for a probe: the first read can have a card still "checking". Read again until all are built.
+  let prov = await kit.req("GET", "/api/providers?x=1");
+  for (let i = 0; i < 60 && prov.body.providers.some((p) => p.state === "checking"); i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    prov = await kit.req("GET", "/api/providers?x=1");
+  }
   const claude = prov.body.providers.find((p) => p.id === "claude");
   const wk = claude.accounts.find((a) => a.id === wid);
   const rt = claude.accounts.find((a) => a.id === rid);

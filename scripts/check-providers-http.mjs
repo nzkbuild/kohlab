@@ -274,8 +274,14 @@ try {
 
   // no credentials, and two people at the same moment
   check("no credentials -> 401", (await req("GET", "/api/providers", { key: "" })).status === 401);
-  const [a, b] = await Promise.all([req("GET", "/api/providers"), req("GET", "/api/providers")]);
-  check("owner GET -> 200 with five AIs", a.status === 200 && b.status === 200 && a.body.providers?.map((p) => p.id).join() === "claude,codex,hermes,omp,opencode", `${a.status} ${a.text.slice(0, 200)}`);
+  const [a0, b] = await Promise.all([req("GET", "/api/providers"), req("GET", "/api/providers")]);
+  check("owner GET -> 200 with five AIs", a0.status === 200 && b.status === 200 && a0.body.providers?.map((p) => p.id).join() === "claude,codex,hermes,omp,opencode", `${a0.status} ${a0.text.slice(0, 200)}`);
+  // The first read answers at once with the AIs still "checking"; the cards fill in as the probes finish.
+  let a = a0;
+  await waitFor(async () => {
+    a = await req("GET", "/api/providers");
+    return !a.body?.providers?.some((p) => p.state === "checking");
+  }, 20000);
   check("two requests at once start claude once", lines(join(fakeDir, "claude-spawns")).length === 1, String(lines(join(fakeDir, "claude-spawns")).length));
 
   const claude = card(a, "claude");

@@ -225,9 +225,12 @@ export default function App() {
                   <ErrorBoundary label="Workspace">
                     <Suspense
                       fallback={
-                        <div className="surface">
-                          <div className="surface-inner">
-                            <SkeletonRows rows={4} className="panel" />
+                        // The same box as the project page that replaces it (a full-height cockpit), so the swap moves nothing.
+                        <div className="cockpit">
+                          <div className="surface">
+                            <div className="surface-inner">
+                              <SkeletonRows rows={4} className="panel" />
+                            </div>
                           </div>
                         </div>
                       }

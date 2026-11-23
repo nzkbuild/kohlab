@@ -1146,7 +1146,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
         const queuedBehind = busy && turnStartedAt !== null && e.at > turnStartedAt;
         return (
           <div className="group/msg flex flex-col items-end">
-            <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-[20px] bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
+            <div className="max-w-[70%] break-words whitespace-pre-wrap rounded-lg bg-surface-bubble px-[18px] py-[10px] text-base leading-6 text-text-primary max-md:text-base">
               {body}
               {pointed.length > 0 ? (
                 <ul className="mt-1 flex flex-wrap gap-2 whitespace-normal">
@@ -1218,7 +1218,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       {"Don't allow"}
                     </Button>
                     {e.always ? (
-                      <Button variant="quiet" className="text-text-secondary [@media(pointer:coarse)]:min-h-11" disabled={askBusy} onClick={() => void answer(e.requestId, true, { always: true })}>
+                      <Button variant="quiet" className="text-text-secondary [@media(pointer:coarse)]:min-h-12" disabled={askBusy} onClick={() => void answer(e.requestId, true, { always: true })}>
                         {`Always allow: ${e.always.label}`}
                       </Button>
                     ) : null}
@@ -1650,7 +1650,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                       <Button variant="quiet" size="sm" className="text-text-secondary" onClick={() => setBannerSnooze(ctxPercent)}>
                         Not now
                       </Button>
-                      <label className="flex min-h-8 cursor-pointer items-center gap-2 text-xs text-text-muted pointer-coarse:min-h-11" htmlFor="banner-auto-fresh">
+                      <label className="flex min-h-8 cursor-pointer items-center gap-2 text-xs text-text-muted pointer-coarse:min-h-12" htmlFor="banner-auto-fresh">
                         <input id="banner-auto-fresh" type="checkbox" className="size-4 shrink-0 accent-accent" checked={autoFresh} onChange={(e) => void setAutoFresh(e.target.checked)} />
                         Do it for me
                       </label>
@@ -1715,7 +1715,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                                   aria-label={`Remove ${label}`}
                                   disabled={uploading}
                                   onClick={() => setPoints((list) => list.filter((x) => x.key !== p.key))}
-                                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
+                                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-12 disabled:opacity-40"
                                 >
                                   <X size={12} aria-hidden="true" />
                                 </button>
@@ -1739,7 +1739,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                               aria-label={`Remove ${a.file.name}`}
                               disabled={uploading}
                               onClick={() => removeAttachment(a.key)}
-                              className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-11 disabled:opacity-40"
+                              className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary max-md:size-12 disabled:opacity-40"
                             >
                               <X size={12} aria-hidden="true" />
                             </button>

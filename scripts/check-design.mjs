@@ -2,10 +2,10 @@
 // The design rules in DESIGN.md that a script can read off the rendered page, on Home, a ready chat, an empty
 // chat, Changes and Settings, at 1280 (mouse) and 390 (touch):
 //   - at most one primary button per view  (primary = a visible `.btn-primary`)
-//   - main controls are big enough: >= 24px with a mouse (WCAG 2.5.8), >= 44px on touch
+//   - main controls are big enough: >= 24px with a mouse (WCAG 2.5.8), >= 48px on touch (docs/design/m3-mono.md, 6)
 //   - no segmented switch with a single segment
 //   - text contrast >= 4.5:1 against the nearest opaque background (the token pairs are in check-contrast)
-// Every view runs twice: in Soft colour (the default) and in Plain (softColour pref "0").
+// Every view runs in light and dark, at standard, medium and high contrast (Settings -> Appearance, kohlab.contrast).
 //
 // Throwaway server (own PORT, WORKS_DIR, PTY_SOCKET) with two chat projects, against the built web/dist.
 // Skips with a printed reason when playwright-core or Chromium is missing.
@@ -43,7 +43,7 @@ function measure(touch) {
 
   // Main controls: buttons and tabs a person presses to do the work. Fields, links in prose and the
   // Monaco editor are out of scope (check-browser already holds every control to 24px).
-  const min = touch ? 44 : 24;
+  const min = touch ? 48 : 24;
   const small = [...document.querySelectorAll("button, [role=tab], [role=menuitem]")]
     .filter(visible)
     .filter((el) => !el.matches("[disabled], [aria-disabled=true]"))
@@ -108,15 +108,15 @@ try {
   ];
   for (const [width, touch] of [[1280, false], [390, true]]) {
     for (const scheme of ["dark", "light"]) {
-      for (const colour of ["soft", "plain"]) {
+      for (const contrast of ["standard", "medium", "high"]) {
         const ctx = await openContext(browser, { width, height: 844, key: KEY, touch, scheme });
         await ctx.addInitScript((v) => {
           try {
-            localStorage.setItem("kohlab.softColour", v);
+            localStorage.setItem("kohlab.contrast", v);
           } catch {
             /* storage is off */
           }
-        }, colour === "soft" ? "1" : "0");
+        }, contrast);
         const page = await ctx.newPage();
         for (const [name, path] of views) {
           await page.goto(fx.base + path);
@@ -124,11 +124,11 @@ try {
           if (name === "Changes") await page.getByRole("button", { name: "Keep this version" }).waitFor({ timeout: 10000 }).catch(() => {});
           await page.waitForTimeout(500);
           const m = await page.evaluate(measure, touch);
-          const at = `${name} @${width} ${scheme} ${colour}`;
+          const at = `${name} @${width} ${scheme} ${contrast}`;
           check(`${at}: at most one primary button`, m.primaries.length <= 1, m.primaries.join(", "));
           // Guards the selector: Home always shows its one primary (Start building), so 0 means the class was renamed.
           if (name === "Home") check(`${at}: the primary is found by its class`, m.primaries.length === 1, m.primaries.join(", "));
-          check(`${at}: main controls >= ${touch ? 44 : 24}px`, m.small.length === 0, m.small.slice(0, 4).join(", "));
+          check(`${at}: main controls >= ${touch ? 48 : 24}px`, m.small.length === 0, m.small.slice(0, 4).join(", "));
           check(`${at}: no one-segment switch`, m.oneSegment.length === 0, m.oneSegment.join(", "));
           check(`${at}: text contrast >= 4.5:1`, m.low.length === 0, m.low.slice(0, 4).join(", "));
         }

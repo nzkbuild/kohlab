@@ -109,7 +109,6 @@ const TTL_OMP_MODELS = 600_000;
 const TTL_HERMES = 300_000;
 const TTL_OPENCODE_MODELS = 60_000;
 const FORCE_GAP = 10_000;
-const FIRST_WAIT = 8_000;
 
 /** A value kept for ttl ms; callers at the same moment share one run. A failed run is not kept. */
 const memos = new Map<string, { at: number; value: Promise<unknown> }>();
@@ -930,19 +929,12 @@ function current(): { providers: ProviderCard[]; at: number } {
   return { providers, at: Math.max(0, ...providers.map((p) => p.checkedAt)) };
 }
 
-/** Every AI's card, at once from the cache. A card older than its time is served marked stale while one new probe runs in the background. The first call after a start waits up to 8 s for the first cards; a probe still running then shows as "checking". */
+/** Every AI's card, at once from the cache. A card older than its time is served marked stale while one new probe runs in the background. Never waits for a probe: an AI with no card yet is "checking" until its probe finishes (the web asks again a moment later). */
 export async function getProviders(): Promise<{ providers: ProviderCard[]; at: number }> {
   const t = clock();
-  const first: Promise<unknown>[] = [];
   for (const id of PROVIDER_IDS) {
     const k = kept.get(id);
-    if (!k) first.push(build(id, false));
-    else if (t - k.at >= k.ttl) void build(id, false);
-  }
-  if (first.length) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([Promise.all(first), new Promise((r) => (timer = setTimeout(r, FIRST_WAIT)))]);
-    clearTimeout(timer);
+    if (!k || t - k.at >= k.ttl) void build(id, false);
   }
   return current();
 }

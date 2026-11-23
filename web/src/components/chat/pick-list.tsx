@@ -27,7 +27,7 @@ export function PickList({ id, label, options, active, onPick }: { id: string; l
             onPick(i);
           }}
           className={cn(
-            "menu-item min-h-9 min-w-0 cursor-pointer items-center text-left pointer-coarse:min-h-11 max-md:my-0.5 max-md:py-2",
+            "menu-item min-h-9 min-w-0 cursor-pointer items-center text-left pointer-coarse:min-h-12 max-md:my-0.5 max-md:py-2",
             i === active && "bg-surface-hover text-text-primary",
           )}
         >

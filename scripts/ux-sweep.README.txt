@@ -1,0 +1,11 @@
+ux-sweep: numbers for what makes the UI feel flaky. No screenshots are read.
+Run: node scripts/ux-sweep.mjs            (report only, exit 0)
+     node scripts/ux-sweep.mjs --gate     (exit 1 when any HIGH issue exists; not in check-all)
+Needs Chromium and playwright-core (found by ui-fixture.mjs); skips cleanly without them.
+Serves a copy of web/dist on PORT 7971 with its own WORKS_DIR, PTY_SOCKET and HOME. Seeds projects with agent "sh".
+Writes /tmp/ux-sweep/report.json (all raw numbers) and prints the top 40 issues grouped across viewports.
+20 routes x 3 viewports (390, 820, 1440) x 2 schemes; 6 screens run in parallel, about 5 minutes.
+Checks: CLS and top shifters, overflow, covered controls, target size, text < 12px, contrast, console,
+failed and slow requests, API burst, idle text change and DOM churn, Tab focus, Back after overlays.
+Severity: covered, CLS > 0.1, page error = high; overflow, idle change, contrast, target, text, focus = medium; slow = low.
+Gaps: the model menu never opens (sh has no models, so the chip is disabled); the shortcuts dialog cannot open on 390 (touch hides it).

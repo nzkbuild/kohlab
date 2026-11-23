@@ -14,7 +14,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import { OpenCodeSignInDialog } from "./OpenCodeDialogs";
 import RulesPanel from "./RulesPanel";
 import { UsageRow } from "./UsageDialog";
-import { Button, Field, Menu, MenuItem, Panel, SkeletonRows } from "./ui";
+import { Button, Field, Menu, MenuItem, Panel, Skeleton, SkeletonRows } from "./ui";
 
 const NO_MODELS = "Models appear after your first chat with it.";
 const MODEL_SEARCH_AT = 12;
@@ -75,7 +75,7 @@ function ModelsList({ models, accountId, owner, onChanged }: { models: ProviderM
 
   return (
     <details className="text-sm">
-      <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary hover:text-text-primary pointer-coarse:min-h-11">
+      <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary hover:text-text-primary pointer-coarse:min-h-12">
         {models.length === 0 ? "No models yet" : `${models.length} ${models.length === 1 ? "model" : "models"}`}
       </summary>
       <div className="mt-2 flex flex-col gap-2">
@@ -591,7 +591,8 @@ function StatusTiles({ cards, selected, onSelect }: { cards: ProviderCard[]; sel
           >
             <span className="w-full truncate text-sm font-medium">{c.name}</span>
             <span className="text-xs">{tileWord(c)}</span>
-            {n > 0 ? <span className="text-xs">{n === 1 ? "1 account" : `${n} accounts`}</span> : null}
+            {/* The line is kept when there are no accounts, so a tile never grows when the reading arrives. */}
+            {n > 0 ? <span className="text-xs">{n === 1 ? "1 account" : `${n} accounts`}</span> : <span className="text-xs" aria-hidden="true">&nbsp;</span>}
           </button>
         );
       })}
@@ -662,7 +663,7 @@ function ProviderCardView({ card, owner, busy, onRefresh }: { card: ProviderCard
         {rows.slice(0, 1).map(accountRow)}
         {rows.length > 3 ? (
           <details className="flex flex-col gap-4">
-            <summary className="cursor-pointer [@media(pointer:coarse)]:min-h-11 text-sm text-text-secondary [@media(pointer:coarse)]:flex [@media(pointer:coarse)]:items-center">{rows.length - 1} more accounts</summary>
+            <summary className="cursor-pointer [@media(pointer:coarse)]:min-h-12 text-sm text-text-secondary [@media(pointer:coarse)]:flex [@media(pointer:coarse)]:items-center">{rows.length - 1} more accounts</summary>
             <div className="flex flex-col gap-4">{rows.slice(1).map(accountRow)}</div>
           </details>
         ) : (
@@ -794,12 +795,23 @@ export default function ProvidersPane({ owner }: { owner: boolean }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <AiUserNotice owner={owner} />
       <AiDefaultsPanel owner={owner} />
       {cards === null && !failed ? (
-        <Panel>
-          <SkeletonRows rows={3} />
-        </Panel>
+        // Same tiles and card space as the loaded pane, so nothing moves when the AIs arrive.
+        <div aria-hidden="true" className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className="flex min-h-11 min-w-0 flex-col items-start gap-0.5 rounded-card bg-surface-raised p-3">
+                <Skeleton className="h-5 w-full" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-4 w-20" />
+              </div>
+            ))}
+          </div>
+          <Panel>
+            <SkeletonRows rows={3} className="min-h-40" />
+          </Panel>
+        </div>
       ) : null}
       {cards === null && failed ? (
         <Panel>
@@ -822,6 +834,8 @@ export default function ProvidersPane({ owner }: { owner: boolean }) {
           </Button>
         </div>
       ) : null}
+      {/* Last, so a notice that arrives late never moves the AIs. */}
+      <AiUserNotice owner={owner} />
       <p className="text-xs leading-relaxed text-text-muted">At a limit, Kohlab can switch to another account or a cheaper model. Set the order in a project's Run panel.</p>
       <p className="text-xs leading-relaxed text-text-muted">
         {owner

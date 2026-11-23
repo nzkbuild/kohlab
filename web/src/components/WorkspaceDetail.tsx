@@ -671,7 +671,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       trigger={
         <button
           type="button"
-          className="inline-flex h-9 pointer-coarse:h-11 min-w-0 max-w-full items-center gap-2 rounded-row px-2.5 text-base font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="inline-flex h-9 pointer-coarse:h-12 min-w-0 max-w-full items-center gap-2 rounded-row px-2.5 text-base font-medium text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           <span className="min-w-0 truncate">{title}</span>
           <CaretDown size={14} className="shrink-0 text-text-muted" aria-hidden="true" />
@@ -778,7 +778,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
       className={cn(
         "dark-pane flex min-h-0 flex-col overflow-hidden bg-surface-terminal",
         wide
-          ? "relative mx-3 mb-2.5 shrink-0 rounded-[14px]"
+          ? "relative mx-3 mb-2.5 shrink-0 rounded-lg"
           : "fixed inset-0 z-[var(--z-drawer)] pt-[var(--safe-top)] pb-[var(--safe-bottom)]",
       )}
       style={wide ? { height: panelSize } : undefined}
@@ -854,11 +854,11 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
         <div className="col-start-1 row-start-1 flex min-w-0 items-center justify-self-stretch gap-1 max-md:h-13">
           {/* A project reached from Home or search has history behind it: Back, not the menu. */}
           {navIndex > 0 ? (
-            <Button variant="quiet" iconOnly aria-label="Back" title="Back" className="shell:hidden size-11 shrink-0" onClick={() => history.back()}>
+            <Button variant="quiet" iconOnly aria-label="Back" title="Back" className="shell:hidden size-12 shrink-0" onClick={() => history.back()}>
               <ArrowLeft size={20} aria-hidden="true" />
             </Button>
           ) : (
-            <Button variant="quiet" iconOnly aria-label="Open menu" title="Menu" className="shell:hidden size-11 shrink-0" onClick={() => setNavOpen(true)}>
+            <Button variant="quiet" iconOnly aria-label="Open menu" title="Menu" className="shell:hidden size-12 shrink-0" onClick={() => setNavOpen(true)}>
               <List size={20} aria-hidden="true" />
             </Button>
           )}
@@ -937,7 +937,7 @@ export default function WorkspaceDetail({ workspaceId }: { workspaceId: string }
                   // finished session, replacing it with a notice would throw
                   // away the only surviving record of what the agent did.
                   // The terminal sits in a calm dark panel, inset from the page edges and under the header.
-                  <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] bg-surface-terminal">
+                  <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-surface-terminal">
                     {running ? null : claudeTerminal && (backgroundBusy || waitingBackground) ? (
                       <div className="flex shrink-0 px-5 pt-3 text-sm text-text-muted">
                         <span>{BACKGROUND_WAIT_LINE}</span>

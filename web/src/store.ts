@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api } from "./api";
-import type { Workspace } from "./types";
+import { CONTRASTS, DENSITIES, TINTS, type Contrast, type Density, type Tint, type Workspace } from "./types";
 import { parseRoute, routePath, type Route } from "./lib/route";
 
 /** Explicit socket state, never inferred from navigator.onLine. */
@@ -11,7 +11,7 @@ export interface Me {
   id: string;
   role: string;
   kind: string;
-  prefs?: { powerTools?: boolean; softColour?: boolean };
+  prefs?: { powerTools?: boolean; tint?: Tint; contrast?: Contrast; density?: Density };
 }
 
 export interface AppState {
@@ -31,9 +31,13 @@ export interface AppState {
   /** Files tab and status bar. Off until someone opens a terminal or asks for files. */
   powerTools: boolean;
   setPowerTools: (value: boolean) => void;
-  /** Soft colour (periwinkle accent, warm neutrals). On unless the account turned it off. */
-  softColour: boolean;
-  setSoftColour: (value: boolean) => void;
+  /** Settings → Appearance. Painted by colour.js before first paint; the account keeps the copy. */
+  tint: Tint;
+  setTint: (value: Tint) => void;
+  contrast: Contrast;
+  setContrast: (value: Contrast) => void;
+  density: Density;
+  setDensity: (value: Density) => void;
   /** A command-palette action for the open project, taken by WorkspaceDetail. */
   panelRequest: PanelRequest | null;
   requestPanel: (request: PanelRequest | null) => void;
@@ -90,28 +94,41 @@ export interface PanelRequest {
 
 // Set once the user changes the setting this page load, so a slow account load cannot undo it.
 let touchedPowerTools = false;
-let touchedSoftColour = false;
+const touchedAppearance = new Set<AppearanceName>();
 
 const POWER_KEY = "kohlab.powerTools";
-const COLOUR_KEY = "kohlab.softColour";
 
-// Soft is the default: only a stored "0" (the account chose Plain) turns it off. colour.js sets the same attribute before first paint.
-function readSoftColour(): boolean {
-  try {
-    return localStorage.getItem(COLOUR_KEY) !== "0";
-  } catch {
-    return true;
-  }
+// Appearance: colour.js reads the same keys before first paint, so these only keep the page and the Settings tabs in step.
+const APPEARANCE = {
+  tint: { key: "kohlab.tint", values: TINTS, fallback: "none" },
+  contrast: { key: "kohlab.contrast", values: CONTRASTS, fallback: "standard" },
+  density: { key: "kohlab.density", values: DENSITIES, fallback: "comfortable" },
+} as const;
+type AppearanceName = keyof typeof APPEARANCE;
+type AppearanceValue = Tint | Contrast | Density;
+
+function isAppearanceValue(name: AppearanceName, value: unknown): value is AppearanceValue {
+  return (APPEARANCE[name].values as readonly unknown[]).includes(value);
 }
 
-function writeSoftColour(value: boolean) {
+// Storage can throw (private mode): then the default, and nothing is cached.
+function readAppearance(name: AppearanceName): AppearanceValue {
   try {
-    localStorage.setItem(COLOUR_KEY, value ? "1" : "0");
+    const stored = localStorage.getItem(APPEARANCE[name].key);
+    if (isAppearanceValue(name, stored)) return stored;
+  } catch {
+    /* storage is off: the default */
+  }
+  return APPEARANCE[name].fallback;
+}
+
+function writeAppearance(name: AppearanceName, value: AppearanceValue) {
+  try {
+    localStorage.setItem(APPEARANCE[name].key, value);
   } catch {
     /* not cached */
   }
-  if (value) document.documentElement.dataset.colour = "soft";
-  else delete document.documentElement.dataset.colour;
+  document.documentElement.dataset[name] = value;
 }
 
 // The account's copy is the truth (see loadMe). This local copy only paints the first frame right.
@@ -158,13 +175,29 @@ export const useApp = create<AppState>((set, get) => ({
     set({ powerTools: value });
     void api.savePrefs({ powerTools: value }).catch(() => {});
   },
-  softColour: readSoftColour(),
-  setSoftColour: (value) => {
-    if (get().softColour === value) return;
-    touchedSoftColour = true;
-    writeSoftColour(value);
-    set({ softColour: value });
-    void api.savePrefs({ softColour: value }).catch(() => {});
+  tint: readAppearance("tint") as Tint,
+  setTint: (value) => {
+    if (get().tint === value) return;
+    touchedAppearance.add("tint");
+    writeAppearance("tint", value);
+    set({ tint: value });
+    void api.savePrefs({ tint: value }).catch(() => {});
+  },
+  contrast: readAppearance("contrast") as Contrast,
+  setContrast: (value) => {
+    if (get().contrast === value) return;
+    touchedAppearance.add("contrast");
+    writeAppearance("contrast", value);
+    set({ contrast: value });
+    void api.savePrefs({ contrast: value }).catch(() => {});
+  },
+  density: readAppearance("density") as Density,
+  setDensity: (value) => {
+    if (get().density === value) return;
+    touchedAppearance.add("density");
+    writeAppearance("density", value);
+    set({ density: value });
+    void api.savePrefs({ density: value }).catch(() => {});
   },
   panelRequest: null,
   requestPanel: (request) => set({ panelRequest: request }),
@@ -215,12 +248,14 @@ export const useApp = create<AppState>((set, get) => ({
         // Turned on before accounts saved it: move that choice up once.
         void api.savePrefs({ powerTools: true }).catch(() => {});
       }
-      const savedColour = me.prefs?.softColour;
-      if (touchedSoftColour) {
-        /* the user switched while this was loading: their choice wins and was already saved */
-      } else if (typeof savedColour === "boolean") {
-        writeSoftColour(savedColour);
-        set({ softColour: savedColour });
+      for (const name of Object.keys(APPEARANCE) as AppearanceName[]) {
+        const saved = me.prefs?.[name];
+        if (touchedAppearance.has(name)) {
+          /* the user chose while this was loading: their choice wins and was already saved */
+        } else if (isAppearanceValue(name, saved)) {
+          writeAppearance(name, saved);
+          set({ [name]: saved } as Partial<AppState>);
+        }
       }
     } catch {
       /* stays null: permissive, and the server refuses what it must */

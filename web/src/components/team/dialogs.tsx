@@ -17,7 +17,7 @@ type RolePatch = Omit<Extract<TeamAction, { action: "role" }>, "action" | "role"
 /** One setting: its name, and its value as a menu. The same row as Settings → AI's defaults. */
 function Row({ label, value, menu }: { label: string; value: string; menu: ReactNode }) {
   return (
-    <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-11">
+    <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-12">
       <span className="w-24 shrink-0 text-sm text-text-secondary">{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <Menu label={`${label}: ${value}`} align="start" trigger={<ComposerChip className="-ml-2.5 max-w-full" label={value} menu />}>

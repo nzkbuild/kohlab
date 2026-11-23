@@ -165,7 +165,7 @@ function SignInView({ target, onClose }: { target: SignInTarget; onClose: () => 
       ) : null}
       {s?.state === "manual" && s.command ? (
         <details className="text-sm text-text-secondary">
-          <summary className="cursor-pointer hover:text-text-primary pointer-coarse:min-h-11">Other ways to sign in</summary>
+          <summary className="cursor-pointer hover:text-text-primary pointer-coarse:min-h-12">Other ways to sign in</summary>
           <div className="mt-2 flex flex-col gap-2">
             <p>Run this on the server, finish signing in, then check again.</p>
             <pre className="mono overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-surface-sunken px-3 py-2 text-text-primary">{s.command}</pre>

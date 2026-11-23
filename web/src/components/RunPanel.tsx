@@ -118,7 +118,7 @@ function HelperRow({ t, now, canMutate, stopping, onStop }: { t: HelperTreeNode;
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className="min-h-8 min-w-0 flex-1 rounded-lg px-2 py-1 text-left hover:bg-surface-hover pointer-coarse:min-h-11"
+          className="min-h-8 min-w-0 flex-1 rounded-lg px-2 py-1 text-left hover:bg-surface-hover pointer-coarse:min-h-12"
         >
           <span className="flex min-w-0 items-baseline gap-2">
             <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{n.label || "A helper"}</span>
@@ -238,7 +238,7 @@ const PRE = "mono max-h-56 overflow-auto rounded-lg bg-surface-sunken p-3 text-x
 /** One row of "Now": the setting, its value (a menu for someone who can change it), and Reset when this project set it. */
 function SettingRow({ label, value, source, menu, canSet, onReset }: { label: string; value: string; source: Src | undefined; menu: ReactNode; canSet: boolean; onReset: () => void }) {
   return (
-    <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-11">
+    <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-12">
       <span className="w-16 shrink-0 text-xs text-text-muted">{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-1">
         {canSet && menu ? (
@@ -295,7 +295,7 @@ function FallbackBlock({ p, info, fallback }: { p: RunSlice; info: RunInfo; fall
   ].filter((c) => !fallback.steps.some((s) => keyOf(s) === keyOf(c)));
   const canEdit = p.canSet;
   const auto = (
-    <label className="flex min-h-8 cursor-pointer items-start gap-3 pointer-coarse:min-h-11" htmlFor="run-fallback-auto">
+    <label className="flex min-h-8 cursor-pointer items-start gap-3 pointer-coarse:min-h-12" htmlFor="run-fallback-auto">
       <input id="run-fallback-auto" type="checkbox" className="mt-0.5 size-4 shrink-0 accent-accent" checked={fallback.auto} disabled={busy || !canEdit} onChange={(e) => void save({ auto: e.target.checked, steps: fallback.steps })} />
       <span className="text-sm text-text-primary">Continue on the next one automatically</span>
     </label>
@@ -481,13 +481,13 @@ function RunContent(p: RunSlice & { onPickNote?: () => void }) {
         {p.nowExtra}
         {p.canMutate ? (
           <div className="flex flex-col gap-1">
-            <div className="flex min-h-8 min-w-0 items-center gap-2 pointer-coarse:min-h-11">
+            <div className="flex min-h-8 min-w-0 items-center gap-2 pointer-coarse:min-h-12">
               <span className="min-w-0 flex-1 text-sm text-text-primary">{p.ctxPercent !== null ? `Chat memory ${p.ctxPercent}% full` : "Chat memory"}</span>
               <Button variant="quiet" size="sm" className="shrink-0 text-xs text-text-secondary" disabled={p.busy || p.background > 0 || p.waiting !== null} onClick={p.onContinueFresh}>
                 Continue fresh now
               </Button>
             </div>
-            <label className="flex min-h-8 cursor-pointer items-center gap-3 pointer-coarse:min-h-11" htmlFor="run-auto-fresh">
+            <label className="flex min-h-8 cursor-pointer items-center gap-3 pointer-coarse:min-h-12" htmlFor="run-auto-fresh">
               <input id="run-auto-fresh" type="checkbox" className="size-4 shrink-0 accent-accent" checked={p.autoFresh} onChange={(e) => p.onAutoFresh(e.target.checked)} />
               <span className="min-w-0 text-sm text-text-primary">Continue fresh automatically when nearly full</span>
             </label>
@@ -561,7 +561,7 @@ function RunContent(p: RunSlice & { onPickNote?: () => void }) {
         </div>
       ) : (
         <details className="text-sm">
-          <summary className="flex min-h-8 cursor-pointer items-center text-sm font-medium text-text-primary pointer-coarse:min-h-11">More about this run</summary>
+          <summary className="flex min-h-8 cursor-pointer items-center text-sm font-medium text-text-primary pointer-coarse:min-h-12">More about this run</summary>
           {info === null ? (
             <div className="pt-4">
               <SkeletonRows rows={3} />
@@ -598,7 +598,7 @@ function RunContent(p: RunSlice & { onPickNote?: () => void }) {
                     <p className="text-sm text-text-secondary">{toolsText(info.tools)}</p>
                     {info.tools.builtin.length + info.tools.mcp.length > 0 ? (
                       <details className="text-sm">
-                        <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary hover:text-text-primary pointer-coarse:min-h-11">Show all</summary>
+                        <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary hover:text-text-primary pointer-coarse:min-h-12">Show all</summary>
                         <div className="flex flex-col gap-2 pt-2">
                           <p className="text-sm break-words text-text-secondary">{info.tools.builtin.length > 0 ? info.tools.builtin.join(", ") : "No built-in tools listed."}</p>
                           {info.tools.mcp.length > 0 ? (

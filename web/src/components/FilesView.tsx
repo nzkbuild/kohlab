@@ -383,7 +383,7 @@ function Files({ workspaceId, previewOpen }: Props) {
         aria-label="Editor"
         className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !active && "max-[899px]:hidden")}
       >
-        <div className="dark-pane mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] bg-surface-terminal">
+        <div className="dark-pane mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-surface-terminal">
           <div className="flex min-h-11 shrink-0 items-center gap-2 px-2">
             <Button variant="quiet" size="sm" className="min-[900px]:hidden" onClick={() => setActive(null)}>
               <ArrowLeft size={14} aria-hidden="true" />

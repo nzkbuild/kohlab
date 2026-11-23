@@ -167,7 +167,7 @@ export default function MarkupDialog({ workspaceId, image, onOpenChange }: Props
                   aria-pressed={ink === c.ink}
                   title={c.label}
                   onClick={() => setInk(c.ink)}
-                  className={cn("size-8 rounded-full ring-offset-2 ring-offset-surface-overlay aria-pressed:ring-2 aria-pressed:ring-focus max-md:size-11", c.className)}
+                  className={cn("size-8 rounded-full ring-offset-2 ring-offset-surface-overlay aria-pressed:ring-2 aria-pressed:ring-focus max-md:size-12", c.className)}
                 />
               ))}
             </div>

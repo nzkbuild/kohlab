@@ -44,7 +44,7 @@ export default function RunStrip({ ai, account, model, mode, state, since = null
         aria-label={`Run details. ${full}`}
         title={full}
         onClick={onToggle}
-        className="flex min-h-8 min-w-0 flex-1 items-center rounded-lg px-4 text-left text-sm text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-focus pointer-coarse:min-h-11 motion-reduce:transition-none"
+        className="flex min-h-8 min-w-0 flex-1 items-center rounded-lg px-4 text-left text-sm text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-focus pointer-coarse:min-h-12 motion-reduce:transition-none"
       >
         <span className="hidden truncate md:block">{stripBrief(parts)}</span>
         <span className="block truncate md:hidden">{stripBrief(parts, true)}</span>
@@ -55,7 +55,7 @@ export default function RunStrip({ ai, account, model, mode, state, since = null
           aria-label={`Don't use ${next.label} for the next message`}
           title="Use the usual model for the next message"
           onClick={next.onClear}
-          className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary focus-visible:outline-2 focus-visible:outline-focus pointer-coarse:size-11"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:text-text-primary focus-visible:outline-2 focus-visible:outline-focus pointer-coarse:size-12"
         >
           <X size={12} aria-hidden="true" />
         </button>

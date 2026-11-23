@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The calmer app in the browser (v2.11, stage 1): Settings -> AI in Soft and Plain colour, dark and light, at 1440 and
-// 390; the Appearance colour choice, its save, and its persistence; the Claude model picker's outcome lines.
+// The calmer app in the browser: Settings -> AI at standard and high contrast, dark and light, at 1440 and 390; the
+// Appearance choices (tint, contrast, density), their save, and their persistence; the Claude model picker's outcome lines.
 // /api/providers and /api/account/prefs are answered by page.route (no AI runs). Throwaway server on port 7959.
 // Skips with a printed reason when playwright-core or Chromium is missing.
 //
@@ -128,10 +128,10 @@ try {
   /* ---------------------------------------- Settings -> AI, both colours -- */
   for (const [width, touch] of [[1440, false], [390, true]]) {
     for (const scheme of ["dark", "light"]) {
-      for (const colour of ["soft", "plain"]) {
-        const at = `Settings -> AI @${width} ${scheme} ${colour}`;
+      for (const contrast of ["standard", "high"]) {
+        const at = `Settings -> AI @${width} ${scheme} ${contrast}`;
         const ctx = await openContext(browser, { width, height: 900, key: KEY, touch, scheme });
-        await ctx.addInitScript((v) => localStorage.setItem("kohlab.softColour", v), colour === "soft" ? "1" : "0");
+        await ctx.addInitScript((v) => localStorage.setItem("kohlab.contrast", v), contrast);
         const page = await ctx.newPage();
         const saved = [];
         await mock(page, saved);
@@ -166,36 +166,57 @@ try {
         check(`${at}: no horizontal overflow`, dims.sw <= dims.iw, `${dims.sw} > ${dims.iw}`);
         const low = await page.evaluate(lowContrast);
         check(`${at}: text contrast >= 4.5:1`, low.length === 0, low.slice(0, 4).join(", "));
-        const attr = await page.evaluate(() => document.documentElement.getAttribute("data-colour"));
-        check(`${at}: the colour attribute matches the choice`, colour === "soft" ? attr === "soft" : attr === null, `${attr}`);
+        const attr = await page.evaluate(() => document.documentElement.getAttribute("data-contrast"));
+        check(`${at}: the contrast attribute matches the choice`, attr === contrast, `${attr}`);
         await ctx.close();
       }
     }
   }
 
-  /* ------------------------------------------------- Appearance: Soft/Plain -- */
+  /* ------------------------------------------- Appearance: tint, contrast, density -- */
   {
     const ctx = await openContext(browser, { width: 1440, height: 900, key: KEY });
     const page = await ctx.newPage();
     const saved = [];
     await mock(page, saved);
     await page.goto(`${fx.base}/settings/appearance`);
-    const soft = page.getByRole("tab", { name: "Soft" });
-    const plain = page.getByRole("tab", { name: "Plain" });
-    await plain.waitFor({ timeout: 15000 }).catch(() => {});
-    check("Appearance: Soft is selected by default", (await soft.getAttribute("aria-selected")) === "true");
-    check("Appearance: the page is in soft colour", (await page.evaluate(() => document.documentElement.getAttribute("data-colour"))) === "soft");
-    await plain.click();
+    const none = page.getByRole("tab", { name: "None" });
+    const lilac = page.getByRole("tab", { name: "Lilac" });
+    const high = page.getByRole("tab", { name: "High" });
+    const compact = page.getByRole("tab", { name: "Compact" });
+    await lilac.waitFor({ timeout: 15000 }).catch(() => {});
+    const attrs = () =>
+      page.evaluate(() => ({
+        tint: document.documentElement.getAttribute("data-tint"),
+        contrast: document.documentElement.getAttribute("data-contrast"),
+        density: document.documentElement.getAttribute("data-density"),
+      }));
+    const first = await attrs();
+    check("Appearance: no tint by default (plain grey)", (await none.getAttribute("aria-selected")) === "true" && first.tint === "none", JSON.stringify(first));
+    check("Appearance: standard contrast and comfortable rows by default", first.contrast === "standard" && first.density === "comfortable", JSON.stringify(first));
+    await lilac.click();
     await page.waitForTimeout(300);
-    check("Appearance: Plain switches the page to plain colour", (await page.evaluate(() => document.documentElement.getAttribute("data-colour"))) === null);
-    check("Appearance: Plain saves softColour false to the account", JSON.stringify(saved.at(-1)) === JSON.stringify({ softColour: false }), JSON.stringify(saved));
+    check("Appearance: Lilac sets the page's tint", (await attrs()).tint === "lilac");
+    check("Appearance: Lilac saves the tint to the account", JSON.stringify(saved.at(-1)) === JSON.stringify({ tint: "lilac" }), JSON.stringify(saved));
+    await high.click();
+    await page.waitForTimeout(300);
+    check("Appearance: High sets the contrast", (await attrs()).contrast === "high");
+    check("Appearance: High saves the contrast to the account", JSON.stringify(saved.at(-1)) === JSON.stringify({ contrast: "high" }), JSON.stringify(saved));
+    await compact.click();
+    await page.waitForTimeout(300);
+    check("Appearance: Compact sets the list density", (await attrs()).density === "compact");
+    check("Appearance: Compact saves the density to the account", JSON.stringify(saved.at(-1)) === JSON.stringify({ density: "compact" }), JSON.stringify(saved));
     await page.reload();
-    await plain.waitFor({ timeout: 15000 }).catch(() => {});
-    check("Appearance: Plain persists after a reload", (await page.evaluate(() => document.documentElement.getAttribute("data-colour"))) === null && (await plain.getAttribute("aria-selected")) === "true");
-    await soft.click();
+    await lilac.waitFor({ timeout: 15000 }).catch(() => {});
+    const after = await attrs();
+    check("Appearance: the choices persist after a reload", after.tint === "lilac" && after.contrast === "high" && after.density === "compact", JSON.stringify(after));
+    check("Appearance: the persisted tint is selected", (await lilac.getAttribute("aria-selected")) === "true");
+    // Put the account back the way it was.
+    await none.click();
+    await page.getByRole("tab", { name: "Standard" }).click();
+    await page.getByRole("tab", { name: "Comfortable" }).click();
     await page.waitForTimeout(300);
-    check("Appearance: Soft saves softColour true", JSON.stringify(saved.at(-1)) === JSON.stringify({ softColour: true }), JSON.stringify(saved));
-    check("Appearance: Soft switches the page back", (await page.evaluate(() => document.documentElement.getAttribute("data-colour"))) === "soft");
+    check("Appearance: the defaults are saved back", JSON.stringify(saved.at(-1)) === JSON.stringify({ density: "comfortable" }) && (await attrs()).tint === "none", JSON.stringify(saved.at(-1)));
     await ctx.close();
   }
 

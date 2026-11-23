@@ -104,7 +104,9 @@ try {
   const mo = await kit.req("POST", "/api/ai/providers/claude/signout");
   check("main Claude signout: ok", mo.status === 200 && mo.body.ok === true, mo.text);
   check("main Claude signout: the login is gone", !existsSync(join(home, ".claude", "signed-in")));
-  const hub = await kit.req("GET", "/api/providers");
+  // After a sign-out the server answers "checking" for a moment, then the signed-out card.
+  const hubBody = await until("/api/providers", (b) => b?.providers?.find((p) => p.id === "claude")?.state !== "checking", 15_000);
+  const hub = { body: hubBody, text: JSON.stringify(hubBody) };
   const claude = hub.body?.providers?.find((p) => p.id === "claude");
   check("main Claude signed out: the card is signed_out", claude?.state === "signed_out", hub.text.slice(0, 300));
   check(

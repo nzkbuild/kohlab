@@ -534,3 +534,19 @@ export interface BrainHit {
   snippet: string;
   score: number;
 }
+
+/** One account's preferences (the server keeps the same shape in lib.ts). */
+export interface AccountPrefs {
+  powerTools?: boolean;
+  tint?: Tint;
+  contrast?: Contrast;
+  density?: Density;
+}
+
+/** Appearance choices (Settings → Appearance). lib.ts checks the same lists on the server. */
+export const TINTS = ["none", "rose", "peach", "mint", "sky", "lilac"] as const;
+export type Tint = (typeof TINTS)[number];
+export const CONTRASTS = ["standard", "medium", "high"] as const;
+export type Contrast = (typeof CONTRASTS)[number];
+export const DENSITIES = ["comfortable", "compact"] as const;
+export type Density = (typeof DENSITIES)[number];

@@ -76,7 +76,7 @@ export function AgentCard({
         type="button"
         aria-pressed={selected}
         onClick={actions.onSelect}
-        className="flex min-w-0 flex-1 flex-col gap-1 rounded-row text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:min-h-11"
+        className="flex min-w-0 flex-1 flex-col gap-1 rounded-row text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:min-h-12"
       >
         <span className="flex min-w-0 items-center gap-2">
           {role.state === "needs_you" ? <span className="size-2 shrink-0 rounded-full bg-text-primary" aria-hidden="true" /> : null}

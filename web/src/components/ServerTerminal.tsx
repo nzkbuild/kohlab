@@ -78,7 +78,7 @@ export default function ServerTerminal() {
                       aria-pressed={isActive}
                       onClick={() => setActive(tab.id)}
                       className={cn(
-                        "inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-sm whitespace-nowrap",
+                        "inline-flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm whitespace-nowrap pointer-coarse:min-h-12",
                         isActive ? "text-text-primary" : "text-text-muted hover:text-text-primary",
                       )}
                     >
@@ -99,7 +99,7 @@ export default function ServerTerminal() {
         ) : null}
 
         {/* The terminal sits in the same calm dark panel as a project's Terminal tab. */}
-        <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] bg-surface-terminal">
+        <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-surface-terminal">
           {failed ? (
             <p role="alert" className="m-0 px-5 pt-3 text-sm text-text-secondary">
               {`The server terminal can't open. ${failed}`}

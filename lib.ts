@@ -1551,7 +1551,7 @@ interface State {
   trashed?: Workspace[];
   agents: Record<string, string>;
   /** Per-account preferences, keyed by account id. */
-  prefs?: Record<string, AccountPrefs>;
+  prefs?: Record<string, StoredPrefs>;
   /** What new chat projects start with (AI control, v2.6). Additive: an older build ignores it. */
   defaults?: AiDefaults;
 }
@@ -1700,12 +1700,34 @@ export async function mutateState<T>(fn: (s: State) => T | Promise<T>): Promise<
   });
 }
 
-/** One account's preferences. Empty until it sets one. softColour: absent means on. */
-export type AccountPrefs = { powerTools?: boolean; softColour?: boolean };
+/** Appearance choices (Settings → Appearance). The web keeps the same lists in web/src/types.ts. */
+export const TINTS = ["none", "rose", "peach", "mint", "sky", "lilac"] as const;
+export const CONTRASTS = ["standard", "medium", "high"] as const;
+export const DENSITIES = ["comfortable", "compact"] as const;
+export type Tint = (typeof TINTS)[number];
+export type Contrast = (typeof CONTRASTS)[number];
+export type Density = (typeof DENSITIES)[number];
+
+/** One account's preferences. Empty until it sets one. */
+export type AccountPrefs = { powerTools?: boolean; tint?: Tint; contrast?: Contrast; density?: Density };
+
+/** What is stored: accounts saved before the tint setting kept softColour (a boolean). */
+export type StoredPrefs = AccountPrefs & { softColour?: boolean };
+
+export function isOneOf<T extends string>(list: readonly T[], value: unknown): value is T {
+  return typeof value === "string" && (list as readonly string[]).includes(value);
+}
+
+/** Read-time migration only: softColour on is the lilac tint, off is none. What is stored is not rewritten. */
+function readPrefs(raw: StoredPrefs): AccountPrefs {
+  const { softColour, ...prefs } = raw;
+  if (prefs.tint === undefined && typeof softColour === "boolean") prefs.tint = softColour ? "lilac" : "none";
+  return prefs;
+}
 
 export async function getPrefs(id: string): Promise<AccountPrefs> {
   const prefs = (await loadState()).prefs;
-  return prefs && Object.hasOwn(prefs, id) ? prefs[id] : {};
+  return readPrefs(prefs && Object.hasOwn(prefs, id) ? prefs[id] : {});
 }
 
 /** Merge a change into one account's preferences. */
@@ -1715,7 +1737,7 @@ export async function setPrefs(id: string, patch: AccountPrefs): Promise<Account
     const next = { ...(Object.hasOwn(s.prefs, id) ? s.prefs[id] : {}), ...patch };
     // defineProperty: a plain assignment to "__proto__" would swap the prototype instead of storing.
     Object.defineProperty(s.prefs, id, { value: next, enumerable: true, writable: true, configurable: true });
-    return next;
+    return readPrefs(next);
   });
 }
 

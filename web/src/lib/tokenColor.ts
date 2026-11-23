@@ -13,7 +13,10 @@ export function tokenColor(el: Element, token: string, alpha = 1): string | unde
   if (!ctx) return undefined;
   ctx.fillStyle = raw;
   ctx.fillRect(0, 0, 1, 1);
-  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+  // A token that is itself see-through (color-mix with transparent) keeps its own alpha.
+  const own = a / 255;
+  alpha *= own;
   const hex = (n: number) => n.toString(16).padStart(2, "0");
   return `#${hex(r)}${hex(g)}${hex(b)}${alpha < 1 ? hex(Math.round(alpha * 255)) : ""}`;
 }

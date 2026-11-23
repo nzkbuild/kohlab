@@ -434,7 +434,7 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 variant="quiet"
                 iconOnly
                 aria-label="Refresh changes"
-                className="max-md:min-h-11 max-md:min-w-11"
+                className="max-md:min-h-12 max-md:min-w-12"
                 disabled={loading}
                 onClick={() => void load()}
               >
@@ -492,11 +492,11 @@ export default function DiffView({ workspaceId, simple = false }: Props) {
                 </ul>
                 {can.mutate ? (
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <Button variant="primary" className="min-h-11 rounded-full max-md:px-3 shell:min-h-9" disabled={simpleBusy} onClick={() => void keepSimple()}>
+                    <Button variant="primary" className="min-h-12 rounded-full max-md:px-3 shell:min-h-9" disabled={simpleBusy} onClick={() => void keepSimple()}>
                       <Check size={14} className="max-md:hidden" aria-hidden="true" />
                       Keep this version
                     </Button>
-                    <Button variant="quiet" className="min-h-11 text-text-secondary max-md:px-2.5 shell:min-h-9" disabled={simpleBusy} onClick={() => setConfirmUndo(true)}>
+                    <Button variant="quiet" className="min-h-12 text-text-secondary max-md:px-2.5 shell:min-h-9" disabled={simpleBusy} onClick={() => setConfirmUndo(true)}>
                       <ArrowCounterClockwise size={14} aria-hidden="true" />
                       Undo
                     </Button>

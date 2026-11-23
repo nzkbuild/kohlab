@@ -107,7 +107,9 @@ try {
   run("agent hooks (status from the agent, not the process)", "node", ["scripts/check-hooks.mjs"]);
   run("sidebar groups", "bun", ["scripts/check-sidebar-groups.mjs"]);
   run("home name", "bun", ["scripts/check-home-name.ts"]);
-  run("token contrast (WCAG 2.2 AA)", "node", ["scripts/check-contrast.mjs"]);
+  // Material 3 roles: every role pair in every contrast level and tint, and the committed CSS is the generator's output.
+  run("colour roles (contrast of every pair, generated CSS current)", "node", ["web/scripts/gen-tokens.mjs", "--check"]);
+  run("token contrast (WCAG 2.2 AA, every theme combination)", "node", ["scripts/check-contrast.mjs"]);
   run("screen model", "node", ["scripts/check-screen.mjs"]);
   run("corruption handling", "node", ["scripts/check-corruption.mjs"]);
   run("safe update (save → install → reload)", "node", ["scripts/check-update.mjs"]);
@@ -145,8 +147,8 @@ try {
   run("design rules: one primary, targets, one-segment switch, contrast (browser)", "node", ["scripts/check-design.mjs"]);
   // Own throwaway server on port 7969, two builds of web/dist: the new-version bar, Reload, drafts, a deleted chunk (browser).
   run("version handshake: new-version bar, Reload, drafts block reloads, deleted chunk (browser)", "node", ["scripts/check-version-handshake.mjs"]);
-  // Own throwaway server on port 7959: Settings -> AI in Soft and Plain, the colour choice and its save, the picker's outcome lines.
-  run("calm app in the browser (AI tiles, capability tiles, Soft/Plain, picker lines)", "node", ["scripts/check-calm-ui.mjs"]);
+  // Own throwaway server on port 7959: Settings -> AI at two contrast levels, the Appearance choices and their save, the picker's outcome lines.
+  run("calm app in the browser (AI tiles, capability tiles, tint/contrast/density, picker lines)", "node", ["scripts/check-calm-ui.mjs"]);
   run("terminal touch scroll (browser)", "node", ["scripts/check-terminal-touch.mjs"]);
   // Own throwaway server with a sh terminal; a DECRQM query (Claude Code's start-up) must not freeze the screen.
   run("terminal survives a DECRQM query (browser)", "node", ["scripts/check-terminal-decrqm.mjs"]);

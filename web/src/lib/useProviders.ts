@@ -4,6 +4,9 @@ import type { ProviderCard } from "../types";
 
 /** One shared reading of GET /api/providers for every picker, chip and the Settings pane. A reading is reused for 60 s. */
 const FRESH_MS = 60_000;
+/** A card the server still has as "checking" is asked for again after this, a few times at most. */
+const RECHECK_MS = 1_500;
+const RECHECK_MAX = 8;
 
 interface Store {
   cards: ProviderCard[] | null;
@@ -14,6 +17,7 @@ interface Store {
 
 let store: Store = { cards: null, at: 0, loading: false, failed: false };
 let inflight: Promise<void> | null = null;
+let rechecks = 0;
 const listeners = new Set<() => void>();
 
 function set(next: Partial<Store>) {
@@ -21,15 +25,63 @@ function set(next: Partial<Store>) {
   listeners.forEach((l) => l());
 }
 
+// The last reading, kept per key in sessionStorage: a visit shows it at once and the fresh reading replaces it in place.
+// Keyed by a hash of the key so one account never sees another's cards.
+const CACHE_PREFIX = "kohlab.providers:";
+function cacheKey(): string {
+  const k = localStorage.getItem("kohlab_key") ?? "";
+  let h = 2166136261;
+  for (let i = 0; i < k.length; i++) h = Math.imul(h ^ k.charCodeAt(i), 16777619) >>> 0;
+  return CACHE_PREFIX + h.toString(36);
+}
+function readCached(): { cards: ProviderCard[]; at: number } | null {
+  try {
+    const got = JSON.parse(sessionStorage.getItem(cacheKey()) ?? "null");
+    return got && Array.isArray(got.cards) && typeof got.at === "number" ? got : null;
+  } catch {
+    return null;
+  }
+}
+function writeCached(cards: ProviderCard[], at: number) {
+  if (cards.some((c) => c.state === "checking")) return; // not a reading yet
+  try {
+    sessionStorage.setItem(cacheKey(), JSON.stringify({ cards, at }));
+  } catch {
+    /* storage off: no cache, nothing else changes */
+  }
+}
+
+/** A card still "checking" keeps the last real card for its AI (marked stale) instead of blanking it. */
+function keepLast(next: ProviderCard[], prev: ProviderCard[] | null): ProviderCard[] {
+  if (!prev) return next;
+  return next.map((c) => {
+    if (c.state !== "checking") return c;
+    const old = prev.find((p) => p.id === c.id && p.state !== "checking");
+    return old ? { ...old, stale: true } : c;
+  });
+}
+
 /** Reads the cards unless a reading under 60 s old is held (`force` skips that). One read at a time. */
 export function loadProviders(force = false): Promise<void> {
   if (inflight) return inflight;
+  if (store.cards === null) {
+    const got = readCached();
+    if (got) set({ cards: got.cards, at: got.at });
+  }
   if (!force && store.cards && Date.now() - store.at < FRESH_MS) return Promise.resolve();
   set({ loading: store.cards === null, failed: false });
   inflight = api
     .providers()
     .then(
-      (r) => set({ cards: r.providers, at: Date.now(), loading: false, failed: false }),
+      (r) => {
+        const at = Date.now();
+        writeCached(r.providers, at);
+        set({ cards: keepLast(r.providers, store.cards), at, loading: false, failed: false });
+        if (r.providers.some((c) => c.state === "checking") && rechecks < RECHECK_MAX) {
+          rechecks++;
+          window.setTimeout(() => void loadProviders(true), RECHECK_MS);
+        } else rechecks = 0;
+      },
       () => set({ loading: false, failed: true }),
     )
     .finally(() => {
@@ -44,7 +96,9 @@ export async function refreshProviders(id?: string): Promise<boolean> {
     const r = await api.refreshProviders(id);
     // An answer for one AI replaces only that card.
     const cards = id && store.cards ? store.cards.map((c) => r.providers.find((p) => p.id === c.id) ?? c) : r.providers;
-    set({ cards, at: Date.now(), loading: false, failed: false });
+    const at = Date.now();
+    writeCached(cards, at);
+    set({ cards, at, loading: false, failed: false });
     return true;
   } catch {
     return false;

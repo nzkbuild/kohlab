@@ -1,86 +1,107 @@
 ---
 name: Kohlab
-description: A quiet, charcoal app for building with Claude on a server you own. ChatGPT-like: separation by background not borders, no spinners or badges, one primary per view, follows the OS light or dark setting. AI control is always in view.
+description: A quiet app for building with Claude on a server you own. Material 3 in monochrome: depth is tone, not borders or shadows; plain words; no spinners or badges; one primary per view; follows the OS light or dark setting. AI control is always in view.
 colors:
-  surface-base: "#212121 dark / #ffffff light"
-  surface-sidebar: "#171717 / #f9f9f9"
-  surface-raised: "#2f2f2f / #f4f4f4"
-  surface-bubble: "#303030 / #f4f4f4"
-  surface-hover: "#2a2a2a / #ececec"
-  surface-active: "#3a3a3a / #e5e5e5"
-  surface-pressed: "#454545 / #d9d9d9"
-  surface-terminal: "#181818 in both modes"
-  text-primary: "#ececec / #0d0d0d"
-  text-secondary: "#c4c4c4 / #3d3d3d"
-  text-muted: "#a3a3a3 / #5d5d5d"
-  text-faint: "#9a9a9a / #6e6e6e"
-  line-subtle: "rgba(255,255,255,.10) / rgba(0,0,0,.10)"
-  status-danger: "oklch(0.82 0.14 25) / oklch(0.55 0.19 25)"
+  surface: "container tones: lowest 100 / 4, low 96 / 10, base 94 / 12, high 92 / 17, highest 90 / 22 (light / dark)"
+  primary: "tone 40 light / 80 dark (monochrome; the one primary action)"
+  error: "tone 20 light / 88 dark, always with a warning icon and the word Problem"
 typography:
-  family: "Geist Variable (UI), Geist Mono Variable (machine text only)"
-  body: "15-16px"
+  family: "System fonts only (no download). Mono for whole machine values only."
+  body: "15px / 22px"
 rounded:
-  row: "8px"
-  card: "16px"
-  composer: "24px"
-  button: "pill"
+  chip: "8px"
+  field: "4px on top, square below"
+  card: "12px"
+  dialog: "28px"
+  composer: "28px"
+  button: "full"
 ---
 
 # Design System: Kohlab
 
 ## Overview
 
-**North star: "A calm place to build."** Someone describes what they want, Claude builds it, asks before anything risky, and they look at a preview and keep or undo it. The look is ChatGPT / Claude desktop: charcoal in dark, white in light, nothing decorative. The app follows the OS (`prefers-color-scheme`); dark values live in `:root` of `web/src/index.css`, light values in the media block under it.
+**North star: "A calm place to build."** Someone describes what they want, Claude builds it, asks before anything risky, and they look at a preview and keep or undo it. The look is ChatGPT / Claude desktop: charcoal in dark, white in light, nothing decorative. The page follows the OS (`prefers-color-scheme`, read by `web/public/colour.js` before first paint). The colours are generated from Material 3 roles into `web/src/styles/tokens.generated.css`; `web/src/index.css` aliases them to the names components use.
 
 Calm does not mean hidden. The one place Kohlab is deliberately open about itself is the AI: which AI, which account, which model, which mode and what it is doing are always in view. Everything else stays quiet.
 
-Copy is plain English in sentence case, no developer words in the main path. Icons are Phosphor only, regular weight (the running status dot is a filled shape, not an icon), 16px in rows and menus, 18px in header buttons. Geist is self-hosted; Geist Mono is only for whole machine values (file names, code, terminal output).
+Copy is plain English in sentence case, no developer words in the main path. Icons are Phosphor only, regular weight (the running status dot is a filled shape, not an icon), 16px in rows and menus, 18px in header buttons. Type is the system font; mono is only for whole machine values (file names, code, terminal output).
 
 ## Principles
 
 - **No spinners, no looping animation, no "Working" badge or chip.** Claude working is one grey line in the chat ("Updating your page", with "· step 2 of 5" after it while Claude has a checklist; or "Working") with a small dot that breathes (the one animation allowed; reduced motion turns it off), plus the send button turning into a round Stop button. The run strip above the composer says "Working" as text only, with no dot; the breathing dot stays on the working line.
 - **AI control is always visible.** Never behind one button. The composer holds the picker and mode chips; the composer chips name the AI, the model and the mode; the run strip above the composer names the account and the state; the Run panel (closed until someone opens it, docked when wide, a sheet on a phone) shows the settings, helpers and replies, and under "More about this run" what the AI was told and what it can use. This overrides the quiet stance on purpose, and stays calm in looks: plain words, tonal fills, no badge, no spinner, no looping animation.
 - **No status chip beside project names.** In the sidebar, status is one 8px mark in the text colour on the right of a row, only when the project needs you or is ready to check, told apart by shape and not by colour: a filled dot is "Needs you", a ring is "Ready to check" (the command palette uses the same two shapes). Each has an accessible label. Nothing otherwise.
-- **Separation by background, not borders.** No line between sidebar and page or under headers. Cards, the Ask box, icon tiles and secondary buttons are tonal fills with no border. The only lines left are focus rings, true dividers (between panes, a palette's search field, above a footnote), and the boundary of a text field (`line-strong`, 3:1 against its surface). The composer has none.
-- **One primary per view.** The filled pill in `text-primary` colour (white in dark, near-black in light). A second action is secondary (tonal pill) or quiet.
-- **Status never relies on hue.** Word and shape carry it; red means destructive only. An error line in the chat is muted text with a WarningCircle icon, never red.
+- **Separation by tone, not borders or shadows.** No line between sidebar and page or under headers. Cards, the Ask box, text fields, icon tiles and secondary buttons are filled containers with no border. The only lines left are the 3px focus ring, the mark of an unchecked box or radio (3:1), and true dividers (between panes, above a footnote). Shadows are for overlays only (menus, dialogs, toasts, sheets). The composer has none.
+- **One primary per view.** The filled pill in the `accent` role (primary: tone 40 in light, 80 in dark). A second action is secondary (tonal pill) or quiet.
+- **Status never relies on hue.** Word and shape carry it. There is no red: danger is the heaviest tone (`status-danger`) with a warning icon and the word Problem. An error line in the chat is muted text with a WarningCircle icon.
 - **One vocabulary.** Keep / Kept, Undo / Undone, "Needs you", "Ready to check". A project is named by its title, never by its id, in the UI, notifications and announcements.
 
 ## Colours
 
-Defined only in `web/src/index.css`, in two tiers: primitive ramps (`--neutral-*`, `--red-*`, `--lime-*`) and the semantic tier (what a thing is: `surface-raised`, `text-muted`, `status-danger`). The approved palette is written as hex in the semantic tier, light and dark. Components use semantic names via Tailwind (`bg-surface-raised`, `text-text-muted`); no component holds a colour literal or a primitive name. `scripts/check-contrast.mjs` audits the pairs, and `scripts/check-design.mjs` reads the rules below off the rendered page: one `.btn-primary` per view, main controls at least 24px (44px on touch), no one-segment switch, text at 4.5:1.
+Material 3 colour roles in monochrome (`docs/design/m3-mono.md`). `web/scripts/gen-tokens.mjs` writes every role for light and dark, three contrast levels and six tints into `web/src/styles/tokens.generated.css`. Do not edit that file: run `node web/scripts/gen-tokens.mjs`. `web/src/index.css` holds the aliases below, and components use only the alias names (`bg-surface-raised`, `text-text-muted`). `node web/scripts/gen-tokens.mjs --check` fails on any role pair below its minimum or a stale file. `scripts/check-contrast.mjs` resolves the aliases in all 54 contexts (light and dark, three contrast levels, six tints, plus the dark pane).
 
-| Role | Dark | Light |
-|---|---|---|
-| Page (`surface-base`) | #212121 | #ffffff |
-| Sidebar | #171717 | #f9f9f9 |
-| Field, composer, raised | #2f2f2f | #f4f4f4 |
-| User message bubble | #303030 | #f4f4f4 |
-| Hover | #2a2a2a | #ececec |
-| Active row, segmented thumb, hovered secondary button | #3a3a3a | #e5e5e5 |
-| Pressed secondary button | #454545 | #d9d9d9 |
-| Text primary / secondary / muted / faint | #ececec / #c4c4c4 / #a3a3a3 / #9a9a9a | #0d0d0d / #3d3d3d / #5d5d5d / #6e6e6e |
-| Terminal surface (always dark, `.dark-pane`) | #181818 | #181818 |
-| Pen inks (Add picture: red, blue; `ink-1`, `ink-2`) | oklch red / blue | oklch red / blue, darker |
+| Alias | Material 3 role | Light tone | Dark tone |
+|---|---|---|---|
+| `surface-base` (page) | surface | 98 | 6 |
+| `surface-sidebar` | surface-container-low | 96 | 10 |
+| `surface-sunken` (code, log) | surface-container-lowest | 100 | 4 |
+| `surface-menu` | surface-container | 94 | 12 |
+| `surface-raised` (panels, cards, composer) | surface-container-high | 92 | 17 |
+| `surface-field` (text fields, raised buttons) | surface-container-highest | 90 | 22 |
+| `surface-overlay` (dialogs, toasts) | surface-container-high | 92 | 17 |
+| `surface-tonal` (tonal buttons, your message) | secondary-container | 90 | 30 |
+| `text-primary` | on-surface | 10 | 90 |
+| `text-secondary`, `text-muted`, `text-faint` | on-surface-variant | 30 | 80 |
+| `text-on-tonal` | on-secondary-container | 30 | 90 |
+| `accent`, `line-accent` | primary | 40 | 80 |
+| `text-on-accent` | on-primary | 100 | 20 |
+| `accent-soft` | primary-container | 90 | 30 |
+| `focus-ring`, `line-strong` (unchecked marks) | outline | 50 | 60 |
+| `line-subtle` (faint divider) | outline-variant | 80 | 30 |
+| `status-running` | primary (with a breathing dot and the word Working) | 40 | 80 |
+| `status-review` | tertiary (with a diamond and the words Ready to check) | 25 | 90 |
+| `status-committed`, `status-stopped` | on-surface-variant (with a small dot and the word Idle) | 30 | 80 |
+| `status-danger` | error (with a warning icon and the word Problem) | 20 | 88 |
+| `surface-terminal` (terminal, always dark) | fixed tone 10 (`--k-terminal`) | 10 | 10 |
 
-Lime (`status-running`) survives only in Settings and update panels as a "healthy" chip; it is never used for Claude working.
+Rules:
 
-**Soft colour (v2.11, on by default).** An override layer on the same semantic tokens: `html[data-colour="soft"]` in `index.css`, with its light values under the OS light media query. It sets warm neutrals (base #1e1d1c / #fcfbf9, raised #2a2927 / #efede8, text #ececea / #1a1918) and a restrained periwinkle accent (`--accent` oklch(0.8 0.09 285) dark, oklch(0.5 0.14 285) light; hover and press one step on). It adds two tinted tokens, `accent-soft` and `on-accent-soft`, which Plain mode maps to the neutral active surface. Terminal, code and log surfaces are not touched.
-
-- Accent marks only: the one primary action, the selected option, plan meters and capability tiles. Everything else stays neutral. Accent is never the only signal: a selected state also has its words or its check mark.
-- **Plain** is the account's choice (Settings → Appearance → Colour). It is the neutral charcoal and white table above, unchanged. The choice is stored per account (`softColour`) and mirrored in `localStorage` as `kohlab.softColour`; `web/public/colour.js` reads the mirror before first paint and sets the attribute, so Soft does not flash to Plain on load.
-- `scripts/check-contrast.mjs` audits the pairs in all four sets (dark, light, soft dark, soft light). `scripts/check-design.mjs` runs every view in both colour modes.
+- **Depth is tone.** A container step is the separation. Shadows are overlays only (`--elevation-overlay`).
+- **State layers.** Hover is `surface-hover` (on-surface 8%), selected `surface-active` (10%), pressed `surface-pressed` (16%). A tonal button moves its fill toward the page instead (`--tonal-hover` 8%, `--tonal-pressed` 12%), so its label keeps its contrast at medium and high contrast.
+- **Outline only for the focus ring** (3px) and the unchecked box or radio. A text field's indicator is a 2px filled bar on its bottom edge.
+- **Tint** is one hue on the same tones: `none` (default, plain grey), `rose`, `peach`, `mint`, `sky`, `lilac`. The chroma is low and reduced into the sRGB gamut, so a tint never changes contrast.
+- **Contrast**: `standard` (default: text 4.5:1, UI 3:1), `medium` (6:1, 3.5:1) and `high` (7:1, 4.5:1). Settings, Appearance, Contrast.
+- **Error** is the heaviest tone with a warning icon and the word Problem. Red is retired. Status is never a hue alone.
+- **Pen inks** (Add picture markup, `--ink-1`, `--ink-2`) keep their own colours: they are drawn ink, not theme chrome.
+- **The dark pane** (`.dark-pane`: terminal, code editor) is dark in a light theme. It re-points the aliases to the dark tones of the same contrast and tint.
+- **Choices are set before first paint.** `web/public/colour.js` sets `data-theme` (light or dark, live from the OS setting), `data-contrast`, `data-tint` and `data-density` on `<html>`, from a localStorage mirror of the account's prefs (`kohlab.tint`, `kohlab.contrast`, `kohlab.density`). The account keeps them as `tint`, `contrast` and `density` (`POST /api/account/prefs`, checked against fixed lists). Accounts saved with the old `softColour` boolean are read as `lilac` (true) or `none` (false) and not rewritten.
 
 ## Typography
 
-Body and controls 15-16px, nothing below 12px. The type scale is tokens in `web/src/index.css`: `text-xs` 12px (meta, counts), `text-sm` 13px (controls, menu items, chips), `text-small` 14px (tool lines, the working line), `text-base` 15px (body, composer), `text-lg` 16px (a Claude reply's sub-headings), `text-xl` 20px (its headings), both semibold so they read as headings against the 15px body. There is no `text-2xs`: 12px is `text-xs`. Use the tokens, never a bracketed pixel size. Home heading `text-2xl` (28px) weight 500. Headings are sentence case, no uppercase kickers. Counters and timestamps use tabular numerals. Mono only for a whole machine value, never for labels or a word in a sentence.
+System fonts only: nothing is downloaded. `--font-sans` is the system stack (system-ui, Segoe UI, Roboto), `--font-mono` the system mono (ui-monospace), used for code and whole machine values only. Sentence case everywhere. Nothing under 12px. Line length about 68 characters in prose.
+
+| Token | Size / line | Used for |
+|---|---|---|
+| `text-xs` | 12 / 17 | meta, counts, section labels |
+| `text-sm` | 13 / 19 | controls, menu items, chips |
+| `text-small` | 14 / 20 | tool lines, the working line |
+| `text-base` | 15 / 22 | body, composer (the default) |
+| `text-lg` | 16 / 24 | a Claude reply's sub-headings |
+| `text-xl` | 20 / 28 | a Claude reply's headings |
+| `text-2xl` | 28 / 36 | the Home heading, page titles |
+
+Use the tokens, never a bracketed pixel size. Counters and timestamps use tabular numerals.
 
 ## Layout and shapes
 
-- **Shell:** sidebar 260px on desktop (collapsible), off-canvas drawer below the `shell` breakpoint (900px); a 52px top bar on phones (menu, "kohlab", new-project pencil) with 44px hit areas. The composer is pinned at the bottom.
-- **Radii:** rows 8px (also the sidebar wordmark and ⋯), cards 16px, composer 24px, user bubble 20px, buttons pills. No 6px or 10px radius on a control.
+- **Shape** (`--radius-*`, the Material 3 corner scale): `--radius-sm` 4px (keyboard keys, field top corners); `--radius-md` 8px (chips, tooltips, `--radius-row`); `--radius-lg` 12px (`--radius-card`: cards, menus, tiles); `--radius-xl` 28px (dialogs, bottom sheets, the composer `--radius-composer`); buttons, switch segments and avatars are full (9999px).
+- **Density** (`--row-h`, one token): comfortable 56px (the default) or compact 40px (Settings, Appearance). It applies to sidebar rows, Settings rows and menu items, and nothing else. Controls keep `--control-h` 40px and `--control-h-sm` 32px.
+- **Touch**: every control and row is at least 48px on a coarse pointer (`pointer: coarse`). Density never goes below that. `scripts/check-design.mjs` measures the rendered page at 390px.
+- **Motion** (`--ease-*`, `--duration-*`, from the Material 3 scale): short2 100ms for state layers, short3 150ms, medium1 250ms for sheets. `prefers-reduced-motion` sets every duration to 1ms. The only loops are the working dot and the skeleton shimmer.
+- **Shell:** sidebar 260px on desktop (collapsible), off-canvas drawer below the `shell` breakpoint (64rem, 1024px); a 52px top bar on phones (menu, "kohlab", new-project pencil) with 48px hit areas. The composer is pinned at the bottom.
 - **Spacing:** gaps sit on a 4/8 grid: 4, 8, 12, 16, 24, 32 (`gap-1`, `gap-2`, `gap-3`, `gap-4`, `gap-6`, `gap-8`). No 6, 7 or 10px gaps.
-- **Sidebar:** wordmark, then Back and Forward arrows (Alt+← / Alt+→; disabled when there is nowhere to go inside the app), search (opens the command palette) and collapse; a "New project" row; a small "Projects" label and one flat list (needs-you first, then ready to check, then most recent). Each project row is one full-width 36px pill with an 8px radius: the name on the left, and on the right the status mark or, on hover, keyboard focus, selection or an open menu, the ⋯ button (32px, 8px radius, 44px on touch) inside the pill. Hover is `surface-hover`, selected `surface-active`. No group headings, counts, times or status icons. Bottom: one account row that opens a menu with Settings, Keyboard shortcuts (not on touch screens) and Install app (when available).
+- **Sidebar:** wordmark, then Back and Forward arrows (Alt+← / Alt+→; disabled when there is nowhere to go inside the app), search (opens the command palette) and collapse; a "New project" row; a small "Projects" label and one flat list (needs-you first, then ready to check, then most recent). Each project row is one full-width pill (`--row-h`, 56px comfortable) with an 8px radius: the name on the left, and on the right the status mark or, on hover, keyboard focus, selection or an open menu, the ⋯ button (48px on touch) inside the pill. Hover is `surface-hover`, selected `surface-active`. No group headings, counts, times or status icons. Bottom: one account row that opens a menu with Settings, Keyboard shortcuts (not on touch screens) and Install app (when available).
 - **Project header (56px, no border):** left, the project name with a ⌄ menu. A chat project's menu is New chat, Conversations, Notes for the AI, Rename, Download project, then (power tools on only) Open terminal and Continue in Claude's terminal, and Delete project last. A terminal project's menu is Rename, Download project, Open terminal, Restart and Stop, then Delete. Centre, one segmented pill switch: a project that runs Claude shows "Chat · Terminal · Changes" (Files too once power tools are on); a chat project shows "Chat · Changes"; a project without Claude shows "Terminal · Changes". A chat project has no Changes segment, and no Preview button, until it has changed a file. Likewise it has no Brain segment until its brain holds more than the seeded Goal (a light, read-only look that never creates the vault), or until a link or a recalled note asks for it; then a chat project shows "Chat · Changes · Brain". Changes shows a count when above 0, in `text-muted` (the faint colour fails 4.5:1 on the active segment). A switch with one segment is never shown: a chat project with nothing to switch to has no switch at all, and it appears with Changes. Segments are of equal width and centred on the content column. When that column is narrower than 44rem (an open preview pane makes it so), the switch drops to its own centred row under the title, so nothing overlaps; the title truncates with an ellipsis. The Chat or Terminal choice is remembered per project, and an old `terminal` link opens the remembered view. Right, a quiet Preview button with the Browser icon, pressed (`surface-active`, `aria-pressed`) while the pane is open. On one row, title, switch and Preview are all 36px tall; the header's left and right padding are equal.
 - **Preview pane:** the shared browser beside the project (a full-screen sheet on a phone). Top bar: back, forward, reload, the address and a ⋯ menu. The project's own page reads "Your page" in the address; other sites show their real address. Below the bar, a segmented control, Phone / Tablet / Desktop (icons always, labels once the pane is wide enough), sets the browser's viewport to 390×844, 820×1180, or follows the pane. A phone or tablet frame is scaled to fit and centred on a `surface-sunken` backdrop. The choice is remembered per project in this browser. The bar also holds, for a person who can change the project: **Point** (an icon toggle, `aria-pressed`, that turns the next click or tap into a pick), and **Problem**, a quiet text button with a warning icon that appears only while the page or the app has problems. Its menu gives the plain summary and "Ask {AI} to fix it". The word stands in for a badge: there is no count and no dot. The ⋯ menu holds "Share a link…" (a dialog: works for 1 day, 7 days or until turned off; primary "Copy link", quiet "Make a new link" and "Turn off link"), and "Add picture" (a dialog to draw on a picture of the page in red or blue, then primary "Add to message"). An earlier version opened from Changes shows a slim row, "You're looking at the version from 55 min ago." ("just now", "3 hr ago", "on Mon"), with a secondary "Go back to this one" and quiet "Back to now". It is secondary because the chat's Keep this version is already the one primary in that view.
 - **Changes (a chat project):** the changed files, primary "Keep this version" and quiet "Undo", then "Show the code" and, once there are two or more, "Earlier versions". Each earlier-version row is a fixed 4rem time column (tabular numerals), the label, then quiet "Look" and "Go back to this one"; on a phone the buttons drop under the label so it never truncates. The code for this tab is fetched as soon as the tab exists, and the diff and versions are fetched together (and ahead of the click, on hover, focus or press), so the first paint is under 400 ms; until the data lands the tab shows skeleton rows.
@@ -92,16 +113,16 @@ Body and controls 15-16px, nothing below 12px. The type scale is tokens in `web/
 - **Continue fresh:** at 70% full a Claude chat shows a quiet card above the strip ("This chat is getting long. Continue with a fresh memory? Nothing is lost.", Continue fresh as a secondary button so Send stays the only primary, Not now, and a "Do it for me" checkbox). By hand it opens a dialog with the AI's handoff note to read or change. In the chat the note sits as a collapsed "Handoff note" card.
 - **Chat:** 720px centred column. User message: right-aligned bubble, with a ⋯ menu under it that holds its message actions. Notes such as "Switched to Hermes" or "Went back to an earlier message" are quiet centred text between faint rules, not bubbles. Claude text: plain, no label. An empty chat matches Home: the heading is "What should {AI} build?" at the same 28px size and sits at the same height (12vh, less the header), and the composer follows it, so nothing jumps when the first message docks it at the bottom. Tools: one muted 14px summary line with a chevron, in plain words and with no file names ("looked around, updated your page and checked it"); the file names stay behind "Show details". An answered permission is plain too: "You allowed Claude to update your page" or "to run a command" (several in a row: "You allowed 3 changes to your page"); a live run stays folded and the working line names the current step. Ready to check is a ready card under the reply, a 16px-radius tonal card with no line, like the Ask card: "Changed N files" (the file list one tap away), then Preview and Keep this version. Until the person has opened Preview for this reply, Preview is the primary and Keep the secondary; after that, Keep is primary. "Undo these changes" (the same words as the Changes tab and its confirm, "Undo the changes?") is quiet and confirmed as a danger action. Keep and Undo add a quiet note to the chat ("Kept this version", "Undid the changes since the last keep") instead of a toast. The card listens for `kohlab:preview-opened`, which the app dispatches whenever the Preview pane opens for a project. Copy shows only under a finished Claude reply that ends in text (not mid-turn, not under a tool run), with a "Copy" tooltip. An Ask is a 16px-radius tonal card with no line: semibold title (a card with one question has none: the question is the title, so there are two lines at most), muted reason, Allow (primary), Don't allow (secondary), "Show details" quiet, 12px between buttons. A problem card ("The page has a problem") is the same kind of card: muted summary, primary "Ask {AI} to fix it", quiet "Not now" that hides it until the problems change. Pointed-at elements sit as removable chips above the composer's text, at most three; the picture and the point lines go to the AI with the message.
 - **Mode menu:** Asks first, Edits allowed, Auto, Full access, and for Claude Plan first, each with one plain line (Full access: "Never asks. It can change and delete anything the AI can reach."). Choosing Full access opens a confirm; its allowing button is secondary, never the primary, Cancel takes the focus, and the words come from the server (who it runs as). Settings → AI uses the same menu and confirm for the default. An ask that can be saved as a rule adds a quiet "Always allow: Run npm test" beside Don't allow, never primary.
-- **Composer:** one 24px raised box with no border, in two rows. The top row holds attached files and the text, which starts at the same x as the messages above (the box pads 24px on desktop, as the column does). The bottom row, left: quiet icon-only squares (40px, 44px on touch) for Add files (paperclip) and Commands ("/", tooltip "Commands (type /)"), then the AI and model as one picker (its effort sits inside the menu) and the mode, each with its one-line detail in the menu. The row's left edge sits 10px into the margin, so the first glyph and the text chips' labels line up with the text above. Other composer chips are text plus a caret, no leading icons. On Home the AI chip shows the AI's name (Claude, Hermes, omp, Codex); an AI that is not signed in is listed but disabled, with "Sign in first in Settings". "Saved (N)" appears only when prompts are saved for later. Chat projects have no Commands chip, since Claude chat runs without slash commands. On phones the row is one line that never scrolls sideways: attach, the model chip (it takes the free room and shows the model's short name, the AI's name only when it is not Claude), the mode as a shield icon alone (its name is `aria-label` "Mode: Asks first"; its name is the `aria-label` "Mode: Asks first"), Send. Effort is inside the model menu. On phones the Commands chip is hidden (typing "/" still opens the list). Right: the context chip when it applies, then one round button. It is Send when idle (disabled when empty), and Stop (square, aria-label "Stop") for the whole time Claude works, whatever is typed. Enter while Claude works queues the text: a quiet card above the box reads "Waiting to send: “first 80 characters”" and "Sends when Claude finishes" (the server holds the message, so the card has no buttons). Ctrl/Cmd+Enter stops and sends the box now. Never two round buttons side by side. The "/" and "@" lists open above the box. Placeholder on desktop: "Message Claude — / for commands, @ for files"; on a phone: "Message Claude".
+- **Composer:** one 24px raised box with no border, in two rows. The top row holds attached files and the text, which starts at the same x as the messages above (the box pads 24px on desktop, as the column does). The bottom row, left: quiet icon-only squares (40px, 48px on touch) for Add files (paperclip) and Commands ("/", tooltip "Commands (type /)"), then the AI and model as one picker (its effort sits inside the menu) and the mode, each with its one-line detail in the menu. The row's left edge sits 10px into the margin, so the first glyph and the text chips' labels line up with the text above. Other composer chips are text plus a caret, no leading icons. On Home the AI chip shows the AI's name (Claude, Hermes, omp, Codex); an AI that is not signed in is listed but disabled, with "Sign in first in Settings". "Saved (N)" appears only when prompts are saved for later. Chat projects have no Commands chip, since Claude chat runs without slash commands. On phones the row is one line that never scrolls sideways: attach, the model chip (it takes the free room and shows the model's short name, the AI's name only when it is not Claude), the mode as a shield icon alone (its name is `aria-label` "Mode: Asks first"; its name is the `aria-label` "Mode: Asks first"), Send. Effort is inside the model menu. On phones the Commands chip is hidden (typing "/" still opens the list). Right: the context chip when it applies, then one round button. It is Send when idle (disabled when empty), and Stop (square, aria-label "Stop") for the whole time Claude works, whatever is typed. Enter while Claude works queues the text: a quiet card above the box reads "Waiting to send: “first 80 characters”" and "Sends when Claude finishes" (the server holds the message, so the card has no buttons). Ctrl/Cmd+Enter stops and sends the box now. Never two round buttons side by side. The "/" and "@" lists open above the box. Placeholder on desktop: "Message Claude — / for commands, @ for files"; on a phone: "Message Claude".
 - **Context chip:** shown only at 50% of the context window or more: "Chat 72% full", and "Chat almost full" from 85%. Its click opens the Usage dialog.
 - **Usage dialog:** titled "Usage", opened by Ctrl/Cmd+U (listed in Keyboard shortcuts), the account menu, the command palette or the context chip. "Your Claude plan": two slim meters (a `surface-raised` track, `text-secondary` fill, `role="meter"`), "Next few hours" and "This week", each "34% used · resets at 7:20 pm" ("resets tomorrow at …" when not today). "This chat: 23% full" with "Long chats get summarised automatically. Start a fresh project chat for a new task." when a Claude chat is open. Only the owner's plan is read (`GET /api/usage`; others see "Only the server owner can see plan usage."); loading is skeleton rows, failure is one sentence with a secondary Try again. The AI cards in Settings show the same meters. Email, plan, usage, versions and error text belong to the owner: everyone else gets the state words and the models.
 - **Connection:** when two background refreshes in a row fail, a slim full-width line at the top of the page reads "Can't reach Kohlab. Trying again…" (`surface-raised` fill, `text-sm`, no border, `role="status"`). The next success hides it. Uploads and other requests show the same plain sentence.
-- **Closing a dialog:** every dialog can be closed in view. Notes and Add picture end in Cancel; Usage, Keyboard shortcuts and Share a link end in a quiet "Done" (44px on touch). Esc still works.
+- **Closing a dialog:** every dialog can be closed in view. Notes and Add picture end in Cancel; Usage, Keyboard shortcuts and Share a link end in a quiet "Done" (48px on touch). Esc still works.
 - **Keyboard shortcuts:** a dialog opened by "?" (outside text fields), by the command palette or by the account menu. It lists only the keys that exist. Ctrl-key hints are hidden on touch screens (`(pointer: coarse)`).
 - **Notes for the AI:** a dialog titled "Notes for Claude" (or the AI's name), opened from a chat project's menu or the command palette. One textarea, the helper "Things it should always remember for this project, like your business name, colours or tone.", Save and Cancel, and a counter "n / 4000" (the server holds the same limit).
-- **Toasts:** a `surface-overlay` fill with a soft shadow and no border (`.kohlab-toast`), centred at the top of the content area (below the phone top bar) so they never cover Send or the ready card, dismissed automatically, `role="status"`. Keep and Undo do not toast: the note in the chat is their feedback.
-- **Home:** centred "What should we build?", the composer, then six starter chips and "Something else" (tonal pills, 36px, 44px on touch). Under them, two quiet links, each with a 16px icon: "Attach a screenshot of a site you like" (picks an image, which is uploaded into the new project) and "Ask me a few questions first" (puts that request in the box; it never sends). Below, up to two full-width tonal rows, one per state, each opening its project: a leading icon (a speech bubble for "<Project> has a question", a check for "<Project> is ready to check") and a trailing caret, so they read as controls. No badge and no dot. "New project" (sidebar, palette, header) opens Home with the cursor in the box; the name dialog is only for "Start from a folder or link".
-- **Terminal project:** the terminal sits in a #181818 panel, radius 14px, 12px from the edges (not the top), 20/24px inner padding. Attach and Copy float inside it.
+- **Toasts:** a `surface-overlay` fill with the overlay shadow and no border (`.kohlab-toast`), centred at the top of the content area (below the phone top bar) so they never cover Send or the ready card, dismissed automatically, `role="status"`. Keep and Undo do not toast: the note in the chat is their feedback.
+- **Home:** centred "What should we build?", the composer, then six starter chips and "Something else" (tonal pills, 36px, 48px on touch). Under them, two quiet links, each with a 16px icon: "Attach a screenshot of a site you like" (picks an image, which is uploaded into the new project) and "Ask me a few questions first" (puts that request in the box; it never sends). Below, up to two full-width tonal rows, one per state, each opening its project: a leading icon (a speech bubble for "<Project> has a question", a check for "<Project> is ready to check") and a trailing caret, so they read as controls. No badge and no dot. "New project" (sidebar, palette, header) opens Home with the cursor in the box; the name dialog is only for "Start from a folder or link".
+- **Terminal project:** the terminal sits in the `surface-terminal` panel, radius 12px (`--radius-lg`), 12px from the edges (not the top), 20/24px inner padding. Attach and Copy float inside it.
 
 ## Components
 
@@ -109,22 +130,22 @@ Radix primitives are styled once in `web/src/components/ui.tsx` (Button, Menu, T
 
 Settings → AI (v2.11): a row of status tiles (one per AI: name, "Signed in", "Not signed in" or "Not installed" in words), then the selected AI's header, plan meters and a "What it can do" tile grid. Each tile is a `capabilityTiles()` row from `web/src/lib/capabilities.ts` with a state word ("Yes", "Depends", "Summary only", "No"); a tile is only shown when the code behind it exists. The model picker shows a short plain-words outcome line for the known Claude models (`modelOutcome()` in the same file).
 
-Buttons: min-height 40px (44px on touch; `.btn` measures 40, not 41), weight 550. Primary filled, dimmed to 40% when disabled; secondary tonal (`surface-raised` fill, hover `surface-active`, pressed `surface-pressed`, no border); quiet borderless; danger red text on a red tint. Icon-only buttons are square with an `aria-label`. Focus is a 2px soft grey (focus-ring token) outline, inset on full-width rows, shown for keyboard use only.
+Buttons: min-height 40px (48px on touch), weight 550, full radius. Primary filled in `accent`, dimmed to 40% when disabled; secondary tonal (`surface-tonal` fill, hover and press move it toward the page, no border); quiet borderless; danger is the `status-danger` text on a faint fill, with the verb. Icon-only buttons are square with an `aria-label`. Focus is the 3px `focus-ring` outline, offset 2px, inset on full-width rows, shown for keyboard use only.
 
 ProviderCard (`ProvidersPane.tsx`): a `Panel` per AI, flat, with the status chip's word, the account, `UsageRow` meters, the models disclosure and quiet actions. RunStrip (`RunStrip.tsx`): the text-only line above the composer. RunPanel (`RunPanel.tsx`): the dock or sheet described under Layout; its helper rows pair a status word with the label and keep Stop to the helpers that can be stopped.
 
-Chip (`ComposerChip` in `ui.tsx`): a quiet pill trigger for composer controls. 32px tall (44px on touch), 13px secondary text, an optional 14px icon before the label and a 12px caret when it opens a menu. Hover `surface-hover`; open or pressed `surface-active`; no border. It forwards its ref, so it can be a Menu trigger. The status chip (`Chip`) is a different thing and stays for status words.
+Chip (`ComposerChip` in `ui.tsx`): a quiet trigger for composer controls, 8px radius. 32px tall (48px on touch), 13px secondary text, an optional 14px icon before the label and a 12px caret when it opens a menu. Hover `surface-hover`; open or pressed `surface-active`; no border. It forwards its ref, so it can be a Menu trigger. The status chip (`Chip`) is a different thing and stays for status words.
 
-Menus, dialogs and the palette sit on `surface-overlay` with a soft shadow; in-page cards and rows are flat. The "/" and "@" lists in the composer use the same surface, radius, shadow and item sizes as the menus. Forced-colors maps borders and outlines to system colours.
+Menus (`surface-menu`, 12px), dialogs and the palette (`surface-overlay`, 28px) carry the overlay shadow; in-page cards and rows are flat tonal containers. The "/" and "@" lists in the composer use the same surface, radius, shadow and item sizes as the menus. Forced-colors maps borders and outlines to system colours.
 
 ## Do and Don't
 
-- Do add colour by adding a primitive, aliasing it in the semantic tier and bridging it in `@theme inline`; give every colour a light and a dark value.
-- Do size controls with `--control-h`, `--control-h-sm`, `--row-h` as min-height; stack with the `--z-*` tokens.
+- Do add colour as a Material 3 role in `web/scripts/gen-tokens.mjs` (both modes and the three contrast levels), alias it in `web/src/index.css` and bridge it in `@theme inline`.
+- Do size controls with `--control-h`, `--control-h-sm` and list rows with `--row-h`, as min-height; stack with the `--z-*` tokens.
 - Do keep one `<h1>` per surface.
 - Do show the AI, account, model and mode in view; don't hide them behind one settings button.
 - Don't add spinners, looping animation, badges, or status chips next to names. The skeleton shimmer and the working line's breathing dot are the only exceptions.
 - Don't put the run strip in a chip or give it a dot.
 - Don't put a border between sidebar and page or under a header.
-- Don't put a hex, OKLCH literal or primitive name in a component; don't import `@radix-ui/*` outside `ui.tsx`.
+- Don't put a hex, OKLCH literal or role name in a component; don't import `@radix-ui/*` outside `ui.tsx`.
 - Don't add hero metrics or summary tiles to Home; don't load fonts from a third party.

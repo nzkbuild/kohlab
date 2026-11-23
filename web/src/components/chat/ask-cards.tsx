@@ -9,7 +9,7 @@ import { Prose } from "./markdown";
 import { Details } from "./tools";
 
 /** Allow and Don't allow: the same width, and tall enough to tap on a touch screen. */
-export const ASK_BUTTON = "min-w-[8rem] justify-center [@media(pointer:coarse)]:min-h-11";
+export const ASK_BUTTON = "min-w-[8rem] justify-center [@media(pointer:coarse)]:min-h-12";
 
 /** The question Claude asked, and the answer, once given: one muted line. A plan keeps its text behind "Show plan". */
 export function AnsweredAsk({ e, allowed, reply }: { e: AskEvent; allowed: boolean; reply?: string }) {

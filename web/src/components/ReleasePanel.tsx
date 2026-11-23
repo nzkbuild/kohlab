@@ -173,7 +173,7 @@ export default function ReleasePanel({ workspaceId }: { workspaceId: string }) {
               href={pr.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-text-secondary underline-offset-2 hover:text-text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:min-h-11"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm text-text-secondary underline-offset-2 hover:text-text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:min-h-12"
             >
               Open on GitHub
               <ArrowSquareOut size={14} aria-hidden="true" />

@@ -7,14 +7,14 @@ import { announce } from "../lib/announce";
 import { useProviders } from "../lib/useProviders";
 import { AccountChoices, EffortChoices, FullAccessDialog, ModeChoices } from "./AiMenus";
 import { ModelChoices, modelName, shortModel, type ModelInfo } from "./ModelPicker";
-import { Button, ComposerChip, Menu, MenuRadioGroup, MenuRadioItem, Panel } from "./ui";
+import { Button, ComposerChip, Menu, MenuRadioGroup, MenuRadioItem, Panel, Skeleton } from "./ui";
 
 type Patch = { [K in keyof AiDefaults]?: AiDefaults[K] | null };
 
 /** One default: its name, its value (a menu for the owner, plain words for everyone else), and "Use built-in" once a value is set. */
 function Row({ label, value, menu, canEdit, isSet, onClear }: { label: string; value: string; menu: ReactNode; canEdit: boolean; isSet: boolean; onClear: () => void }) {
   return (
-    <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-11">
+    <div className="flex min-h-8 items-center gap-2 pointer-coarse:min-h-12">
       <span className="w-24 shrink-0 text-sm text-text-secondary">{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-1">
         {canEdit ? (
@@ -53,7 +53,18 @@ export default function AiDefaultsPanel({ owner }: { owner: boolean }) {
     };
   }, []);
 
-  if (missing || defaults === null) return null;
+  if (missing) return null;
+  // Until the defaults answer, a box of the loaded panel's height (measured: owner 350 px on phones, 270 px wider; member 379 / 299), so the AIs below do not move.
+  if (defaults === null)
+    return (
+      <Panel className={owner ? "min-h-[350px] sm:min-h-[270px]" : "min-h-[379px] sm:min-h-[299px]"}>
+        <div aria-hidden="true" className="flex flex-col gap-3 p-4">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      </Panel>
+    );
 
   const save = async (patch: Patch) => {
     setError(null);
@@ -142,7 +153,7 @@ export default function AiDefaultsPanel({ owner }: { owner: boolean }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex min-h-8 cursor-pointer items-start gap-3 pointer-coarse:min-h-11" htmlFor="default-auto-fresh">
+          <label className="flex min-h-8 cursor-pointer items-start gap-3 pointer-coarse:min-h-12" htmlFor="default-auto-fresh">
             <input
               id="default-auto-fresh"
               type="checkbox"

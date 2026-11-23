@@ -81,7 +81,7 @@ export function FreshDialog({ workspaceId, who, onClose, onDone }: { workspaceId
 export function HandoffCard({ text }: { text: string }) {
   return (
     <details className="rounded-card bg-surface-raised px-4 py-2.5 text-sm">
-      <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary pointer-coarse:min-h-11">Handoff note</summary>
+      <summary className="flex min-h-8 cursor-pointer items-center text-text-secondary pointer-coarse:min-h-12">Handoff note</summary>
       <pre className="mono mt-2 max-h-80 overflow-auto text-xs leading-5 whitespace-pre-wrap break-words text-text-secondary">{text}</pre>
     </details>
   );

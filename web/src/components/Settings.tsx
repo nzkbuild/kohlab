@@ -11,6 +11,7 @@ import UpdatePanel from "./UpdatePanel";
 import BackupsPanel from "./BackupsPanel";
 import TrashPane from "./TrashPane";
 import { Button, PageHeader, Panel, Tab, TabList, Tabs } from "./ui";
+import type { Contrast, Density, Tint } from "../types";
 
 const PAUSE_KEY = "kohlab_announce_paused";
 
@@ -68,43 +69,76 @@ function AccountPane() {
   );
 }
 
-/** Appearance: the colour choice, and the power tools switch. Off keeps the project page to Claude and Changes. */
+const TINT_CHOICES: [Tint, string][] = [["none", "None"], ["rose", "Rose"], ["peach", "Peach"], ["mint", "Mint"], ["sky", "Sky"], ["lilac", "Lilac"]];
+const CONTRAST_CHOICES: [Contrast, string][] = [["standard", "Standard"], ["medium", "Medium"], ["high", "High"]];
+const DENSITY_CHOICES: [Density, string][] = [["comfortable", "Comfortable"], ["compact", "Compact"]];
+
+/** Appearance: the tint, the contrast and the list density, then the power tools switch. Off keeps the project page to Claude and Changes. */
 function AppearancePane() {
   const powerTools = useApp((s) => s.powerTools);
   const setPowerTools = useApp((s) => s.setPowerTools);
-  const softColour = useApp((s) => s.softColour);
-  const setSoftColour = useApp((s) => s.setSoftColour);
+  const tint = useApp((s) => s.tint);
+  const setTint = useApp((s) => s.setTint);
+  const contrast = useApp((s) => s.contrast);
+  const setContrast = useApp((s) => s.setContrast);
+  const density = useApp((s) => s.density);
+  const setDensity = useApp((s) => s.setDensity);
   return (
     <Panel>
-      <div className="flex flex-col gap-4 p-4">
-        <div className="flex flex-col gap-2">
-          <span className="text-sm text-text-primary">Colour</span>
-          <Tabs value={softColour ? "soft" : "plain"} onValueChange={(v) => setSoftColour(v === "soft")}>
-            <TabList label="Colour">
-              <Tab value="soft">Soft</Tab>
-              <Tab value="plain">Plain</Tab>
-            </TabList>
-          </Tabs>
-          <p className="text-xs leading-relaxed text-text-muted">
-            Soft is a quiet blue-violet accent on warm greys. Plain is the neutral charcoal and white. Follows your account on every device.
-          </p>
-        </div>
-        <label className="flex min-h-11 cursor-pointer items-start gap-3" htmlFor="power-tools">
-          <input
-            id="power-tools"
-            type="checkbox"
-            className="mt-0.5 size-4 shrink-0 accent-accent"
-            checked={powerTools}
-            onChange={(e) => setPowerTools(e.target.checked)}
-          />
-          <span className="min-w-0">
-            <span className="block text-sm text-text-primary">Show files and terminal</span>
-            <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
-              Adds a Files tab and a status bar for people who like to see the code. Follows your account on every device.
-            </span>
-          </span>
-        </label>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm text-text-primary">Tint</span>
+        <Tabs value={tint} onValueChange={(v) => setTint(v as Tint)}>
+          <TabList label="Tint">
+            {TINT_CHOICES.map(([value, label]) => (
+              <Tab key={value} value={value}>{label}</Tab>
+            ))}
+          </TabList>
+        </Tabs>
+        <p className="text-xs leading-relaxed text-text-muted">
+          A faint hue on the greys. None is plain grey. Follows your account on every device.
+        </p>
       </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm text-text-primary">Contrast</span>
+        <Tabs value={contrast} onValueChange={(v) => setContrast(v as Contrast)}>
+          <TabList label="Contrast">
+            {CONTRAST_CHOICES.map(([value, label]) => (
+              <Tab key={value} value={value}>{label}</Tab>
+            ))}
+          </TabList>
+        </Tabs>
+        <p className="text-xs leading-relaxed text-text-muted">
+          Medium and High make text and the edges of controls stronger.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm text-text-primary">Density</span>
+        <Tabs value={density} onValueChange={(v) => setDensity(v as Density)}>
+          <TabList label="Density">
+            {DENSITY_CHOICES.map(([value, label]) => (
+              <Tab key={value} value={value}>{label}</Tab>
+            ))}
+          </TabList>
+        </Tabs>
+        <p className="text-xs leading-relaxed text-text-muted">
+          Compact makes the sidebar, Settings and menu rows shorter. Buttons and touch targets stay the same size.
+        </p>
+      </div>
+      <label className="flex min-h-11 cursor-pointer items-start gap-3 pointer-coarse:min-h-12" htmlFor="power-tools">
+        <input
+          id="power-tools"
+          type="checkbox"
+          className="mt-0.5 size-4 shrink-0 accent-accent"
+          checked={powerTools}
+          onChange={(e) => setPowerTools(e.target.checked)}
+        />
+        <span className="min-w-0">
+          <span className="block text-sm text-text-primary">Show files and terminal</span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
+            Adds a Files tab and a status bar for people who like to see the code. Follows your account on every device.
+          </span>
+        </span>
+      </label>
     </Panel>
   );
 }
@@ -172,7 +206,7 @@ export default function Settings() {
         </div>
 
         <div className="border-t border-line-subtle pt-4">
-          <label className="flex min-h-11 cursor-pointer items-start gap-3" htmlFor="announce-paused">
+          <label className="flex min-h-11 cursor-pointer items-start gap-3 pointer-coarse:min-h-12" htmlFor="announce-paused">
             <input
               id="announce-paused"
               type="checkbox"
@@ -226,7 +260,7 @@ export default function Settings() {
               <button
                 key={id}
                 type="button"
-                className="settings-nav-item !min-h-11"
+                className="settings-nav-item"
                 aria-current={active.id === id ? "page" : undefined}
                 onClick={() => navigate({ kind: "settings", section: id }, { replace: true })}
               >

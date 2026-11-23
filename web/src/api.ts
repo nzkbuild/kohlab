@@ -1,6 +1,6 @@
 import type { AccountSignIn, AccountView, AgentStatus, AiDefaults, BackupList, BrainGraph, BrainHit, BrainNote, NoteType, OpenCodeConnection, OpenCodeInstall, OpenCodeMethod, OpenCodeService, OpenCodeSignIn, PermissionRule, RouterCheck, ChatEvent, CodexLogin, DiffFile, HelperNode, LinkInfo, Pick, Problem, ProviderCard, ReleaseStatus, RunInfo, TaskStatus, TrashList, TreeNode, TurnFile, Version, Workspace } from "./types";
 
-import type { Effort, Mode, PreviewPage } from "./types";
+import type { AccountPrefs, Effort, Mode, PreviewPage } from "./types";
 import type { Budget, Team, TeamEvent } from "./team-types";
 import { noteServerBuild } from "./lib/build";
 
@@ -63,6 +63,12 @@ export function clearKey() {
   key = "";
   prefetched.clear();
   localStorage.removeItem("kohlab_key");
+  try {
+    // The AI cards read under this key (useProviders) go with it.
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith("kohlab.providers:")) sessionStorage.removeItem(k);
+  } catch {
+    /* storage off: nothing was kept */
+  }
 }
 export function hasKey() {
   return !!key;
@@ -543,10 +549,10 @@ export const api = {
   files: (id: string) => json<TreeNode[]>(`/api/workspaces/${id}/files`),
   users: () => json<{ users: TeamUser[]; canInvite: boolean }>("/api/users"),
   /** Who this browser is, as far as the server is concerned. */
-  account: () => json<{ id: string; role: string; kind: string; prefs?: { powerTools?: boolean; softColour?: boolean } }>("/api/account"),
+  account: () => json<{ id: string; role: string; kind: string; prefs?: AccountPrefs }>("/api/account"),
   /** Save my preferences on the server, so they follow my account to every device. */
-  savePrefs: (prefs: { powerTools?: boolean; softColour?: boolean }) =>
-    json<{ powerTools?: boolean; softColour?: boolean }>("/api/account/prefs", {
+  savePrefs: (prefs: Partial<AccountPrefs>) =>
+    json<AccountPrefs>("/api/account/prefs", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(prefs),

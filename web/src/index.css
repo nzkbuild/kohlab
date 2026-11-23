@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/tokens.generated.css";
 
 /* Touch-first screens. Tailwind has no built-in variant for this. */
 @custom-variant pointer-coarse (@media (pointer: coarse));
@@ -6,141 +7,117 @@
 /* ============================================================================
    Kohlab design tokens
    ----------------------------------------------------------------------------
-   Direction: quiet charcoal, ChatGPT-like. Separation by background, not
-   borders; Geist for UI, mono only for code and measurement.
-
-   Two tiers, and only two:
-     1. PRIMITIVE: raw OKLCH ramps (neutrals, signal colours).
-     2. SEMANTIC: what a thing IS (surface-raised, text-muted, status-running).
-        The approved quiet palette is given as hex here, light and dark.
-   index.css is the ONLY file with colour literals. Components consume the
-   semantic tier: no hex literal and no primitive name outside this file.
-
-   OKLCH rather than HSL: HSL hue is not perceptually uniform (CSS Color 4
-   states it normatively), so equal-L steps across two hues do not read as equal
-   weight. That is why the previous emerald/amber chips did not match.
+   Material 3 in monochrome (docs/design/m3-mono.md). Two layers, and only two:
+     1. GENERATED: web/src/styles/tokens.generated.css. Material 3 colour roles
+        (--md-sys-color-*) for light and dark, three contrast levels and six
+        tints; shape, motion and state values. Built by web/scripts/gen-tokens.mjs,
+        which fails on any contrast pair below its minimum or a stale file.
+     2. ALIAS: the names components use (--surface-raised, --text-muted, --accent),
+        each pointed at one role. Components never name a role or a colour.
+   web/public/colour.js sets the attributes on <html> before first paint:
+   data-theme (light or dark, from the OS), data-contrast, data-tint, data-density.
+   The only colour literals here are the pen colours for picture markup.
    ========================================================================== */
 
-:root {
-  color-scheme: dark;
-
-  /* --- primitive: zinc neutrals (brand/kohlab-mono-tokens.css) ----------- */
-  /* Hue 286 at trace chroma: neutral under any white balance. Equal-L steps
-     read as equal weight, which is why the scale is OKLCH. */
-  --neutral-1000: oklch(0.145 0.002 286);
-  --neutral-950: oklch(0.175 0.002 286);
-  --neutral-900: oklch(0.205 0.003 286);
-  --neutral-800: oklch(0.255 0.003 286);
-  --neutral-700: oklch(0.315 0.004 286);
-  --neutral-600: oklch(0.53 0.005 286);
-  --neutral-500: oklch(0.64 0.005 286);
-  --neutral-400: oklch(0.72 0.005 286);
-  --neutral-300: oklch(0.81 0.004 286);
-  --neutral-100: oklch(0.97 0.001 286);
-
-  /* --- primitive: signal colours ------------------------------------------ */
-  /* Lime means exactly one thing: an agent is alive right now. Red means
-     destructive. Everything else is monochrome; status is carried by glyph and
-     label (SC 1.4.1), so it survives without hue. */
-  --lime-500: oklch(0.84 0.21 124);
-  --red-500: oklch(0.65 0.21 25);
-
-  /* --- semantic: surfaces. Separation is by tone alone: no borders between
-     the sidebar, the page and the header. Values are the approved quiet
-     palette (docs spec, "Tokens"); the terminal stays #181818 in both modes. */
-  --surface-base: #212121;        /* page: chat, home, settings */
-  --surface-sidebar: #171717;     /* the rail, one step darker than the page */
-  --surface-sunken: #181818;      /* code, log */
-  --surface-terminal: #181818;    /* terminal panel: dark in both modes */
-  --surface-raised: #2f2f2f;      /* composer, fields, cards */
-  --surface-overlay: #2f2f2f;     /* dialogs, palette, popovers */
-  --surface-hover: #2a2a2a;
-  --surface-active: #3a3a3a;      /* selected row, segmented thumb, hovered secondary button */
-  --surface-pressed: #454545;     /* pressed secondary button: one step past active */
-  --surface-bubble: #303030;      /* the user's own message */
+/* The names components use, pointed at the Material 3 roles. Declared on :root and on
+   .dark-pane: a custom property is inherited as a computed value, so each alias has to
+   sit on the element that owns the --md-sys-* values (a dark pane re-points them). */
+:root,
+.dark-pane {
+  /* surfaces: depth is the container tone, never a border or a shadow */
+  --surface-base: var(--md-sys-color-surface);
+  --surface-sidebar: var(--md-sys-color-surface-container-low);
+  --surface-sunken: var(--md-sys-color-surface-container-lowest); /* code, log */
+  --surface-terminal: var(--k-terminal); /* one fixed dark tone in both modes */
+  --surface-raised: var(--md-sys-color-surface-container-high); /* panels, cards, composer */
+  --surface-field: var(--md-sys-color-surface-container-highest); /* text fields, raised buttons */
+  --surface-overlay: var(--md-sys-color-surface-container-high); /* dialogs, toasts */
+  --surface-menu: var(--md-sys-color-surface-container); /* menus */
+  --surface-tonal: var(--md-sys-color-secondary-container); /* tonal buttons */
+  --surface-bubble: var(--md-sys-color-secondary-container); /* the user's own message */
   --bubble-user: var(--surface-bubble);
+  /* state layers: on-surface over whatever is beneath, 8 / 10 / 16 percent */
+  --surface-hover: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  --surface-active: color-mix(in srgb, var(--md-sys-color-on-surface) 10%, transparent);
+  --surface-pressed: color-mix(in srgb, var(--md-sys-color-on-surface) 16%, transparent);
+  /* tonal buttons: hover and press move the fill toward the page (8% and 12%), never toward the label. A
+     content-coloured layer pulls a dark fill toward its light label and costs contrast at medium and high. */
+  --tonal-hover: color-mix(in srgb, var(--md-sys-color-surface) 8%, transparent);
+  --tonal-pressed: color-mix(in srgb, var(--md-sys-color-surface) 12%, transparent);
 
-  /* --- semantic: text ----------------------------------------------------- */
-  --text-primary: #ececec;
-  --text-secondary: #c4c4c4;
-  --text-muted: #a3a3a3;
-  --text-faint: #9a9a9a;
-  --text-on-accent: oklch(0.18 0.002 286);
+  /* text */
+  --text-primary: var(--md-sys-color-on-surface);
+  --text-secondary: var(--md-sys-color-on-surface-variant);
+  --text-muted: var(--md-sys-color-on-surface-variant);
+  --text-faint: var(--md-sys-color-on-surface-variant);
+  --text-on-accent: var(--md-sys-color-on-primary);
+  --text-on-tonal: var(--md-sys-color-on-secondary-container);
 
-  /* --- semantic: lines ---------------------------------------------------- */
-  /* Decorative divider only. Not used between sidebar and page or under headers. */
-  --line-subtle: rgba(255, 255, 255, 0.1);
-  /* Control boundaries must clear 3:1 against their own surface (SC 1.4.11).
-     scripts/check-contrast.mjs audits this against surface-raised. */
-  --line-strong: #808080;
-  --line-accent: var(--text-primary);
-  /* Focus indicator only: soft grey, 3:1 on every surface it sits over (check-contrast.mjs). */
-  --focus-ring: #8a8a8a;
-  /* Pen colours for marking up a picture of the page (Add picture). Two, so a mark can be told from the page. */
+  /* lines: dividers are a faint tone; outline is only the focus ring and unchecked controls */
+  --line-subtle: var(--md-sys-color-outline-variant);
+  --line-strong: var(--md-sys-color-outline);
+  --line-accent: var(--md-sys-color-primary);
+  --focus-ring: var(--md-sys-color-outline);
+
+  /* accent is the primary role; hover and press are solid on-primary state layers */
+  --accent: var(--md-sys-color-primary);
+  --accent-hover: color-mix(in srgb, var(--md-sys-color-on-primary) 8%, var(--md-sys-color-primary));
+  --accent-press: color-mix(in srgb, var(--md-sys-color-on-primary) 12%, var(--md-sys-color-primary));
+  --accent-soft: var(--md-sys-color-primary-container);
+  --on-accent-soft: var(--md-sys-color-on-primary-container);
+
+  /* status: one role each; the icon and the words carry the meaning, never the tone alone */
+  --status-running: var(--md-sys-color-primary);
+  --status-review: var(--md-sys-color-tertiary);
+  --status-committed: var(--md-sys-color-on-surface-variant);
+  --status-stopped: var(--md-sys-color-on-surface-variant);
+  --status-danger: var(--md-sys-color-error);
+
+  --scroll-thumb: color-mix(in oklch, var(--text-primary) 22%, transparent);
+  /* overlays only: menus, dialogs, toasts, sheets */
+  --elevation-overlay: 0 0.75rem 2rem color-mix(in srgb, var(--md-sys-color-shadow) 50%, transparent);
+  --scrim: color-mix(in srgb, var(--md-sys-color-scrim) 66%, transparent);
+}
+
+:root {
+  /* motion: Material 3 easing and durations. Reduced motion sets every duration to 1ms (generated file). */
+  --ease-standard: var(--md-sys-motion-easing-standard);
+  --ease-entrance: var(--md-sys-motion-easing-standard-decelerate);
+  --ease-exit: var(--md-sys-motion-easing-standard-accelerate);
+
+  --duration-fast-01: var(--md-sys-motion-duration-short2);
+  --duration-fast-02: var(--md-sys-motion-duration-short2);
+  --duration-moderate-01: var(--md-sys-motion-duration-short3);
+  --duration-moderate-02: var(--md-sys-motion-duration-medium1);
+
+  /* type: system faces only, nothing downloaded. Mono is for code and measurements. */
+  --font-sans: var(--md-ref-typeface-plain);
+  --font-mono: var(--md-ref-typeface-mono);
+
+  /* shape: the Material 3 corner scale. Chips 8, fields 4 on top, cards 12, dialogs and the composer 28, buttons full. */
+  --radius-sm: var(--md-sys-shape-corner-extra-small);
+  --radius-md: var(--md-sys-shape-corner-small);
+  --radius-lg: var(--md-sys-shape-corner-medium);
+  --radius-xl: var(--md-sys-shape-corner-extra-large);
+  --radius-card: var(--md-sys-shape-corner-medium);
+  --radius-row: var(--md-sys-shape-corner-small);
+  --radius-composer: var(--md-sys-shape-corner-extra-large);
+
+  /* density: one token for list rows (sidebar, Settings rows, menu items). Comfortable 56px is the
+     default; compact (Settings → Appearance) is 40px. Touch overrides below. Always min-height, never height,
+     so text-spacing overrides (SC 1.4.12) never clip. */
+  --row-h: 3.5rem;
+  --control-h: 2.5rem;
+  --control-h-sm: 2rem;
+
+  /* pen colours for marking up a picture (Add picture): drawn ink, so they stay coloured in both themes */
   --ink-1: oklch(0.7 0.19 25);
   --ink-2: oklch(0.72 0.14 250);
-
-  /* --- semantic: status lifecycle ---------------------------------------- */
-  /* One tone per status, chosen so the chip LABEL passes 4.5:1 against the
-     chip's own tinted background, the token is used for dot, border and text
-     alike, so it must be legible as text, not merely vivid as a dot. */
-  --status-running: oklch(0.9 0.17 124);
-  --status-review: var(--neutral-100);
-  --status-committed: var(--neutral-400);
-  --status-stopped: var(--neutral-500);
-  --status-danger: oklch(0.82 0.14 25);
-  /* The primary action is a white fill (brand rule); lime stays a status. */
-  --accent: var(--text-primary);
-  --accent-hover: oklch(1 0 0);
-  --accent-press: var(--neutral-300);
-  /* Tinted accent surface (selected option, capability tile, meter track). Plain
-     mode keeps these neutral; the soft layer below gives them the periwinkle. */
-  --accent-soft: var(--surface-active);
-  --on-accent-soft: var(--text-primary);
-
-  /* --- motion ------------------------------------------------------------ */
-  /* Declared here as well as in @theme: author CSS references var(--ease-*) in
-     `transition` shorthands, and a shorthand with an unresolvable var() is
-     dropped silently, a green build with dead transitions. */
-  --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
-  --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9);
-  --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);
-
-  --duration-fast-01: 70ms;
-  --duration-fast-02: 110ms;
-  --duration-moderate-01: 150ms;
-  --duration-moderate-02: 240ms;
-
-  /* --- type -------------------------------------------------------------- */
-  --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  /* Self-hosted Geist (bundled, no third-party request): one face on every
-     platform is what gives the console a voice. */
-  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-
-  --radius-sm: 0.375rem;
-  --radius-md: 0.625rem;
-  --radius-lg: 0.875rem;
-  --radius-xl: 1.125rem;
-  /* Cards are 16px, sidebar and menu rows 8px (DESIGN.md, Layout and shapes). */
-  --radius-card: 1rem;
-  --radius-row: 0.5rem;
-  /* The chat and Home composer box (DESIGN.md, Layout and shapes). */
-  --radius-composer: 1.5rem;
-
-  /* Scrollbar thumb: a 22% tint of the primary text colour, so it is quiet on a
-     white plane and on a near-black one alike. */
-  --scroll-thumb: color-mix(in oklch, var(--text-primary) 22%, transparent);
 
   /* Layout constants shared by JS and CSS (mobile drawer + sticky chrome). */
   --topbar-h: 3.25rem;
   --sidebar-w: 16.25rem;
   --sidebar-w-collapsed: 3.75rem;
-
-  /* Density: one place to tune how tight the console sits. Always min-height,
-     never height, so text-spacing overrides (SC 1.4.12) never clip. */
-  --control-h: 2.5rem;
-  --control-h-sm: 2rem;
-  --row-h: 2.25rem;
 
   /* Stacking: named layers instead of magic numbers. */
   --z-sticky: 10;
@@ -156,148 +133,18 @@
   --safe-left: env(safe-area-inset-left, 0px);
 }
 
-/* --- light theme -----------------------------------------------------------
-   The page follows the OS setting. Only semantic tokens are overridden here;
-   primitives and the dark :root above stay as they are. */
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-
-    --surface-base: #ffffff;
-    --surface-sidebar: #f9f9f9;
-    --surface-sunken: #f4f4f4;
-    --surface-raised: #f4f4f4;
-    --surface-overlay: #ffffff;
-    --surface-hover: #ececec;
-    --surface-active: #e5e5e5;
-    --surface-pressed: #d9d9d9;
-    --surface-bubble: #f4f4f4;
-    --bubble-user: var(--surface-bubble);
-
-    --text-primary: #0d0d0d;
-    --text-secondary: #3d3d3d;
-    --text-muted: #5d5d5d;
-    --text-faint: #6e6e6e;
-    --text-on-accent: oklch(0.985 0 0);
-
-    --line-subtle: rgba(0, 0, 0, 0.1);
-    --line-strong: oklch(0.6 0.005 286);
-    --line-accent: var(--text-primary);
-    --focus-ring: #8a8a8a;
-    --ink-1: oklch(0.55 0.21 25);
-    --ink-2: oklch(0.5 0.16 255);
-
-    --status-running: oklch(0.46 0.14 130);
-    --status-review: var(--text-primary);
-    --status-committed: var(--text-muted);
-    --status-stopped: var(--text-faint);
-    --status-danger: oklch(0.5 0.19 25);
-
-    --accent: var(--text-primary);
-    --accent-hover: oklch(0.28 0.003 286);
-    --accent-press: oklch(0.35 0.004 286);
-  }
+/* The terminal and code panes stay dark in a light theme: .dark-pane re-points the aliases above. */
+.dark-pane {
+  background: var(--surface-sunken);
 }
 
-/* Terminal and code editor are dev tools and stay dark in both modes. In light
-   mode this pins the dark token values on the pane; in dark mode the page
-   already is dark, so the block is not emitted for it. Keep in step with :root. */
-@media (prefers-color-scheme: light) {
-  .dark-pane {
-    color-scheme: dark;
-
-    --surface-base: #181818;
-    --surface-sunken: #181818;
-    --surface-raised: #181818;
-    --surface-overlay: #2f2f2f;
-    --surface-hover: #2a2a2a;
-    --surface-active: #3a3a3a;
-    --surface-pressed: #454545;
-
-    --text-primary: #ececec;
-    --text-secondary: #c4c4c4;
-    --text-muted: #a3a3a3;
-    --text-faint: #9a9a9a;
-    --text-on-accent: oklch(0.18 0.002 286);
-
-    --line-subtle: rgba(255, 255, 255, 0.1);
-    --line-strong: #808080;
-    --line-accent: var(--text-primary);
-    --focus-ring: #8a8a8a;
-
-    --status-running: oklch(0.9 0.17 124);
-    --status-review: var(--neutral-100);
-    --status-committed: var(--neutral-400);
-    --status-stopped: var(--neutral-500);
-    --status-danger: oklch(0.82 0.14 25);
-
-    --accent: var(--text-primary);
-    --accent-hover: oklch(1 0 0);
-    --accent-press: var(--neutral-300);
-
-    background: var(--surface-sunken);
-  }
+/* Density, the Settings → Appearance choice: compact list rows. Comfortable is the :root default. */
+html[data-density="compact"] {
+  --row-h: 2.5rem;
 }
 
-/* --- soft colour (Settings → Appearance, on by default) --------------------
-   A restrained periwinkle accent on warm neutrals. Semantic tier only: the
-   attribute comes from the account's softColour pref (web/public/colour.js sets
-   it before first paint; store.ts keeps it in step). Absent = Plain, which is
-   the :root above unchanged. Values from docs/mockups/calm/index.html. Terminal,
-   code and log surfaces (--surface-sunken, --surface-terminal) are not touched. */
-html[data-colour="soft"] {
-  --surface-base: #1e1d1c;
-  --surface-sidebar: #161514;
-  --surface-raised: #2a2927;
-  --surface-overlay: #2a2927;
-  --surface-hover: #302e2c;
-  --surface-active: #3a3835;
-  --surface-pressed: #454340;
-  --surface-bubble: #302e2c;
-
-  --text-primary: #ececea;
-  --text-secondary: #c9c7c3;
-  --text-muted: #a8a5a0;
-  --text-faint: #9a9791;
-
-  --accent: oklch(0.8 0.09 285);
-  --accent-hover: oklch(0.86 0.08 285);
-  --accent-press: oklch(0.74 0.09 285);
-  --accent-soft: oklch(0.34 0.06 285);
-  --on-accent-soft: oklch(0.9 0.05 285);
-}
-
-@media (prefers-color-scheme: light) {
-  html[data-colour="soft"] {
-    --surface-base: #fcfbf9;
-    --surface-sidebar: #f4f2ee;
-    --surface-raised: #efede8;
-    --surface-overlay: #fcfbf9;
-    --surface-hover: #e9e6e0;
-    --surface-active: #e0ddd5;
-    --surface-pressed: #d4d0c7;
-    --surface-bubble: #efede8;
-
-    --text-primary: #1a1918;
-    --text-secondary: #3b3936;
-    --text-muted: #5b5853;
-    --text-faint: #69665f;
-
-    --accent: oklch(0.5 0.14 285);
-    --accent-hover: oklch(0.44 0.14 285);
-    --accent-press: oklch(0.38 0.13 285);
-    --accent-soft: oklch(0.93 0.04 285);
-    --on-accent-soft: oklch(0.36 0.12 285);
-    /* The grey ring that clears 3:1 on dark planes is 2.95:1 on the warm light card. */
-    --focus-ring: #6e6e6e;
-  }
-}
-
-/* Plan meter fill: neutral in Plain, the accent in Soft (accent marks plan meters). */
+/* Plan meter fill: the accent marks plan meters. */
 .meter-fill {
-  background: var(--text-secondary);
-}
-html[data-colour="soft"] .meter-fill {
   background: var(--accent);
 }
 
@@ -316,6 +163,9 @@ html[data-colour="soft"] .meter-fill {
   --color-bubble-user: var(--bubble-user);
   --color-surface-sidebar: var(--surface-sidebar);
   --color-surface-bubble: var(--surface-bubble);
+  --color-surface-field: var(--surface-field);
+  --color-surface-menu: var(--surface-menu);
+  --color-surface-tonal: var(--surface-tonal);
 
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
@@ -453,7 +303,7 @@ button:disabled {
    changes shape (measured: the primary button was 8px unfocused, 6px while
    Tab-focused). A focus ring must never mutate the geometry of what it marks. */
 :focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -464,8 +314,8 @@ button:disabled {
 .settings-nav-item:focus-visible,
 .palette-item:focus-visible,
 .file-row:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
 }
 
 ::selection {
@@ -600,31 +450,29 @@ input[type="radio"] {
     }
   }
 
-  /* Tonal, no outline: the fill is the boundary. Hover one step up, press one more. */
+  /* Tonal, no outline: the fill is the boundary (Material 3 tonal button). Hover and press lay a
+     state layer over the fill, so the fill underneath stays where it is. */
   .btn-secondary {
-    background: var(--surface-raised);
-    color: var(--text-primary);
+    background-color: var(--surface-tonal);
+    color: var(--text-on-tonal);
+  }
+  /* On a raised surface the tonal fill would barely show: one step up the container scale. */
+  :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary {
+    background-color: var(--surface-field);
   }
   @media (hover: hover) {
     .btn-secondary:hover:not(:disabled) {
-      background: var(--surface-active);
+      background-image: linear-gradient(var(--tonal-hover), var(--tonal-hover));
+    }
+    :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary:hover:not(:disabled) {
+      background-image: linear-gradient(var(--surface-hover), var(--surface-hover));
     }
   }
   .btn-secondary:active:not(:disabled) {
-    background: var(--surface-pressed);
-  }
-  /* On a raised surface (panel, dialog, sheet, menu, card, the Ask box, anything
-     filled surface-raised/overlay) the tonal fill would vanish: one step up. */
-  :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary {
-    background: var(--surface-active);
-  }
-  @media (hover: hover) {
-    :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary:hover:not(:disabled) {
-      background: var(--surface-pressed);
-    }
+    background-image: linear-gradient(var(--tonal-pressed), var(--tonal-pressed));
   }
   :is(.panel, .dialog-content, .sheet, .auth-card, .menu, .inbox-card, .conn-banner, .source-card-body, [class*="bg-surface-raised"], [class*="bg-surface-overlay"]) .btn-secondary:active:not(:disabled) {
-    background: var(--surface-pressed);
+    background-image: linear-gradient(var(--surface-pressed), var(--surface-pressed));
   }
 
   .btn-quiet {
@@ -645,7 +493,7 @@ input[type="radio"] {
   }
 
   /* Composer chips: quiet pill triggers. Min-height is the small control token,
-     which is 44px on touch (see the coarse-pointer block below). */
+     which is 48px on touch (see the coarse-pointer block below). */
   .chip-trigger {
     display: inline-flex;
     min-width: 0;
@@ -653,7 +501,7 @@ input[type="radio"] {
     min-height: var(--control-h-sm);
     align-items: center;
     gap: 0.5rem;
-    border-radius: 9999px;
+    border-radius: var(--radius-md);
     padding: 0 0.625rem;
     font-size: 0.8125rem;
     line-height: 1.2;
@@ -675,12 +523,12 @@ input[type="radio"] {
   }
   @media (pointer: coarse) {
     .chip-trigger-icon {
-      width: 2.75rem;
-      min-height: 2.75rem;
+      width: 3rem;
+      min-height: 3rem;
     }
   }
 
-  /* Toasts: a fill and a soft shadow, no border (DESIGN: fills, not borders). Sonner's own
+  /* Toasts: a fill and the overlay shadow, no border (DESIGN: fills, not borders). Sonner's own
      defaults carry a border and a shadow, so this selector is deliberately more specific. */
   [data-sonner-toaster] {
     --normal-bg: var(--surface-overlay);
@@ -690,7 +538,7 @@ input[type="radio"] {
   [data-sonner-toaster] [data-sonner-toast][data-styled="true"].kohlab-toast {
     border: 0;
     font-size: var(--text-sm);
-    box-shadow: 0 0.75rem 2rem oklch(0.08 0.002 286 / 0.5);
+    box-shadow: var(--elevation-overlay);
   }
   @media (hover: hover) {
     .chip-trigger:hover:not(:disabled) {
@@ -731,14 +579,13 @@ input[type="radio"] {
     width: 100%;
     box-sizing: border-box;
     min-height: var(--control-h);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-md);
-    background: var(--surface-sunken);
+    border: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    background: var(--surface-field);
     padding: 0.5rem 0.75rem;
     color: var(--text-primary);
     font-size: 0.9375rem;
-    outline: none;
-    transition: border-color var(--duration-fast-02) var(--ease-standard);
+    transition: box-shadow var(--duration-fast-02) var(--ease-standard);
   }
   .field-input::placeholder,
   .field-textarea::placeholder {
@@ -747,7 +594,7 @@ input[type="radio"] {
   .field-input:focus,
   .field-select:focus,
   .field-textarea:focus {
-    border-color: var(--accent);
+    box-shadow: inset 0 -2px 0 var(--accent);
   }
   .field-help {
     font-size: 0.8125rem;
@@ -763,7 +610,7 @@ input[type="radio"] {
     align-items: center;
     gap: 0.5rem;
     border: 1px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--radius-md);
     padding: 0.25rem 0.625rem 0.25rem 0.5rem;
     font-size: 0.8125rem;
     font-weight: 500;
@@ -780,15 +627,15 @@ input[type="radio"] {
   }
 
   .chip-running {
-    background: color-mix(in oklch, var(--status-running) 12%, transparent);
+    background: color-mix(in oklch, var(--status-running) 8%, transparent);
     color: var(--status-running);
   }
   .chip-review {
-    background: color-mix(in oklch, var(--status-review) 12%, transparent);
+    background: color-mix(in oklch, var(--status-review) 8%, transparent);
     color: var(--status-review);
   }
   .chip-committed {
-    background: color-mix(in oklch, var(--status-committed) 10%, transparent);
+    background: color-mix(in oklch, var(--status-committed) 8%, transparent);
     color: var(--status-committed);
   }
   .chip-stopped {
@@ -796,7 +643,7 @@ input[type="radio"] {
     color: var(--text-muted);
   }
   .chip-danger {
-    background: color-mix(in oklch, var(--status-danger) 12%, transparent);
+    background: color-mix(in oklch, var(--status-danger) 8%, transparent);
     color: var(--status-danger);
   }
 
@@ -835,7 +682,7 @@ input[type="radio"] {
     position: fixed;
     inset: 0;
     z-index: var(--z-scrim);
-    background: oklch(0.1 0.002 286 / 0.66);
+    background: var(--scrim);
   }
 }
 
@@ -1008,11 +855,11 @@ input[type="radio"] {
     display: none;
   }
 }
-/* Touch: 44px hit area, shown only on the selected or open row (long press also opens it). */
+/* Touch: 48px hit area, shown only on the selected or open row (long press also opens it). */
 @media (pointer: coarse) {
   .sidebar-more {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 3rem;
+    height: 3rem;
   }
 }
 @media (hover: hover) {
@@ -1202,9 +1049,6 @@ input[type="radio"] {
 .auth-card {
   border-radius: var(--radius-card);
   background: var(--surface-raised);
-  box-shadow:
-    0 1px 2px -1px oklch(0.1 0.002 286 / 0.6),
-    0 1.5rem 3rem -1rem oklch(0.1 0.002 286 / 0.7);
 }
 
 /* The key is a machine fact, so it is set in mono like every other machine fact
@@ -1212,7 +1056,7 @@ input[type="radio"] {
    character by character. Taller than a normal field: a 48-character secret is
    the most important thing anyone types here. */
 .auth-key {
-  min-height: 2.75rem;
+  min-height: 3rem;
   /* Start clears the prompt glyph, end clears the reveal control, so neither
      can overlap the value. */
   padding-inline: 2rem 2.5rem;
@@ -1490,7 +1334,7 @@ input[type="radio"] {
   inset: 0;
   z-index: var(--z-overlay);
   /* Radix sets this; we only supply colour. */
-  background: oklch(0.1 0.002 286 / 0.7);
+  background: var(--scrim);
 }
 
 .dialog-content {
@@ -1500,9 +1344,9 @@ input[type="radio"] {
   inset-block-start: 22%;
   width: min(30rem, calc(100% - 2rem));
   margin-inline: auto;
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-xl);
   background: var(--surface-overlay);
-  box-shadow: 0 1.5rem 4rem oklch(0.08 0.002 286 / 0.55);
+  box-shadow: var(--elevation-overlay);
 }
 
 /* A dialog that holds a picture (Add picture): wider than the default 30rem. */
@@ -1528,9 +1372,9 @@ input[type="radio"] {
     overflow-y: auto;
     margin: 0;
     padding: 0 1rem max(1rem, var(--safe-bottom));
-    border-width: 1px 0 0;
-    border-radius: 18px 18px 0 0;
-    box-shadow: 0 -0.75rem 2.5rem oklch(0.08 0.002 286 / 0.45);
+    border-width: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    box-shadow: var(--elevation-overlay);
   }
   .dialog-content::before {
     content: "";
@@ -1563,7 +1407,6 @@ input[type="radio"] {
   width: min(34rem, 100%);
   flex-direction: column;
   overflow-y: auto;
-  border-inline-start: 1px solid var(--line-strong);
   background: var(--surface-overlay);
   padding: 1.25rem 1.5rem max(1.5rem, env(safe-area-inset-bottom));
 }
@@ -1694,7 +1537,7 @@ input[type="radio"] {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--radius-md);
   background: var(--surface-sunken);
   padding: 0.25rem;
@@ -1766,7 +1609,7 @@ input[type="radio"] {
 .conn-banner[data-state="offline"] {
   color: var(--status-danger);
 }
-/* The new-version bar: tonal fill, no border, one primary (Reload). Its height is the button's (44px on touch). */
+/* The new-version bar: tonal fill, no border, one primary (Reload). Its height is the button's (48px on touch). */
 .update-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1844,10 +1687,9 @@ input[type="radio"] {
   color: var(--text-primary);
 }
 
-/* The review card is the loudest object on Home: a full-strength border and a
-   raised plane, because a decision waiting on you outranks everything alive. */
+/* The review card is the loudest object on Home: the heaviest raised plane, because a decision waiting on you outranks everything alive. */
 .inbox-card {
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
   padding: 1rem 1.125rem;
@@ -1874,14 +1716,14 @@ input[type="radio"] {
   z-index: var(--z-dialog); /* above an open dialog: the New project dialog has a menu */
   min-width: 11rem;
   border-radius: var(--radius-card);
-  background: var(--surface-overlay);
+  background: var(--surface-menu);
   padding: 0.25rem;
-  box-shadow: 0 0.75rem 2rem oklch(0.08 0.002 286 / 0.5);
+  box-shadow: var(--elevation-overlay);
 }
 
 .menu-item {
   display: flex;
-  min-height: var(--control-h);
+  min-height: var(--row-h);
   align-items: center;
   gap: 0.5rem;
   border-radius: var(--radius-row);
@@ -1905,8 +1747,8 @@ input[type="radio"] {
 
 .tooltip {
   z-index: var(--z-overlay);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--surface-overlay);
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
@@ -2066,9 +1908,9 @@ input[type="radio"] {
   }
   .termkey {
     flex: 1 0 auto;
-    min-width: 2.75rem;
-    min-height: 2.5rem;
-    border: 1px solid var(--line-strong);
+    min-width: 3rem;
+    min-height: 3rem;
+    border: 0;
     border-radius: var(--radius-md);
     background: var(--surface-base);
     color: var(--text-primary);
@@ -2109,12 +1951,15 @@ input[type="radio"] {
   }
 }
 
-/* Coarse pointers get a 44px minimum on every control and row (WCAG 2.5.5). */
+/* Coarse pointers get a 48px minimum on every control and row (the Material touch target; WCAG 2.5.5 asks 44).
+   Density never goes below it: a compact row is still 48px under a finger. */
 @media (pointer: coarse) {
   :root {
-    --control-h: 2.75rem;
-    --control-h-sm: 2.75rem;
-    --row-h: 2.75rem;
+    --control-h: 3rem;
+    --control-h-sm: 3rem;
+  }
+  html[data-density="compact"] {
+    --row-h: 3rem;
   }
 }
 
@@ -2123,7 +1968,7 @@ input[type="radio"] {
   .launch-limits summary {
     display: flex;
     align-items: center;
-    min-height: 2.75rem;
+    min-height: 3rem;
   }
 }
 

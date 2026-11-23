@@ -275,7 +275,9 @@ const connsOf = (b) => (Array.isArray(b?.connections) ? b.connections : []);
 
 try {
   // ---- the card before any install ----
-  const before = await kit.req("GET", "/api/providers");
+  // The first read may still say "checking" for OpenCode; wait for its real card.
+  const beforeBody = await until("/api/providers", (b) => b?.providers?.find((p) => p.id === "opencode")?.state !== "checking", 15_000);
+  const before = { body: beforeBody, text: JSON.stringify(beforeBody) };
   const ocBefore = before.body?.providers?.find((p) => p.id === "opencode");
   check("the AI hub has an OpenCode card", !!ocBefore, before.text.slice(0, 200));
   check("not installed: the card says so and offers Install", ocBefore?.installed === false && ocBefore?.state === "not_installed" && ocBefore?.actions?.[0]?.kind === "install", JSON.stringify(ocBefore?.actions));
@@ -329,7 +331,7 @@ try {
   writeFileSync(join(MAIN_DATA, "approve"), "1");
   const done1 = await until("/api/ai/accounts/main:opencode/opencode/signin", (b) => b?.state === "done" || b?.state === "failed", 20_000);
   check("approved: the sign-in is done (after the exit and a listed connection)", done1?.state === "done", JSON.stringify(done1));
-  const card1 = (await kit.req("GET", "/api/providers")).body.providers.find((p) => p.id === "opencode");
+  const card1 = (await until("/api/providers", (b) => b?.providers?.find((p) => p.id === "opencode")?.state !== "checking", 15_000))?.providers?.find((p) => p.id === "opencode");
   const main1 = card1?.accounts?.find((a) => a.id === "main:opencode");
   check("connected: the card lists the connection and its models", card1?.state === "connected" && main1?.state === "connected" && connsOf(main1).some((c) => c.integration === "openai" && c.label === "OpenAI") && main1.models.some((m) => m.value === "openai/gpt-test" && m.group === "openai"), JSON.stringify(main1).slice(0, 400));
 
@@ -378,7 +380,7 @@ try {
   check("the extra account's sign-in is done", xdone?.state === "done", JSON.stringify(xdone));
   const xk = await kit.req("POST", `/api/ai/accounts/${extra.id}/opencode/key`, { integration: "anthropic", key: "sk-fake-EXTRA-0123456789", label: "Second" });
   check("a key on the extra account stays in its own profile", xk.status === 200 && connsOf(xk.body).some((c) => c.label === "Second") && !connsOf(xk.body).some((c) => c.label === "Work"), xk.text);
-  const card2 = (await kit.req("GET", "/api/providers")).body.providers.find((p) => p.id === "opencode");
+  const card2 = (await until("/api/providers", (b) => b?.providers?.find((p) => p.id === "opencode")?.state !== "checking", 15_000))?.providers?.find((p) => p.id === "opencode");
   check("the card has the main account and the extra one, each with its own connections", card2?.accounts?.length === 2 && card2.accounts.some((a) => a.id === extra.id && connsOf(a).some((c) => c.label === "Second")) && card2.accounts.some((a) => a.id === "main:opencode" && connsOf(a).some((c) => c.label === "Work")), JSON.stringify(card2?.accounts?.map((a) => [a.id, a.state])));
   check("OpenCode accounts sign in per connection on the generic routes (400)", (await kit.req("POST", `/api/ai/accounts/${extra.id}/signin`, {})).status === 400 && (await kit.req("POST", `/api/ai/accounts/${extra.id}/signout`, {})).status === 400);
 

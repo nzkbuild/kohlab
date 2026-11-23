@@ -246,6 +246,8 @@ resetCounts();
 fakeProbes();
 failing = true;
 t += 1000;
+await getProviders(); // the first call answers "checking" at once; the probe finishes in the background
+await tick();
 const bad = await getProviders();
 const badClaude = bad.providers.find((p) => p.id === "claude")!;
 check("cache: a failing probe gives an error card with a plain sentence", badClaude.state === "error" && /Claude/.test(badClaude.error?.message ?? "") && !/boom/.test(JSON.stringify(badClaude)));
@@ -278,6 +280,7 @@ providersTest.reset();
 resetCounts();
 fakeProbes();
 await getProviders();
+await tick();
 const base = counts.claude;
 t += 5_000;
 await refreshProviders("claude");

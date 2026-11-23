@@ -577,7 +577,7 @@ export default function PreviewPanel({ url, t, nav, variant, onClose, onNewLink,
               aria-pressed={device === id}
               title={label}
               onClick={() => chooseDevice(id)}
-              className="inline-flex min-h-(--control-h-sm) items-center gap-2 rounded-full px-3 text-sm text-text-secondary hover:text-text-primary aria-pressed:bg-surface-active aria-pressed:text-text-primary pointer-coarse:min-h-11"
+              className="inline-flex min-h-(--control-h-sm) items-center gap-2 rounded-full px-3 text-sm text-text-secondary hover:text-text-primary aria-pressed:bg-surface-active aria-pressed:text-text-primary pointer-coarse:min-h-12"
             >
               <Icon size={16} aria-hidden="true" />
               <span className="hidden @min-[28rem]:inline">{label}</span>

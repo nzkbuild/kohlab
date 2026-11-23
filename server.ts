@@ -83,7 +83,12 @@ import {
   repoNameFromUrl,
   handleHook,
   setHookBase,
+  AccountPrefs,
+  CONTRASTS,
+  DENSITIES,
+  TINTS,
   getPrefs,
+  isOneOf,
   setPrefs,
   mutateState,
   copyWorkspace,
@@ -2573,17 +2578,25 @@ async function handle(req: Request, server: Server<WSData>): Promise<Response | 
     if (path === "/api/account/prefs" && req.method === "POST") {
       if (!auth) return json({ error: "unauthorized" }, 401);
       if (auth.kind === "share") return json({ error: "a shared link cannot save preferences" }, 403);
-      const body = (await req.json().catch(() => ({}))) as { powerTools?: unknown; softColour?: unknown };
-      const patch: { powerTools?: boolean; softColour?: boolean } = {};
+      const body = (await req.json().catch(() => ({}))) as { powerTools?: unknown; tint?: unknown; contrast?: unknown; density?: unknown };
+      const patch: AccountPrefs = {};
       if (body.powerTools !== undefined) {
         if (typeof body.powerTools !== "boolean") return json({ error: "powerTools must be true or false" }, 400);
         patch.powerTools = body.powerTools;
       }
-      if (body.softColour !== undefined) {
-        if (typeof body.softColour !== "boolean") return json({ error: "softColour must be true or false" }, 400);
-        patch.softColour = body.softColour;
+      if (body.tint !== undefined) {
+        if (!isOneOf(TINTS, body.tint)) return json({ error: `tint must be one of ${TINTS.join(", ")}` }, 400);
+        patch.tint = body.tint;
       }
-      if (Object.keys(patch).length === 0) return json({ error: "powerTools or softColour must be true or false" }, 400);
+      if (body.contrast !== undefined) {
+        if (!isOneOf(CONTRASTS, body.contrast)) return json({ error: `contrast must be one of ${CONTRASTS.join(", ")}` }, 400);
+        patch.contrast = body.contrast;
+      }
+      if (body.density !== undefined) {
+        if (!isOneOf(DENSITIES, body.density)) return json({ error: `density must be one of ${DENSITIES.join(", ")}` }, 400);
+        patch.density = body.density;
+      }
+      if (Object.keys(patch).length === 0) return json({ error: "powerTools, tint, contrast or density is needed" }, 400);
       return json(await setPrefs(accountIdOf(auth), patch));
     }
     if (path === "/api/account/key" && req.method === "POST") {
@@ -3125,6 +3138,8 @@ serve({
   },
   websocket: socketHandlers,
 });
+// Read the AIs once, shortly after start, so the first Settings → AI visit finds cards. Nothing repeats.
+setTimeout(() => void getProviders().catch(() => {}), 1_500);
 
 
 // The dev servers are detached, so they would outlive this process. Stop them on the way out; a signal is sent again once they are stopped, so the exit is the same as before.

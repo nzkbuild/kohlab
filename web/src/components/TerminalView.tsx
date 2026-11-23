@@ -88,7 +88,7 @@ function getTerminal(key: string, el: HTMLElement): { term: Terminal; fit: FitAd
     macOptionClickForcesSelection: true,
     scrollback: 10000,
     theme: {
-      // The terminal panel colour: #181818 in both modes.
+      // The terminal panel colour: one fixed dark tone in both modes (--surface-terminal).
       background: tokenColor(el, "--surface-terminal"),
       foreground: tokenColor(el, "--text-primary"),
       cursor: tokenColor(el, "--accent"),
@@ -145,8 +145,8 @@ const TERMINAL_KEYS: [string, string, string][] = [
   ["|", "|", "Pipe"],
 ];
 
-/** Phone keys are 44px: the touch target size, not the desktop control height. */
-const PHONE_KEY = "termkey !min-h-11";
+/** Phone keys are 48px: the touch target size, not the desktop control height. */
+const PHONE_KEY = "termkey";
 
 export default function TerminalView({ workspaceId, terminalId, onExit, autoFocus }: Props) {
   const onExitRef = useRef(onExit);
