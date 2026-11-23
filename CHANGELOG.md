@@ -9,6 +9,21 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.15.0] - 2026-11-23
+
+### Changed
+- **One consistent look, built on Material Design 3 in monochrome.** Every screen now draws from the same colour roles (light and dark, with tonal surfaces instead of outlines), system fonts, a 56px comfortable row height, 48px touch targets, and one set of shapes and motion. The old soft-colour layer and the bundled Geist font are gone.
+- **Settings → Appearance** now has **Tint** (none, rose, peach, mint, sky, lilac), **Contrast** (standard, medium, high) and **Density** (comfortable, compact). Everything is readable at every combination (checked automatically). The old Soft colour setting becomes the lilac tint for accounts that had it on.
+- **Settings → AI opens instantly** and shows the last known state of each AI while it refreshes in the background, instead of waiting on every check. Space is reserved so nothing jumps when the answers arrive.
+
+### Fixed
+- Layout jumps in Settings → AI, the chat area's loading screen and the AI defaults panel; Settings checkboxes and the Terminal tab are now full-size touch targets; Home and Team no longer change on their own while idle.
+- A stale "Signed in" can no longer appear after you sign out.
+- The editor's line highlight keeps its transparency under the new colours.
+
+### Added
+- `scripts/ux-sweep.mjs`: an automatic check of every main screen at phone, tablet and desktop size, light and dark (layout shifts, covered or tiny controls, overflow, unreadable text, console errors, slow requests, pages that keep changing). It took the app from 89 issues to 13 on its first pass.
+
 ## [2.14.0] - 2026-11-20
 
 ### Added
