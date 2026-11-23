@@ -91,6 +91,7 @@ try {
   run("web preview pages (listing, escaping, JSON route, share links)", "bun", ["scripts/check-preview-pages.mjs"]);
   // Needs web/dist and Chromium (skips without); mocks the pages, preview and shared-browser calls.
   run("web preview pages in the browser (Page | Code, Look, Pages menu)", "node", ["scripts/check-preview-pages-ui.mjs"]);
+  run("file cards in the chat (page and picture, chips, sandbox, no layout shift)", "node", ["scripts/check-file-cards-ui.mjs"]);
   run("shared browser rules (dev command, dev URL, allowed URLs)", "bun", ["scripts/check-browser-unit.mjs"]);
   run("shared browser coordinates (letterbox, clamp)", "bun", ["scripts/check-browser-coords.mjs"]);
   run("chat markdown (code, links, lists, headings)", "bun", ["scripts/check-markdown.mjs"]);

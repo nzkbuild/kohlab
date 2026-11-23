@@ -9,6 +9,12 @@ Kohlab's versioning philosophy:
 
 - **1.x line is home.** Steady growth (features, fixes, improvements) stays on 1.x.
 
+## [2.15.1] - 2026-11-23
+
+### Added
+- **Pages and pictures show right in the chat.** When the AI saves a web page (`.html`) or a picture (`.png`, `.jpg`, `.svg` and so on) into your project, it appears as a card under that step: the newest one open, older ones folded to a single row, each with **Open in Preview** and **Expand**. Pages run in the same locked-down frame as Preview, so they can't touch Kohlab itself, and the card's space is reserved so nothing jumps when it loads.
+- **File names in a reply become "View" chips** that open the same card.
+
 ## [2.15.0] - 2026-11-23
 
 ### Changed

@@ -31,7 +31,8 @@ import { Button, ComposerChip, Menu, MenuItem, MenuLabel, MenuSeparator, MenuSub
 import { ChatEvent, ToolEvent, AskEvent } from "./chat/types";
 import { friendly, failed, workingLine, workedLine } from "./chat/text";
 import { noteOf, isToolLine, mergeEvents, groupRows } from "./chat/events";
-import { WorkspaceCtx, AgentCtx } from "./chat/contexts";
+import { WorkspaceCtx, AgentCtx, FileCardsCtx, type FileCards } from "./chat/contexts";
+import { FileCard, cardKind } from "./chat/FileCard";
 import { Prose } from "./chat/markdown";
 import { CopyReply } from "./chat/copy";
 import { pictureType, ProjectImage } from "./chat/media";
@@ -361,6 +362,21 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
     const m = new Map<string, { output: string; failed?: boolean }>();
     for (const e of events) if (e.kind === "result") m.set(e.toolId, { output: e.output, failed: e.failed });
     return m;
+  }, [events]);
+
+  // The files the AI wrote that a card can show (pages and pictures): their write counts, and the last write of each. The file written last is the newest card.
+  const fileCards = useMemo<FileCards>(() => {
+    const edits = new Map<string, number>();
+    const lastEdit = new Map<string, number>();
+    for (const e of events) {
+      if (e.kind !== "tool" || !e.file || !cardKind(e.file)) continue;
+      edits.set(e.file, (edits.get(e.file) ?? 0) + 1);
+      lastEdit.set(e.file, e.n);
+    }
+    let newest: string | null = null;
+    let at = -1;
+    for (const [path, n] of lastEdit) if (n > at) [newest, at] = [path, n];
+    return { newest, edits, lastEdit };
   }, [events]);
 
   // The question Claude is waiting on right now, if the answer has not come back yet.
@@ -1414,6 +1430,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
   return (
     <WorkspaceCtx.Provider value={workspaceId}>
     <AgentCtx.Provider value={who}>
+    <FileCardsCtx.Provider value={fileCards}>
       <div className="flex h-full min-h-0" style={keyboard ? { paddingBottom: keyboard } : undefined}>
         <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col", empty && "justify-start pt-[max(0px,calc(12vh-52px))]")}>
           {/* An empty chat puts its heading where Home's is (12vh plus Home's own 28px, less the 56px project header and the column's 24px padding above it; there is no header-height variable to use, the header is a fixed h-14); the first message docks the composer at the bottom. */}
@@ -1463,7 +1480,11 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
                   const renderRow = (row: ChatEvent[]) => (
                         <Fragment key={row[0].n}>
                           {isToolLine(row[0]) ? (
-                            <ToolRun lines={row} results={results} />
+                            <>
+                              <ToolRun lines={row} results={results} />
+                              {/* A file the AI wrote shows its card under the run, at its last write (one card per file). */}
+                              {row.flatMap((e) => (isToolLine(e) && e.file && cardKind(e.file) && fileCards.lastEdit.get(e.file) === e.n ? [<FileCard key={e.file} path={e.file} />] : []))}
+                            </>
                           ) : row.length > 1 ? (
                             <AnsweredGroup events={row} answers={answers} />
                           ) : (
@@ -1958,6 +1979,7 @@ export default function ChatView({ workspaceId, onPreview, previewing = false, p
           onConfirm={() => void undo()}
         />
       </div>
+    </FileCardsCtx.Provider>
     </AgentCtx.Provider>
     </WorkspaceCtx.Provider>
   );
